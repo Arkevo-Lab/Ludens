@@ -1,0 +1,114 @@
+diff --git a/dist/types/compaction/compaction-v2-streaming.d.ts b/dist/types/compaction/compaction-v2-streaming.d.ts
+index 80cffb9..f95dc39 100644
+--- a/dist/types/compaction/compaction-v2-streaming.d.ts
++++ b/dist/types/compaction/compaction-v2-streaming.d.ts
+@@ -31,6 +31,7 @@ export interface CompactionV2Request {
+     retainedUserItems: unknown[];
+     retainedMessageBudget: number;
+     sessionId?: string;
++    parentSessionId?: string;
+     promptCacheKey?: string;
+ }
+ /** Response collected from the V2 stream and converted into replacement history. */
+@@ -66,6 +67,7 @@ export declare function buildCompactionV2Request(model: Model, input: unknown[],
+         summary: string;
+     };
+     sessionId?: string;
++    parentSessionId?: string;
+     promptCacheKey?: string;
+     retainedMessageBudget?: number;
+     retainedUserItems?: unknown[];
+@@ -73,6 +75,7 @@ export declare function buildCompactionV2Request(model: Model, input: unknown[],
+ /** Wrap a body built by the normal Codex serializer for V2 compaction transport. */
+ export declare function buildCompactionV2RequestFromBody(model: Model, body: OpenAICodexCompactionBody, options?: {
+     sessionId?: string;
++    parentSessionId?: string;
+     promptCacheKey?: string;
+     retainedMessageBudget?: number;
+     retainedUserItems?: unknown[];
+diff --git a/dist/types/compaction/compaction.d.ts b/dist/types/compaction/compaction.d.ts
+index 2272e27..64ee5ba 100644
+--- a/dist/types/compaction/compaction.d.ts
++++ b/dist/types/compaction/compaction.d.ts
+@@ -243,6 +243,8 @@ export interface SummaryOptions {
+     thinkingLevel?: ThinkingLevel;
+     /** Session routing key for remote compaction transports with sticky provider sessions. */
+     sessionId?: string;
++    /** Parent cache affinity for an isolated Codex V2 background request. */
++    parentSessionId?: string;
+     /** Prompt-cache key for conventional summary requests, gated against the summarizing model. */
+     promptCacheKey?: string;
+     /**
+diff --git a/src/compaction/compaction-v2-streaming.ts b/src/compaction/compaction-v2-streaming.ts
+index fb1c6db..5ca1fc8 100644
+--- a/src/compaction/compaction-v2-streaming.ts
++++ b/src/compaction/compaction-v2-streaming.ts
+@@ -80,6 +80,7 @@ export interface CompactionV2Request {
+ 	retainedUserItems: unknown[];
+ 	retainedMessageBudget: number;
+ 	sessionId?: string;
++	parentSessionId?: string;
+ 	promptCacheKey?: string;
+ }
+ 
+@@ -207,6 +208,7 @@ export function buildCompactionV2Request(
+ 		tools?: unknown[];
+ 		reasoning?: { effort: string; summary: string };
+ 		sessionId?: string;
++		parentSessionId?: string;
+ 		promptCacheKey?: string;
+ 		retainedMessageBudget?: number;
+ 		retainedUserItems?: unknown[];
+@@ -241,6 +243,7 @@ export function buildCompactionV2RequestFromBody(
+ 	body: OpenAICodexCompactionBody,
+ 	options?: {
+ 		sessionId?: string;
++		parentSessionId?: string;
+ 		promptCacheKey?: string;
+ 		retainedMessageBudget?: number;
+ 		retainedUserItems?: unknown[];
+@@ -253,6 +256,7 @@ export function buildCompactionV2RequestFromBody(
+ 		retainedUserItems: options?.retainedUserItems ?? input,
+ 		retainedMessageBudget: resolveCompactionV2RetainedMessageBudget(options?.retainedMessageBudget),
+ 		sessionId: options?.sessionId,
++		parentSessionId: options?.parentSessionId,
+ 		promptCacheKey: options?.promptCacheKey,
+ 	};
+ }
+@@ -375,6 +379,7 @@ async function attemptCompactionV2Streaming(
+ 			signal,
+ 			fetch: fetchImpl,
+ 			sessionId: request.sessionId,
++			parentSessionId: request.parentSessionId,
+ 			providerSessionState: options.providerSessionState,
+ 			preferWebsockets: options.preferWebsockets,
+ 			responsesLite: model.useResponsesLite,
+diff --git a/src/compaction/compaction.ts b/src/compaction/compaction.ts
+index 542131c..04909df 100644
+--- a/src/compaction/compaction.ts
++++ b/src/compaction/compaction.ts
+@@ -737,6 +737,8 @@ export interface SummaryOptions {
+ 	thinkingLevel?: ThinkingLevel;
+ 	/** Session routing key for remote compaction transports with sticky provider sessions. */
+ 	sessionId?: string;
++	/** Parent cache affinity for an isolated Codex V2 background request. */
++	parentSessionId?: string;
+ 	/** Prompt-cache key for conventional summary requests, gated against the summarizing model. */
+ 	promptCacheKey?: string;
+ 	/**
+@@ -1758,6 +1760,7 @@ export async function compact(
+ 		// at the call sites, leaked back in here. See resolveCompactionEffort.
+ 		thinkingLevel: options?.thinkingLevel,
+ 		sessionId: options?.sessionId,
++		parentSessionId: options?.parentSessionId,
+ 		promptCacheKey: options?.promptCacheKey,
+ 		remotePromptCacheKey:
+ 			options && Object.hasOwn(options, "remotePromptCacheKey")
+@@ -1982,6 +1985,7 @@ export async function compact(
+ 			assertRemoteCompactionInputFits(trimmed, model);
+ 			const requestOptions = {
+ 				sessionId: summaryOptions.sessionId,
++				parentSessionId: summaryOptions.parentSessionId,
+ 				promptCacheKey: summaryOptions.remotePromptCacheKey,
+ 				retainedMessageBudget: settings.v2RetainedMessageBudget,
+ 				retainedUserItems,
