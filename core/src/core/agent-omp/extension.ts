@@ -60,11 +60,11 @@ export async function media(observations: Observation[], record?: RecordEvent, t
 
 export interface Cycle { epoch: string; signal: AbortSignal; purpose?: "consolidate" }
 
-export function createRsaExtension(options: {
+export function createLudensExtension(options: {
   runtime: ExtensionHost;
   workspace: Workspace;
   basewareSocket: string;
-  rsaSocket?: string;
+  ludensSocket?: string;
   binDir: string;
   runDir?: string;
   clock?: Clock;
@@ -89,25 +89,25 @@ export function createRsaExtension(options: {
     limit: z.number().int().min(1).max(64).nullable().optional().describe("Range page size; omit or null for default 8."),
     after: z.number().int().min(0).nullable().optional().describe("Range cursor from nextAfter; 0 starts history. Omit or null when unused."),
   });
-  // Each RSA host owns one OMP session. Use OMP's existing extension environment
+  // Each Ludens host owns one OMP session. Use OMP's existing extension environment
   // mechanism; native bash and its process manager own execution. Capture paths
   // once so repeated prompts do not keep prepending the same directories.
   const python = pythonEnvironment();
   const environment = {
-    RSA_PYTHON: python.RSA_PYTHON,
+    LUDENS_PYTHON: python.LUDENS_PYTHON,
     PATH: [options.binDir, resolve(import.meta.dir, "../../../../baseware/bin"), python.PATH ?? ""].join(delimiter),
     PYTHONPATH: python.PYTHONPATH,
-    RSA_SOCKET: options.rsaSocket ?? "",
-    RSA_WORKSPACE: workspace.path, RSA_RUN_ID: runtime.status().runId, RSA_LOG_DIAGNOSTICS: runtime.diagnostics,
-    RSA_ARTIFACT_ROOT: process.env.RSA_ARTIFACT_ROOT ?? resolve(import.meta.dir, "../../../../../artifacts/rsa"),
+    LUDENS_SOCKET: options.ludensSocket ?? "",
+    LUDENS_WORKSPACE: workspace.path, LUDENS_RUN_ID: runtime.status().runId, LUDENS_LOG_DIAGNOSTICS: runtime.diagnostics,
+    LUDENS_ARTIFACT_ROOT: process.env.LUDENS_ARTIFACT_ROOT ?? resolve(import.meta.dir, "../../../../../artifacts/ludens"),
     BASEWARE_SOCKET: options.basewareSocket, BASEWARE_EPOCH: "", BASEWARE_TRACE: "{}",
-    RSA_EPOCH: "", RSA_TRACE: "",
+    LUDENS_EPOCH: "", LUDENS_TRACE: "",
   };
   const originalEnvironment = Object.fromEntries(Object.keys(environment).map(key => [key, process.env[key]]));
 
   const observe: CustomTool<typeof observeParameters> = {
     name: "observe", label: "Observe", loadMode: "essential", approval: "read",
-    description: "Read the workspace timeline: latest main perception by default, a record by id, at a timestamp, or a start/end range. Media follow records in order. Select another recorded capability when needed. Mark Perception.sample with @capability and @record, then rsa perception reload. Use rsa perception inject off/on to disable/enable automatic context attachment while keeping recording and explicit observe available; stop ends recording. Discover devices through rsa controller.",
+    description: "Read the workspace timeline: latest main perception by default, a record by id, at a timestamp, or a start/end range. Media follow records in order. Select another recorded capability when needed. Mark Perception.sample with @capability and @record, then ludens perception reload. Use ludens perception inject off/on to disable/enable automatic context attachment while keeping recording and explicit observe available; stop ends recording. Discover devices through ludens controller.",
     parameters: observeParameters,
     async execute(id, params, _onUpdate, _ctx, signal) {
       const cycle = options.cycle();
@@ -122,7 +122,7 @@ export function createRsaExtension(options: {
   async function readPerception(signal: AbortSignal, parent: EventTrace, query: ObservationQuery = {}): Promise<PerceptionRead> {
     signal.throwIfAborted();
     if (runtime.perception) return runtime.perception.observe(signal, parent, query);
-    const text = "Perception is not configured. Implement perception.py and run rsa perception reload.";
+    const text = "Perception is not configured. Implement perception.py and run ludens perception reload.";
     const identity = childTrace(parent);
     const read: PerceptionRead = { queryId: identity.spanId!, ok: false, query, records: [], hasMore: false,
       error: { code: "UNAVAILABLE", message: text } };
@@ -159,7 +159,7 @@ export function createRsaExtension(options: {
   // permission to create another permanent media archive.
   async function recordToolImages(images: ImageContent[], parent: EventTrace, source: string, content: unknown[] = []) {
     const observations: Observation[] = [];
-    // rsa observe --images prints an explicit record marker for each terminal
+    // ludens observe --images prints an explicit record marker for each terminal
     // image. Pair that marker with the registered byte hash, never a nearest frame.
     const markers = content.flatMap(part => {
       const value = part as { type?: string; text?: string };
@@ -172,7 +172,7 @@ export function createRsaExtension(options: {
       const delivered = runtime.perception?.deliveredMediaReference(hash, markers[index]);
       // Exact byte identity can reuse an existing recorded asset. This does
       // not infer its capture time or which of several records produced it.
-      const root = join(workspace.path, ".rsa", "timeline");
+      const root = join(workspace.path, ".ludens", "timeline");
       const asset = `objects/${hash}.bin`, path = join(root, asset);
       const retained = await Promise.all([realpath(root), realpath(path), stat(path)])
         .then(([canonicalRoot, canonicalPath, file]) => canonicalPath === join(canonicalRoot, asset)
@@ -215,7 +215,7 @@ export function createRsaExtension(options: {
     // error and code identity), so silence is never ambiguous between "no new
     // frame" and "the sampler is dead". Inside a round the model composes its
     // own observations through the observe tool; control status and skill or
-    // memory indexes stay on demand: the model reads files or runs `rsa
+    // memory indexes stay on demand: the model reads files or runs `ludens
     // status`; ops metadata lives in logs.
     const perception = status.perception;
     const state: { state: PerceptionStatus["state"]; codeSHA?: string; error?: string } = perception
@@ -260,7 +260,7 @@ export function createRsaExtension(options: {
       });
       refreshShellConfigCache();
       const content = await captureContext({ epoch: options.cycle().epoch }, "prompt_start");
-      if (content.length) return { message: { customType: "rsa-observation", content, display: false } };
+      if (content.length) return { message: { customType: "ludens-observation", content, display: false } };
     });
     pi.on("session_shutdown", () => {
       for (const [key, value] of Object.entries(originalEnvironment)) {

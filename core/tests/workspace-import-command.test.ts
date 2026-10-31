@@ -10,10 +10,10 @@ async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-import-command-")));
   const home = join(root, "global"), workspace = join(root, "workspace");
   await mkdir(workspace);
-  await writeFile(join(workspace, "rsa.json"), '{"driver":"cua"}');
+  await writeFile(join(workspace, "ludens.json"), '{"driver":"cua"}');
   const run = async (...args: string[]) => {
     const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
-    delete env.RSA_WORKSPACE; delete env.RSA_SOCKET; delete env.BASEWARE_SOCKET;
+    delete env.LUDENS_WORKSPACE; delete env.LUDENS_SOCKET; delete env.BASEWARE_SOCKET;
     const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "workspace", ...args], {
       cwd: root, env, stdout: "pipe", stderr: "pipe",
     });
@@ -23,7 +23,7 @@ async function fixture() {
   return { root, workspace, run, close: () => rm(root, { recursive: true, force: true }) };
 }
 
-async function listening(workspace: string, service: "rsa" | "baseware") {
+async function listening(workspace: string, service: "core" | "baseware") {
   const hash = createHash("sha256").update(workspace).digest("hex").slice(0, 16);
   const path = `/tmp/ludens-${service}-${process.getuid!()}-${hash}.sock`;
   const server = createServer(socket => socket.end());
@@ -35,9 +35,9 @@ test("import and new-id refuse an active workspace without changing its identity
   const f = await fixture();
   try {
     await ensureWorkspaceIdentity(f.workspace);
-    const identityPath = join(f.workspace, ".rsa/workspace.json");
+    const identityPath = join(f.workspace, ".ludens/workspace.json");
     const before = await readFile(identityPath, "utf8");
-    for (const service of ["rsa", "baseware"] as const) {
+    for (const service of ["core", "baseware"] as const) {
       const stop = await listening(f.workspace, service);
       try {
         for (const args of [["import", f.workspace], ["open", f.workspace, "--new-id"]]) {
@@ -45,7 +45,7 @@ test("import and new-id refuse an active workspace without changing its identity
           expect(result.code).toBe(1);
           expect(result.stderr).toContain(`Workspace is running (${service})`);
           expect(await readFile(identityPath, "utf8")).toBe(before);
-          expect(await readdir(join(f.workspace, ".rsa"))).toEqual(["workspace.json"]);
+          expect(await readdir(join(f.workspace, ".ludens"))).toEqual(["workspace.json"]);
         }
       } finally { await stop(); }
     }
@@ -58,12 +58,12 @@ test("an active previous workspace is detected through a symlink before importin
     const previous = join(f.root, "previous"), alias = join(f.root, "previous-alias");
     await mkdir(previous);
     await symlink(previous, alias);
-    const stop = await listening(previous, "rsa");
+    const stop = await listening(previous, "core");
     try {
       const result = await f.run("import", f.workspace, "--previous-workspace", alias);
       expect(result.code).toBe(1);
-      expect(result.stderr).toContain("Workspace is running (rsa)");
-      expect(await readdir(f.workspace)).toEqual(["rsa.json"]);
+      expect(result.stderr).toContain("Workspace is running (core)");
+      expect(await readdir(f.workspace)).toEqual(["ludens.json"]);
     } finally { await stop(); }
   } finally { await f.close(); }
 });

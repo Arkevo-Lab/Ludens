@@ -9,23 +9,23 @@ import { listen, send } from "../src/daemon/transport.ts";
 import { createTestDeviceSession } from "./runtime-fixture.ts";
 
 test("local Python, Controller and CLI share a workspace timeline across runs without duplicate media", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-timeline-")));
-  const socket = `/tmp/rsa-timeline-${crypto.randomUUID()}.sock`;
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-timeline-")));
+  const socket = `/tmp/ludens-timeline-${crypto.randomUUID()}.sock`;
   const events: {type: string; data: any}[] = [];
   const record = (type: string, data: unknown) => { events.push({type, data}); };
   const {devices} = createTestDeviceSession({controllers: [{
     tool: {name: "pad.press", description: "offline input", inputSchema: {type: "object"}}, requiresControl: true,
     async execute() { throw new Error("manual input must be rejected before execution"); },
   }]}, record);
-  const env = {...process.env, RSA_SOCKET: socket, RSA_WORKSPACE: workspace, RSA_RUN_ID: "first-run",
+  const env = {...process.env, LUDENS_SOCKET: socket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "first-run",
     PYTHONPATH: join(import.meta.dir, "../python"), BASEWARE_EPOCH: undefined,
     PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(":")};
   let runtime = new Runtime(devices, record, 60, "first-run");
   const configure = (runId: string) => {
     runtime = new Runtime(devices, record, 60, runId);
-    runtime.attach({ controller: new WorkspaceController({workspace, devices, record, env: {...env, RSA_RUN_ID: runId}}) });
+    runtime.attach({ controller: new WorkspaceController({workspace, devices, record, env: {...env, LUDENS_RUN_ID: runId}}) });
     runtime.attach({ perception: new PerceptionRuntime({workspace, runDir: join(workspace, "logs", runId),
-      env: {...env, RSA_RUN_ID: runId}, record}) });
+      env: {...env, LUDENS_RUN_ID: runId}, record}) });
   };
   configure("first-run");
   const closeServer = await listen(socket, () => runtime);
@@ -37,10 +37,10 @@ test("local Python, Controller and CLI share a workspace timeline across runs wi
     return JSON.parse(stdout);
   }
   const python = (code: string) => run(["python3", "-B", "-c", code]);
-  const cli = (...args: string[]) => run([join(import.meta.dir, "../bin/rsa"), ...args]);
+  const cli = (...args: string[]) => run([join(import.meta.dir, "../bin/ludens"), ...args]);
   const blob = Buffer.from("shared offline audio").toString("base64");
   try {
-    await writeFile(join(workspace, "senses.py"), `from rsa_tools import capability, record, Client
+    await writeFile(join(workspace, "senses.py"), `from ludens_tools import capability, record, Client
 import os
 @capability
 def transient():
@@ -78,19 +78,19 @@ def action():
     const results = await Promise.all([
       python('import json, os; from senses import temperature; print(json.dumps({"result": temperature(), "pid": os.getpid()}))'),
       cli("controller", "python/senses.py:temperature", "--args", '{"value":31}'),
-      python('import json; from rsa_tools import Client; print(json.dumps(Client().call("python/senses.py:outer")))'),
+      python('import json; from ludens_tools import Client; print(json.dumps(Client().call("python/senses.py:outer")))'),
     ]);
     const first = results[0].result;
     expect(first.data.pid).toBe(results[0].pid);
     expect(first.data.pid).not.toBe(runtime.perception!.status().pid);
-    const segments = join(workspace, ".rsa/timeline/segments");
+    const segments = join(workspace, ".ludens/timeline/segments");
     const samples = (await Promise.all((await readdir(segments)).filter(name => name.endsWith(".jsonl"))
       .map(async name => (await readFile(join(segments, name), "utf8")).trim().split("\n").map(line => JSON.parse(line))))).flat();
     expect(samples).toHaveLength(4);
     expect(new Set(samples.map(sample => sample.sequence)).size).toBe(4);
     expect(new Set(samples.map(sample => sample.id)).size).toBe(4);
     expect(events.some(event => event.type === "perception_sample")).toBe(false);
-    expect(await readdir(join(workspace, ".rsa/timeline/objects"))).toHaveLength(1);
+    expect(await readdir(join(workspace, ".ludens/timeline/objects"))).toHaveLength(1);
     expect(await readFile(first.media[0].path, "utf8")).toBe("shared offline audio");
     expect(await Bun.file(join(workspace, "logs/first-run/observations")).exists()).toBe(false);
     expect(JSON.stringify(events)).not.toContain(blob);
@@ -114,7 +114,7 @@ def action():
     expect(next.timeline.sequence).toBe(5);
     const nextRead = await cli("observe", "--id", next.timeline.recordId);
     expect(nextRead.records[0].runId).toBe("second-run");
-    expect(await readdir(join(workspace, ".rsa/timeline/objects"))).toHaveLength(1);
+    expect(await readdir(join(workspace, ".ludens/timeline/objects"))).toHaveLength(1);
     expect(await Bun.file(join(workspace, "logs/second-run/observations")).exists()).toBe(false);
   } finally {
     await runtime.close();

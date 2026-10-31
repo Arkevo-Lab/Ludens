@@ -1,6 +1,6 @@
-"""Workspace-owned perception. Implement this class, then run rsa perception reload."""
+"""Workspace-owned perception. Implement this class, then run ludens perception reload."""
 
-from rsa_tools import capability, record
+from ludens_tools import capability, record
 
 
 class Perception:

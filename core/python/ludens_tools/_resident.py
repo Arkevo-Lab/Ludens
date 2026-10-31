@@ -25,8 +25,8 @@ class WorkspaceSourceLoader(importlib.machinery.SourceFileLoader):
         raw = self.get_data(self.path)
         self.remember(Path(self.path), raw)
         module = sys.modules[fullname]
-        module.__rsa_source_sha__ = hashlib.sha256(raw).hexdigest()
-        module.__rsa_source_bytes__ = raw
+        module.__ludens_source_sha__ = hashlib.sha256(raw).hexdigest()
+        module.__ludens_source_bytes__ = raw
         return self.source_to_code(raw, self.path)
 
 
@@ -67,21 +67,21 @@ def load_instance(message, role, class_name, method_name, *, recorded=False):
     sys.meta_path.insert(0, WorkspaceImports(workspace, remember))
     module = types.ModuleType(role)
     module.__file__ = str(workspace / f"{role}.py")
-    module.__rsa_source_sha__ = hashlib.sha256(source.encode("utf-8")).hexdigest()
-    module.__rsa_source_bytes__ = source.encode("utf-8")
+    module.__ludens_source_sha__ = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    module.__ludens_source_bytes__ = source.encode("utf-8")
     sys.modules[role] = module
-    remember(Path(module.__file__), module.__rsa_source_bytes__)
+    remember(Path(module.__file__), module.__ludens_source_bytes__)
     exec(compile(source, module.__file__, "exec"), module.__dict__)
     instance = getattr(module, class_name)()
     for name in ("start", method_name, "close"):
         if not callable(getattr(instance, name, None)):
             raise TypeError(f"{class_name} must implement {name}()")
     method = getattr(instance, method_name)
-    if not getattr(method, "__rsa_capability__", False):
+    if not getattr(method, "__ludens_capability__", False):
         raise TypeError(f"{class_name}.{method_name} must use @capability")
-    if recorded and not getattr(method, "__rsa_recorded__", False):
+    if recorded and not getattr(method, "__ludens_recorded__", False):
         raise TypeError(f"{class_name}.{method_name} must use @capability and @record")
-    if method.__rsa_identity__["id"] != f"python/{role}.py:{class_name}.{method_name}":
+    if method.__ludens_identity__["id"] != f"python/{role}.py:{class_name}.{method_name}":
         raise TypeError(f"The entry method must be defined as {role}.py:{class_name}.{method_name}")
     if inspect.iscoroutinefunction(method):
         raise TypeError(f"{class_name}.{method_name} must be synchronous; use def, not async def")

@@ -16,13 +16,13 @@ _clock = "python-capability-" + uuid.uuid4().hex
 
 
 def _mark(target, kind):
-    flags = getattr(target, "__rsa_declaration__", None)
+    flags = getattr(target, "__ludens_declaration__", None)
     if flags is None:
         source = Path(target.__code__.co_filename).resolve()
         workspace = Path(current()["workspace"]).resolve()
         path = os.path.relpath(source, workspace)
         # This is the loaded version, not whatever may be edited later on disk.
-        code_sha = target.__globals__.get("__rsa_source_sha__")
+        code_sha = target.__globals__.get("__ludens_source_sha__")
         if code_sha is None and source.is_file():
             code_sha = hashlib.sha256(source.read_bytes()).hexdigest()
         identity = {"id": f"python/{path}:{target.__qualname__}", "codeSHA": code_sha,
@@ -67,12 +67,12 @@ def _mark(target, kind):
                 with invocation(identity):
                     started = time.monotonic()
                     return finish(original(*args, **kwargs), started)
-        wrapped.__rsa_declaration__ = flags
-        wrapped.__rsa_identity__ = identity
+        wrapped.__ludens_declaration__ = flags
+        wrapped.__ludens_identity__ = identity
         target = wrapped
     flags[kind] = True
-    target.__rsa_capability__ = flags["capability"]
-    target.__rsa_recorded__ = flags["recorded"]
+    target.__ludens_capability__ = flags["capability"]
+    target.__ludens_recorded__ = flags["recorded"]
     return target
 
 

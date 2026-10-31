@@ -8,13 +8,13 @@ import { forgetWorkspace, listRegisteredWorkspaces, ludensHome, readGlobalConfig
   registerWorkspace, renewWorkspaceIdentity, updateGlobalConfig } from "@ludens/protocol/ludens";
 
 export const GLOBAL_HELP = `Ludens settings and workspace registry:
-rsa config [show]
-rsa config set workspaceRoot <directory>
-rsa config set defaults.<model|seconds|requests|compactionThreshold|dashboard|pet> <value>
-rsa workspace list
-rsa workspace open <directory> [--new-id]
-rsa workspace forget <id>
-rsa workspace import <directory> [--legacy-state <directory>] [--previous-workspace <directory>]
+ludens config [show]
+ludens config set workspaceRoot <directory>
+ludens config set defaults.<model|seconds|requests|compactionThreshold|dashboard|pet> <value>
+ludens workspace list
+ludens workspace open <directory> [--new-id]
+ludens workspace forget <id>
+ludens workspace import <directory> [--legacy-state <directory>] [--previous-workspace <directory>]
 
 LUDENS_HOME selects the global directory (default ~/.ludens).
 New workspaces use its configured workspaceRoot; existing workspace settings do not change.
@@ -31,7 +31,7 @@ function directory(value: string) {
 /** Read-only probe; never take over or stop a running workspace. */
 async function assertInactive(workspace: string) {
   const hash = createHash("sha256").update(workspace).digest("hex").slice(0, 16);
-  for (const service of ["rsa", "baseware"]) {
+  for (const service of ["core", "baseware"]) {
     const path = `/tmp/ludens-${service}-${process.getuid?.() ?? "user"}-${hash}.sock`;
     await new Promise<void>((accept, reject) => {
       const socket = connect(path);
@@ -50,7 +50,7 @@ export async function globalCommand(command: string, args: string[], home = lude
   if (command === "config") {
     const [action = "show", field, value, ...extra] = args;
     if (action === "show" && !field) { console.log(JSON.stringify({ home, ...await readGlobalConfig(home) }, null, 2)); return; }
-    if (action !== "set" || !field || value === undefined || extra.length) throw new Error("Use rsa config set <field> <value>");
+    if (action !== "set" || !field || value === undefined || extra.length) throw new Error("Use ludens config set <field> <value>");
     const config = await updateGlobalConfig(config => {
       if (field === "workspaceRoot") config.workspaceRoot = directory(value);
       else if (field.startsWith("defaults.")) {
@@ -70,7 +70,7 @@ export async function globalCommand(command: string, args: string[], home = lude
     await forgetWorkspace(rest[0]!, home);
     console.log(JSON.stringify({ forgotten: rest[0] })); return;
   }
-  if (action !== "open" && action !== "import") throw new Error("Use rsa workspace list | open <directory> | forget <id> | import <directory>");
+  if (action !== "open" && action !== "import") throw new Error("Use ludens workspace list | open <directory> | forget <id> | import <directory>");
   const { positionals, values } = parseArgs({ args: rest, allowPositionals: true, options: action === "open"
     ? { "new-id": { type: "boolean" } }
     : { "legacy-state": { type: "string" }, "previous-workspace": { type: "string" } } });
@@ -79,8 +79,8 @@ export async function globalCommand(command: string, args: string[], home = lude
   let imported: unknown;
   if (action === "import") {
     // Import creates identity, so require an explicit workspace configuration.
-    const config = JSON.parse(await readFile(join(workspace, "rsa.json"), "utf8"));
-    if (!config || typeof config.driver !== "string" || !config.driver.trim()) throw new Error("Workspace import requires rsa.json with a driver");
+    const config = JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8"));
+    if (!config || typeof config.driver !== "string" || !config.driver.trim()) throw new Error("Workspace import requires ludens.json with a driver");
     await assertInactive(workspace);
     const previousPath = typeof values["previous-workspace"] === "string" ? directory(values["previous-workspace"]) : undefined;
     const previousWorkspace = previousPath ? await realpath(previousPath).catch(error => {
@@ -96,7 +96,7 @@ export async function globalCommand(command: string, args: string[], home = lude
     });
   } else {
     await readWorkspaceIdentity(workspace).catch(error => {
-      if (error.code === "ENOENT") throw new Error("Workspace has no Ludens identity; use rsa workspace import <directory> for an existing workspace");
+      if (error.code === "ENOENT") throw new Error("Workspace has no Ludens identity; use ludens workspace import <directory> for an existing workspace");
       throw error;
     });
     if (values["new-id"]) { await assertInactive(workspace); await renewWorkspaceIdentity(workspace, home); }

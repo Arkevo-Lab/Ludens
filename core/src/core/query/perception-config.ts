@@ -68,7 +68,7 @@ async function optionalStat(path: string) {
 }
 
 async function settingsPath(workspace: string, create = false): Promise<string | null> {
-  const directory = join(workspace, ".rsa");
+  const directory = join(workspace, ".ludens");
   let parent = await optionalStat(directory);
   if (!parent) {
     if (!create) return null;
@@ -77,7 +77,7 @@ async function settingsPath(workspace: string, create = false): Promise<string |
     parent = await lstat(directory);
   }
   if (!parent.isDirectory() || parent.isSymbolicLink() || await realpath(directory) !== directory)
-    throw new Error(".rsa 必须是工作区内的真实目录");
+    throw new Error(".ludens 必须是工作区内的真实目录");
   const path = join(directory, "settings.json"), file = await optionalStat(path);
   if (file && (!file.isFile() || file.isSymbolicLink())) throw new Error("settings.json 必须是工作区内的普通文件");
   return path;
@@ -169,7 +169,7 @@ export async function perceptionRuntime(
   const unavailable = (reason: PerceptionRuntimeSnapshot["reason"]): PerceptionRuntimeSnapshot => ({
     checkedAt: new Date().toISOString(), connection: "unavailable", reason, runId: null, perception: null,
   });
-  // Every host owns its canonical address even when RSA_SOCKET adds an alias.
+  // Every host owns its canonical address even when LUDENS_SOCKET adds an alias.
   // Neither the Dashboard environment nor an archived manifest chooses this socket.
   const { socket } = await resolveWorkspaceAddress(workspace);
   let value: unknown;

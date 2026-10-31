@@ -7,32 +7,32 @@ description = "Ludens native harness, capability and storage tasks; execution bi
 
 [[tasks]]
 name = "ludens/background-compaction"
-digest = "sha256:f49257c5b8d62d34b62045667a10698bd1db64a85d6b0760eddd2a7c864ecd2c"
+digest = "sha256:476d1631d70660ed5d7e7bebde1e68f4a33058d3fe218407f62427c411114e7d"
 
 [[tasks]]
 name = "ludens/capability-reuse"
-digest = "sha256:cb91b07ddff17e0eb50d9c586991b626d40a8b23b78fb592cd3223abcb6d2c11"
+digest = "sha256:c72daf04950c293c75dd4213c40dacfeb4472f6ff2ff059a1950f4671b110e5f"
 
 [[tasks]]
 name = "ludens/clamp"
-digest = "sha256:cdb59fdc2ddd4fb87314ecaa8dc23624fa2160ce9c36f98e526577e017548ded"
+digest = "sha256:475cd8eb8379e11edc5d6ef71d84d347ee1db7886be6133927dca79746021181"
 
 [[tasks]]
 name = "ludens/control-handoff"
-digest = "sha256:03d13bcd4e56f82aa6381a9ee7480d9f5861f953999e217a9f2cd6e1fc4b2ae0"
+digest = "sha256:e2c007ea76af17b06ed0bda6df0aa27f221cb53d46299e5ba6d1962ee38b2e48"
 
 [[tasks]]
 name = "ludens/index-memory"
-digest = "sha256:0ed3a2f02594dbe9c24f7192b4be15be15cc6f0f40b0af9fb4c23708f7576cb1"
+digest = "sha256:381f46925ffc7cad3e2f4385aaa9f4dc9baf9ef05673dbc988c6017a21194c45"
 
 [[tasks]]
 name = "ludens/perception-lifecycle"
-digest = "sha256:e0eccf558eefc10ff5283de13cc5f27561b54cfb15fba67276b16f10c6fa527a"
+digest = "sha256:b6928c2c04a463c77ba211e6ff57ad12f2b255164ce6a755a4365daa80582135"
 
 [[tasks]]
 name = "ludens/video-storage"
-digest = "sha256:0b2f67b6ce576353e5953d6422999fbb9f8949c5739c3366868a52fc542cce79"
+digest = "sha256:561b09d7822e61451626033afa9eac57664aedc60a4cb30ce06e9a9f490b1497"
 
 [[tasks]]
 name = "ludens/ws-recovery"
-digest = "sha256:1798e553cac7b26dde78a20db74a25e6d69f9fd6048dbc7bd9ccf0b1afd06301"
+digest = "sha256:028996821090ed10434f598c7191a3aa7a540f5de3cf8c8daf8291dbaf54054c"

@@ -3,6 +3,9 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "bin": {
+    "ludens": "./bin/ludens"
+  },
   "exports": {
     "./core/query/*": "./src/core/query/*.ts",
     "./core/shiori/*": "./src/core/shiori/*.ts",
@@ -15,13 +18,13 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "rsa": "bun src/cli/main.ts",
+    "ludens": "bun src/cli/main.ts",
     "test": "bun run typescript:test && bun run python:test",
     "typecheck": "bun run typescript:typecheck && bun run python:typecheck",
     "typescript:test": "uv run --project python --frozen bun test",
     "typescript:typecheck": "tsc --noEmit",
     "python:test": "uv run --project python --frozen python scripts/test-python.py",
-    "python:typecheck": "uv run --project python --frozen mypy --config-file python/pyproject.toml python/rsa_tools",
+    "python:typecheck": "uv run --project python --frozen mypy --config-file python/pyproject.toml python/ludens_tools",
     "omp:test:transport": "bun test tests/omp-websocket.test.ts"
   },
   "devDependencies": {

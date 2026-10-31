@@ -8,7 +8,7 @@ from pathlib import Path
 import sys
 import traceback
 
-from rsa_tools._capabilities import discover, load_function, validate
+from ludens_tools._capabilities import discover, load_function, validate
 
 
 def invoke(workspace, request):
@@ -21,7 +21,7 @@ def invoke(workspace, request):
         raise ValueError("Capability source changed after discovery; refresh before invoking it")
     # -B prevents cache writes, but still reads existing timestamp-based pyc.
     # Give this fresh process a nonexistent cache root so quick helper edits load.
-    sys.pycache_prefix = str(workspace / "__pycache__" / ("rsa-" + os.urandom(12).hex()))
+    sys.pycache_prefix = str(workspace / "__pycache__" / ("ludens-" + os.urandom(12).hex()))
     with invocation_output():
         function = load_function(workspace, capability["origin"]["path"], capability["origin"]["function"], raw=raw)
         result = function(**request["arguments"])
@@ -67,7 +67,7 @@ def main():
 if __name__ == "__main__":
     # This is a package-internal script, not a directory of top-level user
     # modules. Leaving its folder on sys.path shadows namespace packages such
-    # as workspace/benchmarks/ with rsa_tools/benchmarks.py.
+    # as workspace/benchmarks/ with ludens_tools/benchmarks.py.
     package_directory = Path(__file__).resolve().parent
     sys.path[:] = [entry for entry in sys.path if Path(entry).resolve() != package_directory]
     sys.exit(main())

@@ -15,13 +15,13 @@ import unittest
 from contextlib import redirect_stderr
 from unittest.mock import patch
 
-from rsa_tools import Client
-from rsa_tools._context import current, scope
-from rsa_tools._recording import RecordingWindow
+from ludens_tools import Client
+from ludens_tools._context import current, scope
+from ludens_tools._recording import RecordingWindow
 
 
-SOURCE = '''from rsa_tools import capability, record
-from rsa_tools._context import current
+SOURCE = '''from ludens_tools import capability, record
+from ludens_tools._context import current
 seen = []
 @capability
 def helper(fail=False):
@@ -57,7 +57,7 @@ def load(workspace, call_context):
 
 class RecordingTests(unittest.TestCase):
     def test_worker_health_is_immediate_while_durable_faults_are_coalesced(self):
-        source = '''from rsa_tools import capability, record
+        source = '''from ludens_tools import capability, record
 @capability
 def frame(count):
     if count % 2:
@@ -77,10 +77,10 @@ class Perception:
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 incoming, messages = queue.Queue(), []
-                environment = {**os.environ, "RSA_SOCKET": "missing.sock", "RSA_RUN_ID": "run",
-                               "RSA_LOG_DIAGNOSTICS": "normal", "BASEWARE_TRACE": "{}"}
+                environment = {**os.environ, "LUDENS_SOCKET": "missing.sock", "LUDENS_RUN_ID": "run",
+                               "LUDENS_LOG_DIAGNOSTICS": "normal", "BASEWARE_TRACE": "{}"}
                 with (root / "stderr").open("w") as stderr:
-                    process = subprocess.Popen([sys.executable, "-u", "-m", "rsa_tools._perception"],
+                    process = subprocess.Popen([sys.executable, "-u", "-m", "ludens_tools._perception"],
                                                cwd=root, env=environment, stdin=subprocess.PIPE,
                                                stdout=subprocess.PIPE, stderr=stderr, text=True)
 
@@ -149,7 +149,7 @@ class Perception:
 
                     base.update(recording_observer=recorder.observe, recording_window=recorder, timeline_append=append)
                     functions = load(directory, base)
-                    with patch("rsa_tools._context.request") as rpc, redirect_stderr(io.StringIO()) as stderr, scope(base):
+                    with patch("ludens_tools._context.request") as rpc, redirect_stderr(io.StringIO()) as stderr, scope(base):
                         for index in range(hz * 10):
                             self.assertEqual(functions["sample"](nested), {"text": "frame"})
                             recorder.sampled(2, True)
@@ -175,7 +175,7 @@ class Perception:
             base["recording_sink"] = lambda kind, data, trace, origin, channel: events.append((kind, data, channel))
             base["timeline_append"] = lambda **message: records.append(message) or message["sample"]
             functions = load(directory, base)
-            with patch("rsa_tools._context.request") as rpc, scope(base):
+            with patch("ludens_tools._context.request") as rpc, scope(base):
                 self.assertEqual(functions["sample"](), {"text": "frame"})
                 with self.assertRaises(ValueError):
                     functions["sample"](fail=True)
@@ -192,7 +192,7 @@ class Perception:
             recorder = RecordingWindow(events.append, base["trace"], "generation", 10, clock=lambda: clock[0])
             base.update(recording_observer=recorder.observe, timeline_append=lambda **message: message["sample"])
             functions = load(directory, base)
-            with patch("rsa_tools._context.request") as rpc, redirect_stderr(io.StringIO()) as stderr, scope(base):
+            with patch("ludens_tools._context.request") as rpc, redirect_stderr(io.StringIO()) as stderr, scope(base):
                 for index in range(100):
                     fail = index % 2 == 0
                     try:
@@ -222,7 +222,7 @@ class Perception:
         with tempfile.TemporaryDirectory() as directory:
             base = context(directory)
             functions = load(directory, base)
-            with patch("rsa_tools._context.request") as rpc, scope(base):
+            with patch("ludens_tools._context.request") as rpc, scope(base):
                 self.assertEqual(functions["helper"](), "frame")
                 with self.assertRaises(ValueError):
                     functions["helper"](True)
@@ -233,7 +233,7 @@ class Perception:
             self.assertEqual(messages[-1]["event"]["data"]["errorType"], "ValueError")
 
     def test_driver_boundary_keeps_sampling_purpose_and_recording_owner(self):
-        with scope(context(".", recording_purpose="continuous-perception")), patch("rsa_tools.client.request", return_value={"ok": True}) as rpc:
+        with scope(context(".", recording_purpose="continuous-perception")), patch("ludens_tools.client.request", return_value={"ok": True}) as rpc:
             result = Client(trace={"traceId": "explicit"}).call("gamepad.press", {"keys": ["a"]})
         self.assertEqual(result, {"ok": True})
         wire = rpc.call_args.args[1]
@@ -241,7 +241,7 @@ class Perception:
         self.assertEqual(wire["trace"], {"traceId": "explicit", "recordingPurpose": "continuous-perception", "recordingId": "host-run"})
 
     def test_trial_subject_does_not_require_a_persisted_call(self):
-        from rsa_tools.benchmarks import Trial
+        from ludens_tools.benchmarks import Trial
         for continuous, host in ((True, True), (True, False), (False, True), (False, False)):
             with self.subTest(continuous=continuous, host=host), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
@@ -254,7 +254,7 @@ class Perception:
                 functions = load(root, base)
                 with scope(base):
                     trial = Trial("test", root, artifacts, root, input_path)
-                    with patch("rsa_tools._context._trial_observer", trial._observe), patch("rsa_tools._context.request") as rpc:
+                    with patch("ludens_tools._context._trial_observer", trial._observe), patch("ludens_tools._context.request") as rpc:
                         functions["quality"]()
                         trial.flush()
                 result = json.loads((artifacts / "context.json").read_text())

@@ -1,7 +1,7 @@
 import type { VideoFrameReference } from "@ludens/protocol/timeline-media";
 
 export interface Event {
-  /** Present on canonical device files; mirrored historical RSA rows keep their local sequence. */
+  /** Present on canonical device files; mirrored historical Ludens rows keep their local sequence. */
   serviceId?: string;
   source?: {
     component: string;
@@ -113,7 +113,7 @@ export interface Tool {
   name: string;
   intent: string;
   args: Record<string, any>;
-  argsRef?: { encoding: "rsa-json-v1"; path: string; sha256: string; bytes: number };
+  argsRef?: { encoding: "ludens-json-v1"; path: string; sha256: string; bytes: number };
   at: string;
   ok: boolean | null;
   commandMs: number | null;

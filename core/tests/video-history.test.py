@@ -19,8 +19,8 @@ from unittest.mock import Mock, patch
 import av
 from PIL import Image, UnidentifiedImageError
 
-from rsa_tools._observation_history import ObservationHistory
-from rsa_tools._video import VideoRecorder, _Segment, decode_frame
+from ludens_tools._observation_history import ObservationHistory
+from ludens_tools._video import VideoRecorder, _Segment, decode_frame
 
 
 SAMPLING = {"clock": "fixture", "startedAtMs": 0, "finishedAtMs": 1}
@@ -193,13 +193,13 @@ class VideoHistoryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             for generation, configured, expected in (("one", "", 30), ("two", "    sample_hz = 12.5\n", 12.5)):
-                source = ("from rsa_tools import capability, record\nclass Perception:\n" + configured +
+                source = ("from ludens_tools import capability, record\nclass Perception:\n" + configured +
                           "    def start(self, context):\n        self.sample()\n"
                           "    @record\n    @capability\n    def sample(self):\n"
                           "        return " + repr(sample(png())) + "\n"
                           "    def close(self):\n        pass\n")
                 with (root / "stderr.log").open("w") as stderr:
-                    process = subprocess.Popen([sys.executable, "-u", "-m", "rsa_tools._perception"], cwd=root,
+                    process = subprocess.Popen([sys.executable, "-u", "-m", "ludens_tools._perception"], cwd=root,
                                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True)
                     incoming = queue.Queue()
                     reader = threading.Thread(target=lambda: [incoming.put(json.loads(line)) for line in process.stdout], daemon=True)
@@ -298,7 +298,7 @@ class VideoHistoryTests(unittest.TestCase):
             release.wait(timeout=5)
             return original_encode(recorder, *args)
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_VIDEO_QUEUE_FRAMES": "1", "RSA_VIDEO_QUEUE_BYTES": "4096"}), patch.object(VideoRecorder, "_encode", slow_encode):
+                "LUDENS_VIDEO_QUEUE_FRAMES": "1", "LUDENS_VIDEO_QUEUE_BYTES": "4096"}), patch.object(VideoRecorder, "_encode", slow_encode):
             history = ObservationHistory(directory)
             raw = png()
             first = history.append(sample(raw), "one", SAMPLING)
@@ -319,7 +319,7 @@ class VideoHistoryTests(unittest.TestCase):
                 cold.close()
 
     def test_rejected_streams_do_not_allocate_files_or_encoder_metadata(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"RSA_VIDEO_QUEUE_BYTES": "1"}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_VIDEO_QUEUE_BYTES": "1"}):
             root = Path(directory).resolve()
             recorder = VideoRecorder(root, root / "video")
             try:
@@ -369,7 +369,7 @@ class VideoHistoryTests(unittest.TestCase):
                 release.wait(timeout=3)
                 return decode_frame(*args)
             try:
-                with ThreadPoolExecutor(max_workers=1) as pool, patch("rsa_tools._video.decode_frame", slow_decode):
+                with ThreadPoolExecutor(max_workers=1) as pool, patch("ludens_tools._video.decode_frame", slow_decode):
                     future = pool.submit(history.observe, {"id": record["id"]})
                     self.assertTrue(entered.wait(timeout=2))
                     started = time.monotonic()
@@ -377,7 +377,7 @@ class VideoHistoryTests(unittest.TestCase):
                     self.assertLess(time.monotonic() - started, 0.2)
                     release.set()
                     self.assertTrue(future.result()["records"])
-                with patch.dict(os.environ, {"RSA_VIDEO_QUERY_BYTES": "1"}):
+                with patch.dict(os.environ, {"LUDENS_VIDEO_QUERY_BYTES": "1"}):
                     with self.assertRaisesRegex(ValueError, "query byte budget"):
                         history.observe({"id": record["id"]})
             finally:
@@ -416,7 +416,7 @@ class VideoHistoryTests(unittest.TestCase):
                 recorder.close()
 
     def test_window_expiry_keeps_no_images_or_persistent_video(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"RSA_PERCEPTION_PERSIST": "0"}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0"}):
             history = ObservationHistory(directory)
             row = history.append(sample(png()), "one", SAMPLING)
             self.assertTrue(row["media"][0]["timeline"]["asset"].startswith("window-"))
@@ -437,7 +437,7 @@ class VideoHistoryTests(unittest.TestCase):
             row = history.append(sample(png()), "one", SAMPLING)
             history.close()
             source = row["media"][0]["timeline"]
-            command = [sys.executable, "-m", "rsa_tools._video", "--root", str(history.directory),
+            command = [sys.executable, "-m", "ludens_tools._video", "--root", str(history.directory),
                        "--asset", source["asset"], "--pts", "0", "--time-base", "1/1000000"]
             result = subprocess.run(command, capture_output=True, check=True)
             self.assert_picture(result.stdout, (200, 40, 60))
@@ -468,7 +468,7 @@ class VideoHistoryTests(unittest.TestCase):
                 restarted.close()
 
     def test_public_import_does_not_load_video_dependencies(self):
-        result = subprocess.run([sys.executable, "-c", "import rsa_tools,sys; print('av' in sys.modules, 'PIL' in sys.modules)"],
+        result = subprocess.run([sys.executable, "-c", "import ludens_tools,sys; print('av' in sys.modules, 'PIL' in sys.modules)"],
                                 capture_output=True, text=True, check=True)
         self.assertEqual(result.stdout.strip(), "False False")
 

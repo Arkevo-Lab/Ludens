@@ -9,7 +9,7 @@ import { BasewareClient } from "@ludens/baseware/client";
 import { listen } from "@ludens/baseware/server";
 import { captureResult } from "./runtime-fixture.ts";
 
-async function workspace() { return realpath(await mkdtemp(join(tmpdir(), "rsa-python-"))); }
+async function workspace() { return realpath(await mkdtemp(join(tmpdir(), "ludens-python-"))); }
 
 test("discovery reads decorated signatures without importing workspace files", async () => {
   const directory = await workspace();
@@ -18,7 +18,7 @@ test("discovery reads decorated signatures without importing workspace files", a
     await mkdir(join(directory, "logs"));
     await writeFile(join(directory, "helper.py"), "raise RuntimeError('do not import helpers during discovery')\n");
     const source = `from __future__ import annotations
-from rsa_tools import capability
+from ludens_tools import capability
 from pathlib import Path
 Path("imported").touch()
 @capability()
@@ -58,15 +58,15 @@ def dynamic_default(value: int = int("2")):
 test("aliased capability decorators discover ordinary functions without importing them", async () => {
   const directory = await workspace();
   try {
-    await writeFile(join(directory, "observe.py"), `from rsa_tools import capability as cap
-import rsa_tools as rsa
+    await writeFile(join(directory, "observe.py"), `from ludens_tools import capability as cap
+import ludens_tools as ludens
 from pathlib import Path
 Path("imported").touch()
 @cap
 def inspect() -> dict:
     """Provide this workspace's current observation."""
     return {"text": "view", "media": []}
-@rsa.capability
+@ludens.capability
 def plain():
     """An ordinary callable capability."""
     return True
@@ -94,9 +94,9 @@ test("static discovery does not import workspace shadows from cwd or inherited P
     const marker = join(directory, "imported");
     const shadow = `open(${JSON.stringify(marker)}, "w").close()\nraise RuntimeError("workspace shadow imported")\n`;
     await writeFile(join(directory, "json.py"), shadow);
-    await mkdir(join(directory, "rsa_tools"));
-    await writeFile(join(directory, "rsa_tools/__init__.py"), shadow);
-    await writeFile(join(directory, "actions.py"), 'from rsa_tools import capability\n@capability\ndef inspect():\n    """Read a value."""\n    return 1\n');
+    await mkdir(join(directory, "ludens_tools"));
+    await writeFile(join(directory, "ludens_tools/__init__.py"), shadow);
+    await writeFile(join(directory, "actions.py"), 'from ludens_tools import capability\n@capability\ndef inspect():\n    """Read a value."""\n    return 1\n');
     process.env.PYTHONPATH = directory;
     const found = await new PythonCapabilities(directory).discover();
     expect(found.capabilities.map(item => item.origin.function)).toEqual(["inspect"]);
@@ -111,7 +111,7 @@ test("static discovery does not import workspace shadows from cwd or inherited P
 test("capability decorator arguments are rejected without executing them", async () => {
   const directory = await workspace();
   try {
-    await writeFile(join(directory, "invalid.py"), `from rsa_tools import capability
+    await writeFile(join(directory, "invalid.py"), `from ludens_tools import capability
 raise RuntimeError("discovery must not evaluate this module")
 @capability(extra=True)
 def unsupported():
@@ -137,7 +137,7 @@ test("invocation validates before import, loads local helpers, and refreshes edi
     const compile = Bun.spawn(["python3", "-m", "py_compile", helperPath], {stdout: "ignore", stderr: "pipe"});
     expect(await compile.exited).toBe(0);
     const path = join(directory, "tools", "actions.py");
-    const source = `from rsa_tools import capability
+    const source = `from ludens_tools import capability
 from helper import increment
 from pathlib import Path
 import subprocess, sys
@@ -179,7 +179,7 @@ def add(value: int, enabled: bool = True):
 test("workspace capabilities use the Baseware Python client with the caller's epoch and trace", async () => {
   const directory = await workspace();
   // Keep the Unix socket path short on macOS, where /var/folders temp paths are long.
-  const socketPath = `/tmp/rsa-py-${crypto.randomUUID()}.sock`;
+  const socketPath = `/tmp/ludens-py-${crypto.randomUUID()}.sock`;
   const requests: any[] = [];
   let connections = 0;
   const server = createServer(socket => {
@@ -198,7 +198,7 @@ test("workspace capabilities use the Baseware Python client with the caller's ep
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
   try {
-    await writeFile(join(directory, "actions.py"), `from rsa_tools import capability
+    await writeFile(join(directory, "actions.py"), `from ludens_tools import capability
 from baseware import Client
 @capability
 def inspect(button: str):
@@ -229,7 +229,7 @@ test("aborting invocation kills its Python process group, including child proces
   const directory = await workspace();
   const events: {type: string; data: any; trace: any}[] = [];
   try {
-    await writeFile(join(directory, "actions.py"), `from rsa_tools import capability
+    await writeFile(join(directory, "actions.py"), `from ludens_tools import capability
 import subprocess, sys, time
 from pathlib import Path
 @capability
@@ -269,7 +269,7 @@ test("Python spawn failure closes discovery and invocation spans without losing 
     const executable = join(directory, "python");
     await writeFile(executable, "#!/bin/sh\nexec python3 \"$@\"\n");
     await chmod(executable, 0o755);
-    await writeFile(join(directory, "actions.py"), 'from rsa_tools import capability\n@capability\ndef echo(value: str = "hi"):\n    """Return the supplied text."""\n    return value\n');
+    await writeFile(join(directory, "actions.py"), 'from ludens_tools import capability\n@capability\ndef echo(value: str = "hi"):\n    """Return the supplied text."""\n    return value\n');
     const registry = new PythonCapabilities(directory, executable, (type, data, trace) => events.push({type, data, trace}));
     const {capabilities: [capability]} = await registry.discover(undefined, parent);
     await rm(executable);
@@ -290,7 +290,7 @@ test("Python spawn failure closes discovery and invocation spans without losing 
 
 test("Python calls the real Baseware service using the persistent owner's lease and JSON observations", async () => {
   const directory = await workspace();
-  const socketPath = `/tmp/rsa-py-${crypto.randomUUID()}.sock`;
+  const socketPath = `/tmp/ludens-py-${crypto.randomUUID()}.sock`;
   const events: {type: string; data: any; trace: any}[] = [];
   const actions: Record<string, unknown>[] = [];
   let acquired = 0;
@@ -312,7 +312,7 @@ test("Python calls the real Baseware service using the persistent owner's lease 
   const owner = await BasewareClient.connect(socketPath);
   try {
     await writeFile(observation.path, JSON.stringify({position: {x: 3, y: 4}, visible: true, label: "地图"}));
-    await writeFile(join(directory, "actions.py"), `from rsa_tools import capability
+    await writeFile(join(directory, "actions.py"), `from ludens_tools import capability
 from baseware import Client
 import json, os
 @capability
@@ -324,17 +324,17 @@ def step(label: str):
     with open(observations[0]["path"], encoding="utf-8") as source:
         data = json.load(source)
     return {"execution": execution, "observations": observations, "data": data,
-            "rsa_context": [os.environ.get(name) for name in ("RSA_SOCKET", "RSA_EPOCH", "RSA_TRACE")]}
+            "ludens_context": [os.environ.get(name) for name in ("LUDENS_SOCKET", "LUDENS_EPOCH", "LUDENS_TRACE")]}
 `);
     await owner.request({kind: "acquire", epoch: "owner-epoch", seconds: 30});
     const registry = new PythonCapabilities(directory);
     const {capabilities: [capability]} = await registry.discover();
     const env = {BASEWARE_SOCKET: socketPath, BASEWARE_EPOCH: "owner-epoch", BASEWARE_TRACE: JSON.stringify({toolCallId: "python-real-call"}),
-      RSA_SOCKET: "/tmp/current-rsa.sock", RSA_EPOCH: "obsolete", RSA_TRACE: "{}"};
+      LUDENS_SOCKET: "/tmp/current-ludens.sock", LUDENS_EPOCH: "obsolete", LUDENS_TRACE: "{}"};
     const result = await registry.invoke(capability!.id, {label: "前进"}, {env});
     expect(result).toMatchObject({isError: false, details: {result: {
       execution: {status: "completed", stdout: "完了"}, observations: [observation],
-      data: {position: {x: 3, y: 4}, visible: true, label: "地图"}, rsa_context: ["/tmp/current-rsa.sock", null, null],
+      data: {position: {x: 3, y: 4}, visible: true, label: "地图"}, ludens_context: ["/tmp/current-ludens.sock", null, null],
     }}});
     expect(actions).toEqual([{label: "前进"}]);
     expect(acquired).toBe(1);

@@ -44,7 +44,7 @@ def _number(name, default, integer=False):
 
 def _workspace_settings(root):
     """Workspace settings override environment defaults; both are optional."""
-    path = Path(root) / ".rsa" / "settings.json"
+    path = Path(root) / ".ludens" / "settings.json"
     try:
         value = json.loads(path.read_text())
     except FileNotFoundError:
@@ -128,7 +128,7 @@ class ObservationHistory:
     def __init__(self, workspace, *, sample_hz=DEFAULT_SAMPLE_HZ):
         self.sample_hz = validate_sample_hz(sample_hz)
         self.root = Path(workspace).resolve()
-        self.directory = self.root / ".rsa" / "timeline"
+        self.directory = self.root / ".ludens" / "timeline"
         self.directory.mkdir(parents=True, exist_ok=True)
         self._writer = (self.directory / "writer.lock").open("a+b")
         try:
@@ -156,15 +156,15 @@ class ObservationHistory:
         self.segment_dir = self.directory / "segments"
         self.segment_dir.mkdir(parents=True, exist_ok=True)
         settings = _workspace_settings(self.root)
-        self.hot_seconds = _configured(settings, "hotSeconds", "RSA_PERCEPTION_HOT_SECONDS", 600)
-        self.hot_limit = _number("RSA_PERCEPTION_HOT_BYTES", 1024 * 1024 * 1024, True)
-        self.segment_seconds = _number("RSA_PERCEPTION_SEGMENT_SECONDS", 3600)
-        self.video_segment_seconds = _configured(settings, "videoSegmentSeconds", "RSA_VIDEO_SEGMENT_SECONDS", 300)
-        self.video_idle_seconds = _configured(settings, "videoIdleSeconds", "RSA_VIDEO_IDLE_SECONDS", 10)
-        self.segment_limit = _number("RSA_PERCEPTION_SEGMENT_BYTES", 256 * 1024 * 1024, True)
-        persist = os.environ.get("RSA_PERCEPTION_PERSIST", "1").strip().lower()
+        self.hot_seconds = _configured(settings, "hotSeconds", "LUDENS_PERCEPTION_HOT_SECONDS", 600)
+        self.hot_limit = _number("LUDENS_PERCEPTION_HOT_BYTES", 1024 * 1024 * 1024, True)
+        self.segment_seconds = _number("LUDENS_PERCEPTION_SEGMENT_SECONDS", 3600)
+        self.video_segment_seconds = _configured(settings, "videoSegmentSeconds", "LUDENS_VIDEO_SEGMENT_SECONDS", 300)
+        self.video_idle_seconds = _configured(settings, "videoIdleSeconds", "LUDENS_VIDEO_IDLE_SECONDS", 10)
+        self.segment_limit = _number("LUDENS_PERCEPTION_SEGMENT_BYTES", 256 * 1024 * 1024, True)
+        persist = os.environ.get("LUDENS_PERCEPTION_PERSIST", "1").strip().lower()
         if persist not in {"1", "0", "true", "false"}:
-            raise ValueError("RSA_PERCEPTION_PERSIST must be 1, 0, true, or false")
+            raise ValueError("LUDENS_PERCEPTION_PERSIST must be 1, 0, true, or false")
         self.persistent = persist in {"1", "true"}
         self.lock = threading.Lock()
         self._hot = OrderedDict()
@@ -309,7 +309,7 @@ class ObservationHistory:
         prepared = {}
         for index, item in enumerate(sample.get("media", [])):
             if item["mediaType"].startswith("image/"):
-                from rsa_tools._video import image_size
+                from ludens_tools._video import image_size
                 raw = self._media_bytes(item)
                 prepared[index] = (raw, image_size(raw))
         with self.lock:
@@ -328,7 +328,7 @@ class ObservationHistory:
                 if item["mediaType"].startswith("image/"):
                     raw, size = prepared[index]
                     if self._video is None:
-                        from rsa_tools._video import VideoRecorder
+                        from ludens_tools._video import VideoRecorder
                         video_dir = (self.directory if self.persistent else self._temporary) / "video"
                         self._video = VideoRecorder(self.directory, video_dir,
                             segment_seconds=self.video_segment_seconds, idle_seconds=self.video_idle_seconds)
@@ -507,7 +507,7 @@ class ObservationHistory:
                 raw = originals.get(index)
                 cold = raw is None
                 if cold:
-                    from rsa_tools._video import decode_frame
+                    from ludens_tools._video import decode_frame
                     raw = decode_frame(self.directory, item["timeline"]["asset"], video)
                 if budget is not None:
                     budget[0] -= len(raw)
@@ -703,7 +703,7 @@ class ObservationHistory:
             has_more = len(selected) > limit
             records = [self._read(entry) for entry in selected[:limit]]
             availability = self._availability(query, records)
-            budget = [_number("RSA_VIDEO_QUERY_BYTES", 32 * 1024 * 1024, True)]
+            budget = [_number("LUDENS_VIDEO_QUERY_BYTES", 32 * 1024 * 1024, True)]
             originals = [dict(self._hot_media.get(record["sequence"], {})) for record in records]
             if not self.persistent:
                 # Window files can be removed by another append. Copy their
@@ -742,7 +742,7 @@ def read_timeline_record(workspace, sequence):
     """Read one committed persistent record without owning or starting a writer."""
     if type(sequence) is not int or sequence < 1:
         raise ValueError("Timeline sequence must be a positive integer")
-    root = Path(workspace).resolve() / ".rsa" / "timeline"
+    root = Path(workspace).resolve() / ".ludens" / "timeline"
     segments = root / "segments"
     if root.resolve() != root or segments.resolve() != segments:
         raise ValueError("Timeline storage must not follow symlinks")

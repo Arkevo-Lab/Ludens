@@ -1,6 +1,6 @@
 """Timeline image encoding and read-only frame extraction.
 
-Only the timeline writer owns VideoRecorder. Importing rsa_tools does not load
+Only the timeline writer owns VideoRecorder. Importing ludens_tools does not load
 PyAV, and the command-line reader never starts sampling or takes the writer lock.
 """
 
@@ -106,7 +106,7 @@ def decode_frame(root: Path, asset: str, video: dict[str, Any]) -> bytes:
         stream = container.streams.video[0]
         width, height = int(info["width"]), int(info["height"])
         if (width <= 0 or height <= 0 or stream.width != width + width % 2 or stream.height != height + height % 2
-                or stream.width * stream.height * 3 > _positive("RSA_VIDEO_QUEUE_BYTES", 32 * 1024 * 1024)):
+                or stream.width * stream.height * 3 > _positive("LUDENS_VIDEO_QUEUE_BYTES", 32 * 1024 * 1024)):
             raise ValueError("Recorded video dimensions exceed the decoding budget or disagree with its metadata")
         stream_base = Fraction(stream.time_base.numerator, stream.time_base.denominator)
         container.seek(int(wanted / stream_base), stream=stream, backward=True)
@@ -159,11 +159,11 @@ class VideoRecorder:
         self.directory.mkdir(parents=True, exist_ok=True)
         if self.root.resolve() != self.root or self.directory.resolve() != self.directory:
             raise ValueError("Timeline video directory must not follow symlinks")
-        self.queue_limit = _positive("RSA_VIDEO_QUEUE_BYTES", 32 * 1024 * 1024)
-        self.queue_count = _positive("RSA_VIDEO_QUEUE_FRAMES", 64)
-        self.segment_seconds = segment_seconds if segment_seconds is not None else _positive("RSA_VIDEO_SEGMENT_SECONDS", 300)
-        self.idle_seconds = idle_seconds if idle_seconds is not None else _positive("RSA_VIDEO_IDLE_SECONDS", 10)
-        self.max_streams = _positive("RSA_VIDEO_STREAMS", 16)
+        self.queue_limit = _positive("LUDENS_VIDEO_QUEUE_BYTES", 32 * 1024 * 1024)
+        self.queue_count = _positive("LUDENS_VIDEO_QUEUE_FRAMES", 64)
+        self.segment_seconds = segment_seconds if segment_seconds is not None else _positive("LUDENS_VIDEO_SEGMENT_SECONDS", 300)
+        self.idle_seconds = idle_seconds if idle_seconds is not None else _positive("LUDENS_VIDEO_IDLE_SECONDS", 10)
+        self.max_streams = _positive("LUDENS_VIDEO_STREAMS", 16)
         self.condition = threading.Condition()
         self.queue: deque[tuple[_Segment, bytes, int, int]] = deque()
         self.channels: dict[str, _Segment] = {}

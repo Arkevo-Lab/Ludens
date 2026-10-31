@@ -116,14 +116,14 @@ export class PythonCapabilities {
   private run(request: unknown, options: PythonInvocationOptions, sourceOnly = false): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     options.signal?.throwIfAborted();
     const input = JSON.stringify(request);
-    const env = pythonEnvironment({ ...options.env, RSA_WORKSPACE: this.workspace });
+    const env = pythonEnvironment({ ...options.env, LUDENS_WORKSPACE: this.workspace });
     // Static discovery must not import workspace modules that shadow the bridge
     // or its standard-library imports. Invocation retains the author's environment.
     if (sourceOnly) env.PYTHONPATH = pythonModulePaths().join(delimiter);
-    for (const name of ["RSA_EPOCH", "RSA_TRACE"]) delete env[name];
+    for (const name of ["LUDENS_EPOCH", "LUDENS_TRACE"]) delete env[name];
     env.PYTHONDONTWRITEBYTECODE = "1";
     return new Promise((done, fail) => {
-      const child = spawn(this.pythonPath, ["-B", "-m", "rsa_tools._bridge"], {
+      const child = spawn(this.pythonPath, ["-B", "-m", "ludens_tools._bridge"], {
         cwd: sourceOnly ? pythonModulePaths()[0] : this.workspace, env, detached: true, stdio: ["pipe", "pipe", "pipe"],
       });
       let stdout = "", stderr = "";

@@ -131,7 +131,7 @@ class Trial:
         if media is None:
             raise ValueError("Timeline artifact does not belong to the recorded observation")
         reference = media["timeline"]  # Retain the committed record, not a caller-owned mutable dict.
-        timeline = workspace / ".rsa" / "timeline"
+        timeline = workspace / ".ludens" / "timeline"
         source = media_path(timeline, reference["asset"])
         video = reference.get("video")
         item = {"path": source.relative_to(workspace).as_posix(), "timeline": reference,
@@ -189,8 +189,8 @@ _current = None
 def current_trial():
     """Join the identity assigned by Shiori, or raise outside such a program."""
     global _current
-    keys = ["RSA_BENCH_TRIAL_ID", "RSA_BENCH_RUN_DIR", "RSA_BENCH_ARTIFACTS",
-            "RSA_BENCH_TASK_DIR", "RSA_BENCH_INPUT"]
+    keys = ["LUDENS_BENCH_TRIAL_ID", "LUDENS_BENCH_RUN_DIR", "LUDENS_BENCH_ARTIFACTS",
+            "LUDENS_BENCH_TASK_DIR", "LUDENS_BENCH_INPUT"]
     values = [os.environ.get(key) for key in keys]
     if not all(values):
         raise RuntimeError("No Shiori trial is assigned; required environment: " + ", ".join(keys))

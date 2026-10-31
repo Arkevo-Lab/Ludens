@@ -30,13 +30,13 @@ async function storage(path: string): Promise<{files: number; bytes: number; all
     allocatedBytes: sum.allocatedBytes + entry.allocatedBytes}), {files: 0, bytes: 0, allocatedBytes: 0});
 }
 
-test("resident sampling records data without per-frame audit across Python, RSA and Baseware", async () => {
+test("resident sampling records data without per-frame audit across Python, Ludens and Baseware", async () => {
   const report: Record<string, unknown>[] = [];
   for (const [hz, diagnostics] of [[1, "normal"], [10, "normal"], [30, "normal"], [1, "full"]] as const) {
-    const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-recording-flow-")));
+    const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-recording-flow-")));
     const runId = `sampling-${hz}-${diagnostics}`, runDir = join(workspace, "logs", runId);
     const deviceSocket = `/tmp/bw-recording-${crypto.randomUUID()}.sock`;
-    const hostSocket = `/tmp/rsa-recording-${crypto.randomUUID()}.sock`;
+    const hostSocket = `/tmp/ludens-recording-${crypto.randomUUID()}.sock`;
     const log = new EventLog(runDir, { id: runId, now: () => performance.now() }, workspace, diagnostics);
     const deviceLog = new DeviceLog(join(workspace, ".device-events"), crypto.randomUUID());
     let deviceCalls = 0, rsaRpcCalls = 0, mediaRegistrations = 0;
@@ -56,14 +56,14 @@ test("resident sampling records data without per-frame audit across Python, RSA 
     const closeDevice = await listenDevice(deviceSocket, core);
     const devices = await connectBaseware({ socket: deviceSocket, seconds: 60, runDir, record: log.record });
     await writeFile(join(runDir, "manifest.json"), JSON.stringify({ runId, workspace, eventSources: devices.eventSources, logging: { diagnostics } }));
-    const env = pythonEnvironment({ RSA_SOCKET: hostSocket, RSA_WORKSPACE: workspace, RSA_RUN_ID: runId, RSA_LOG_DIAGNOSTICS: diagnostics });
+    const env = pythonEnvironment({ LUDENS_SOCKET: hostSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: runId, LUDENS_LOG_DIAGNOSTICS: diagnostics });
     const runtime = new Runtime(devices, log.record, 60, runId, diagnostics);
     runtime.attach({ controller: new WorkspaceController({ workspace, devices, record: log.record, env }) });
     runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: log.record, env, diagnostics,
       registerMedia: media => { mediaRegistrations++; log.registerMedia(media); } }) });
     const closeHost = await listen(hostSocket, () => { rsaRpcCalls++; return runtime; });
     try {
-      await writeFile(join(workspace, "senses.py"), `from rsa_tools import Client, capability
+      await writeFile(join(workspace, "senses.py"), `from ludens_tools import Client, capability
 device = Client()
 @capability
 def view(name):
@@ -74,7 +74,7 @@ def view(name):
 def pair():
     return {"media": view("top")["media"] + view("bottom")["media"], "data": {"screens": 2}}
 `);
-      await writeFile(join(workspace, "perception.py"), `from rsa_tools import capability, record
+      await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 from senses import pair
 class Perception:
     sample_hz = ${hz}
@@ -101,7 +101,7 @@ class Perception:
       devices.close();
       await core.close();
 
-      const segments = join(workspace, ".rsa/timeline/segments");
+      const segments = join(workspace, ".ludens/timeline/segments");
       const records = (await Promise.all((await readdir(segments)).filter(name => name.endsWith(".jsonl")).map(name => jsonLines(join(segments, name))))).flat();
       const local = await jsonLines(join(runDir, "events.jsonl"));
       const events = await Array.fromAsync(readRunEvents(runDir));
@@ -138,7 +138,7 @@ class Perception:
 
       // A new Python process reads the same closed video, without starting or repairing a sampler.
       const cold = Bun.spawn([pythonExecutable(env), "-c", `import json
-from rsa_tools._observation_history import ObservationHistory
+from ludens_tools._observation_history import ObservationHistory
 history = ObservationHistory(${JSON.stringify(workspace)})
 try:
     value = history.observe({"id": ${JSON.stringify(records[0].id)}})
@@ -155,8 +155,8 @@ finally: history.close()`], { env, stdout: "pipe", stderr: "pipe" });
           runEvents: await storage(join(runDir, "events.jsonl")),
           runDiagnostics: await storage(join(runDir, "diagnostics.jsonl")),
           baseware: await storage(deviceLog.source.root),
-          timeline: await storage(join(workspace, ".rsa/timeline")),
-          archive: await storage(join(workspace, ".rsa/archive")),
+          timeline: await storage(join(workspace, ".ludens/timeline")),
+          archive: await storage(join(workspace, ".ludens/archive")),
         }, rssMiB: Number((process.memoryUsage().rss / 1024 ** 2).toFixed(1)) });
     } finally {
       await runtime.close(); devices.close(); await closeHost(); await closeDevice();
@@ -164,5 +164,5 @@ finally: history.close()`], { env, stdout: "pipe", stderr: "pipe" });
     }
   }
   console.log("recording-integration", JSON.stringify(report));
-  if (process.env.RSA_RECORDING_REPORT) await writeFile(process.env.RSA_RECORDING_REPORT, JSON.stringify(report, null, 2) + "\n");
+  if (process.env.LUDENS_RECORDING_REPORT) await writeFile(process.env.LUDENS_RECORDING_REPORT, JSON.stringify(report, null, 2) + "\n");
 }, 60000);

@@ -14,10 +14,10 @@ import time
 import unittest
 from unittest.mock import patch
 
-from rsa_tools import Client, capability
-from rsa_tools._capabilities import discover
-from rsa_tools._context import current, scope
-from rsa_tools._recording import RecordingWindow
+from ludens_tools import Client, capability
+from ludens_tools._capabilities import discover
+from ludens_tools._context import current, scope
+from ludens_tools._recording import RecordingWindow
 
 
 class Worker:
@@ -25,10 +25,10 @@ class Worker:
         self.root, self.role = root, role
         self.messages, self.pending, self.lock = [], {}, threading.Lock()
         self.stderr = (root / f"{role}-{generation}.stderr").open("w")
-        env = {**os.environ, "RSA_WORKSPACE": str(root), "BASEWARE_TRACE": "{}"}
+        env = {**os.environ, "LUDENS_WORKSPACE": str(root), "BASEWARE_TRACE": "{}"}
         if socket_path:
-            env["RSA_SOCKET"] = socket_path
-        self.process = subprocess.Popen([sys.executable, "-u", "-m", f"rsa_tools._{role}"],
+            env["LUDENS_SOCKET"] = socket_path
+        self.process = subprocess.Popen([sys.executable, "-u", "-m", f"ludens_tools._{role}"],
             cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, text=True)
 
         def read():
@@ -77,7 +77,7 @@ class Worker:
             self.stderr.close()
 
 
-PERCEPTION = '''from rsa_tools import capability, record
+PERCEPTION = '''from ludens_tools import capability, record
 class Perception:
     sample_hz = 30
     def start(self, context): self.count = 0
@@ -91,8 +91,8 @@ class Perception:
 
 ACTION = '''from pathlib import Path
 import json
-from rsa_tools import Client, capability, record
-from rsa_tools._context import current
+from ludens_tools import Client, capability, record
+from ludens_tools._context import current
 from helper import identify
 @record
 @capability
@@ -121,7 +121,7 @@ class Action:
 
 class ActionTests(unittest.TestCase):
     def test_manual_history_query_omits_absent_epoch(self):
-        with scope({**current(), "epoch": None}), patch("rsa_tools.client.request", return_value={"records": []}) as rpc:
+        with scope({**current(), "epoch": None}), patch("ludens_tools.client.request", return_value={"records": []}) as rpc:
             self.assertEqual(Client().observe({"after": 1}), {"records": []})
         self.assertNotIn("epoch", rpc.call_args.args[1])
         self.assertEqual(rpc.call_args.args[1]["query"], {"after": 1})
@@ -129,7 +129,7 @@ class ActionTests(unittest.TestCase):
     def test_two_residents_share_history_and_action_failure_never_retries(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            helper = 'from rsa_tools import capability\n@capability\ndef identify(): return "loaded-v1"\n'
+            helper = 'from ludens_tools import capability\n@capability\ndef identify(): return "loaded-v1"\n'
             (root / "helper.py").write_text(helper)
             perception = Worker(root, "perception", PERCEPTION)
             perception.wait(lambda: any(x.get("event") == "sample" for x in perception.messages))
@@ -194,7 +194,7 @@ class ActionTests(unittest.TestCase):
     def test_capability_methods_preserve_objects_without_becoming_cli_entries(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            source = '''from rsa_tools import capability, record
+            source = '''from ludens_tools import capability, record
 MODEL = object()
 @capability
 def model():
@@ -216,7 +216,7 @@ def quality():
             self.assertEqual(catalog["diagnostics"], [])
             self.assertEqual([x["origin"]["function"] for x in catalog["capabilities"]], ["model"])
             namespace = {"__name__": "program", "__file__": str(root / "program.py")}
-            from rsa_tools.benchmarks import Trial
+            from ludens_tools.benchmarks import Trial
             artifacts = root / "artifacts"
             artifacts.mkdir()
             input_path = root / "input.json"
@@ -227,7 +227,7 @@ def quality():
                 self.assertIs(namespace["model"](), namespace["MODEL"])
                 self.assertIs(namespace["Action"]().step(), namespace["MODEL"])
                 trial = Trial("trial", root, artifacts, root, input_path)
-                with patch("rsa_tools._context._trial_observer", trial._observe):
+                with patch("ludens_tools._context._trial_observer", trial._observe):
                     namespace["quality"]()
                     trial.flush()
             result = json.loads((artifacts / "context.json").read_text())
@@ -247,7 +247,7 @@ def quality():
                 parent.update(recording_observer=window.observe)
                 @capability
                 def step(): return object()
-                with scope(parent), patch("rsa_tools._context.request") as rpc:
+                with scope(parent), patch("ludens_tools._context.request") as rpc:
                     for index in range(hz * 10):
                         step()
                         window.sampled(1, True)

@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
 import { consolidateOmpSession, createOmpSession } from "../src/core/agent-omp/session.ts";
 import { captureResult, readTestController, createTestRuntime, installTestPerception } from "./runtime-fixture.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 
 test("consolidation uses the same session with file tools, records memory reads, and skips sensors", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-consolidation-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-consolidation-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "memory"), { recursive: true });
   const note = join(workspace, "memory", "current.md");
@@ -31,7 +31,7 @@ test("consolidation uses the same session with file tools, records memory reads,
     readTestController(runtime, "camera", {}, signal, trace));
   const control = new AbortController();
   let cycle: Cycle = { epoch: "play-before", signal: control.signal };
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     maxRequests: 5, cycle: () => cycle,
   });
@@ -49,7 +49,7 @@ test("consolidation uses the same session with file tools, records memory reads,
     enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
     disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
     toolNames: ["read", "write", "edit", "observe", "bash"], customTools: extension.tools,
-    preloadedPreparedExtensions: [{ path: "rsa-test", resolvedPath: "rsa-test", factory: extension.factory, error: null }],
+    preloadedPreparedExtensions: [{ path: "ludens-test", resolvedPath: "ludens-test", factory: extension.factory, error: null }],
   });
   const originalTools = session.getActiveToolNames();
   const originalFile = session.sessionFile;

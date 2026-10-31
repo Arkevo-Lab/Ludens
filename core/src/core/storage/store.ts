@@ -189,7 +189,7 @@ export async function inspectEvidence(workspace: string, runId: string, referenc
     if (reference.kind === "timeline") {
       const owner = await containedPath(await realpath(workspace), reference.workspaceRelative ?? ".");
       if (!(await stat(owner)).isDirectory()) throw new Error("Timeline owner must be a workspace directory");
-      const root = await containedPath(owner, ".rsa/timeline");
+      const root = await containedPath(owner, ".ludens/timeline");
       if (reference.timeline.video) {
         validateVideoReference(reference.timeline);
         if (reference.timeline.video.status === "gap") throw new Error(`Recording gap: ${reference.timeline.video.reason ?? "not encoded"}`);

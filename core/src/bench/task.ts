@@ -145,9 +145,9 @@ export async function readTask(path: string, source: TaskDefinition["source"] = 
 /** Pin selected small package bytes once. Runtime outputs never become task inputs. */
 export async function pinTask(workspace: string, task: TaskDefinition): Promise<TaskDefinition> {
   const canonicalWorkspace = await realpath(workspace);
-  const parent = join(canonicalWorkspace, ".rsa", "benchmarks", "tasks"), destination = join(parent, task.digest.slice(7));
+  const parent = join(canonicalWorkspace, ".ludens", "benchmarks", "tasks"), destination = join(parent, task.digest.slice(7));
   await mkdir(parent, { recursive: true });
-  await containedPath(canonicalWorkspace, ".rsa/benchmarks/tasks");
+  await containedPath(canonicalWorkspace, ".ludens/benchmarks/tasks");
   if (await exists(destination)) {
     await containedPath(canonicalWorkspace, relative(canonicalWorkspace, destination));
     const pinned = await readTask(destination, task.source);

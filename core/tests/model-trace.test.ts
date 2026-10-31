@@ -18,7 +18,7 @@ import { listen as listenBaseware } from "@ludens/baseware/server";
 import { connectBaseware } from "../src/core/subsystems/baseware.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
-import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { captureResult, readTestController, installTestPerception } from "./runtime-fixture.ts";
@@ -34,7 +34,7 @@ const sse = (delta: unknown, finishReason: string, id: string) => [
 ].map(v => `data: ${JSON.stringify(v)}\n\n`).join("") + "data: [DONE]\n\n";
 
 test("native compaction lifecycle tracing preserves stages and epochs with only diagnostic fields", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-compaction-lifecycle-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-compaction-lifecycle-"));
   let now = 10, epoch = "first-epoch";
   const log = new EventLog(directory, {id: "compaction-lifecycle", now: () => now});
   const dispose = installCompactionSpeculationTrace(log, () => ({epoch}));
@@ -70,7 +70,7 @@ test("native compaction lifecycle tracing preserves stages and epochs with only 
 });
 
 test("background candidate, HTTP and retry keep their epoch across takeovers without leaking into foreground", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-compaction-gap-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-compaction-gap-"));
   const log = new EventLog(directory, {id: "compaction-gap", now: () => performance.now()});
   let cycle: {epoch: string} | undefined = {epoch: "first-epoch"};
   const trace = new ModelTrace(log, () => ({epoch: cycle?.epoch}));
@@ -135,7 +135,7 @@ test("background candidate, HTTP and retry keep their epoch across takeovers wit
 });
 
 test("native V2 retry warnings preserve explicit evidence without copying arbitrary logger context", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-compaction-retry-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-compaction-retry-"));
   const log = new EventLog(directory, {id: "compaction-retry", now: () => performance.now()});
   let epoch: string | undefined = "first-epoch";
   const dispose = installCompactionSpeculationTrace(log, () => ({epoch, modelCallId: "unrelated-model"}));
@@ -166,7 +166,7 @@ test("native V2 retry warnings preserve explicit evidence without copying arbitr
 });
 
 test("WS outbound frames are dispatch, not the first server event", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-ws-trace-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-ws-trace-"));
   let now = 100;
   const log = new EventLog(directory, {id: "ws-trace", now: () => now});
   const trace = new ModelTrace(log, () => ({epoch: "epoch"}));
@@ -200,7 +200,7 @@ test("WS outbound frames are dispatch, not the first server event", async () => 
 });
 
 test("compaction HTTP tracing forwards requests and responses without consuming bodies", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-compaction-http-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-compaction-http-"));
   const log = new EventLog(directory, {id: "compaction", now: () => performance.now()});
   const original = globalThis.fetch;
   const calls: Parameters<typeof fetch>[] = [];
@@ -279,7 +279,7 @@ test("compaction HTTP tracing forwards requests and responses without consuming 
 });
 
 test("compaction HTTP failures and cancellation retain safe diagnostics and independent IDs", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-compaction-error-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-compaction-error-"));
   const log = new EventLog(directory, {id: "compaction", now: () => performance.now()});
   const original = globalThis.fetch;
   const cause = Object.assign(new Error("unable to verify certificate"), {code: "CERT_UNTRUSTED", token: "private-cause-token"});
@@ -318,7 +318,7 @@ test("compaction HTTP failures and cancellation retain safe diagnostics and inde
 
 test("real OMP preserves image prefixes and native tool traces while shell IPC retains only its declared epoch", async () => {
   const globalProvider = otelTrace.getTracerProvider();
-  const directory = await mkdtemp(join(tmpdir(), "rsa-wire-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-wire-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), {recursive: true});
   const notes = join(workspace, "skills", "notes.md");
@@ -346,7 +346,7 @@ test("real OMP preserves image prefixes and native tool traces while shell IPC r
   devices.onDisconnect(error => { void runtime.disconnected(error); });
   const {epoch} = await runtime.start();
   const trace = new ModelTrace(log, () => ({epoch: epoch!, ...extension.context()}));
-  const extension = createRsaExtension({runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")), basewareSocket,
+  const extension = createLudensExtension({runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")), basewareSocket,
     binDir: resolve(import.meta.dir, "../bin"),
     cycle: () => ({epoch: epoch!, signal: new AbortController().signal}), maxRequests: 7, trace: trace.current});
   const received: string[] = [];
@@ -533,7 +533,7 @@ test("real OMP preserves image prefixes and native tool traces while shell IPC r
 }, 30_000);
 
 test("HTTP errors and cancellation have terminal model events and preserve their request identity", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-errors-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-errors-"));
   const log = new EventLog(directory, {id: "errors", now: () => performance.now()});
   const trace = new ModelTrace(log, () => ({epoch: "epoch"}));
   const stream = trace.wrap(streamOpenAICompletions as StreamFn);
@@ -566,7 +566,7 @@ test("HTTP errors and cancellation have terminal model events and preserve their
 }, 30_000);
 
 test("certificate fetch errors record only diagnostic fields and retain HTTP correlation", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-certificate-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-certificate-"));
   const log = new EventLog(directory, {id: "certificate", now: () => performance.now()});
   const trace = new ModelTrace(log, () => ({epoch: "epoch"}));
   const cause = Object.assign(new Error("unable to verify the first certificate"), {
@@ -605,7 +605,7 @@ test("certificate fetch errors record only diagnostic fields and retain HTTP cor
 });
 
 test("transport retries share a request but get distinct HTTP IDs; reused tool IDs belong to the new call", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-retry-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-retry-"));
   const log = new EventLog(directory, {id: "retry", now: () => performance.now()});
   const trace = new ModelTrace(log, () => ({epoch: "epoch"}));
   const stream = trace.wrap(streamOpenAICompletions as StreamFn);

@@ -8,7 +8,7 @@ import type { EventMetadata, EventSource } from "@ludens/baseware/protocol";
 
 export type { EventMetadata, EventSource } from "@ludens/baseware/protocol";
 export const EVENT_SCHEMA_VERSION = 2;
-export const RSA_SOURCE: EventSource = { component: "rsa" };
+export const LUDENS_SOURCE: EventSource = { component: "ludens" };
 
 export interface EventTrace {
   recordingId?: string;
@@ -57,7 +57,7 @@ export class EventLog {
     const at = new Date().toISOString(), atMs = this.clock.now();
     appendFileSync(join(this.directory, metadata.channel === "diagnostic" ? "diagnostics.jsonl" : "events.jsonl"), JSON.stringify({
       schemaVersion: EVENT_SCHEMA_VERSION, runId: this.clock.id, seq, at, atMs,
-      source: metadata.source ?? RSA_SOURCE,
+      source: metadata.source ?? LUDENS_SOURCE,
       origin: metadata.origin ?? { eventId: `${this.clock.id}:${seq}`, clockId: this.clock.id, seq, at, atMs },
       ...(metadata.channel ? { channel: metadata.channel } : {}), type, trace, data,
     }) + "\n");
@@ -107,7 +107,7 @@ export class EventLog {
     return { path, sha256, bytes: bytes.byteLength, encoding: "gzip" };
   }
 
-  stream(path: string, event: unknown, trace: EventTrace, source: EventSource = RSA_SOURCE) {
+  stream(path: string, event: unknown, trace: EventTrace, source: EventSource = LUDENS_SOURCE) {
     let stored = event, format: string | undefined;
     if (this.archive && event && typeof event === "object" && "data" in event && typeof event.data === "string") {
       const input = event as { event?: string; data: string; raw?: string[] };
@@ -118,7 +118,7 @@ export class EventLog {
         dataSha256: new Bun.SHA256().update(input.data).digest("hex"), dataBytes: Buffer.byteLength(input.data),
         raw: input.raw?.map(value => value.startsWith("data:")
           ? { data: true, prefix: value.startsWith("data: ") ? "data: " : "data:", line: line++ } : value) };
-      format = "rsa-stream-v1";
+      format = "ludens-stream-v1";
     }
     appendFileSync(join(this.directory, path), JSON.stringify({ at: new Date().toISOString(), atMs: this.clock.now(), source, trace,
       ...(format ? { format } : {}), event: stored }) + "\n");

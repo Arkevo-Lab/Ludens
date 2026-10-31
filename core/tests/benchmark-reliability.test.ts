@@ -11,7 +11,7 @@ test.each([
   ["background-compaction", ["compaction_speculation", "compaction_http_start", "compaction_http_end", "auto_compaction_end"]],
   ["perception-lifecycle", ["perception_status", "perception_observe_start", "perception_observe_end"]],
 ] as const)("%s evaluates real production events without network or devices", async (id, requiredEvents) => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-benchmark-test-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-benchmark-test-"));
   const runDir = join(directory, "logs/run"), workspace = join(directory, "workspace");
   const source = `import { run } from ${JSON.stringify(resolve(import.meta.dir, `../src/bench/cases/${id}.ts`))};
 import { EventLog } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/storage/events.ts"))};
@@ -41,8 +41,8 @@ await Bun.write(${JSON.stringify(join(directory, "outcome.json"))}, JSON.stringi
     await writeFile(join(directory, "input.json"), "{}");
     const taskDir = resolve(import.meta.dir, `../benchmarks/tasks/${id}`);
     const verifier = Bun.spawn(["sh", join(taskDir, "tests/test.sh")], { cwd: directory,
-      env: { PATH: process.env.PATH, RSA_BENCH_TASK_DIR: taskDir, RSA_BENCH_INPUT: join(directory, "input.json"),
-        RSA_BENCH_ARTIFACTS: artifacts, RSA_BENCH_VERIFIER_DIR: verifierDir }, stdout: "pipe", stderr: "pipe" });
+      env: { PATH: process.env.PATH, LUDENS_BENCH_TASK_DIR: taskDir, LUDENS_BENCH_INPUT: join(directory, "input.json"),
+        LUDENS_BENCH_ARTIFACTS: artifacts, LUDENS_BENCH_VERIFIER_DIR: verifierDir }, stdout: "pipe", stderr: "pipe" });
     expect({ code: await verifier.exited, stderr: await new Response(verifier.stderr).text() }).toEqual({ code: 0, stderr: "" });
     expect(JSON.parse(await readFile(join(verifierDir, "reward.json"), "utf8"))).toEqual(result.rewards);
     // Verifier consumes frozen measurements; changing a decision input changes
@@ -56,7 +56,7 @@ await Bun.write(${JSON.stringify(join(directory, "outcome.json"))}, JSON.stringi
 }, 30_000);
 
 test.each(["control-handoff", "ws-recovery", "background-compaction"])("%s cancellation cleans up before returning", async id => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-benchmark-abort-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-benchmark-abort-"));
   const runDir = join(directory, "logs/run"), workspace = join(directory, "workspace");
   const source = `import { run } from ${JSON.stringify(resolve(import.meta.dir, `../src/bench/cases/${id}.ts`))};
 import { EventLog } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/storage/events.ts"))};

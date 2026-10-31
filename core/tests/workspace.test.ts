@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { Workspace } from "../src/core/storage/workspace.ts";
 
 test("skill and script edits update the next index while preserving earlier evidence", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-skills-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-skills-"));
   const root = join(directory, "workspace");
   await mkdir(join(root, "skills", "turn", "scripts"), { recursive: true });
   const workspace = new Workspace(root, join(directory, "state", "skill-versions"));
@@ -27,7 +27,7 @@ test("skill and script edits update the next index while preserving earlier evid
 });
 
 test("memory snapshots retain earlier content independently of skill versions", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-memory-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-memory-"));
   const root = join(directory, "workspace");
   await mkdir(join(root, "skills", "turn"), { recursive: true });
   const workspace = new Workspace(root, join(directory, "state", "skill-versions"));

@@ -137,17 +137,17 @@ test("catalog help is inert and device execution receives literal argument value
   } finally { await runtime.close(); execute.mockRestore(); capture.mockRestore(); }
 });
 
-test("RSA IPC requires a workspace controller and an agent environment cannot enable control through the CLI", async () => {
+test("Ludens IPC requires a workspace controller and an agent environment cannot enable control through the CLI", async () => {
   const { runtime, devices } = fixture();
   runtime.attach({ controller: undefined });
   const acquire = spyOn(devices, "acquire");
-  const path = `/tmp/rsa-management-${crypto.randomUUID()}.sock`;
+  const path = `/tmp/ludens-management-${crypto.randomUUID()}.sock`;
   const close = await listen(path, runtime);
   try {
     await expect(send(path, { kind: "sensor", argv: ["any", "command"] })).rejects.toThrow("Unknown command");
     await expect(send(path, { kind: "controller", argv: [] })).rejects.toThrow("Workspace controller is unavailable");
     const cli = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "auto", "on"], {
-      env: { ...process.env, RSA_SOCKET: path, BASEWARE_EPOCH: "agent-cycle" }, stdout: "pipe", stderr: "pipe",
+      env: { ...process.env, LUDENS_SOCKET: path, BASEWARE_EPOCH: "agent-cycle" }, stdout: "pipe", stderr: "pipe",
     });
     const errors = new Response(cli.stderr).text();
     expect(await cli.exited).toBe(1);
@@ -186,8 +186,8 @@ test("a blocked background read does not delay handback, the next epoch, or host
 
 test("parallel hosts route to independent devices and reject each other's epochs", async () => {
   const a = fixture(), b = fixture();
-  const socketA = `/tmp/rsa-project-a-${crypto.randomUUID()}.sock`;
-  const socketB = `/tmp/rsa-project-b-${crypto.randomUUID()}.sock`;
+  const socketA = `/tmp/ludens-project-a-${crypto.randomUUID()}.sock`;
+  const socketB = `/tmp/ludens-project-b-${crypto.randomUUID()}.sock`;
   const closeA = await listen(socketA, a.runtime), closeB = await listen(socketB, b.runtime);
   try {
     const ownerA = await a.runtime.start(), ownerB = await b.runtime.start();

@@ -11,7 +11,7 @@ import { EventLog } from "../src/core/storage/events.ts";
 import { ModelTrace } from "../src/core/agent-omp/trace.ts";
 
 test("native Shiori runs preserve tool errors, aborted chats and thrown provider failures within one epoch", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-shiori-native-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-shiori-native-"));
   const log = new EventLog(directory, {id: "native-fixture", now: () => performance.now()});
   const trace = new ModelTrace(log, () => ({epoch: "same-takeover"}));
   const model = getBundledModels("deepseek").find(m => m.id === "deepseek-flash")!;

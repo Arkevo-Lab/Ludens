@@ -4,22 +4,22 @@ import type { ObservationQuery, PerceptionRead, TimelineMedia } from "../core/su
 import { readToolArguments } from "@ludens/baseware/tool-contract";
 import type { ExecutionResult } from "@ludens/baseware/contracts";
 
-export const HELP = `rsa status
-rsa auto on [--message <text>]
-rsa auto off
-rsa consolidate [--seconds <n>]
-rsa perception status | reload | stop
-rsa perception inject [on|off]
-rsa action status | reload | stop
-rsa observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
-rsa controller list | <id> --help | <id> [--args '<JSON object>' | --file <arguments.json>]
+export const HELP = `ludens status
+ludens auto on [--message <text>]
+ludens auto off
+ludens consolidate [--seconds <n>]
+ludens perception status | reload | stop
+ludens perception inject [on|off]
+ludens action status | reload | stop
+ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
+ludens controller list | <id> --help | <id> [--args '<JSON object>' | --file <arguments.json>]
 
 Control management is unavailable inside agent cycles carrying BASEWARE_EPOCH.
-The current directory is the workspace; --workspace <path> or RSA_WORKSPACE overrides it.
-RSA_SOCKET overrides its default host address. Each workspace resumes its own session.
-Use rsa controller for device and workspace capabilities.`;
+The current directory is the workspace; --workspace <path> or LUDENS_WORKSPACE overrides it.
+LUDENS_SOCKET overrides its default host address. Each workspace resumes its own session.
+Use ludens controller for device and workspace capabilities.`;
 
-export const OBSERVE_HELP = `rsa observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
+export const OBSERVE_HELP = `ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
 Read the workspace timeline without sampling. Default: latest Perception.sample record.
 --capability selects a recorded capability, or '*' for the whole timeline; --id selects a record.
 --at selects the last record at or before the given recordedAt timestamp.
@@ -32,23 +32,23 @@ An empty range succeeds; missing point/latest data, expiration and query errors 
 --images displays the same compact observation text and requested pixels through
 OMP's native terminal image support; use it when reading pictures through bash.
 availability reports the retained range; non-persistent history expires outside its hot window.
-The same command is available as rsa perception observe.`;
+The same command is available as ludens perception observe.`;
 
-const PERCEPTION_HELP = `rsa perception status | reload | stop
-rsa perception inject [on|off]
+const PERCEPTION_HELP = `ludens perception status | reload | stop
+ludens perception inject [on|off]
 ${OBSERVE_HELP}
 Loads workspace/perception.py:Perception in a resident process and calls sample() continuously.
 Set sample_hz to choose a target and video nominal rate (default 30 Hz). Reload after editing code or weights.
-Mark sample() with @capability and @record from rsa_tools. Only marked results enter the timeline.
+Mark sample() with @capability and @record from ludens_tools. Only marked results enter the timeline.
 Persistent history survives reload and new runs. Defaults: 10-minute hot window, hourly segments.
-Set RSA_PERCEPTION_PERSIST=0 in the host environment for hot-window-only history.
+Set LUDENS_PERCEPTION_PERSIST=0 in the host environment for hot-window-only history.
 inject off disables automatic observation attachment to model context; sampling, recording and explicit observe continue.
-inject on restores automatic attachment; inject without arguments shows the policy (also in rsa status).
+inject on restores automatic attachment; inject without arguments shows the policy (also in ludens status).
 The policy survives perception reload and control cycles in this host; a new host defaults to on.
 stop ends the sampling process and timeline writer, including video recording. Use inject off to reduce context instead.
 Empty or failed perception supplies no default images.`;
 
-export const ACTION_HELP = `rsa action status | reload | stop
+export const ACTION_HELP = `ludens action status | reload | stop
 Loads workspace/action.py:Action in its own persistent Python process during auto control.
 Implement start(context), @capability step(), close(); step_hz defaults to 30.
 Use asynchronous play to keep observing while inputs run. @record optionally retains a result
@@ -86,16 +86,16 @@ async function observe(argv: string[], socket: string) {
   console.log(output);
 }
 
-export const CONTROLLER_HELP = `rsa controller list
-rsa controller <id> --help
-rsa controller controller/<native name> [--args '<JSON object>' | --file <arguments.json>]
-rsa controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
+export const CONTROLLER_HELP = `ludens controller list
+ludens controller <id> --help
+ludens controller controller/<native name> [--args '<JSON object>' | --file <arguments.json>]
+ludens controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
 
 Device controllers (including sensors) and decorated Python functions share this workspace catalog.
 List and help discover capabilities without executing workspace code.
 Calls requiring control use BASEWARE_EPOCH from an existing takeover; they never acquire control.
 Sensor controllers return observations alongside the execution result and can run without takeover.
-Python: from rsa_tools import Client; Client().list(), .help(id), .call(id, arguments).
+Python: from ludens_tools import Client; Client().list(), .help(id), .call(id, arguments).
 All arguments are objects; --file reads the same complete argument object as --args.`;
 
 async function controller(argv: string[], socket: string) {
@@ -129,7 +129,7 @@ export async function cli(argv: string[], socket: string) {
     return;
   }
   if (kind === "action" && (!rest.length || rest[0] === "--help")) { console.log(ACTION_HELP); return; }
-  if (!["status", "auto", "consolidate", "perception", "action"].includes(kind)) throw new Error("Unknown command; see rsa --help");
+  if (!["status", "auto", "consolidate", "perception", "action"].includes(kind)) throw new Error("Unknown command; see ludens --help");
   const control = kind === "auto" || kind === "consolidate" ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null } : undefined;
   const value = await send(socket, {
     kind, argv: rest, epoch: process.env.BASEWARE_EPOCH,

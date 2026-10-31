@@ -10,7 +10,7 @@ import { importLegacyWorkspaceState, openWorkspaceSession, selectWorkspaceSessio
 import { readCurrentSession, initializeWorkspaceState } from "../src/core/storage/workspace-state.ts";
 
 test("explicit legacy import copies history, tool output and skill versions without retaining source dependencies", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-session-import-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-session-import-"));
   const home = join(directory, "home"), state = await initializeWorkspaceState(join(directory, "workspace"), home);
   const source = join(directory, "legacy"), oldDir = join(source, "sessions");
   const legacy = SessionManager.create(state.workspace, oldDir);
@@ -41,7 +41,7 @@ test("explicit legacy import copies history, tool output and skill versions with
 });
 
 test("legacy import rejects conflicts and foreign source ownership before copying", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-session-conflict-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-session-conflict-"));
   const home = join(directory, "home"), state = await initializeWorkspaceState(join(directory, "workspace"), home);
   const source = join(directory, "legacy");
   const legacy = SessionManager.create(state.workspace, join(source, "sessions"));
@@ -60,7 +60,7 @@ test("legacy import rejects conflicts and foreign source ownership before copyin
 });
 
 test("a moved legacy workspace needs explicit previous ownership before adopting its absolute selection", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-session-relocate-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-session-relocate-"));
   const home = join(directory, "home"), old = await initializeWorkspaceState(join(directory, "old"), home);
   const manager = SessionManager.create(old.workspace, old.sessionsDir);
   manager.appendMessage({ role: "user", content: "Legacy context", timestamp: Date.now() });
@@ -84,7 +84,7 @@ test("a moved legacy workspace needs explicit previous ownership before adopting
 });
 
 test("a new workspace session survives idle shutdown, resumes, and can start fresh without deleting learned files", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-session-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-session-"));
   const state = await initializeWorkspaceState(join(directory, "workspace"), join(directory, "state"));
   await mkdir(join(state.workspace, "skills"));
   await mkdir(join(state.workspace, "memory"));
@@ -166,7 +166,7 @@ test("a new workspace session survives idle shutdown, resumes, and can start fre
 }, 30_000);
 
 test("moving preserves identity and context; same-named foreign sessions and renewed identities stay isolated", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-owner-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-owner-"));
   const home = join(directory, "home"), first = await initializeWorkspaceState(join(directory, "first"), home);
   let manager = await openWorkspaceSession(first);
   manager.appendMessage({ role: "user", content: "Stable workspace context", timestamp: Date.now() });

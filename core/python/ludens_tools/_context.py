@@ -12,13 +12,13 @@ import traceback
 import uuid
 
 
-class RSAError(RuntimeError):
-    """The RSA host rejected a request."""
+class LudensError(RuntimeError):
+    """The Ludens host rejected a request."""
 
 
 def request(socket_path, message, timeout=None):
     if not socket_path:
-        raise ValueError("RSA_SOCKET or socket_path is required")
+        raise ValueError("LUDENS_SOCKET or socket_path is required")
     wire = json.dumps(message, allow_nan=False).encode("utf-8") + b"\n"
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.settimeout(timeout)
@@ -27,14 +27,14 @@ def request(socket_path, message, timeout=None):
         with connection.makefile("rb") as incoming:
             line = incoming.readline()
             if not line:
-                raise ConnectionError("RSA disconnected before replying; the request was not retried")
+                raise ConnectionError("Ludens disconnected before replying; the request was not retried")
             reply = json.loads(line)
             if reply["ok"]:
                 return reply.get("value")
-            raise RSAError(reply["error"])
+            raise LudensError(reply["error"])
 
 
-_active = ContextVar("rsa_call_context", default=None)
+_active = ContextVar("ludens_call_context", default=None)
 _clock_id = "python-" + uuid.uuid4().hex
 _sequence = 0
 _warned = False
@@ -46,12 +46,12 @@ def current():
     if active is not None:
         return active
     return {
-        "socket_path": os.environ.get("RSA_SOCKET"),
+        "socket_path": os.environ.get("LUDENS_SOCKET"),
         "epoch": os.environ.get("BASEWARE_EPOCH"),
         "trace": json.loads(os.environ.get("BASEWARE_TRACE", "{}")),
-        "workspace": os.environ.get("RSA_WORKSPACE", os.getcwd()),
-        "run_id": os.environ.get("RSA_RUN_ID"),
-        "diagnostics": os.environ.get("RSA_LOG_DIAGNOSTICS", "normal"),
+        "workspace": os.environ.get("LUDENS_WORKSPACE", os.getcwd()),
+        "run_id": os.environ.get("LUDENS_RUN_ID"),
+        "diagnostics": os.environ.get("LUDENS_LOG_DIAGNOSTICS", "normal"),
         "timeout": None,
     }
 
@@ -98,7 +98,7 @@ def emit(context, event_type, data):
             observer_sink(context, event_type, data, origin)
         except Exception as error:
             if not _warned:
-                print(f"RSA Python logging unavailable: {error}", file=sys.stderr)
+                print(f"Ludens Python logging unavailable: {error}", file=sys.stderr)
                 _warned = True
     if channel is None or not (host_available or recorder):
         return
@@ -114,7 +114,7 @@ def emit(context, event_type, data):
         }, timeout=1)
     except Exception as error:
         if not _warned:
-            print(f"RSA Python logging unavailable: {error}", file=sys.stderr)
+            print(f"Ludens Python logging unavailable: {error}", file=sys.stderr)
             _warned = True
 
 

@@ -14,16 +14,16 @@ async function fixture() {
   await writeFile(join(task, "task.toml"), 'schema_version="1.4"\n[task]\nname="local/jump"\n');
   await writeFile(join(task, "instruction.md"), "Make one synthetic jump; measure it.\n");
   const verifier = join(task, "tests/test.sh");
-  await writeFile(verifier, 'printf \'{"height":24,"landed":0}\' > "$RSA_BENCH_VERIFIER_DIR/reward.json"\n');
+  await writeFile(verifier, 'printf \'{"height":24,"landed":0}\' > "$LUDENS_BENCH_VERIFIER_DIR/reward.json"\n');
   const program = join(workspace, "jump.py");
   await writeFile(program, `import os
 from pathlib import Path
-assert not os.environ.get("RSA_SOCKET")
+assert not os.environ.get("LUDENS_SOCKET")
 assert not os.environ.get("BASEWARE_SOCKET")
 assert not os.environ.get("OPENAI_API_KEY")
 actions=Path("actions.txt")
 actions.write_text(str(int(actions.read_text())+1) if actions.exists() else "1")
-Path(os.environ["RSA_BENCH_ARTIFACTS"],"measurements.json").write_text('{"height":24}')
+Path(os.environ["LUDENS_BENCH_ARTIFACTS"],"measurements.json").write_text('{"height":24}')
 `);
   return { root, workspace, task, program, verifier, options: { workspace, globalHome: join(root, "index"), seconds: 5,
     config: { task: "local/jump", argv: ["{python}", program] } }, cleanup: () => rm(root, { recursive: true, force: true }) };
@@ -79,12 +79,12 @@ test("a moved benchmark workspace retains history, evidence and verification thr
 test("invalid score is separate from execution; a new verifier regrades recorded evidence", async () => {
   const f = await fixture();
   try {
-    await writeFile(f.verifier, 'printf \'{"height":null}\' > "$RSA_BENCH_VERIFIER_DIR/reward.json"\n');
+    await writeFile(f.verifier, 'printf \'{"height":null}\' > "$LUDENS_BENCH_VERIFIER_DIR/reward.json"\n');
     const first = await runTask("local/jump", f.options);
     expect(first.trial.status).toBe("completed"); expect(first.verification?.status).toBe("error");
     const execution = JSON.stringify({ ...first.trial, selectedVerificationId: undefined });
     await writeFile(f.program, "raise ImportError('evaluator is gone')\n");
-    await writeFile(f.verifier, 'printf \'{"height":24}\' > "$RSA_BENCH_VERIFIER_DIR/reward.json"\n');
+    await writeFile(f.verifier, 'printf \'{"height":24}\' > "$LUDENS_BENCH_VERIFIER_DIR/reward.json"\n');
     const second = await verifyTask(f.workspace, first.trial.id, { globalHome: f.options.globalHome, taskPath: f.task, reason: "corrected verifier" });
     expect(second.verifier_result.rewards).toEqual({ height: 24 });
     expect(JSON.stringify({ ...second.trial, selectedVerificationId: undefined })).toBe(execution);
@@ -145,11 +145,11 @@ test("edited measurements can be regraded and execution and verifier diagnostics
   };
   try {
     await writeFile(f.program, (await readFile(f.program, "utf8")) + '\nprint("measurement completed")\n');
-    await writeFile(f.verifier, 'python3 "$RSA_BENCH_TASK_DIR/tests/verify.py"\n');
+    await writeFile(f.verifier, 'python3 "$LUDENS_BENCH_TASK_DIR/tests/verify.py"\n');
     await writeFile(join(f.task, "tests/verify.py"), `import json,os
 from pathlib import Path
-measurement=json.loads(Path(os.environ["RSA_BENCH_ARTIFACTS"],"measurements.json").read_text())
-output=Path(os.environ["RSA_BENCH_VERIFIER_DIR"])
+measurement=json.loads(Path(os.environ["LUDENS_BENCH_ARTIFACTS"],"measurements.json").read_text())
+output=Path(os.environ["LUDENS_BENCH_VERIFIER_DIR"])
 (output/"reward.json").write_text(json.dumps({"height":measurement["height"]}))
 (output/"details.json").write_text(json.dumps({"measuredHeight":measurement["height"]}))
 print("graded saved measurements")
@@ -178,7 +178,7 @@ test("default aggregation accepts selected results from different verifier versi
   const f = await fixture();
   try {
     const first = await runTask("local/jump", f.options), second = await runTask("local/jump", f.options);
-    await writeFile(f.verifier, 'printf \'{"height":48,"landed":0}\' > "$RSA_BENCH_VERIFIER_DIR/reward.json"\n');
+    await writeFile(f.verifier, 'printf \'{"height":48,"landed":0}\' > "$LUDENS_BENCH_VERIFIER_DIR/reward.json"\n');
     const regraded = await verifyTask(f.workspace, first.trial.id, { globalHome: f.options.globalHome, taskPath: f.task });
     expect(regraded.verification?.task.digest).not.toBe(second.verification?.task.digest);
     const dataset = join(f.root, "dataset.toml");

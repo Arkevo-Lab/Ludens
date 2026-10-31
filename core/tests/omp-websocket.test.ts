@@ -31,7 +31,7 @@ const model = buildModel({
 });
 // Synthetic token only: neither the fixture nor the provider reads local auth.
 const apiKey = `aaa.${Buffer.from(JSON.stringify({
-  "https://api.openai.com/auth": {chatgpt_account_id: "rsa-offline-test"},
+  "https://api.openai.com/auth": {chatgpt_account_id: "ludens-offline-test"},
 })).toString("base64url")}.bbb`;
 const user = (content: string) => ({role: "user" as const, content, timestamp: 1});
 const context = (content: string): Context => ({messages: [user(content)]});

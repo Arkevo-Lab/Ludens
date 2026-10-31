@@ -12,16 +12,16 @@ import { createHash } from "node:crypto";
 const args = process.argv.slice(2);
 const option = (name: string) => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; };
 assert.ok(option("--run"), "--run is required");
-const artifacts = process.env.RSA_BENCH_ARTIFACTS;
+const artifacts = process.env.LUDENS_BENCH_ARTIFACTS;
 const cachePath = option("--cache-root") ?? (artifacts ? join(artifacts, "index-cache") : undefined);
 const outputPath = option("--output") ?? (artifacts ? join(artifacts, "measurements.json") : undefined);
 assert.ok(cachePath && outputPath, "--cache-root and --output are required outside a Shiori trial");
 const run = resolve(option("--run")!), cacheRoot = resolve(cachePath), output = resolve(outputPath);
 assert.ok(!cacheRoot.startsWith(run + "/"), "Use an isolated disposable directory");
-process.env.RSA_DASHBOARD_INDEX_ROOT = cacheRoot;
-process.env.RSA_DASHBOARD_INDEX_IDLE_MS = "1";
-if (option("--cache-bytes")) process.env.RSA_DASHBOARD_INDEX_CACHE_BYTES = option("--cache-bytes");
-if (option("--build-bytes")) process.env.RSA_DASHBOARD_BUILD_BYTES = option("--build-bytes");
+process.env.LUDENS_APP_INDEX_ROOT = cacheRoot;
+process.env.LUDENS_APP_INDEX_IDLE_MS = "1";
+if (option("--cache-bytes")) process.env.LUDENS_APP_INDEX_CACHE_BYTES = option("--cache-bytes");
+if (option("--build-bytes")) process.env.LUDENS_APP_BUILD_BYTES = option("--build-bytes");
 mkdirSync(dirname(output), { recursive: true });
 const memory = () => process.memoryUsage();
 const sourceBefore = statSync(join(run, "events.jsonl"));
@@ -124,8 +124,8 @@ async function main() {
   report.buildersExited = [...childPids].every(pid => { try { process.kill(pid, 0); return false; } catch { return true; } });
   assert.ok(report.buildersExited, "Builder process did not exit");
   report.completedAt = new Date().toISOString(); save(); clearInterval(timer);
-  if (artifacts && process.env.RSA_BENCH_TRIAL_ID) writeFileSync(join(artifacts, "context.json"), JSON.stringify({
-    trialId: process.env.RSA_BENCH_TRIAL_ID, workspace: process.env.RSA_WORKSPACE,
+  if (artifacts && process.env.LUDENS_BENCH_TRIAL_ID) writeFileSync(join(artifacts, "context.json"), JSON.stringify({
+    trialId: process.env.LUDENS_BENCH_TRIAL_ID, workspace: process.env.LUDENS_WORKSPACE,
     conditions: { sourceRun: run, sourceBytes: sourceBefore.size, budget: report.budget },
     subjects: [], artifacts: [], limitations: report.limitations,
   }) + "\n");

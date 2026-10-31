@@ -2,7 +2,7 @@
   "task": "ludens/clamp",
   "argv": [
     "{python}",
-    "{rsa}/benchmarks/examples/clamp.py",
+    "{core}/benchmarks/examples/clamp.py",
     "--samples",
     "{param.samples}",
     "--seed",

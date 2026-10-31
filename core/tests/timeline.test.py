@@ -1,6 +1,6 @@
 """Offline workspace timeline contracts, including independent Python callers.
 
-PYTHONPATH=rsa/python python3 rsa/tests/timeline.test.py
+PYTHONPATH=ludens/python python3 ludens/tests/timeline.test.py
 """
 
 import base64
@@ -20,9 +20,9 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from rsa_tools._capabilities import discover, load_function, call_local
-from rsa_tools._context import scope
-from rsa_tools._observation_history import ObservationHistory, observation_result, MAIN_CAPABILITY
+from ludens_tools._capabilities import discover, load_function, call_local
+from ludens_tools._context import scope
+from ludens_tools._observation_history import ObservationHistory, observation_result, MAIN_CAPABILITY
 
 
 SAMPLING = {"clock": "test", "startedAtMs": 0, "finishedAtMs": 1}
@@ -36,8 +36,8 @@ class Worker:
         self.pending, self.events = {}, queue.Queue()
         self.lock = threading.Lock()
         self.stderr = (self.root / (run + "-stderr.txt")).open("w")
-        self.process = subprocess.Popen([sys.executable, "-u", "-m", "rsa_tools._perception"],
-            cwd=root, env={**os.environ, "PYTHONPATH": PYTHON_PATH, "RSA_SOCKET": "", "BASEWARE_EPOCH": ""},
+        self.process = subprocess.Popen([sys.executable, "-u", "-m", "ludens_tools._perception"],
+            cwd=root, env={**os.environ, "PYTHONPATH": PYTHON_PATH, "LUDENS_SOCKET": "", "BASEWARE_EPOCH": ""},
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, text=True)
         self.reader = threading.Thread(target=self.read, daemon=True)
         self.reader.start()
@@ -76,7 +76,7 @@ class Worker:
             self.stderr.close()
 
 
-SOURCE = '''from rsa_tools import capability, record
+SOURCE = '''from ludens_tools import capability, record
 class Perception:
     sample_hz = 50
     def start(self, context): self.count = 0
@@ -91,7 +91,7 @@ class Perception:
 
 class TimelineTests(unittest.TestCase):
     def test_generic_data_channels_record_lookup_and_cross_segment_objects(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"RSA_PERCEPTION_SEGMENT_BYTES": "1"}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_SEGMENT_BYTES": "1"}):
             root = Path(directory)
             (root / "sample.wav").write_bytes(b"one immutable sensor payload")
             history = ObservationHistory(root)
@@ -117,7 +117,7 @@ class TimelineTests(unittest.TestCase):
     def test_decorators_discovery_direct_import_local_client_nested_and_loaded_revision(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
-            source = '''from rsa_tools import capability as sense, record, capability
+            source = '''from ludens_tools import capability as sense, record, capability
 MODEL = object()
 @record
 @sense
@@ -254,7 +254,7 @@ def invalid():
                 worker.close()
 
     def test_window_delivery_survives_immediate_eviction_without_persistent_objects(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"RSA_PERCEPTION_PERSIST": "0", "RSA_PERCEPTION_HOT_BYTES": "1"}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_BYTES": "1"}):
             history = ObservationHistory(directory)
             record = history.append({"media": [{"mediaType": "audio/wav", "data": "YWJj"}]}, "g", SAMPLING)
             self.assertEqual(base64.b64decode(record["media"][0]["data"]), b"abc")
@@ -290,7 +290,7 @@ def invalid():
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             worker = Worker(root, SOURCE)
-            socket_path = "/tmp/rsa-timeline-test-" + uuid.uuid4().hex[:12] + ".sock"
+            socket_path = "/tmp/ludens-timeline-test-" + uuid.uuid4().hex[:12] + ".sock"
             class Handler(socketserver.StreamRequestHandler):
                 def handle(self):
                     message = json.loads(self.rfile.readline())
@@ -305,7 +305,7 @@ def invalid():
             server.messages = []
             serving = threading.Thread(target=server.serve_forever, daemon=True)
             serving.start()
-            (root / "external.py").write_text('''from rsa_tools import capability, record
+            (root / "external.py").write_text('''from ludens_tools import capability, record
 @record
 @capability
 def sensor(value: int) -> dict:
@@ -313,7 +313,7 @@ def sensor(value: int) -> dict:
     return {"data": value}
 ''')
             command = 'from external import sensor; import json; print(json.dumps([sensor(i) for i in range(8)]))'
-            environment = {**os.environ, "PYTHONPATH": PYTHON_PATH, "RSA_SOCKET": socket_path, "RSA_WORKSPACE": str(root), "RSA_RUN_ID": "external-run"}
+            environment = {**os.environ, "PYTHONPATH": PYTHON_PATH, "LUDENS_SOCKET": socket_path, "LUDENS_WORKSPACE": str(root), "LUDENS_RUN_ID": "external-run"}
             try:
                 with ThreadPoolExecutor(max_workers=3) as pool:
                     results = list(pool.map(lambda _: subprocess.run([sys.executable, "-c", command], cwd=root, env=environment,

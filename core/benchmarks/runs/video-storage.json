@@ -2,7 +2,7 @@
   "task": "ludens/video-storage",
   "argv": [
     "{python}",
-    "{rsa}/scripts/verify-video-storage.py",
+    "{core}/scripts/verify-video-storage.py",
     "--records",
     "{param.records}",
     "--rate",

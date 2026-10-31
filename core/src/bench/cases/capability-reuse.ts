@@ -11,7 +11,7 @@ import { connectBaseware } from "../../core/subsystems/baseware.ts";
 import { createHostRuntime } from "../../core/shiori/host.ts";
 import { PythonCapabilities } from "../../core/subsystems/python-capabilities.ts";
 import { Runtime } from "../../core/shiori/runtime.ts";
-import { listen as listenRsa } from "../../daemon/transport.ts";
+import { listen as listenLudens } from "../../daemon/transport.ts";
 import { initializeWorkspaceState } from "../../core/storage/workspace-state.ts";
 import type { RecordEvent } from "../../core/storage/events.ts";
 import type { BenchmarkContext } from "../types.ts";
@@ -42,8 +42,8 @@ export async function run(ctx: BenchmarkContext): Promise<Record<string, unknown
   const recordBenchmark = ctx.log.recorder({ component: "benchmark", implementation: "assembly-bench", implementationVersion: "1" });
   const environment = new ReuseEnvironment(ctx.seed, join(ctx.runDir, "bench-frames"), recordBenchmark);
   const state = await initializeWorkspaceState(ctx.workspace);
-  const prefix = `/tmp/rsa-bench-${crypto.randomUUID()}`;
-  const basewareSocket = `${prefix}-b.sock`, rsaSocket = `${prefix}-r.sock`;
+  const prefix = `/tmp/ludens-bench-${crypto.randomUUID()}`;
+  const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
   let runtime: Runtime | undefined;
   const record: RecordEvent = (type, data, trace, metadata) => {
     ctx.log.record(type, data, trace, metadata);
@@ -63,7 +63,7 @@ export async function run(ctx: BenchmarkContext): Promise<Record<string, unknown
     diagnostics: ctx.log.diagnostics, capabilities: environment.capabilities,
     drivers: [{ id: "benchmark-assembly-bench", version: "1" }] });
   let closeBaseware: (() => Promise<void>) | undefined;
-  let closeRsa: (() => Promise<void>) | undefined;
+  let closeLudens: (() => Promise<void>) | undefined;
   let devices: Awaited<ReturnType<typeof connectBaseware>> | undefined;
   let epoch: string | undefined;
   const cancel = () => { void runtime?.stop("benchmark cancelled"); };
@@ -77,14 +77,14 @@ export async function run(ctx: BenchmarkContext): Promise<Record<string, unknown
     await writeCapabilityDocument(devices.catalog, join(ctx.workspace, "baseware.json"));
     await writeFile(join(ctx.workspace, "perception.py"), perceptionTemplate, { flag: "wx" });
     runtime = await createHostRuntime({ devices, record, workspace: ctx.workspace, runDir: ctx.runDir,
-      state, log: ctx.log, basewareSocket, rsaSocket, seconds: ctx.seconds, budget: ctx.budget,
+      state, log: ctx.log, basewareSocket, ludensSocket, seconds: ctx.seconds, budget: ctx.budget,
       model: ctx.model, maxRequests: ctx.maxRequests, compactionThreshold: 256000, action: false });
     devices.onHandback(reason => { void runtime!.stop(reason); });
     devices.onDisconnect(error => { void runtime!.disconnected(error); });
-    closeRsa = await listenRsa(rsaSocket, runtime);
+    closeLudens = await listenLudens(ludensSocket, runtime);
     await runtime.perception!.reload();
     ctx.signal?.throwIfAborted();
-    epoch = (await runtime.start(await readFile(join(process.env.RSA_BENCH_TASK_DIR!, "instruction.md"), "utf8"))).epoch!;
+    epoch = (await runtime.start(await readFile(join(process.env.LUDENS_BENCH_TASK_DIR!, "instruction.md"), "utf8"))).epoch!;
     ctx.signal?.throwIfAborted();
     while (runtime.status().mode !== "manual" || runtime.status().thinking) await Bun.sleep(50);
     recordBenchmark("benchmark_reuse_finished", { ...environment.summary(), reason: runtime.status().reason }, { epoch });
@@ -93,8 +93,8 @@ export async function run(ctx: BenchmarkContext): Promise<Record<string, unknown
     try { await runtime?.close(); }
     finally {
       devices?.close();
-      await closeRsa?.(); await closeBaseware?.();
-      await rm(rsaSocket, { force: true }); await rm(basewareSocket, { force: true });
+      await closeLudens?.(); await closeBaseware?.();
+      await rm(ludensSocket, { force: true }); await rm(basewareSocket, { force: true });
     }
   }
   ctx.signal?.throwIfAborted();

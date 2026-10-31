@@ -13,7 +13,7 @@ import { pinTask, readTask, taskDigest } from "../src/bench/task.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
-async function temporary() { const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-task-contract-"))); roots.push(root); return root; }
+async function temporary() { const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-task-contract-"))); roots.push(root); return root; }
 async function file(path: string, data: string) { await mkdir(join(path, ".."), { recursive: true }); await writeFile(path, data); }
 const identity = { name: "ludens/test", digest: `sha256:${"1".repeat(64)}` };
 async function task(root: string, extra = "") {
@@ -160,13 +160,13 @@ test("file and event evidence remain readable after edits while missing paths an
   expect((await inspectEvidence(root, value.id, { ...prefix, byteLength: 0 })).available).toBe(true);
   expect((await inspectEvidence(root, value.id, { ...prefix, byteLength: 0, seq: 1 })).available).toBe(false);
   const timeline = { asset: "video/aaaaaaaa.mp4", video: { pts: 0, timeBase: [1, 30] as [number, number], width: 4, height: 4 } };
-  await file(join(root, ".rsa/timeline/video/aaaaaaaa.mp4"), "recorded");
-  await file(join(root, ".rsa/timeline/video/aaaaaaaa.mp4.json"), '{"status":"pending"}');
+  await file(join(root, ".ludens/timeline/video/aaaaaaaa.mp4"), "recorded");
+  await file(join(root, ".ludens/timeline/video/aaaaaaaa.mp4.json"), '{"status":"pending"}');
   expect((await inspectEvidence(root, value.id, { kind: "timeline", timeline })).available).toBe(false);
-  await file(join(root, ".rsa/timeline/video/aaaaaaaa.mp4.json"), '{"status":"ready"}');
+  await file(join(root, ".ludens/timeline/video/aaaaaaaa.mp4.json"), '{"status":"ready"}');
   expect((await inspectEvidence(root, value.id, { kind: "timeline", timeline })).available).toBe(true);
   expect((await inspectEvidence(root, value.id, { kind: "timeline", timeline: { ...timeline, video: { ...timeline.video, status: "gap", reason: "lost" } } })).available).toBe(false);
-  await rm(join(root, ".rsa/timeline/video/aaaaaaaa.mp4"));
+  await rm(join(root, ".ludens/timeline/video/aaaaaaaa.mp4"));
   expect((await inspectEvidence(root, value.id, { kind: "timeline", timeline })).available).toBe(false);
 });
 
@@ -263,7 +263,7 @@ test("isolated child timeline references retain their owner without copying orig
   const root = await temporary(), value = await completed(root);
   const workspaceRelative = `logs/${value.id}/work`;
   const timeline = { asset: "video/bbbbbbbb.mp4", video: { pts: 1, timeBase: [1, 30] as [number, number], width: 4, height: 4 } };
-  const original = join(root, workspaceRelative, ".rsa/timeline", timeline.asset);
+  const original = join(root, workspaceRelative, ".ludens/timeline", timeline.asset);
   await file(original, "isolated original");
   await file(original + ".json", '{"status":"ready"}');
   const reference = { kind: "timeline" as const, workspaceRelative, timeline };

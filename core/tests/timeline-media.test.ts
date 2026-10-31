@@ -9,7 +9,7 @@ import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { decodeTimelineFrame } from "@ludens/protocol/timeline-media";
 
 test("model image versions reference one video source and archive errors do not alter model input", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-derived-media-")));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-derived-media-")));
   const events: { type: string; data: any }[] = [];
   const record = (type: string, data: unknown) => { events.push({ type, data }); };
   const registered: any[] = [];
@@ -53,7 +53,7 @@ test("model image versions reference one video source and archive errors do not 
     expect(registered.some(entry => entry.asset === saved.asset)).toBe(true);
     expect(events.some(event => ["timeline_media", "perception_sample"].includes(event.type))).toBe(false);
     await runtime.stop();
-    const root = join(workspace, ".rsa", "timeline");
+    const root = join(workspace, ".ludens", "timeline");
     expect(JSON.parse(await readFile(join(root, saved.asset + ".json"), "utf8")).status).toBe("ready");
     const decoded = await decodeTimelineFrame(root, saved);
     expect(decoded.subarray(0, 8)).toEqual(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
@@ -76,7 +76,7 @@ test("model image versions reference one video source and archive errors do not 
 });
 
 test("offline frame reads distinguish an unfinished segment from lost recording", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-pending-video-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-pending-video-")));
   const reference = { asset: "video/abcd.mp4", video: { pts: 0, timeBase: [1, 1000000] as [number, number], width: 32, height: 32 } };
   try {
     await mkdir(join(root, "video"));

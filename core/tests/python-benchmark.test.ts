@@ -5,13 +5,13 @@ import { join, resolve } from "node:path";
 
 const pythonPath = resolve(import.meta.dir, "../python");
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "rsa-python-trial-"));
+  const root = await mkdtemp(join(tmpdir(), "ludens-python-trial-"));
   const workspace = join(root, "workspace"), runDir = join(workspace, "logs/trial"), artifacts = join(runDir, "artifacts"), task = join(root, "task");
   await mkdir(artifacts, { recursive: true }); await mkdir(task);
   const input = join(runDir, "input.json"); await writeFile(input, "{}");
-  const env = { ...process.env, PYTHONPATH: pythonPath, RSA_WORKSPACE: workspace,
-    RSA_BENCH_TRIAL_ID: "trial", RSA_BENCH_RUN_DIR: runDir, RSA_BENCH_ARTIFACTS: artifacts, RSA_BENCH_TASK_DIR: task, RSA_BENCH_INPUT: input,
-    RSA_SOCKET: "", RSA_RUN_ID: "", BASEWARE_EPOCH: "", BASEWARE_TRACE: "{}" };
+  const env = { ...process.env, PYTHONPATH: pythonPath, LUDENS_WORKSPACE: workspace,
+    LUDENS_BENCH_TRIAL_ID: "trial", LUDENS_BENCH_RUN_DIR: runDir, LUDENS_BENCH_ARTIFACTS: artifacts, LUDENS_BENCH_TASK_DIR: task, LUDENS_BENCH_INPUT: input,
+    LUDENS_SOCKET: "", LUDENS_RUN_ID: "", BASEWARE_EPOCH: "", BASEWARE_TRACE: "{}" };
   const run = async (source: string, extra: Record<string, string> = {}) => {
     const child = Bun.spawn(["python3", "-B", "-c", source], { cwd: workspace, env: { ...env, ...extra }, stdout: "pipe", stderr: "pipe" });
     return { code: await child.exited, stdout: await new Response(child.stdout).text(), stderr: await new Response(child.stderr).text() };
@@ -22,12 +22,12 @@ async function fixture() {
 test("current_trial needs Shiori identity and never creates runs or a fallback decorator", async () => {
   const f = await fixture();
   try {
-    const result = await f.run(`from rsa_tools import current_trial
-import rsa_tools
-assert not hasattr(rsa_tools, 'benchmark')
+    const result = await f.run(`from ludens_tools import current_trial
+import ludens_tools
+assert not hasattr(ludens_tools, 'benchmark')
 try: current_trial()
 except RuntimeError as error: assert 'No Shiori trial' in str(error)
-else: raise AssertionError('unassigned trial accepted')`, { RSA_BENCH_TRIAL_ID: "" });
+else: raise AssertionError('unassigned trial accepted')`, { LUDENS_BENCH_TRIAL_ID: "" });
     expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
     expect(await readdir(f.artifacts)).toEqual([]);
     expect(await readdir(f.runDir)).toEqual(["artifacts", "input.json"]);
@@ -37,7 +37,7 @@ else: raise AssertionError('unassigned trial accepted')`, { RSA_BENCH_TRIAL_ID: 
 test("explicit Python trial preserves loaded objects and observes real capability versions without lifecycle writes", async () => {
   const f = await fixture();
   try {
-    const source = `from rsa_tools import capability
+    const source = `from ludens_tools import capability
 MODEL=object()
 @capability
 def model():
@@ -49,7 +49,7 @@ class Action:
 `;
     await writeFile(join(f.workspace, "model.py"), source);
     expect(await f.run(`from pathlib import Path
-from rsa_tools import current_trial
+from ludens_tools import current_trial
 from model import model, Action, MODEL
 trial=current_trial()
 trial.conditions(seed=7)
@@ -73,7 +73,7 @@ test("artifact values are immutable and escaping paths are rejected", async () =
   const f = await fixture();
   try {
     expect(await f.run(`from pathlib import Path
-from rsa_tools import current_trial
+from ludens_tools import current_trial
 trial=current_trial()
 Path('sample.txt').write_text('before')
 item=trial.artifact('sample.txt')
@@ -94,13 +94,13 @@ for path in ['../escape.json', '/tmp/escape.json', 'context.json']:
 test("failed Python measurement keeps its exception and collected facts without claiming a terminal trial", async () => {
   const f = await fixture();
   try {
-    await writeFile(join(f.workspace, "bad.py"), `from rsa_tools import capability
+    await writeFile(join(f.workspace, "bad.py"), `from ludens_tools import capability
 @capability
 def fail():
     """Fail one measurement."""
     raise ValueError('measured failure')
 `);
-    const result = await f.run(`from rsa_tools import current_trial
+    const result = await f.run(`from ludens_tools import current_trial
 from bad import fail
 current_trial().conditions(checkpoint='before')
 fail()`);
@@ -116,8 +116,8 @@ fail()`);
 test("timeline artifacts retain exact canonical frame identities and reject invented references", async () => {
   const f = await fixture();
   try {
-    const result = await f.run(`from rsa_tools import current_trial
-from rsa_tools._observation_history import ObservationHistory
+    const result = await f.run(`from ludens_tools import current_trial
+from ludens_tools._observation_history import ObservationHistory
 from datetime import datetime, timezone
 from pathlib import Path
 trial=current_trial()
@@ -133,7 +133,7 @@ bad={**media['timeline'], 'recordId':'other'}
 try: trial.artifact(bad)
 except ValueError as error: assert 'identity' in str(error)
 else: raise AssertionError('invented reference accepted')
-source=Path('.rsa/timeline') / media['timeline']['asset']
+source=Path('.ludens/timeline') / media['timeline']['asset']
 source.write_bytes(b'corrupt')
 try: trial.artifact(media)
 except ValueError as error: assert 'checksum' in str(error)
@@ -150,8 +150,8 @@ from io import BytesIO
 from datetime import datetime, timezone
 from pathlib import Path
 from PIL import Image
-from rsa_tools import current_trial
-from rsa_tools._observation_history import ObservationHistory
+from ludens_tools import current_trial
+from ludens_tools._observation_history import ObservationHistory
 output=BytesIO()
 Image.new('RGB', (32,32), 'red').save(output, format='PNG')
 h=ObservationHistory(Path.cwd(), sample_hz=30)

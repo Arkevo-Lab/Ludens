@@ -6,13 +6,13 @@ import { join, resolve } from "node:path";
 import { send } from "../src/daemon/transport.ts";
 import { initializeWorkspaceState, writeCurrentSession, type WorkspaceState } from "../src/core/storage/workspace-state.ts";
 
-const rsaDirectory = resolve(import.meta.dir, "..");
-const entry = join(rsaDirectory, "src/cli/main.ts");
+const ludensDirectory = resolve(import.meta.dir, "..");
+const entry = join(ludensDirectory, "src/cli/main.ts");
 type Ready = { ready: true; runId: string; runDir: string; stateDir: string; workspace: string; socket: string };
 type Host = { child: Bun.Subprocess<"ignore", "pipe", "pipe">; stderr: Promise<string> };
 
 async function fixture() {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-host-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-host-"));
   const globalHome = join(directory, "global");
   const operations: string[] = [];
   const sockets = new Set<Socket>();
@@ -40,14 +40,14 @@ async function fixture() {
   await writeFile(preload, `import { mock } from "bun:test";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-mock.module(${JSON.stringify(join(rsaDirectory, "src/core/agent-omp/session.ts"))}, () => ({
+mock.module(${JSON.stringify(join(ludensDirectory, "src/core/agent-omp/session.ts"))}, () => ({
   createOmpAgent: async ({ workspace, resume, runDir }) => {
     // The interface snapshot is available before the agent starts.
     await readFile(join(workspace, "baseware.json"), "utf8");
     await writeFile(join(runDir, "test-driver.json"), JSON.stringify({ workspace, resume, cwd: process.cwd() }));
-    await appendFile(process.env.RSA_TEST_DRIVER_CALLS, JSON.stringify({ workspace, resume }) + "\\n");
-    if (process.env.RSA_TEST_GATE) {
-      while (!await Bun.file(process.env.RSA_TEST_GATE).exists()) await Bun.sleep(10);
+    await appendFile(process.env.LUDENS_TEST_DRIVER_CALLS, JSON.stringify({ workspace, resume }) + "\\n");
+    if (process.env.LUDENS_TEST_GATE) {
+      while (!await Bun.file(process.env.LUDENS_TEST_GATE).exists()) await Bun.sleep(10);
     }
     return { run: async () => {}, consolidate: async () => {}, abort: async () => {}, close: async () => {} };
   },
@@ -56,17 +56,17 @@ mock.module(${JSON.stringify(join(rsaDirectory, "src/core/agent-omp/session.ts")
   const driverCalls = join(directory, "driver-calls.jsonl");
   function environment(extra: Record<string, string> = {}) {
     const env = { ...process.env };
-    delete env.RSA_SOCKET;
-    delete env.RSA_WORKSPACE;
+    delete env.LUDENS_SOCKET;
+    delete env.LUDENS_WORKSPACE;
     delete env.BASEWARE_SOCKET;
     delete env.BASEWARE_EPOCH;
     delete env.BASEWARE_TRACE;
-    return { ...env, LUDENS_HOME: globalHome, PI_CODING_AGENT_DIR: join(directory, "omp"), RSA_TEST_DRIVER_CALLS: driverCalls, ...extra };
+    return { ...env, LUDENS_HOME: globalHome, PI_CODING_AGENT_DIR: join(directory, "omp"), LUDENS_TEST_DRIVER_CALLS: driverCalls, ...extra };
   }
   function launch(workspace: string, options: string[] = [], extra: Record<string, string> = {}, fromCwd = false): Host {
     const child = Bun.spawn([process.execPath, "--preload", preload, entry, "run", ...(fromCwd ? [] : ["--workspace", workspace]),
       "--baseware-socket", basewareSockets.get(workspace)!, ...options], {
-      cwd: fromCwd ? workspace : rsaDirectory, env: environment(extra), stdin: "ignore", stdout: "pipe", stderr: "pipe",
+      cwd: fromCwd ? workspace : ludensDirectory, env: environment(extra), stdin: "ignore", stdout: "pipe", stderr: "pipe",
     });
     const launched = { child, stderr: new Response(child.stderr).text() };
     children.push(launched);
@@ -78,7 +78,7 @@ mock.module(${JSON.stringify(join(rsaDirectory, "src/core/agent-omp/session.ts")
       states.push(state);
       const socket = join(directory, `baseware-${name}.sock`);
       basewareSockets.set(state.workspace, socket);
-      const child = Bun.spawn([process.execPath, join(rsaDirectory, "../baseware/src/main.ts"), "serve",
+      const child = Bun.spawn([process.execPath, join(ludensDirectory, "../baseware/src/main.ts"), "serve",
         "--driver", "lease-fixture", "--driver-package", `file:${resolve(import.meta.dir, "../../baseware/tests/fixtures/lease-driver.ts")}`, "--port", String((bridge.address() as AddressInfo).port),
         "--socket", socket, "--data-dir", join(state.workspace, "logs/baseware")], {
         cwd: state.workspace, env: environment(), stdin: "ignore", stdout: "pipe", stderr: "pipe",
@@ -90,7 +90,7 @@ mock.module(${JSON.stringify(join(rsaDirectory, "src/core/agent-omp/session.ts")
     },
     async status(workspace: string, fromCwd = false) {
       const cli = Bun.spawn([process.execPath, entry, ...(fromCwd ? [] : ["--workspace", workspace]), "status"], {
-        cwd: fromCwd ? workspace : rsaDirectory, env: environment(), stdout: "pipe", stderr: "pipe",
+        cwd: fromCwd ? workspace : ludensDirectory, env: environment(), stdout: "pipe", stderr: "pipe",
       });
       const [code, output, errors] = await Promise.all([cli.exited, new Response(cli.stdout).text(), new Response(cli.stderr).text()]);
       expect({ code, errors }).toEqual({ code: 0, errors: "" });
@@ -189,7 +189,7 @@ test("a starting host owns the workspace before readiness even when another addr
     const gate = join(testbed.directory, "continue-initialization");
     const firstAlias = join(testbed.directory, "first.sock");
     const secondAlias = join(testbed.directory, "second.sock");
-    const firstHost = testbed.launch(state.workspace, [], { RSA_SOCKET: firstAlias, RSA_TEST_GATE: gate });
+    const firstHost = testbed.launch(state.workspace, [], { LUDENS_SOCKET: firstAlias, LUDENS_TEST_GATE: gate });
     const deadline = Date.now() + 5000;
     while (!await Bun.file(testbed.driverCalls).exists()) {
       if (Date.now() > deadline) throw new Error("Host never entered the mock driver initialization");
@@ -200,7 +200,7 @@ test("a starting host owns the workspace before readiness even when another addr
     const legacyDir = join(state.dir, "sessions");
     await mkdir(legacyDir);
     await writeFile(join(legacyDir, "still-owned.jsonl"), "Do not move a live host's files");
-    const duplicate = testbed.launch(state.workspace, [], { RSA_SOCKET: secondAlias });
+    const duplicate = testbed.launch(state.workspace, [], { LUDENS_SOCKET: secondAlias });
     expect(await duplicate.child.exited).toBe(1);
     expect(await duplicate.stderr).toContain("Host already running");
     expect(testbed.operations).toEqual(["HELLO"]);

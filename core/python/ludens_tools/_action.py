@@ -61,7 +61,7 @@ def main():
                 context = {**current(), "workspace": str(workspace), "run_id": Path(message["runDir"]).name,
                            "epoch": epoch, "generation": message["generation"], "trace": trace,
                            "recording_purpose": "continuous-action",
-                           "diagnostics": message.get("diagnostics", os.environ.get("RSA_LOG_DIAGNOSTICS", "normal"))}
+                           "diagnostics": message.get("diagnostics", os.environ.get("LUDENS_LOG_DIAGNOSTICS", "normal"))}
                 if context["diagnostics"] not in ("normal", "full"):
                     raise ValueError("diagnostics must be normal or full")
                 result = {"pid": os.getpid(), "state": "loading", "diagnostics": context["diagnostics"]}

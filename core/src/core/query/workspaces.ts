@@ -35,7 +35,7 @@ export async function openWorkspace(input: unknown, home = globalHome) {
   let entry;
   try { entry = await registerWorkspace(workspace, home); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("目录不存在或缺少工作区身份；旧版目录请先运行 rsa workspace import <path>。");
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") throw new Error("目录不存在或缺少工作区身份；旧版目录请先运行 ludens workspace import <path>。");
     throw error;
   }
   clearCatalogCache();
@@ -70,9 +70,9 @@ export async function createWorkspace(input: unknown, signal?: AbortSignal, home
   const repository = repoRoot;
   const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
   for (const key of Object.keys(env)) {
-    if (key === "RSA_WORKSPACE" || key === "RSA_SOCKET" || key.startsWith("BASEWARE_")) delete env[key];
+    if (key === "LUDENS_WORKSPACE" || key === "LUDENS_SOCKET" || key.startsWith("BASEWARE_")) delete env[key];
   }
-  const child = spawn(join(repository, "core/bin/rsa"), args, {
+  const child = spawn(join(repository, "core/bin/ludens"), args, {
     cwd: repository, env, detached: true, stdio: ["ignore", "pipe", "pipe"],
   });
   const errors: Buffer[] = [];

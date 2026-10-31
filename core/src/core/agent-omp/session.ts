@@ -6,7 +6,7 @@ import type { AgentRunner } from "../shiori/runtime.ts";
 import { Workspace } from "../storage/workspace.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
 import { openWorkspaceSession, selectWorkspaceSession } from "./workspace-session.ts";
-import { createRsaExtension, type Cycle, type ExtensionHost } from "./extension.ts";
+import { createLudensExtension, type Cycle, type ExtensionHost } from "./extension.ts";
 import type { EventLog } from "../storage/events.ts";
 import { installCompactionHttpTrace, ModelTrace } from "./trace.ts";
 import { SHIORI_SOURCE } from "./shiori.ts";
@@ -52,7 +52,7 @@ export async function createOmpSession(options: Parameters<typeof createAgentSes
 }
 
 export async function createOmpAgent(options: {
-  runtime: ExtensionHost; workspace: string; runDir: string; basewareSocket: string; rsaSocket: string;
+  runtime: ExtensionHost; workspace: string; runDir: string; basewareSocket: string; ludensSocket: string;
   state: WorkspaceState;
   binDir: string; model: string; maxRequests: number;
   resume?: string;
@@ -62,7 +62,7 @@ export async function createOmpAgent(options: {
   let cycle: Cycle | undefined;
   // Native background summaries can finish between control cycles.
   const trace = new ModelTrace(options.log, () => ({ epoch: cycle?.epoch, ...extension.context() }));
-  const extension = createRsaExtension({ ...options, clock: options.log.clock, trace: trace.current, workspace: new Workspace(options.workspace, options.state.versionsDir),
+  const extension = createLudensExtension({ ...options, clock: options.log.clock, trace: trace.current, workspace: new Workspace(options.workspace, options.state.versionsDir),
     cycle: () => {
       if (!cycle) throw new Error("No active control cycle");
       return cycle;
@@ -121,7 +121,7 @@ export async function createOmpAgent(options: {
     // Native background completions can wake an idle OMP session. Handback ends
     // permission to call the model as well as the device, without killing jobs.
     const removeControlGate = session.agent.addBeforeModelCall(() => {
-      if (!cycle || cycle.signal.aborted) return { stop: true, reason: "RSA control cycle is inactive" };
+      if (!cycle || cycle.signal.aborted) return { stop: true, reason: "Ludens control cycle is inactive" };
     });
     const sessionFile = await selectWorkspaceSession(options.state, manager);
     const unsubscribe = trace.attach(session);

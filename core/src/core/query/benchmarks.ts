@@ -52,10 +52,10 @@ const shellQuote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'"
 export function benchmarkCommand(task: TaskWithBindings, workspace: string, bindingPath?: string): string | null {
   const binding = bindingPath ? task.bindings.find(item => item.path === bindingPath) : task.bindings.length === 1 ? task.bindings[0] : undefined;
   if (!binding) return null;
-  return `rsa --workspace ${shellQuote(workspace)} bench run ${shellQuote(task.name)} --digest ${shellQuote(task.digest)} --config ${shellQuote(binding.path)}`;
+  return `ludens --workspace ${shellQuote(workspace)} bench run ${shellQuote(task.name)} --digest ${shellQuote(task.digest)} --config ${shellQuote(binding.path)}`;
 }
 export function benchmarkVerifyCommand(trial: Pick<TrialSummary, "workspace" | "runId">) {
-  return `rsa --workspace ${shellQuote(trial.workspace)} bench verify ${shellQuote(trial.runId)}`;
+  return `ludens --workspace ${shellQuote(trial.workspace)} bench verify ${shellQuote(trial.runId)}`;
 }
 /** URL selections pin a verification, never count a re-score as another execution. */
 export function benchmarkSelection(result: BenchmarkResult, baseline?: BenchmarkResult) {

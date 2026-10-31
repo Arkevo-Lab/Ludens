@@ -12,12 +12,12 @@ export function verify(m: any) {
 }
 
 if (import.meta.main) {
-  if (!process.env.RSA_BENCH_INPUT || !process.env.RSA_BENCH_ARTIFACTS || !process.env.RSA_BENCH_VERIFIER_DIR)
+  if (!process.env.LUDENS_BENCH_INPUT || !process.env.LUDENS_BENCH_ARTIFACTS || !process.env.LUDENS_BENCH_VERIFIER_DIR)
     throw new Error("Shiori verification paths are required");
-  JSON.parse(readFileSync(process.env.RSA_BENCH_INPUT, "utf8"));
-  const result = verify(JSON.parse(readFileSync(join(process.env.RSA_BENCH_ARTIFACTS, "measurements.json"), "utf8")));
+  JSON.parse(readFileSync(process.env.LUDENS_BENCH_INPUT, "utf8"));
+  const result = verify(JSON.parse(readFileSync(join(process.env.LUDENS_BENCH_ARTIFACTS, "measurements.json"), "utf8")));
   const rewards = result.rewards;
   if (!Object.values(rewards).every(value => typeof value === "number" && Number.isFinite(value))) throw new Error("Invalid task reward");
-  writeFileSync(join(process.env.RSA_BENCH_VERIFIER_DIR, "reward.json"), JSON.stringify(rewards) + "\n");
-  writeFileSync(join(process.env.RSA_BENCH_VERIFIER_DIR, "details.json"), JSON.stringify(result.details) + "\n");
+  writeFileSync(join(process.env.LUDENS_BENCH_VERIFIER_DIR, "reward.json"), JSON.stringify(rewards) + "\n");
+  writeFileSync(join(process.env.LUDENS_BENCH_VERIFIER_DIR, "details.json"), JSON.stringify(result.details) + "\n");
 }

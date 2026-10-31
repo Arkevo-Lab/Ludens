@@ -148,7 +148,7 @@ export class ActionRuntime {
     try { source = await readFile(join(this.workspace, "action.py")); }
     catch (error) {
       this.setStatus({ state: (error as NodeJS.ErrnoException).code === "ENOENT" ? "unimplemented" : "error",
-        enabled: true, generation: null, epoch, error: `Implement workspace/action.py:Action, then run rsa action reload. ${String(error)}` });
+        enabled: true, generation: null, epoch, error: `Implement workspace/action.py:Action, then run ludens action reload. ${String(error)}` });
       return this.status();
     }
     const generation = crypto.randomUUID(), codeSHA = createHash("sha256").update(source).digest("hex");
@@ -166,12 +166,12 @@ export class ActionRuntime {
         await this.closeWorker(); return this.status();
       }
       this.admitted = generation;
-      const env: NodeJS.ProcessEnv = { ...process.env, ...this.options.env, RSA_WORKSPACE: this.workspace,
-        RSA_RUN_ID: basename(this.options.runDir), BASEWARE_EPOCH: epoch, BASEWARE_TRACE: JSON.stringify(trace),
-        RSA_LOG_DIAGNOSTICS: this.options.diagnostics ?? "normal" };
+      const env: NodeJS.ProcessEnv = { ...process.env, ...this.options.env, LUDENS_WORKSPACE: this.workspace,
+        LUDENS_RUN_ID: basename(this.options.runDir), BASEWARE_EPOCH: epoch, BASEWARE_TRACE: JSON.stringify(trace),
+        LUDENS_LOG_DIAGNOSTICS: this.options.diagnostics ?? "normal" };
       env.PYTHONPATH = [...pythonModulePaths(), ...(env.PYTHONPATH ? [env.PYTHONPATH] : [])].join(delimiter);
       const worker = new PythonWorker(generation, {
-        executable: pythonExecutable(env), module: "rsa_tools._action", workspace: this.workspace, env,
+        executable: pythonExecutable(env), module: "ludens_tools._action", workspace: this.workspace, env,
         stderrPath: join(directory, "stderr.log"),
         onEvent: event => {
           if (this.worker !== worker) return;

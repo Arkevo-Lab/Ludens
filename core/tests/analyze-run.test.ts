@@ -18,7 +18,7 @@ function fixture() {
 }
 
 async function analyze(events: unknown[] | ((directory: string) => Promise<unknown[]>), epoch?: string) {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-analysis-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-analysis-"));
   try {
     const rows = typeof events === "function" ? await events(directory) : events;
     await writeFile(join(directory, "events.jsonl"), rows.map(event => JSON.stringify(event)).join("\n") + "\n");
@@ -57,7 +57,7 @@ test("analysis resolves indexed skill arguments without copying bodies or losing
   expect(indexed.summary).toMatchObject({ skillReads: 2, skillWrites: 1, skillEdits: 1,
     skillEvidence: { state: "complete", unknownArguments: 0, knownSuccessful: { read: 2, write: 1, edit: 1 } } });
   expect(indexed.skillArgumentErrors).toEqual([]);
-  expect(indexed.tools[2].argsRef.encoding).toBe("rsa-json-v1");
+  expect(indexed.tools[2].argsRef.encoding).toBe("ludens-json-v1");
   expect(indexed.tools[2]).not.toHaveProperty("args");
   expect(JSON.stringify(indexed)).not.toContain("large body");
 }, 30_000);
@@ -773,10 +773,10 @@ test("analysis attributes late compaction lifecycle to its epoch without extendi
     event("compaction_speculation", "two", { stage: "failed", error: "unattributed" }, { epoch: null }),
     event("compaction_speculation", "two", { stage: "failed", error: "candidate-b failed" }, second),
     event("control", "two", { mode: "manual", reason: "time budget" }),
-  ].map(row => ({ ...row, source: { component: row.type === "control" ? "rsa" : "shiori" } }));
+  ].map(row => ({ ...row, source: { component: row.type === "control" ? "ludens" : "shiori" } }));
   const report = await analyze(events, "one");
   expect(report.window.observedElapsedMs).toBe(4000);
-  expect(report.summary.sources).toEqual({ rsa: 2, shiori: 7 });
+  expect(report.summary.sources).toEqual({ ludens: 2, shiori: 7 });
   expect(report.compactionSpeculation.map((item: { seq: number }) => item.seq)).toEqual([2, 10, 12]);
   expect(report.compactionSpeculation.map((item: { trace: unknown }) => item.trace)).toEqual([
     { epoch: "one", ...first }, { epoch: "one", ...first }, { epoch: "one", ...first },
@@ -788,7 +788,7 @@ test("analysis attributes late compaction lifecycle to its epoch without extendi
   expect(JSON.stringify(report)).not.toContain("private-value");
   expect(report.compactionMaintenance[0]).toMatchObject({ epoch: "one", startSeq: 3, endSeq: 11, durationMs: 8000 });
   const next = await analyze(events, "two");
-  expect(next.summary.sources).toEqual({ rsa: 2, shiori: 2 });
+  expect(next.summary.sources).toEqual({ ludens: 2, shiori: 2 });
   expect(next.summary.compactionSpeculation).toEqual({ ...emptySpeculation, started: 1, failed: 1 });
   expect(next.compactionHttpAttempts).toEqual([]);
   expect(next.compactionMaintenance).toEqual([]);

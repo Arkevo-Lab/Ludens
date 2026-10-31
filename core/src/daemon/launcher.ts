@@ -32,17 +32,17 @@ export interface LaunchConfig {
 }
 
 export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchConfig {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("rsa.json must be an object");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("ludens.json must be an object");
   const config = value as Record<string, unknown>;
   const allowed = ["driver", "driverPackage", "game", "port", "cuaCommand", "model", "seconds", "requests", "compactionThreshold", "dashboard", "pet", "logging"];
-  for (const key of Object.keys(config)) if (!allowed.includes(key)) throw new Error(`Unknown rsa.json field: ${key}`);
-  if (typeof config.driver !== "string" || !config.driver.trim()) throw new Error("rsa.json driver must be a non-empty driver id");
+  for (const key of Object.keys(config)) if (!allowed.includes(key)) throw new Error(`Unknown ludens.json field: ${key}`);
+  if (typeof config.driver !== "string" || !config.driver.trim()) throw new Error("ludens.json driver must be a non-empty driver id");
   if (config.driverPackage !== undefined && (typeof config.driverPackage !== "string" || !config.driverPackage.trim())) {
     throw new Error("driverPackage must be a non-empty package spec");
   }
   if (config.game !== undefined && (typeof config.game !== "string" || !config.game.trim())) throw new Error("game must be a non-empty path");
   const bridge = manifest ? manifest.transport !== "stdio" : true;
-  if (manifest && manifest.id !== config.driver) throw new Error(`Driver manifest id ${JSON.stringify(manifest.id)} does not match rsa.json driver ${JSON.stringify(config.driver)}`);
+  if (manifest && manifest.id !== config.driver) throw new Error(`Driver manifest id ${JSON.stringify(manifest.id)} does not match ludens.json driver ${JSON.stringify(config.driver)}`);
   if (!bridge && (config.game !== undefined || config.port !== undefined)) throw new Error(`${config.driver} does not use game or a bridge port`);
   if (manifest && config.game !== undefined && !manifest.launchCommand?.length) throw new Error(`${config.driver} does not support launching a game; omit game and prepare the device separately`);
   if (config.cuaCommand !== undefined && (bridge || typeof config.cuaCommand !== "string" || !config.cuaCommand.trim())) {
@@ -60,7 +60,7 @@ export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchCo
   if (result.compactionThreshold !== undefined && (!Number.isInteger(result.compactionThreshold) || result.compactionThreshold <= 0)) {
     throw new Error("compactionThreshold must be a positive integer");
   }
-  if (bridge && result.port === undefined) throw new Error(`${config.driver} requires a bridge port; set port in rsa.json or defaultPort in its driver manifest`);
+  if (bridge && result.port === undefined) throw new Error(`${config.driver} requires a bridge port; set port in ludens.json or defaultPort in its driver manifest`);
   if (result.port !== undefined && (!Number.isInteger(result.port) || result.port <= 0 || result.port > 65535)) throw new Error("port must be an integer from 1 to 65535");
   if (typeof result.model !== "string" || !result.model.trim()) throw new Error("model must be a non-empty string");
   for (const key of ["dashboard", "pet"] as const) if (typeof result[key] !== "boolean") throw new Error(`${key} must be boolean`);
@@ -77,14 +77,14 @@ export interface LaunchPlan {
   background: string;
   sharedPet: { cwd: string; background: string };
   launcher: string;
-  rsa: string;
+  ludens: string;
   baseware: string;
   basewareSocket: string;
   commands: Partial<Record<ServiceName, string[]>>;
 }
 
 export async function launchPlan(config: LaunchConfig, workspace: string, repo = resolve(import.meta.dir, "../../.."), socket?: string, manifest?: DriverManifest): Promise<LaunchPlan> {
-  const rsa = join(repo, "core/bin/rsa");
+  const ludens = join(repo, "core/bin/ludens");
   const baseware = join(repo, "baseware/bin/baseware");
   const basewareSocket = socket ?? await defaultSocket(workspace);
   const background = join(workspace, "logs/background");
@@ -93,11 +93,11 @@ export async function launchPlan(config: LaunchConfig, workspace: string, repo =
   return {
     workspace, config, manifest, dashboardUrl: "http://127.0.0.1:3015", background, sharedPet,
     dashboardCheck: ["npm", "--prefix", join(repo, "app"), "run", "build:check"],
-    launcher: join(repo, "core/scripts/launch-background.py"), rsa, baseware, basewareSocket,
+    launcher: join(repo, "core/scripts/launch-background.py"), ludens, baseware, basewareSocket,
     commands: {
       ...(config.game && bridge && manifest?.launchCommand ? { emulator: ["env",
         ...Object.entries(manifest.launchEnv ?? {}).map(([key, value]) => `${key}=${value}`),
-        `RSA_BRIDGE_PORT=${config.port}`,
+        `LUDENS_BRIDGE_PORT=${config.port}`,
         ...manifest.launchCommand, resolve(workspace, config.game)] } : {}),
       baseware: [baseware, "serve", "--driver", config.driver,
         ...(config.driverPackage ? ["--driver-package", config.driverPackage.startsWith("file:")
@@ -105,14 +105,14 @@ export async function launchPlan(config: LaunchConfig, workspace: string, repo =
         ...(bridge && config.port !== undefined ? ["--port", String(config.port)] : []),
         ...(config.cuaCommand ? ["--cua-command", config.cuaCommand] : []), "--socket", basewareSocket,
         "--data-dir", join(workspace, "logs/baseware"), "--diagnostics", config.logging.diagnostics],
-      host: [rsa, "run", "--baseware-socket", basewareSocket, "--model", config.model,
+      host: [ludens, "run", "--baseware-socket", basewareSocket, "--model", config.model,
         "--seconds", String(config.seconds), "--requests", String(config.requests),
         ...(config.compactionThreshold !== undefined
           ? ["--compaction-threshold", String(config.compactionThreshold)] : []),
         "--diagnostics", config.logging.diagnostics,
       ],
       ...(config.dashboard ? { dashboard: ["npm", "--prefix", join(repo, "app"), "run", "start"] } : {}),
-      ...(config.pet ? { pet: [join(repo, "app/bin/rsa-companion"), "--workspace", workspace, "--show-window"] } : {}),
+      ...(config.pet ? { pet: [join(repo, "app/bin/ludens-companion"), "--workspace", workspace, "--show-window"] } : {}),
     },
   };
 }
@@ -135,7 +135,7 @@ const systemIO: LaunchIO = {
     const env = { ...process.env };
     // Workspace selection must not inherit a previous agent shell's address or lease.
     for (const key of Object.keys(env)) {
-      if (key.startsWith("BASEWARE_") || ["RSA_SOCKET", "RSA_WORKSPACE"].includes(key)) delete env[key];
+      if (key.startsWith("BASEWARE_") || ["LUDENS_SOCKET", "LUDENS_WORKSPACE"].includes(key)) delete env[key];
     }
     const child = Bun.spawn(argv, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     const timer = setTimeout(() => child.kill(), 10_000);
@@ -173,7 +173,7 @@ export class WorkspaceLauncher {
   }
   async job(name: ServiceName): Promise<Job> {
     const hash = createHash("sha256").update(this.plan.workspace).digest("hex").slice(0, 16);
-    const label = name === "pet" ? "dev.ludens.pet" : `dev.ludens.rsa.${hash}.${name}`;
+    const label = name === "pet" ? "dev.ludens.pet" : `dev.ludens.core.${hash}.${name}`;
     const target = `gui/${process.getuid!()}/${label}`;
     const result = await this.run(["launchctl", "print", target]);
     return { target, registered: result.code === 0,
@@ -182,7 +182,7 @@ export class WorkspaceLauncher {
       lastExitCode: result.stdout.match(/^\s*last exit code = (-?\d+)$/m) ? Number(result.stdout.match(/^\s*last exit code = (-?\d+)$/m)![1]) : null };
   }
   async host(): Promise<HostStatus | null> {
-    const result = await this.run([this.plan.rsa, "status"]);
+    const result = await this.run([this.plan.ludens, "status"]);
     return result.code === 0 ? JSON.parse(result.stdout) : null;
   }
   async baseware(): Promise<BasewareStatus | null> {
@@ -206,7 +206,7 @@ export class WorkspaceLauncher {
       if (result) return result;
       await this.io.sleep();
     } while (this.io.now() < deadline);
-    throw new Error(`Timed out waiting for ${description}. Check ${this.plan.background}; use rsa services to inspect remaining processes.`);
+    throw new Error(`Timed out waiting for ${description}. Check ${this.plan.background}; use ludens services to inspect remaining processes.`);
   }
   private async ensure(name: ServiceName) {
     const job = await this.job(name);
@@ -284,23 +284,23 @@ export class WorkspaceLauncher {
         return false;
       });
     } else this.io.note(`Reusing Baseware ${baseware.serviceId}; running settings are unchanged.`);
-    if (!baseware.connected) throw new Error("Baseware is alive but its device is disconnected. Inspect rsa services before stopping and starting it again.");
+    if (!baseware.connected) throw new Error("Baseware is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
 
     let host = await this.host();
     if (!host) {
       await this.ensure("host");
-      host = await this.waitFor("RSA host", async () => {
+      host = await this.waitFor("Ludens host", async () => {
         const value = await this.host();
         if (value) return value;
         await this.alive("host");
         return false;
       });
     } else this.io.note(`Reusing host ${host.runId}; running settings are unchanged.`);
-    if (!host.connected) throw new Error("Host is alive but its device is disconnected. Inspect rsa services before stopping and starting it again.");
+    if (!host.connected) throw new Error("Host is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
 
     dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
     if (this.plan.config.dashboard && !dashboard) {
-      if (!(await this.job("dashboard")).pid && (await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied but the RSA Dashboard API is not ready; inspect that service before retrying.");
+      if (!(await this.job("dashboard")).pid && (await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied but the Ludens Dashboard API is not ready; inspect that service before retrying.");
       await this.ensure("dashboard");
       dashboard = await this.waitFor("Dashboard API", async () => {
         if (await this.io.dashboardReady(this.plan.dashboardUrl)) return true;
@@ -309,7 +309,7 @@ export class WorkspaceLauncher {
       });
     }
     if (this.plan.config.pet) {
-      if (!dashboard) throw new Error("Pet needs the Dashboard. Enable dashboard in rsa.json or start it separately.");
+      if (!dashboard) throw new Error("Pet needs the Dashboard. Enable dashboard in ludens.json or start it separately.");
       if (await this.io.petReady(this.plan.dashboardUrl)) this.io.note("Reusing Ludens Pet's connected desktop instance.");
       else {
         await this.ensure("pet");
@@ -323,14 +323,14 @@ export class WorkspaceLauncher {
         });
       }
     }
-    this.io.note(host.mode === "auto" ? "Existing takeover is still running." : "Ready in manual mode. Run rsa auto on to start acting.");
+    this.io.note(host.mode === "auto" ? "Existing takeover is still running." : "Ready in manual mode. Run ludens auto on to start acting.");
     return this.status();
   }
   async down(includeDashboard: boolean, keepEmulator = false, includePet = false) {
     const managedHost = await this.job("host");
     if (managedHost.pid) {
       const host = await this.host();
-      if (host?.mode === "auto") await this.checked([this.plan.rsa, "auto", "off"]);
+      if (host?.mode === "auto") await this.checked([this.plan.ludens, "auto", "off"]);
       if (host) await this.waitFor("model cleanup", async () => {
         const status = await this.host();
         return !status || (!status.thinking && !status.consolidating);

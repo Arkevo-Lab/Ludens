@@ -7,25 +7,25 @@ import { listen as listenBaseware } from "@ludens/baseware/server";
 import { connectBaseware } from "../../core/subsystems/baseware.ts";
 import { WorkspaceController } from "../../core/subsystems/controller.ts";
 import { Runtime } from "../../core/shiori/runtime.ts";
-import { listen as listenRsa, send } from "../../daemon/transport.ts";
+import { listen as listenLudens, send } from "../../daemon/transport.ts";
 import type { BenchmarkContext } from "../types.ts";
 import { readEvents, seqs, eventIds, until } from "../fixtures/evidence.ts";
 
 /** Real sockets, arbitration and Python cancellation; only the physical driver is simulated. */
 export async function run(ctx: BenchmarkContext): Promise<Record<string, unknown>> {
   ctx.signal?.throwIfAborted();
-  const prefix = `/tmp/rsa-bench-${crypto.randomUUID()}`;
-  const basewareSocket = `${prefix}-b.sock`, rsaSocket = `${prefix}-r.sock`;
+  const prefix = `/tmp/ludens-bench-${crypto.randomUUID()}`;
+  const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
   const record = ctx.log.recorder({ component: "benchmark" });
   const root = resolve(import.meta.dir, "../../..");
-  const env = { ...process.env, RSA_SOCKET: rsaSocket, BASEWARE_SOCKET: basewareSocket,
-    RSA_WORKSPACE: ctx.workspace, RSA_RUN_ID: ctx.log.clock.id, RSA_LOG_DIAGNOSTICS: ctx.log.diagnostics,
+  const env = { ...process.env, LUDENS_SOCKET: ludensSocket, BASEWARE_SOCKET: basewareSocket,
+    LUDENS_WORKSPACE: ctx.workspace, LUDENS_RUN_ID: ctx.log.clock.id, LUDENS_LOG_DIAGNOSTICS: ctx.log.diagnostics,
     PATH: [dirname(process.execPath), join(root, "bin"), process.env.PATH].join(":"),
     PYTHONPATH: join(root, "python") };
   await mkdir(ctx.workspace, { recursive: true });
   await writeFile(join(ctx.workspace, "handoff.py"), `from pathlib import Path
 import os
-from rsa_tools import Client, capability
+from ludens_tools import Client, capability
 @capability
 def hold():
     """Hold a simulated input until the human takes control."""
@@ -68,7 +68,7 @@ def hold():
   runtime.attach({ controller: new WorkspaceController({ workspace: ctx.workspace, devices, env, record: ctx.log.record }) });
   devices.onHandback(reason => { void runtime.stop(reason); });
   devices.onDisconnect(error => { void runtime.disconnected(error); });
-  const closeRsa = await listenRsa(rsaSocket, runtime);
+  const closeLudens = await listenLudens(ludensSocket, runtime);
   const measurements: Array<{ scenario: string; epoch: string; manual: boolean; neutral: boolean;
     cancelled: boolean; pythonGone: boolean; handbackMs: number; neutralMs: number; settleMs: number }> = [];
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
@@ -81,7 +81,7 @@ def hold():
       const epoch = (await runtime.start()).epoch!;
       const beforeActions = actions;
       record("benchmark_scenario", { scenario, phase: "started", requestedDurationMs: 30_000 }, { epoch });
-      const pending = send(rsaSocket, { kind: "controller", argv: [], action: "call",
+      const pending = send(ludensSocket, { kind: "controller", argv: [], action: "call",
         id: scenario === "driver" ? "controller/pad.hold" : "python/handoff.py:hold",
         arguments: scenario === "driver" ? {durationMs: 30000} : {}, epoch })
         .then(value => ({ value: value as { status?: string }, error: "", at: performance.now() }),
@@ -114,14 +114,14 @@ def hold():
     await runtime.start();
     const before = actions;
     try {
-      await send(rsaSocket, { kind: "controller", argv: [], action: "call", id: "controller/pad.hold",
+      await send(ludensSocket, { kind: "controller", argv: [], action: "call", id: "controller/pad.hold",
         arguments: {durationMs: 1}, epoch: priorEpoch });
     } catch (error) { staleRejected = String(error).includes("STALE_EPOCH"); }
     staleExecuted = actions !== before;
     record("benchmark_stale_epoch", { rejected: staleRejected, driverExecuted: staleExecuted }, { epoch: priorEpoch });
   } finally {
     ctx.signal?.removeEventListener("abort", abort);
-    await runtime.close(); devices.close(); await closeRsa(); await closeBaseware();
+    await runtime.close(); devices.close(); await closeLudens(); await closeBaseware();
   }
   ctx.signal?.throwIfAborted();
   await ctx.log.flush();

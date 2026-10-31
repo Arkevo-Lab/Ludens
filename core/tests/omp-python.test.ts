@@ -5,13 +5,13 @@ import { tmpdir } from "node:os";
 import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
 import { consolidateOmpSession, createOmpSession } from "../src/core/agent-omp/session.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("workspace Python capabilities do not grow OMP's tool list across writes, removal or consolidation", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-omp-python-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-omp-python-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), {recursive: true});
   const events: {type: string; data: any}[] = [];
@@ -19,9 +19,9 @@ test("workspace Python capabilities do not grow OMP's tool list across writes, r
   const control = new AbortController();
   let cycle: Cycle = {epoch: "python-epoch", signal: control.signal};
   let session: AgentSession | undefined;
-  const rsaSocket = "/tmp/unused-rsa.sock";
-  const extension = createRsaExtension({runtime, workspace: new Workspace(workspace, join(directory, "versions")),
-    basewareSocket: "/tmp/unused-baseware.sock", rsaSocket, binDir: join(import.meta.dir, "../bin"),
+  const ludensSocket = "/tmp/unused-ludens.sock";
+  const extension = createLudensExtension({runtime, workspace: new Workspace(workspace, join(directory, "versions")),
+    basewareSocket: "/tmp/unused-baseware.sock", ludensSocket, binDir: join(import.meta.dir, "../bin"),
     maxRequests: 20, cycle: () => cycle,
   });
   const settings = Settings.isolated({"memory.backend": "off", "autolearn.enabled": false, "retry.enabled": false,
@@ -31,7 +31,7 @@ test("workspace Python capabilities do not grow OMP's tool list across writes, r
   const modelRegistry = new ModelRegistry(authStorage, undefined, {settings});
   const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
   const baseTools = ["read", "write", "edit", "observe", "bash"];
-  const source = `from rsa_tools import capability
+  const source = `from ludens_tools import capability
 @capability
 def calculate(value: int = 4):
     """Return the value plus one."""
@@ -41,12 +41,12 @@ def calculate(value: int = 4):
   let request = 0;
   try {
     ({session} = await createOmpSession({cwd: workspace, agentDir: join(directory, "omp"), model, authStorage, modelRegistry, settings,
-      sessionManager: SessionManager.create(workspace, join(directory, "session")), systemPrompt: "Use rsa controller to discover capabilities.", cacheWarming: false,
+      sessionManager: SessionManager.create(workspace, join(directory, "session")), systemPrompt: "Use ludens controller to discover capabilities.", cacheWarming: false,
       skills: [], rules: [], contextFiles: [], promptTemplates: [], slashCommands: [],
       enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
       disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
       toolNames: baseTools, customTools: extension.tools,
-      preloadedPreparedExtensions: [{path: "rsa-python-test", resolvedPath: "rsa-python-test", factory: extension.factory, error: null}],
+      preloadedPreparedExtensions: [{path: "ludens-python-test", resolvedPath: "ludens-python-test", factory: extension.factory, error: null}],
     }));
     // Exercise OMP's actual tool loop and extension hooks with an offline transport.
     session.agent.streamFn = async (_model, context) => {
@@ -56,7 +56,7 @@ def calculate(value: int = 4):
       let content: AssistantMessage["content"] = [{type: "text", text: "Finished."}];
       if (index === 1) content = call("write", {path: "actions.py", content: source});
       if (index === 2) content = call("write", {path: "actions.py", content: source.replace("plus one", "plus two").replace("value + 1", "value + 2")});
-      if (index === 3) content = call("bash", {command: "rm actions.py && printf '%s|%s' \"$RSA_SOCKET\" \"$BASEWARE_EPOCH\""});
+      if (index === 3) content = call("bash", {command: "rm actions.py && printf '%s|%s' \"$LUDENS_SOCKET\" \"$BASEWARE_EPOCH\""});
       const message: AssistantMessage = {role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(), content,
         stopReason: index <= 3 ? "toolUse" : "stop",
         usage: {input: 100, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 110, cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0}}};
@@ -72,7 +72,7 @@ def calculate(value: int = 4):
     }
     const shellResult = session.sessionManager.getEntries().find(entry => entry.type === "message"
       && entry.message.role === "toolResult" && entry.message.toolName === "bash");
-    expect(JSON.stringify(shellResult)).toContain(`${rsaSocket}|python-epoch`);
+    expect(JSON.stringify(shellResult)).toContain(`${ludensSocket}|python-epoch`);
     expect(events.some(event => event.type === "python_capability" || event.type === "python_capability_result")).toBe(false);
     expect(session.sessionManager.getEntries().filter(entry => entry.type === "message" && entry.message.role === "toolResult")).toHaveLength(3);
 

@@ -7,10 +7,10 @@ import { readArtifact } from "@ludens/protocol/log-archive";
 import { once } from "node:events";
 import { readRunEvents } from "@ludens/protocol/event-sources";
 
-export const LOG_HELP = `rsa logs events --run <run-directory> [--diagnostics]
+export const LOG_HELP = `ludens logs events --run <run-directory> [--diagnostics]
 Stream saved events as NDJSON, resolving registered device sources without copying them.
 --diagnostics explicitly reads the separate diagnostic channel.
-rsa logs read --run <run-directory> (--ref '<JSON reference>' | --file <reference.json> | --event <seq> --field <name>) [--full]
+ludens logs read --run <run-directory> (--ref '<JSON reference>' | --file <reference.json> | --event <seq> --field <name>) [--full]
 Read a stored model/tool artifact offline; no host or model is started.
 Default: expand text/structure and keep media references. --full restores recorded media
 as base64; missing, unrecorded or expired media fails explicitly. HTTP wire hashes describe
@@ -27,7 +27,7 @@ export async function logCommand(argv: string[]) {
     }
     return;
   }
-  if (argv[0] !== "read") throw new Error("Expected rsa logs read; see rsa logs --help");
+  if (argv[0] !== "read") throw new Error("Expected ludens logs read; see ludens logs --help");
   const { values } = parseArgs({ args: argv.slice(1), options: {
     run: { type: "string" }, ref: { type: "string" }, file: { type: "string" },
     event: { type: "string" }, field: { type: "string" }, full: { type: "boolean" },
