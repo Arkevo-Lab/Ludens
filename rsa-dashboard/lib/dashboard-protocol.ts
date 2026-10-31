@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/dashboard-protocol";
+export * from "@ludens/core/core/query/dashboard-protocol";

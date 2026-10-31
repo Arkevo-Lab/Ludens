@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/drivers";
+export * from "@ludens/core/core/query/drivers";

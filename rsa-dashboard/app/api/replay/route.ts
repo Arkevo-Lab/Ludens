@@ -1,6 +1,6 @@
-import { dashboardWorker } from "@ludens/rsa/core/query/dashboard-worker";
+import { dashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 import { localRequest, errorResponse } from "@/lib/local-request";
-import type { ReplayQuery } from "@ludens/rsa/core/query/replay";
+import type { ReplayQuery } from "@ludens/core/core/query/replay";
 import { fileResponse } from "@/lib/file-response";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

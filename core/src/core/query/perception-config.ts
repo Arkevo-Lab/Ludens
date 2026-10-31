@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { globalHome, hostRequest, workspaceForProject } from "./data";
-import { resolveWorkspaceAddress } from "@ludens/rsa/core/storage/workspace-state";
+import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { withWorkspaceRegistrationLock } from "@ludens/protocol/ludens";
 
 /** Workspace overrides only; absent values inherit the perception process environment. */

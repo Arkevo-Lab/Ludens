@@ -239,7 +239,7 @@ test("launch config keeps limits explicit and paths as literal argv entries", as
   expect(value.commands.baseware).toEqual(["/tmp/Source with spaces/baseware/bin/baseware", "serve",
     "--driver", "bridge-fixture", "--port", "47991", "--socket", "/tmp/baseware-test.sock",
     "--data-dir", "/tmp/Workspace with spaces/logs/baseware", "--diagnostics", "normal"]);
-  expect(value.commands.host).toContain("/tmp/Source with spaces/rsa/bin/rsa");
+  expect(value.commands.host).toContain("/tmp/Source with spaces/core/bin/rsa");
   expect(value.commands.host).toContain("--baseware-socket");
   expect(value.commands.host).not.toContain("--driver");
   expect(value.commands.host).not.toContain("--port");

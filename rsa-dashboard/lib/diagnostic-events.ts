@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/diagnostic-events";
+export * from "@ludens/core/core/query/diagnostic-events";

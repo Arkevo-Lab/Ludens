@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/perception-config";
+export * from "@ludens/core/core/query/perception-config";

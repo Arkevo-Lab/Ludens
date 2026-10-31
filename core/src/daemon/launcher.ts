@@ -84,7 +84,7 @@ export interface LaunchPlan {
 }
 
 export async function launchPlan(config: LaunchConfig, workspace: string, repo = resolve(import.meta.dir, "../../.."), socket?: string, manifest?: DriverManifest): Promise<LaunchPlan> {
-  const rsa = join(repo, "rsa/bin/rsa");
+  const rsa = join(repo, "core/bin/rsa");
   const baseware = join(repo, "baseware/bin/baseware");
   const basewareSocket = socket ?? await defaultSocket(workspace);
   const background = join(workspace, "logs/background");
@@ -93,7 +93,7 @@ export async function launchPlan(config: LaunchConfig, workspace: string, repo =
   return {
     workspace, config, manifest, dashboardUrl: "http://127.0.0.1:3015", background, sharedPet,
     dashboardCheck: ["npm", "--prefix", join(repo, "rsa-dashboard"), "run", "build:check"],
-    launcher: join(repo, "rsa/scripts/launch-background.py"), rsa, baseware, basewareSocket,
+    launcher: join(repo, "core/scripts/launch-background.py"), rsa, baseware, basewareSocket,
     commands: {
       ...(config.game && bridge && manifest?.launchCommand ? { emulator: ["env",
         ...Object.entries(manifest.launchEnv ?? {}).map(([key, value]) => `${key}=${value}`),

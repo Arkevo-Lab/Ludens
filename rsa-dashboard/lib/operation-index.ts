@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/operation-index";
+export * from "@ludens/core/core/query/operation-index";

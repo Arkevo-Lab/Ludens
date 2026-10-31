@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/timeline-record";
+export * from "@ludens/core/core/query/timeline-record";

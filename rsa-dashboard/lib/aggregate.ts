@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/aggregate";
+export * from "@ludens/core/core/query/aggregate";

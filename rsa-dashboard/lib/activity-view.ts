@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/activity-view";
+export * from "@ludens/core/core/query/activity-view";

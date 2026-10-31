@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/cold-build-protocol";
+export * from "@ludens/core/core/query/cold-build-protocol";

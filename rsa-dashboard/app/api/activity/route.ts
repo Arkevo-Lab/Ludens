@@ -1,6 +1,6 @@
-import { dashboardWorker } from "@ludens/rsa/core/query/dashboard-worker";
+import { dashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 import { localRequest, errorResponse } from "@/lib/local-request";
-import type { ActivityQuery } from "@ludens/rsa/core/query/activity";
+import type { ActivityQuery } from "@ludens/core/core/query/activity";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

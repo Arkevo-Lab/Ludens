@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/pet-state";
+export * from "@ludens/core/core/query/pet-state";

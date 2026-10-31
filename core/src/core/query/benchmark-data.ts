@@ -1,7 +1,7 @@
 import { open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { discoverTasks } from "@ludens/rsa/bench/catalog";
-import { get, history, inspectEvidence, verifications } from "@ludens/rsa/core/storage/store";
+import { discoverTasks } from "@ludens/core/bench/catalog";
+import { get, history, inspectEvidence, verifications } from "@ludens/core/core/storage/store";
 import { readWorkspaceIdentity } from "@ludens/protocol/ludens";
 import { globalHome, catalog, resolveRun } from "./data";
 import type { Event, Manifest } from "./types";

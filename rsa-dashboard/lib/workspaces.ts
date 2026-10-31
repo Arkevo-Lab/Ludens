@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/workspaces";
+export * from "@ludens/core/core/query/workspaces";

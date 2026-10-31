@@ -14,7 +14,7 @@ export const repoRoot = (() => {
     process.cwd(),
   ];
   // The marker pair rejects a package store's @ludens scope directory, which also
-  // contains a bare `rsa/package.json` but never the dashboard workspace.
-  return candidates.find(root => existsSync(join(root, "rsa", "package.json"))
+  // contains a bare `core/package.json` but never the dashboard workspace.
+  return candidates.find(root => existsSync(join(root, "core", "package.json"))
     && existsSync(join(root, "rsa-dashboard", "package.json"))) ?? candidates[0];
 })();

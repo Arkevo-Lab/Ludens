@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/replay-types";
+export * from "@ludens/core/core/query/replay-types";

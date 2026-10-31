@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/prepare-run";
+export * from "@ludens/core/core/query/prepare-run";

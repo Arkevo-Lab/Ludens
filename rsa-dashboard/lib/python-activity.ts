@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/python-activity";
+export * from "@ludens/core/core/query/python-activity";

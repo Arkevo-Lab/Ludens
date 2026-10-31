@@ -1,6 +1,6 @@
-import { dashboardWorker } from "@ludens/rsa/core/query/dashboard-worker";
+import { dashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 import { localRequest, errorResponse } from "@/lib/local-request";
-import { parsePerceptionPatch } from "@ludens/rsa/core/query/perception-config";
+import { parsePerceptionPatch } from "@ludens/core/core/query/perception-config";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/run-identity";
+export * from "@ludens/core/core/query/run-identity";

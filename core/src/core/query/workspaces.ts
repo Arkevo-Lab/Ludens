@@ -72,7 +72,7 @@ export async function createWorkspace(input: unknown, signal?: AbortSignal, home
   for (const key of Object.keys(env)) {
     if (key === "RSA_WORKSPACE" || key === "RSA_SOCKET" || key.startsWith("BASEWARE_")) delete env[key];
   }
-  const child = spawn(join(repository, "rsa/bin/rsa"), args, {
+  const child = spawn(join(repository, "core/bin/rsa"), args, {
     cwd: repository, env, detached: true, stdio: ["ignore", "pipe", "pipe"],
   });
   const errors: Buffer[] = [];

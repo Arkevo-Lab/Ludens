@@ -1,1 +1,1 @@
-export * from "@ludens/rsa/core/query/initial-selection";
+export * from "@ludens/core/core/query/initial-selection";

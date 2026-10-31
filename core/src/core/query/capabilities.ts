@@ -2,9 +2,9 @@ import { readFile, realpath } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { globalHome, hostRequest, workspaceForProject } from "./data";
-import { resolveWorkspaceAddress } from "@ludens/rsa/core/storage/workspace-state";
-import { discoverTasks } from "@ludens/rsa/bench/catalog";
-import { isObject } from "@ludens/rsa/core/storage/contract";
+import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
+import { discoverTasks } from "@ludens/core/bench/catalog";
+import { isObject } from "@ludens/core/core/storage/contract";
 import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
 
 export interface CapabilityEntry {
