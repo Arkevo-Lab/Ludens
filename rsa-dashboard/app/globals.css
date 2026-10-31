@@ -1,8 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "../components/capabilities-tasks.css";
-@import "../components/capabilities-declarations.css";
-@import "../components/context-picker.css";
+@import "../features/capabilities/capabilities-tasks.css";
+@import "../features/capabilities/capabilities-declarations.css";
+@import "../features/workspaces/context-picker.css";
 
 @custom-variant dark (&:is(.dark *));
 

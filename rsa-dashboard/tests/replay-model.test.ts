@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { adjacentReplayFrame, clampReplayTime, mergeReplayPages, replayFramesAt, replayItemActive,
-  replayWindowBounds, retainReplayWindows } from "../components/replay-model";
+  replayWindowBounds, retainReplayWindows } from "../features/replay/replay-model";
 import type { ReplayFrame, ReplayItem, ReplayWindow } from "../lib/replay-types";
 
 const frame = (id: string, at: number, capability = "vision", sequence = at): ReplayFrame =>

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createPerceptionSession, normalizePerceptionDraft, perceptionPatch, perceptionReloadCommand, type SavedPerception } from "../components/perception-draft";
+import { createPerceptionSession, normalizePerceptionDraft, perceptionPatch, perceptionReloadCommand, type SavedPerception } from "../features/capabilities/perception-draft";
 
 function storage() {
   const data = new Map<string, string>();

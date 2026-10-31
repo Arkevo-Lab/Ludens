@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { ImageBuffer, type BufferedImage } from "../components/image-buffer";
+import { ImageBuffer, type BufferedImage } from "../features/replay/image-buffer";
 
 function controlled() {
   const jobs = new Map<string, { signal: AbortSignal; resolve(value: BufferedImage): void; reject(error: Error): void }>();

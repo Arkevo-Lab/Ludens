@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { replayVideoReady, selectVideoSource, videoResourceKey, videoPosition, videoNeedsSeek, videoSyncState, type VideoSource } from "../components/replay-video-model";
+import { replayVideoReady, selectVideoSource, videoResourceKey, videoPosition, videoNeedsSeek, videoSyncState, type VideoSource } from "../features/replay/replay-video-model";
 
 test("pending playback retains a readable snapshot, then switches at its boundary or after a failed load", () => {
   const first: VideoSource = { assetId: "segment", url: "/video?bytes=100", originAt: 1000,

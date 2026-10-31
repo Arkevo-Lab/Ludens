@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { observationMediaStatus, readObservationText } from "../components/observation-media";
+import { observationMediaStatus, readObservationText } from "../features/live/observation-media";
 
 // These functions back the real media components. No device/model operation is involved.
 test("a failed text read releases the response; an explicit retry reads the identical URL", async () => {

@@ -4,7 +4,7 @@ import type { BenchmarkCatalog } from "../lib/benchmarks";
 import { benchmarkWorkspaceState, benchmarkHistoryState, benchmarkReferenceState, benchmarkDetailUrl,
   benchmarkGuidanceLinks, benchmarkListCommand, benchmarkTaskHelpCommand,
   clearBenchmarkResult, clearBenchmarkBaseline, clearBenchmarkFilter,
-  benchmarkTaskChoices, benchmarkTaskSelection, benchmarkTaskFilter } from "../components/benchmark-onboarding";
+  benchmarkTaskChoices, benchmarkTaskSelection, benchmarkTaskFilter } from "../features/benchmark/benchmark-onboarding";
 
 const catalog = (patch: Partial<BenchmarkCatalog> = {}): BenchmarkCatalog => ({
   project: "alpha", projects: [{ id: "alpha", workspace: "/work/alpha" }], tasks: [], history: { trials: [], issues: [] }, issues: [], ...patch,

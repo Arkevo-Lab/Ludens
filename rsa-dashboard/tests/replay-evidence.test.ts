@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { replayEvidenceUrl } from "../components/replay-evidence-model";
+import { replayEvidenceUrl } from "../features/replay/replay-evidence-model";
 
 test("direct evidence URLs preserve scope and distinguish record and event identities", () => {
   const frame = new URL(replayEvidenceUrl("project=a%26b&run=run&epoch=old&id=event%3A2", { kind: "frame", record: "capture&1", sequence: 0 }), "http://localhost");
