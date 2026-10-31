@@ -31,7 +31,10 @@ function renderLogContent(target, input, copy) {
   path.setAttribute('d', paths[kind]);
   icon.append(path);
   let title = block?.title ?? input.title;
-  if (id === 'connected:manual') title = title === '本轮已结束，控制权已交还' ? copy.returned : copy.waiting;
+  if (id === 'connected:manual') {
+    if (title === '本轮已结束，控制权已交还') title = copy.returned;
+    else if (title === '已连接，等待 AI 接管') title = copy.waiting;
+  }
   const header = el('div', 'log-header');
   const heading = el('span', 'log-title', title);
   heading.title = title;

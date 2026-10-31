@@ -213,7 +213,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, 
   const activity = installCompanionActivity(owner, pet, access)
   const play = () => {
     if (!enabled) toggle()
-    if (ready) { pet.showInactive(); pet.webContents.send('ludens:companion:game', 'start') }
+    if (ready) { pet.show(); pet.focus(); pet.webContents.send('ludens:companion:game', 'start') }
   }
   const trayMenuItems = (): Electron.MenuItemConstructorOptions[] => {
     const text = companionI18n[locale].menu

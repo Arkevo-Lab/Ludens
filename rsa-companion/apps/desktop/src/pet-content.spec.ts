@@ -145,6 +145,15 @@ describe('pet log content', () => {
     expect(target.querySelector('.log-event')?.textContent).toBe('Control returned to you')
   })
 
+  it.each(['en', 'zh'] as const)('preserves redacted manual connection status in %s', locale => {
+    const brief = briefNotification(notification('system', {
+      id: 'connected:manual', title: '本轮已结束，控制权已交还',
+    }))
+    render(target, brief, locale)
+    expect(target.querySelector('.log-title')?.textContent).toBe(brief.title)
+    expect(target.querySelector('.log-body')?.textContent).toBe('')
+  })
+
   it('renders brief notifications without any private source fields', () => {
     const full = notification('tool', { title: 'PRIVATE tool name', text: 'PRIVATE source',
       tool: { intent: 'PRIVATE intent', args: { command: 'PRIVATE command' }, result: 'PRIVATE result' },
