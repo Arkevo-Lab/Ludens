@@ -10,17 +10,17 @@ const repository = (() => {
     resolve(process.cwd(), ".."),
     process.cwd(),
   ];
-  return candidates.find(root => existsSync(join(root, "rsa", "package.json"))
+  return candidates.find(root => existsSync(join(root, "core", "package.json"))
     && existsSync(join(root, "protocol", "package.json"))) ?? candidates[0];
 })();
-const projectPython = resolve(repository, "rsa/python/.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
+const projectPython = resolve(repository, "core/python/.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 
 export function pythonExecutable(environment: NodeJS.ProcessEnv = process.env): string {
   return environment.RSA_PYTHON || (existsSync(projectPython) ? projectPython : "python3");
 }
 
 export function pythonModulePaths(): string[] {
-  return [resolve(repository, "rsa/python"), resolve(repository, "baseware/python")];
+  return [resolve(repository, "core/python"), resolve(repository, "baseware/python")];
 }
 
 export function pythonEnvironment(overrides: Partial<NodeJS.ProcessEnv> = {}): NodeJS.ProcessEnv {

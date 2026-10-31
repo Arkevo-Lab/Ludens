@@ -43,14 +43,14 @@ To ensure reliable recovery, we decoupled the connection-recovery state machine 
 
 Network edge cases that take five or six hours to trigger cannot be debugged by running an eight-hour live session after every code change.
 
-During implementation we built an offline transport-layer test suite ([rsa/tests/omp-websocket.test.ts](../../../rsa/tests/omp-websocket.test.ts)) and a companion benchmark ([ws-recovery.ts](../../../rsa/src/bench/cases/ws-recovery.ts)): in-process fixtures stub the WebSocket and HTTP layers beneath `streamOpenAICodexResponses`, and a virtual clock advances the 60 s cooldown without live model calls:
+During implementation we built an offline transport-layer test suite ([core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)) and a companion benchmark ([ws-recovery.ts](../../../core/src/bench/cases/ws-recovery.ts)): in-process fixtures stub the WebSocket and HTTP layers beneath `streamOpenAICodexResponses`, and a virtual clock advances the 60 s cooldown without live model calls:
 
 ```sh
 (cd rsa && bun run omp:test:transport)
 (cd rsa && bun run typecheck)
 
 # Generate benchmark records viewable with event and scoring evidence in the Dashboard:
-rsa/bin/rsa --workspace /absolute/path/to/workspace bench run ludens/ws-recovery
+core/bin/rsa --workspace /absolute/path/to/workspace bench run ludens/ws-recovery
 ```
 
 The suite covers **13 scenario classes** (including the R3 `Agent.prompt` end-to-end single-execution tool-callback regression):

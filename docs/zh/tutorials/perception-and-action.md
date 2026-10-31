@@ -2,13 +2,13 @@
 
 在实时交互环境中，高频采样与高频动作由工作区内的两个独立常驻 Python 进程承担：`perception.py:Perception` 负责持续采集环境状态并写入 `.rsa/timeline/`，`action.py:Action` 负责在 `auto` 周期内持续读取时空轴并下发控制输入。能力装饰器与时空轴信封约定见 [工作区与能力编程](workspace.md)。
 
-下文中的 CLI 命令均在**目标工作区目录**下执行，假定仓库 `rsa/bin` 与 `baseware/bin` 已加入 `PATH`。跨目录操作时，在子命令前传入 `rsa --workspace /absolute/path/to/workspace`。
+下文中的 CLI 命令均在**目标工作区目录**下执行，假定仓库 `core/bin` 与 `baseware/bin` 已加入 `PATH`。跨目录操作时，在子命令前传入 `rsa --workspace /absolute/path/to/workspace`。
 
 ## 常驻感知与历史读取
 
 ### 1. `perception.py:Perception` 生命周期
 
-`perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [rsa/templates/perception.py](../../../rsa/templates/perception.py)）：
+`perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [core/templates/perception.py](../../../core/templates/perception.py)）：
 
 - `start(self, context)`：进程启动或 `reload` 时执行一次，可在此加载深度学习权重、初始化状态或后台采样线程。`context` 包含 `workspace`、`runDir` 与 `generation`。
 - `sample(self)`：需标注 `@record` 与 `@capability`，由调度器按类属性 `sample_hz`（默认 `30.0` Hz，同时作为录像编码的名义帧率）连续调用。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
@@ -79,7 +79,7 @@ CLI `rsa observe`、Python `Client().observe(query)` 与 OMP 原生 `observe` �
 
 ## 常驻动作
 
-`action.py` 中的 `Action` 类在 `auto` 控制周期内运行于独立的常驻 Python 进程（模板见 [rsa/templates/action.py](../../../rsa/templates/action.py)）：
+`action.py` 中的 `Action` 类在 `auto` 控制周期内运行于独立的常驻 Python 进程（模板见 [core/templates/action.py](../../../core/templates/action.py)）：
 
 - **方法契约**：`start(self, context)` 在接管或重载时初始化一次（`context` 含 `workspace`、`runDir`、`generation`、`epoch`）；`step(self)` 标注 `@capability`（如需将决策留档至时空轴可加 `@record`），按类属性 `step_hz`（默认 `30.0` Hz）循环执行；`close(self)` 释放资源。
 - **读取感知与执行动作**：在 `Action` 中通过 `self.device = Client()` 调用 `self.device.observe()` 读取最新或历史感知记录，并调用 `self.device.call("controller/...", {...})` 下发设备指令。异步 `pad.play` 提交后无需在单步内同步阻塞等待，后续 `step()` 可边观测边决策。

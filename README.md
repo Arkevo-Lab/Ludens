@@ -33,10 +33,10 @@ Requires **macOS** (for `launchd` service management), **Bun 1.4**, **Python 3.1
 
 ```sh
 bun install --frozen-lockfile
-uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm run build)
+uv sync --project core/python --frozen
+(cd app && npm run build)
 
-export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
+export PATH="$PWD/baseware/bin:$PWD/core/bin:$PATH"
 ```
 
 ### 2. Initialize and launch a workspace
@@ -60,7 +60,7 @@ rsa auto off  # Return device control; keep services running
 rsa down      # Stop workspace-managed services
 ```
 
-For workspace management, multi-driver options, and the optional **Ludens Pet** desktop companion (`rsa-companion`), see the [Quickstart guide](docs/en/tutorials/quickstart.md).
+For workspace management, multi-driver options, and the optional **Ludens Pet** desktop companion (`app`), see the [Quickstart guide](docs/en/tutorials/quickstart.md).
 
 ## Architecture
 
@@ -70,9 +70,8 @@ Ludens separates device access, the agent harness, and the workspace code evolve
 | --- | --- |
 | [Baseware](baseware/README.md) | Device drivers, screen/audio observation, control leases, and CLI / API / MCP access. |
 | [Protocol](protocol/README.md) | Zero-dependency contract layer (`@ludens/protocol`): RPC schemas, run-event types, Timeline / Archive formats, and Dashboard DTOs shared by all packages. |
-| [RSA](rsa/README.md) | Agent harness powered by **Shiori** and **OMP 18.14.0**: session lifecycle, resident perception/action, benchmarks, and logging. |
-| [Dashboard](rsa-dashboard/README.md) | Local web console for live runs, timeline replay, trace analysis, and benchmark comparison. |
-| [Ludens Pet](rsa-companion/README.md) | Optional Electron companion shell, native desktop pet, tray controls, and audio. |
+| [Core](core/README.md) | Agent harness (`@ludens/core`) powered by **Shiori** and **OMP 18.14.0**: session lifecycle, resident perception/action, benchmarks, and logging. |
+| [App](app/README.md) | Unified graphical layer (`@ludens/app`): the local web console for live runs, timeline replay, trace analysis, and benchmark comparison, plus the optional Electron desktop companion with native pet, tray controls, and audio. |
 
 Each workspace is a standalone code directory outside the repository (`~/.ludens/workspaces/<name>` by default):
 

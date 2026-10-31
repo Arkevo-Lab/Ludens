@@ -2,7 +2,7 @@
 
 Workspace 是交由 Agent 与开发者共同演进的普通 Coding 工作区：可以在其中编写感知与控制代码、沉淀技能与记忆、收集数据集并训练模型，而无需改动仓库内的 Harness 或 Driver 源码。
 
-下文中的 CLI 命令均在**目标工作区目录**下执行（假定仓库 `rsa/bin` 与 `baseware/bin` 已加入 `PATH`）。环境安装与服务启停见 [安装与工作区启停](quickstart.md)，常驻 `perception.py` 与 `action.py` 的具体实现见 [常驻感知与动作循环](perception-and-action.md)。
+下文中的 CLI 命令均在**目标工作区目录**下执行（假定仓库 `core/bin` 与 `baseware/bin` 已加入 `PATH`）。环境安装与服务启停见 [安装与工作区启停](quickstart.md)，常驻 `perception.py` 与 `action.py` 的具体实现见 [常驻感知与动作循环](perception-and-action.md)。
 
 ## 文件与会话
 
@@ -51,7 +51,7 @@ workspace/
 
 ### 2. 模板与会话生命周期
 
-- **初始化模板**：`rsa init --name <name> --driver <id>` 在全局默认父目录下创建工作区，也可传 `--workspace <path>` 指定目录。创建缺失的 [AGENTS.md](../../../rsa/templates/AGENTS.md)、[perception.py](../../../rsa/templates/perception.py) 与 [action.py](../../../rsa/templates/action.py) 模板；全局 `defaults` 复制到新建的 `rsa.json`，之后修改全局配置不影响它。`AGENTS.md` 可自由修改或删除，后续启动不会强行补回；修改后需重启 Host 生效。
+- **初始化模板**：`rsa init --name <name> --driver <id>` 在全局默认父目录下创建工作区，也可传 `--workspace <path>` 指定目录。创建缺失的 [AGENTS.md](../../../core/templates/AGENTS.md)、[perception.py](../../../core/templates/perception.py) 与 [action.py](../../../core/templates/action.py) 模板；全局 `defaults` 复制到新建的 `rsa.json`，之后修改全局配置不影响它。`AGENTS.md` 可自由修改或删除，后续启动不会强行补回；修改后需重启 Host 生效。
 - **工作区身份**：`.rsa/workspace.json` 的 ID 是唯一身份，不由目录名称或路径计算。移动后执行 `rsa workspace open <new-path>` 更新全局索引；独立副本用 `open <copy-path> --new-id` 分配新身份并清除当前会话选择。原始会话、技能版本、录制和日志仍在工作区内。registry 丢失后可重新 `open`，`forget <id>` 只注销索引。旧目录需显式 [导入](quickstart.md#已有工作区登记与迁移)。
 - **会话续接**：重启 Host 默认读取 `.rsa/shiori/current-session.json` 续接上一轮 OMP 会话；`rsa run --new-session` 开启新会话并保留工作区全部代码与文件，`--resume <session.jsonl>` 可指定恢复同一工作区下的历史会话。
 - **技能与记忆**：`skills/<name>/SKILL.md` 采用含 `name` 与 `description` 的 YAML frontmatter。Agent 通过 OMP 原生 `read` / `write` / `edit` 工具按需读写技能与记忆，RSA 不会在每轮模型请求中重复推送全量文件索引。
@@ -91,7 +91,7 @@ def capture_top(exposure: int = 1) -> dict:
     return Client().call("controller/screen.top.capture", {})
 ```
 
-`@capability` 既可用于顶层同步函数，也可用于类方法（如 `Perception.sample`、`Action.step`）。静态发现会扫描工作区代码（跳过 `logs/`、`.rsa/`、`.git/` 与虚拟环境），要求被标记函数具备 **docstring** 与**显式参数类型注解**（支持标量、`list`、`dict[str, ...]` 与 `Optional`），并将顶层同步函数及 `Perception.sample` / `Action.step` 纳入 `rsa controller list` 目录。实现细节见 [_capabilities.py](../../../rsa/python/rsa_tools/_capabilities.py)。
+`@capability` 既可用于顶层同步函数，也可用于类方法（如 `Perception.sample`、`Action.step`）。静态发现会扫描工作区代码（跳过 `logs/`、`.rsa/`、`.git/` 与虚拟环境），要求被标记函数具备 **docstring** 与**显式参数类型注解**（支持标量、`list`、`dict[str, ...]` 与 `Optional`），并将顶层同步函数及 `Perception.sample` / `Action.step` 纳入 `rsa controller list` 目录。实现细节见 [_capabilities.py](../../../core/python/rsa_tools/_capabilities.py)。
 
 不同调用入口的执行位置与数据边界对比：
 

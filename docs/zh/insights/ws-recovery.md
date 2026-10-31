@@ -43,14 +43,14 @@
 
 这种跑五六个小时才撞上一次的网络边界问题，如果每次改完代码都去跑八小时实机实验，根本没法高效调试。
 
-所以我们在架构实现期用 TDD 的思路，写了一套完全离线的传输层测试（[rsa/tests/omp-websocket.test.ts](../../../rsa/tests/omp-websocket.test.ts)）和配套的看板 Benchmark（[ws-recovery.ts](../../../rsa/src/bench/cases/ws-recovery.ts)）：直接在进程内用夹具接管 `streamOpenAICodexResponses` 底层的 WebSocket 与 HTTP，并用虚拟时钟秒级快进 60 秒冷却期，不用连真模型、也不用消耗在线 Token：
+所以我们在架构实现期用 TDD 的思路，写了一套完全离线的传输层测试（[core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)）和配套的看板 Benchmark（[ws-recovery.ts](../../../core/src/bench/cases/ws-recovery.ts)）：直接在进程内用夹具接管 `streamOpenAICodexResponses` 底层的 WebSocket 与 HTTP，并用虚拟时钟秒级快进 60 秒冷却期，不用连真模型、也不用消耗在线 Token：
 
 ```sh
 (cd rsa && bun run omp:test:transport)
 (cd rsa && bun run typecheck)
 
 # 生成可直接在 Dashboard 看板里查看事件与评分证据的基准记录：
-rsa/bin/rsa --workspace /absolute/path/to/workspace bench run ludens/ws-recovery
+core/bin/rsa --workspace /absolute/path/to/workspace bench run ludens/ws-recovery
 ```
 
 测试覆盖以下 **13 类工况**（包含 R3 的 `Agent.prompt` 端到端工具回调单次执行回归验证）：

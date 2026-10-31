@@ -2,7 +2,7 @@
 
 A Workspace is an ordinary coding workspace evolved jointly by the agent and developers: perception and control code can be written in it, skills and memory accumulated, datasets collected and models trained, without modifying the Harness or Driver sources in the repo.
 
-All CLI commands below run in the **target workspace directory** (assuming the repo's `rsa/bin` and `baseware/bin` are on `PATH`). For environment setup and service lifecycle see [Installation and Workspace Lifecycle](quickstart.md); the resident `perception.py` and `action.py` implementations are covered in [Resident Perception and Action Loops](perception-and-action.md).
+All CLI commands below run in the **target workspace directory** (assuming the repo's `core/bin` and `baseware/bin` are on `PATH`). For environment setup and service lifecycle see [Installation and Workspace Lifecycle](quickstart.md); the resident `perception.py` and `action.py` implementations are covered in [Resident Perception and Action Loops](perception-and-action.md).
 
 ## Files and Sessions
 
@@ -51,7 +51,7 @@ workspace/
 
 ### 2. Templates and Session Lifecycle
 
-- **Init templates**: `rsa init --name <name> --driver <id>` creates a workspace below the global default parent; pass `--workspace <path>` for an explicit directory. It creates missing [AGENTS.md](../../../rsa/templates/AGENTS.md), [perception.py](../../../rsa/templates/perception.py), and [action.py](../../../rsa/templates/action.py) templates. Global `defaults` are copied into the new `rsa.json`; later global changes do not affect it. `AGENTS.md` may be freely edited or deleted and is never force-restored on later starts; restart the Host after editing it for changes to take effect.
+- **Init templates**: `rsa init --name <name> --driver <id>` creates a workspace below the global default parent; pass `--workspace <path>` for an explicit directory. It creates missing [AGENTS.md](../../../core/templates/AGENTS.md), [perception.py](../../../core/templates/perception.py), and [action.py](../../../core/templates/action.py) templates. Global `defaults` are copied into the new `rsa.json`; later global changes do not affect it. `AGENTS.md` may be freely edited or deleted and is never force-restored on later starts; restart the Host after editing it for changes to take effect.
 - **Workspace identity**: the ID in `.rsa/workspace.json` is persistent and is not derived from the directory name or path. After moving a workspace, run `rsa workspace open <new-path>` to update the global index. Use `open <copy-path> --new-id` for an independent copy, assigning a new identity and clearing the current session selection. Past sessions, skill versions, recordings, and logs remain in the workspace. Rebuild a lost registry with `open`; `forget <id>` removes only its index entry. Old directories need explicit [import](quickstart.md#registering-and-migrating-existing-workspaces).
 - **Session resume**: restarting the Host resumes the previous OMP session via `.rsa/shiori/current-session.json` by default; `rsa run --new-session` starts a new session while keeping all workspace code and files, and `--resume <session.jsonl>` resumes a specified historical session under the same workspace.
 - **Skills and memory**: `skills/<name>/SKILL.md` uses YAML frontmatter with `name` and `description`. The agent reads and writes skills and memory on demand through the OMP-native `read` / `write` / `edit` tools; RSA does not re-push a full file index on every model request.
@@ -91,7 +91,7 @@ def capture_top(exposure: int = 1) -> dict:
     return Client().call("controller/screen.top.capture", {})
 ```
 
-`@capability` works on both top-level sync functions and methods (e.g. `Perception.sample`, `Action.step`). Static discovery scans workspace code (skipping `logs/`, `.rsa/`, `.git/`, and virtual environments) and requires marked functions to have a **docstring** and **explicit parameter type annotations** (scalars, `list`, `dict[str, ...]`, and `Optional` are supported); top-level sync functions plus `Perception.sample` / `Action.step` are included in the `rsa controller list` catalog. Implementation details: [_capabilities.py](../../../rsa/python/rsa_tools/_capabilities.py).
+`@capability` works on both top-level sync functions and methods (e.g. `Perception.sample`, `Action.step`). Static discovery scans workspace code (skipping `logs/`, `.rsa/`, `.git/`, and virtual environments) and requires marked functions to have a **docstring** and **explicit parameter type annotations** (scalars, `list`, `dict[str, ...]`, and `Optional` are supported); top-level sync functions plus `Perception.sample` / `Action.step` are included in the `rsa controller list` catalog. Implementation details: [_capabilities.py](../../../core/python/rsa_tools/_capabilities.py).
 
 How the call entry points differ in execution location and data boundary:
 

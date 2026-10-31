@@ -2,7 +2,7 @@
 
 如果只是一问一答地写代码，OMP 原生的上下文压缩其实挺好用的；但当我们把 OMP 放进一个**时空一致的实时环境**里连续跑时它的乐观压缩机制几乎立刻就不够用了。
 
-这篇笔记聊聊当时到底发生了什么以及我们为什么在 [rsa/patches/](../../../rsa/patches/) 里调整了 OMP 的压缩结构（Agent Loop 本体没换，边界见 [架构与边界](../reference/architecture.md)）。补丁跟随 OMP 版本走（当前 `18.14.0`）：上游加上新字段时删我们重复的部分，行为分叉保留并重做。
+这篇笔记聊聊当时到底发生了什么以及我们为什么在 [core/patches/](../../../core/patches/) 里调整了 OMP 的压缩结构（Agent Loop 本体没换，边界见 [架构与边界](../reference/architecture.md)）。补丁跟随 OMP 版本走（当前 `18.14.0`）：上游加上新字段时删我们重复的部分，行为分叉保留并重做。
 
 ## 先看原版 OMP 是怎么想的
 
@@ -54,7 +54,7 @@
 
 ### 4. 给每个后台候选绑定唯一标识（`operationId`）
 
-以前后台压缩为什么终止、花了多久，在日志里很难对齐追踪。我们加了 `diagnostics_channel("omp.compaction.speculation")`，从候选创建起就绑定唯一的 `operationId`，把 `started / armed / failed / cancelled / applied / invalidated` 全生命周期和耗时写进日志（见 [trace.ts](../../../rsa/src/core/agent-omp/trace.ts) 与 [日志契约](../reference/logging.md#shiori-压缩与传输)）。
+以前后台压缩为什么终止、花了多久，在日志里很难对齐追踪。我们加了 `diagnostics_channel("omp.compaction.speculation")`，从候选创建起就绑定唯一的 `operationId`，把 `started / armed / failed / cancelled / applied / invalidated` 全生命周期和耗时写进日志（见 [trace.ts](../../../core/src/core/agent-omp/trace.ts) 与 [日志契约](../reference/logging.md#shiori-压缩与传输)）。
 
 ## 改完之后的代价与验证
 
@@ -62,5 +62,5 @@
 
 为了防止以后升级把这套行为改坏，我们配了两条回归验证：
 
-- **集成测试**：[rsa/tests/omp-speculation.test.ts](../../../rsa/tests/omp-speculation.test.ts) 直接跑真实的 OMP preparation / validation / commit / 尾部重放，验证“涨超 20k 仍存活”、“到线等待在途候选”、“分支/余量不足仍正常作废”以及“取消打断不晚提交”。
+- **集成测试**：[core/tests/omp-speculation.test.ts](../../../core/tests/omp-speculation.test.ts) 直接跑真实的 OMP preparation / validation / commit / 尾部重放，验证“涨超 20k 仍存活”、“到线等待在途候选”、“分支/余量不足仍正常作废”以及“取消打断不晚提交”。
 - **内置 Benchmark**：`rsa bench run ludens/background-compaction`（见 [Benchmark](../reference/benchmark.md)），用受控流离线复刻整套后台压缩生命周期。

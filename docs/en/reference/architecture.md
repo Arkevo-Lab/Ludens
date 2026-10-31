@@ -7,10 +7,10 @@ Ludens (RSA, Recursive Self-Adaptation) decouples device drivers, the Agent exec
 | Component | Process Shape and Core Responsibilities |
 | --- | --- |
 | `baseware/` | **Standalone device service**: loads built-in or external Drivers, provides a unified Controller capability catalog, control-lease (`epoch`) arbitration, input cancellation, and device fact logs; exposed via CLI, TS/Python APIs, and MCP. |
-| `rsa/` | **Adaptive Harness**: manages workspace configuration and lifecycle, capability discovery and routing, resident perception (`perception.py`) and resident action (`action.py`) Python subprocesses, Harbor evaluation, and run-log archiving. |
+| `core/` | **Adaptive Harness** (`@ludens/core`): manages workspace configuration and lifecycle, capability discovery and routing, resident perception (`perception.py`) and resident action (`action.py`) Python subprocesses, Harbor evaluation, and run-log archiving. |
 | **Shiori** | **Sole execution kernel (role name)**: implemented by the RSA Host Runtime; uniformly governs control cycles, time/request budgets, signal cancellation, and exit cleanup. Agent mode mounts **OMP 18.14.0**; plain evaluation programs, Verifiers, and Metrics share the same lifecycle without starting a model. |
-| `rsa-dashboard/` | **Local console service**: builds and queries log indexes through a dedicated Node Worker, serving realtime activity streams, spacetime video replay, run statistics, doc browsing, the capability catalog, and human-handover entry points. |
-| `rsa-companion/` | **Optional desktop companion (Ludens Pet)**: Electron desktop shell; the main window reuses the same Dashboard view, while the native transparent pet window and audio engine incrementally consume the same activity log. |
+| `app/` | **Local console service (`@ludens/app`, web)**: builds and queries log indexes through a dedicated Node Worker, serving realtime activity streams, spacetime video replay, run statistics, doc browsing, the capability catalog, and human-handover entry points. |
+| `app/desktop/` | **Optional desktop companion (Ludens Pet)**: Electron desktop shell; the main window reuses the same Dashboard view, while the native transparent pet window and audio engine incrementally consume the same activity log. |
 
 ```mermaid
 flowchart LR
@@ -41,13 +41,13 @@ The repository is organized as a Bun workspace with `@ludens/protocol` as the ze
 | Package / Directory | Layer and Responsibility |
 | --- | --- |
 | `protocol/` (`@ludens/protocol`) | **Contract foundation**: RPC schemas, run-event types, Timeline / Archive formats, Benchmark DTOs, and Dashboard activity projections; consumed by every other package via workspace imports only. |
-| `rsa/src/core/shiori/` | **Control kernel**: `epoch` control leases, time/request budgets, program execution, and cancellation; no dependency on OMP, CLI, or sockets. |
-| `rsa/src/core/storage/` | **Workspace and fact storage**: `.rsa/` identity and state, `logs/<run-id>/` event streams and archives, Benchmark trial/verification storage. |
-| `rsa/src/core/subsystems/` | **Workspace resident and device subsystems**: Python perception/action workers, `@capability` discovery, Baseware device sessions. |
-| `rsa/src/core/agent-omp/` | **OMP AgentRunner implementation**: OMP session assembly, the RSA extension, and model-trace recording behind a narrow `ExtensionHost` interface. |
-| `rsa/src/core/query/` | **Query and projection engine**: log/run/operation indexes, cold builds, activity/replay/telemetry projections consumed by the Dashboard and Ludens Pet. |
-| `rsa/src/daemon/`, `rsa/src/bench/`, `rsa/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, Harbor benchmark runner, and the pure CLI front end. |
-| `rsa-dashboard/shell/` + `rsa-dashboard/features/` | **Console views**: the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `benchmark`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `rsa-dashboard/components/ui/`. |
+| `core/src/core/shiori/` | **Control kernel**: `epoch` control leases, time/request budgets, program execution, and cancellation; no dependency on OMP, CLI, or sockets. |
+| `core/src/core/storage/` | **Workspace and fact storage**: `.rsa/` identity and state, `logs/<run-id>/` event streams and archives, Benchmark trial/verification storage. |
+| `core/src/core/subsystems/` | **Workspace resident and device subsystems**: Python perception/action workers, `@capability` discovery, Baseware device sessions. |
+| `core/src/core/agent-omp/` | **OMP AgentRunner implementation**: OMP session assembly, the RSA extension, and model-trace recording behind a narrow `ExtensionHost` interface. |
+| `core/src/core/query/` | **Query and projection engine**: log/run/operation indexes, cold builds, activity/replay/telemetry projections consumed by the Dashboard and Ludens Pet. |
+| `core/src/daemon/`, `core/src/bench/`, `core/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, Harbor benchmark runner, and the pure CLI front end. |
+| `app/shell/` + `app/features/` | **Console views**: the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `benchmark`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `app/components/ui/`. |
 
 
 ## Devices and Unified Capabilities
@@ -79,7 +79,7 @@ rsa controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":500
 
 ### 3. Resident Action Process and Input Reset
 
-The workspace `action.py` resident action worker is permanently bound to the `epoch` and `inputGeneration` from startup. When `rsa action stop`, `rsa action reload`, or an `Action.step()` exception occurs inside an `auto` cycle, the system immediately cancels and releases all of this workspace's current inputs through Baseware (including concurrent CLI inputs), bumps `inputGeneration` to reject stale calls from the old instance, and keeps the current `epoch`, remaining budget, and OMP session. See [rsa/src/core/shiori/runtime.ts](../../../rsa/src/core/shiori/runtime.ts).
+The workspace `action.py` resident action worker is permanently bound to the `epoch` and `inputGeneration` from startup. When `rsa action stop`, `rsa action reload`, or an `Action.step()` exception occurs inside an `auto` cycle, the system immediately cancels and releases all of this workspace's current inputs through Baseware (including concurrent CLI inputs), bumps `inputGeneration` to reject stale calls from the old instance, and keeps the current `epoch`, remaining budget, and OMP session. See [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts).
 
 ## Session and Loop
 
@@ -89,13 +89,13 @@ The RSA Host reuses a single OMP session per workspace (persisted under `.rsa/sh
 
 - Keeps OMP's native system prompt (a workspace `AGENTS.md`, if present, is injected via native `contextFiles`).
 - Explicitly enables the OMP-native tools `read`, `write`, `edit`, `bash`, `wait`, and registers the custom tool `observe`.
-- Overrides only what the host contract requires: disabling `retry.modelFallback` (keeps the chosen vision model sticky), disabling `title.refreshOnReplan` and `cacheWarming` (keeps every model request strictly attributed to its control cycle), setting `PROVIDER_IMAGE_BUDGETS` to `Infinity` (retains history images before compaction so mid-run image drops don't break the Prompt Cache prefix), plus the optional `compactionThreshold`. See [rsa/src/core/agent-omp/session.ts](../../../rsa/src/core/agent-omp/session.ts).
+- Overrides only what the host contract requires: disabling `retry.modelFallback` (keeps the chosen vision model sticky), disabling `title.refreshOnReplan` and `cacheWarming` (keeps every model request strictly attributed to its control cycle), setting `PROVIDER_IMAGE_BUDGETS` to `Infinity` (retains history images before compaction so mid-run image drops don't break the Prompt Cache prefix), plus the optional `compactionThreshold`. See [core/src/core/agent-omp/session.ts](../../../core/src/core/agent-omp/session.ts).
 
 Inside an `auto` control cycle, the outer loop runs as follows:
 
-1. **Open a turn**: issues an OMP `prompt` using [continue.md](../../../rsa/prompts/continue.md) (on first takeover with `auto on --message`, a one-shot reminder is appended).
+1. **Open a turn**: issues an OMP `prompt` using [continue.md](../../../core/prompts/continue.md) (on first takeover with `auto on --message`, a one-shot reminder is appended).
 2. **Perception and action run in parallel**: the environment keeps running while the model reasons — the resident `Perception.sample()` samples continuously at `sample_hz` into `.rsa/timeline/`, and the resident `Action.step()` continuously reads the spacetime axis and executes high-frequency control at `step_hz`.
-3. **Automatic context delivery**: the RSA extension hooks OMP's `before_agent_start` hook (see [extension.ts](../../../rsa/src/core/agent-omp/extension.ts)). When auto-injection is on (default `inject on`), it automatically appends the latest undelivered primary-channel perception records plus sampler state transitions (`state / codeSHA / error`) at the start of each prompt; tool results are never appended with observations, the `tool_result` hook only records delivery receipts for native tool images, and mid-turn observation is composed explicitly by the model via `observe`. The former end-of-batch channel was removed on 2026-10-29; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
+3. **Automatic context delivery**: the RSA extension hooks OMP's `before_agent_start` hook (see [extension.ts](../../../core/src/core/agent-omp/extension.ts)). When auto-injection is on (default `inject on`), it automatically appends the latest undelivered primary-channel perception records plus sampler state transitions (`state / codeSHA / error`) at the start of each prompt; tool results are never appended with observations, the `tool_result` hook only records delivery receipts for native tool images, and mid-turn observation is composed explicitly by the model via `observe`. The former end-of-batch channel was removed on 2026-10-29; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
 4. **Continue or hand over**: when a single `prompt` ends and budget remains, the next turn starts automatically; on human handover or budget exhaustion, the `addBeforeModelCall` gate immediately blocks new model requests and releases device control.
 
 ### 2. Context Compaction and Transport Recovery
@@ -110,7 +110,7 @@ Inside an `auto` control cycle, the outer loop runs as follows:
 
 ## TypeScript and Python
 
-RSA consists of a TypeScript host (`rsa/src/`) plus a Python toolkit (`rsa/python/rsa_tools/`):
+RSA consists of a TypeScript host (`core/src/`) plus a Python toolkit (`core/python/rsa_tools/`):
 
 - **TypeScript side**: owns the Shiori runtime, control leases, OMP session extensions, cross-process RPC, and CLI / Benchmark orchestration.
 - **Python side**: owns `@capability` static discovery and dynamic execution, the resident `Perception` / `Action` loops, PyAV video-segment encoding, on-demand cold-frame decoding, and `current_trial()` evaluation evidence registration. Video encode/decode happens on demand inside the resident perception process; no separate streaming service is introduced.
