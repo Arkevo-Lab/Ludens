@@ -76,12 +76,12 @@ async function readArchiveJson<T>(url: string, signal?: AbortSignal): Promise<T>
     const body = await response.json();
     signal?.throwIfAborted();
     if (response.status === 202 && body.code === "ARCHIVE_PREPARING") {
-      const { promise, resolve, reject } = Promise.withResolvers<void>();
-      const aborted = () => { clearTimeout(timer); reject(signal?.reason); };
-      const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, 250);
-      signal?.addEventListener("abort", aborted, { once: true });
-      if (signal?.aborted) aborted();
-      await promise;
+      await new Promise<void>((resolve, reject) => {
+        const aborted = () => { clearTimeout(timer); reject(signal?.reason); };
+        const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, 250);
+        signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) aborted();
+      });
       continue;
     }
     if (!response.ok) throw Object.assign(new Error(body.error ?? `读取失败 · HTTP ${response.status}`),

@@ -14,13 +14,12 @@
 
 ### 2. 安装核心组件
 
-默认安装 Baseware、RSA 与网页 Dashboard，各组件及 RSA Python 运行时分别维护独立锁文件。安装 `rsa` 时，Bun 会按 `package.json` 自动应用 [rsa/patches/](../../../rsa/patches/) 下的 OMP 依赖补丁：
+在仓库根目录使用根 `bun.lock` 一次安装 JavaScript workspaces，再构建网页 Dashboard。Bun 会按根 `package.json` 自动应用 [rsa/patches/](../../../rsa/patches/) 下的 OMP 依赖补丁。RSA Python 运行时保留独立的 `uv.lock`，可选桌宠的 pnpm 安装方式见下文。不要在 `rsa-dashboard` 中运行 `npm ci`：npm 会选择根 workspace，而根目录使用 Bun，不维护 npm 锁文件。
 
 ```sh
-(cd baseware && bun install --frozen-lockfile)
-(cd rsa && bun install --frozen-lockfile)
+bun install --frozen-lockfile
 uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm ci && npm run build)
+(cd rsa-dashboard && npm run build)
 
 export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
 ```

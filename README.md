@@ -32,10 +32,9 @@ Drivers only expose raw device capabilities (screen capture, input events, contr
 Requires **macOS** (for `launchd` service management), **Bun 1.4**, **Python 3.12+**, **Node.js 22.13+ / 24+**, **uv**, and configured local **OMP model credentials** (default model: `openai-codex/gpt-6.1-sol`).
 
 ```sh
-(cd baseware && bun install --frozen-lockfile)
-(cd rsa && bun install --frozen-lockfile)
+bun install --frozen-lockfile
 uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm ci && npm run build)
+(cd rsa-dashboard && npm run build)
 
 export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
 ```

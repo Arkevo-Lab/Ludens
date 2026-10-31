@@ -14,13 +14,12 @@ Unless a `cd` into the target workspace is shown explicitly, run all commands fr
 
 ### 2. Install core components
 
-Install Baseware, RSA, and the web Dashboard by default; each component and the RSA Python runtime keeps its own lockfile. When installing `rsa`, Bun automatically applies the OMP dependency patches under [rsa/patches/](../../../rsa/patches/) per `package.json`:
+Install the JavaScript workspaces once from the repository root using the root `bun.lock`, then build the web Dashboard. Bun automatically applies the OMP dependency patches under [rsa/patches/](../../../rsa/patches/) per the root `package.json`. The RSA Python runtime keeps its separate `uv.lock`; the optional pet's pnpm setup is covered below. Do not run `npm ci` in `rsa-dashboard`: npm selects the root workspace, which uses Bun rather than an npm lockfile.
 
 ```sh
-(cd baseware && bun install --frozen-lockfile)
-(cd rsa && bun install --frozen-lockfile)
+bun install --frozen-lockfile
 uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm ci && npm run build)
+(cd rsa-dashboard && npm run build)
 
 export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
 ```
