@@ -6,11 +6,11 @@
 
 ### 1. `normal` 与 `full` 模式对比
 
-在 `rsa.json` 的 `logging.diagnostics`（或 CLI `--diagnostics`）中设置日志模式，启动时写入 `manifest.json`，Python 子进程通过环境变量 `RSA_LOG_DIAGNOSTICS` 继承（`rsa status` 的 `logging.diagnostics` 与 `basewareDiagnostics` 分别显示 Host 与 Baseware 的实际生效模式）：
+在 `ludens.json` 的 `logging.diagnostics`（或 CLI `--diagnostics`）中设置日志模式，启动时写入 `manifest.json`，Python 子进程通过环境变量 `LUDENS_LOG_DIAGNOSTICS` 继承（`ludens status` 的 `logging.diagnostics` 与 `basewareDiagnostics` 分别显示 Host 与 Baseware 的实际生效模式）：
 
 | 模式 | 记录范围 | 落盘位置 |
 | --- | --- | --- |
-| `normal`（默认） | 完整保留模型调用、工具执行、主动能力调用、设备输入及终态（`action_start / action_end`）、控制权变迁、常驻进程生命周期与故障区间；对携带 `trace.recordingPurpose = "continuous-perception"` 或 `"continuous-action"` 的常驻循环内部只读调用链，省略逐次调用事件与日志 RPC（标注 `@record` 的结果仍正常写入 `.rsa/timeline/`）。 | `logs/<run-id>/events.jsonl` 与 Baseware `events/` |
+| `normal`（默认） | 完整保留模型调用、工具执行、主动能力调用、设备输入及终态（`action_start / action_end`）、控制权变迁、常驻进程生命周期与故障区间；对携带 `trace.recordingPurpose = "continuous-perception"` 或 `"continuous-action"` 的常驻循环内部只读调用链，省略逐次调用事件与日志 RPC（标注 `@record` 的结果仍正常写入 `.ludens/timeline/`）。 | `logs/<run-id>/events.jsonl` 与 Baseware `events/` |
 | `full` | 在 `normal` 基础上，额外记录常驻感知/动作循环内部的每一次嵌套 Python 调用与 Baseware 只读查询明细（不重复复制媒体或经历事件）。 | 独立写入 `logs/<run-id>/diagnostics.jsonl` 与 Baseware `diagnostics/` 分段 |
 
 ### 2. 周期聚合统计与故障区间合并
@@ -26,21 +26,21 @@
 
 单次运行目录 `workspace/logs/<run-id>/` 的文件组成：
 
-工作区目录由全局 `$LUDENS_HOME/registry/<id>.json` 定位，稳定身份来自 `.rsa/workspace.json`；registry 只索引路径，运行事实不保存在源码仓库旁。目录搬动后重新 `rsa workspace open <path>` 即可登记；历史 `manifest.json` 中的原始运行信息仍保留。
+工作区目录由全局 `$LUDENS_HOME/registry/<id>.json` 定位，稳定身份来自 `.ludens/workspace.json`；registry 只索引路径，运行事实不保存在源码仓库旁。目录搬动后重新 `ludens workspace open <path>` 即可登记；历史 `manifest.json` 中的原始运行信息仍保留。
 
 | 文件 / 目录 | 内容与归属 |
 | --- | --- |
 | `manifest.json` | 工作区路径、模型、Driver 列表、预算、生效日志模式、Shiori 实现版本、Git/提示词哈希及 `eventSources` 外部事实源声明。 |
-| `events.jsonl` | RSA 写入的 Schema v2 主事件流（保存调用身份、统计与内容引用）。 |
+| `events.jsonl` | Ludens 写入的 Schema v2 主事件流（保存调用身份、统计与内容引用）。 |
 | `diagnostics.jsonl` | `full` 模式下的高频内部调用诊断流，按需分页读取。 |
-| `streams/` | 模型流式响应分片（`rsa-stream-v1` 格式，小根节点内联，大节点引用 `.rsa/archive/`）。 |
+| `streams/` | 模型流式响应分片（`ludens-stream-v1` 格式，小根节点内联，大节点引用 `.ludens/archive/`）。 |
 | `perception/<gen>/` · `action/<gen>/` | 对应代次的入口信息、实际导入的工作区源码清单 `sources.json` 与进程 `stderr`。 |
 
 跨运行共享的三类底层存储：
 
-1. **Baseware 设备事实源（`logs/baseware/`）**：每个 Baseware 实例独立维护 `source.json`、`events/` 与 `diagnostics/`（按 1 小时或 256 MiB 切段），事件以 `origin.eventId = "<serviceId>:<seq>"` 唯一标识。RSA 在 `manifest.json` 的 `eventSources` 中记录 `{sourceId, root, format, recordingId, windows}`；读取端通过 [protocol/src/event-sources.ts](../../../protocol/src/event-sources.ts) 按需归并。动作启动时冻结 `recordingId`，即便动作在窗口关闭后晚到结束，仍精确归属原运行。
-2. **工作区时空轴（`.rsa/timeline/`）**：存放跨 run 共享的感知与能力留档——`video/<id>.mp4` 及配套状态文件 `.mp4.json`（区分 `pending / ready / error`）、非视频去重媒体 `objects/<sha256>.bin`、以及分段记录 `segments/`（含 JSONL、定长 `.idx` 索引与 `.meta.json`）。关闭持久化（`RSA_PERCEPTION_PERSIST=0`）时仅使用 `window-<pid>-.../` 临时窗口。
-3. **内容寻址结构化归档（`.rsa/archive/`）**：由 [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts) 统一读写。模型消息、工具定义与大参数/结果存为 `objects/<sha256>.json.gz`（使用 `encoding: "rsa-json-v1"` 与 tagged JSON 区分内部引用与用户 `$ref` 字段）。日志中的图像/音频数据不重复存盘，而是引用 `.rsa/timeline/` 资产，并在 `.rsa/archive/media/<sha256>.json` 维护轻量级哈希到视频帧的映射索引（内存 LRU 上限 4096 项）。
+1. **Baseware 设备事实源（`logs/baseware/`）**：每个 Baseware 实例独立维护 `source.json`、`events/` 与 `diagnostics/`（按 1 小时或 256 MiB 切段），事件以 `origin.eventId = "<serviceId>:<seq>"` 唯一标识。Ludens 在 `manifest.json` 的 `eventSources` 中记录 `{sourceId, root, format, recordingId, windows}`；读取端通过 [protocol/src/event-sources.ts](../../../protocol/src/event-sources.ts) 按需归并。动作启动时冻结 `recordingId`，即便动作在窗口关闭后晚到结束，仍精确归属原运行。
+2. **工作区时空轴（`.ludens/timeline/`）**：存放跨 run 共享的感知与能力留档——`video/<id>.mp4` 及配套状态文件 `.mp4.json`（区分 `pending / ready / error`）、非视频去重媒体 `objects/<sha256>.bin`、以及分段记录 `segments/`（含 JSONL、定长 `.idx` 索引与 `.meta.json`）。关闭持久化（`LUDENS_PERCEPTION_PERSIST=0`）时仅使用 `window-<pid>-.../` 临时窗口。
+3. **内容寻址结构化归档（`.ludens/archive/`）**：由 [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts) 统一读写。模型消息、工具定义与大参数/结果存为 `objects/<sha256>.json.gz`（使用 `encoding: "ludens-json-v1"` 与 tagged JSON 区分内部引用与用户 `$ref` 字段）。日志中的图像/音频数据不重复存盘，而是引用 `.ludens/timeline/` 资产，并在 `.ludens/archive/media/<sha256>.json` 维护轻量级哈希到视频帧的映射索引（内存 LRU 上限 4096 项）。
 
 上述 Baseware 路径由工作区编排显式指定。独立 `baseware serve` 省略 `--data-dir` 时使用 `$LUDENS_HOME/logs/baseware/<socket-name>/`；显式目录始终优先。共享桌宠的偏好与后台日志在 `$LUDENS_HOME/pet/`，其针对工作区的消费事件仍写入 `<workspace>/logs/consumers/`。
 
@@ -48,7 +48,7 @@
 
 每条 JSONL 事件均包含写入者顶层标识（`runId` 或 `serviceId`、递增 `seq`、墙钟 `at`、单调时钟 `atMs`）以及以下四个核心块（定义见 [core/src/core/storage/events.ts](../../../core/src/core/storage/events.ts)）：
 
-- **`source`**：产生该语义的职责组件（`shiori`、`rsa`、`workspace`、`baseware`、`benchmark`、`dashboard`、`pet`）及其具体实现与版本。
+- **`source`**：产生该语义的职责组件（`shiori`、`ludens`、`workspace`、`baseware`、`benchmark`、`dashboard`、`pet`）及其具体实现与版本。
 - **`origin`**：源进程首次生成该事实的 `{eventId, clockId, seq, at, atMs}`，跨进程转发与落盘保持不变（`atMs` 仅允许在相同 `clockId` 内相减）。
 - **`trace`**：调用链与业务归属上下文，含 `traceId / spanId / parentSpanId`（调用树关系）、`epoch / modelCallId / requestId / httpId / toolCallId / operationId`（业务实体 ID）、`recordingId / recordingPurpose`（运行归属与常驻用途）及 `inputGeneration`（同 epoch 内动作 worker 重载代次）。
 - **`type` / `data`**：具体事件类型与载荷。
@@ -64,7 +64,7 @@
 
 | 事件类型 | 语义与生命周期边界 |
 | --- | --- |
-| `capability_start / capability_end` | `rsa controller` 的 `list / help / call` 边界，记录参数、能力 ID、epoch 校验结果、终态（`success / error / cancelled`）与耗时。 |
+| `capability_start / capability_end` | `ludens controller` 的 `list / help / call` 边界，记录参数、能力 ID、epoch 校验结果、终态（`success / error / cancelled`）与耗时。 |
 | `python_capabilities_start / python_capabilities` | 工作区 `@capability` AST 静态扫描发现的独立子 Span。 |
 | `python_capability / python_capability_result` | CLI 单次 Python 能力运行器的函数位置、源码哈希、入参与返回结果。 |
 | `python_call_start / python_call_end` | 工作区 `@capability` 装饰器函数的实际执行 Span，记录 PID、源码哈希、终态与耗时（不强制序列化原生 Python 入参/返回对象）。`normal` 下省略的常驻父层会在子事件标记 `parentOmitted: true`。 |
@@ -81,12 +81,12 @@
 
 - **查询事件**：每次执行 `observe` 记录 `perception_observe_start / perception_observe_end`，以该次调用的 `spanId` 作为返回信封的 `queryId`。
 - **交付收据**：自动交付只在 prompt 开始（`before_agent_start`）发生；显式 `observe` 与原生工具图片各自开自己的收据（`origin` 分别为 `explicit` / `tool_result`）。每次向模型交付上下文时写入一条 `observation_context` 事件，记录 `{id, origin, queries, observations, purpose?}`。随后发起的 `model_start` 通过 `deliveryIds` 引用本次新增的收据 ID（注：`deliveryIds` 仅标识本轮新追加的观测来源，模型完整历史上下文以请求归档 payload 为准）。
-- **自动交付去重游标**：自动注入开启时（`context_policy` 事件记录 `rsa perception inject on/off` 变更），扩展按时空轴 `recordId` 去重，同一条记录不会随续轮重复追加；画面像素相同但 `recordId` 不同的新采样仍作为独立时间证据交付。只有当自动交付实际成功完成时才推进采样器状态游标，被抑制或取消的读取不会吞掉状态变迁通知。
+- **自动交付去重游标**：自动注入开启时（`context_policy` 事件记录 `ludens perception inject on/off` 变更），扩展按时空轴 `recordId` 去重，同一条记录不会随续轮重复追加；画面像素相同但 `recordId` 不同的新采样仍作为独立时间证据交付。只有当自动交付实际成功完成时才推进采样器状态游标，被抑制或取消的读取不会吞掉状态变迁通知。
 
 ### 2. 模型输入重编码与工具图片追踪
 
 - **派生图像（`modelMedia`）**：感知图像在送入 OMP 前经过一次 `resizeImage` 编码，编码耗时与尺寸记入 `observation_media` 事件，并将重编码后的图像交由感知 writer 存为派生资产（在 `observation_media.modelMedia` 中记录派生哈希、源 `asset / recordId / sequence` 与转换器名称 `omp.resizeImage`）。
-- **原生工具图片**：通过原生 `read` 或 `bash --images` 交付给模型的图片记录为 `observation(origin = "tool_result")` 并关联对应 `toolCallId`。若 CLI 输出携带明确的时空轴记录标签且字节匹配，则精确关联到该 `recordId`；若仅字节哈希匹配 `.rsa/timeline/objects/<sha256>.bin`，则仅复用底层资产而不臆测采样时刻。
+- **原生工具图片**：通过原生 `read` 或 `bash --images` 交付给模型的图片记录为 `observation(origin = "tool_result")` 并关联对应 `toolCallId`。若 CLI 输出携带明确的时空轴记录标签且字节匹配，则精确关联到该 `recordId`；若仅字节哈希匹配 `.ludens/timeline/objects/<sha256>.bin`，则仅复用底层资产而不臆测采样时刻。
 
 ## Shiori、压缩与传输
 
@@ -100,7 +100,7 @@
 
 ### 1. Dashboard Worker 与三层可重建索引（`.dashboard-index/`）
 
-Dashboard 将日志解析与索引构建完全隔离在 Next.js 请求上下文之外的独立 Node Worker 中。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.rsa/archive/` 或 `.rsa/timeline/`），包含三部分：
+Dashboard 将日志解析与索引构建完全隔离在 Next.js 请求上下文之外的独立 Node Worker 中。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.ludens/archive/` 或 `.ludens/timeline/`），包含三部分：
 
 1. **源事件位置与关系目录**：每条事件仅保存文件字节偏移、时间戳（取 `origin.at ?? at`）、类型与调用身份；模型、Span、动作与观测的关联表均指向源事件字节偏移。
 2. **Activity 按需展示配方**：仅保存每个展示块（Thinking / Text / Tool / System / Diagnostic）对应的源事件偏移或 `streams/` 截止字节数；前端或桌宠请求时才按配方从原件组装文本，不在索引中冗余存储完整正文。
@@ -108,8 +108,8 @@ Dashboard 将日志解析与索引构建完全隔离在 Next.js 请求上下文�
 
 ### 2. 分页缓存与冷历史构建子进程
 
-- **页缓存与租约淘汰**：索引按每页最多 1024 条或 256 KiB 分页落盘。查询 Worker 维护默认 **256 MiB** 的共享页缓存（可通过 `RSA_DASHBOARD_INDEX_CACHE_BYTES` 调整），最多保留 **3 个**闲置 run（`RSA_DASHBOARD_INDEX_MAX_RUNS`），闲置 **5 分钟**（`RSA_DASHBOARD_INDEX_IDLE_MS`）且无在途读取租约时自动释放内存。
-- **单实例冷构建 Builder**：首次打开尚未建立索引的历史大型 run 时，查询 Worker 启动全局唯一的临时 Builder 子进程（目标工作集默认 **2 GiB**，由 `RSA_DASHBOARD_BUILD_BYTES` 控制），单遍扫描固定截止点的事件流并批量生成 `generations/<id>/`，完成后通过原子替换 `.dashboard-index/active.json` 发布并退出子进程以归还 OS 内存。构建期间接口返回 HTTP `202 ARCHIVE_PREPARING` 及实时进度；关闭浏览器标签页仅取消当前 HTTP 查询，不会中断后台有限构建任务。
+- **页缓存与租约淘汰**：索引按每页最多 1024 条或 256 KiB 分页落盘。查询 Worker 维护默认 **256 MiB** 的共享页缓存（可通过 `LUDENS_APP_INDEX_CACHE_BYTES` 调整），最多保留 **3 个**闲置 run（`LUDENS_APP_INDEX_MAX_RUNS`），闲置 **5 分钟**（`LUDENS_APP_INDEX_IDLE_MS`）且无在途读取租约时自动释放内存。
+- **单实例冷构建 Builder**：首次打开尚未建立索引的历史大型 run 时，查询 Worker 启动全局唯一的临时 Builder 子进程（目标工作集默认 **2 GiB**，由 `LUDENS_APP_BUILD_BYTES` 控制），单遍扫描固定截止点的事件流并批量生成 `generations/<id>/`，完成后通过原子替换 `.dashboard-index/active.json` 发布并退出子进程以归还 OS 内存。构建期间接口返回 HTTP `202 ARCHIVE_PREPARING` 及实时进度；关闭浏览器标签页仅取消当前 HTTP 查询，不会中断后台有限构建任务。
 
 ### 3. 控制台 HTTP 接口与 Ludens Pet 增量跟随
 
@@ -120,7 +120,7 @@ Dashboard 将日志解析与索引构建完全隔离在 Next.js 请求上下文�
 
 ### 1. 时空轴播放器与帧预读缓冲
 
-Dashboard 回放视图（`/api/replay`）将 `.rsa/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
+Dashboard 回放视图（`/api/replay`）将 `.ludens/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
 
 - **时间窗与双帧预读**：事件按最多 60 秒窗口、每页 500 条游标分页；画面使用解码缓冲 Hook——待目标时刻的所有屏幕画面加载完毕后原子切换，同时向后预读最多 2 帧（上限 8 张图 / 32 MiB 预读缓存），切换工作区或离开页面时立即释放图像内存。
 - **采样画面与模型实际输入区分**：播放器主画面展示感知层留档的连续帧（包含模型思考期间采集但未送入上下文的帧）；模型调用详情按该请求的输入引用定位观测。视频帧是有损重建，不能当作模型输入的原始字节；未留档、编码缺口或过期媒体按实际状态显示缺失。
@@ -135,11 +135,11 @@ python3 core/scripts/analyze-run.py /path/to/workspace/logs/run-id \
   --epoch epoch-id --output /path/to/analysis.json
 
 # 展开单条事件的归档引用正文（默认媒体仅展示引用摘要；--full 仅恢复仍有原件的媒体字节，视频源保留有损来源标记）
-core/bin/rsa logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
+core/bin/ludens logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
 
 # 按序流式输出 run 声明的全部事实源事件（加 --diagnostics 读取 full 诊断流）
-core/bin/rsa logs events --run /path/to/workspace/logs/run-id
-core/bin/rsa logs events --run /path/to/workspace/logs/run-id --diagnostics
+core/bin/ludens logs events --run /path/to/workspace/logs/run-id
+core/bin/ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
 ```
 
 [analyze-run.py](../../../core/scripts/analyze-run.py) 的核心指标统计口径：

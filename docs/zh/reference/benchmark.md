@@ -6,33 +6,33 @@ Ludens 评测系统遵循 [Harbor Framework](https://github.com/harbor-framework
 
 ## 入口与运行所有权
 
-### 1. `rsa bench` CLI 命令全集
+### 1. `ludens bench` CLI 命令全集
 
-在目标工作区下执行 `rsa bench --help` 可查看全部子命令：
+在目标工作区下执行 `ludens bench --help` 可查看全部子命令：
 
 ```sh
 # 发现、帮助与静态契约校验
-rsa bench list
-rsa bench help ludens/ws-recovery
-rsa bench schema [task|reward|dataset]
-rsa bench validate task /path/to/task
-rsa bench validate reward /path/to/verifier-or-reward.json
-rsa bench validate dataset /path/to/dataset.toml
+ludens bench list
+ludens bench help ludens/ws-recovery
+ludens bench schema [task|reward|dataset]
+ludens bench validate task /path/to/task
+ludens bench validate reward /path/to/verifier-or-reward.json
+ludens bench validate dataset /path/to/dataset.toml
 
 # 执行评测与独立重评
-rsa bench run ludens/ws-recovery [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
-rsa bench verify <run-id> --reason "Regrade fixed measurements"
-rsa bench verify <run-id> --task /path/to/updated-task --reason "Updated grading criteria"
+ludens bench run ludens/ws-recovery [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
+ludens bench verify <run-id> --reason "Regrade fixed measurements"
+ludens bench verify <run-id> --task /path/to/updated-task --reason "Updated grading criteria"
 
 # 历史查询、单次详情、版本对比与数据集聚合
-rsa bench history [namespace/task] [--limit 20]
-rsa bench get <run-id[@verification-id]>
-rsa bench verifications <run-id>
-rsa bench compare <run-id[@verification-id]> <baseline-run-id[@verification-id]>
-rsa bench aggregate <dataset.toml> <run-id-1> <run-id-2> --policy all|graded
+ludens bench history [namespace/task] [--limit 20]
+ludens bench get <run-id[@verification-id]>
+ludens bench verifications <run-id>
+ludens bench compare <run-id[@verification-id]> <baseline-run-id[@verification-id]>
+ludens bench aggregate <dataset.toml> <run-id-1> <run-id-2> --policy all|graded
 ```
 
-- **退出码语义**：`rsa bench run` 在执行完成且评分有效（含得分为 `0`）时返回 `0`；被测程序执行失败返回 `1`；执行成功但 Verifier 缺失或评分失败返回 `2`。
+- **退出码语义**：`ludens bench run` 在执行完成且评分有效（含得分为 `0`）时返回 `0`；被测程序执行失败返回 `1`；执行成功但 Verifier 缺失或评分失败返回 `2`。
 - **静态校验**：`schema` 输出内置的 `ludens-native` 契约导引（`guideOnly: true`）；`validate` 使用静态解析器检查文件结构与字段，绝不执行任务代码或 Verifier 脚本。
 
 ### 2. 运行配置绑定（Run Bindings）
@@ -52,7 +52,7 @@ Harbor 任务包只描述“测什么与怎么判分”，而“运行什么程�
 
 | 占位符 / 字段 | 解析值与边界 |
 | --- | --- |
-| `{rsa}` / `{python}` / `{bun}` | RSA 包根目录（仓库中的 `core/`）、选定框架 Python 解释器（`RSA_PYTHON`）与 Bun 可执行文件路径。 |
+| `{ludens}` / `{python}` / `{bun}` | Ludens 包根目录（仓库中的 `core/`）、选定框架 Python 解释器（`LUDENS_PYTHON`）与 Bun 可执行文件路径。 |
 | `{workspace}` | 作者所在的原工作区绝对路径。 |
 | `{workdir}` | 本次试验的实际执行目录（`workspace: "isolated"` 时为每次试验独立创建的隔离目录）。 |
 | `{artifacts}` | 本次试验独占的产物输出目录（`logs/<run-id>/artifacts`）。 |
@@ -110,12 +110,12 @@ digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde
 
 ## Python 辅助登记是可选的
 
-被测 Python 程序只需直接读取环境变量 `RSA_BENCH_ARTIFACTS` 并写入测量文件（如 `measurements.json`）即可完成试验，无需强制导入任何框架包。若需结构化登记实验条件、被测模型版本或自动收集进程内 `@capability` 调用统计，可选用 `rsa_tools.current_trial()`（完整示例见 [clamp.py](../../../core/benchmarks/examples/clamp.py)）：
+被测 Python 程序只需直接读取环境变量 `LUDENS_BENCH_ARTIFACTS` 并写入测量文件（如 `measurements.json`）即可完成试验，无需强制导入任何框架包。若需结构化登记实验条件、被测模型版本或自动收集进程内 `@capability` 调用统计，可选用 `ludens_tools.current_trial()`（完整示例见 [clamp.py](../../../core/benchmarks/examples/clamp.py)）：
 
 ```python
-from rsa_tools import current_trial
+from ludens_tools import current_trial
 
-trial = current_trial()  # 读取 RSA_BENCH_* 环境变量；非 Shiori 试验环境调用会直接报错
+trial = current_trial()  # 读取 LUDENS_BENCH_* 环境变量；非 Shiori 试验环境调用会直接报错
 trial.conditions(dataset_revision="v3", seed=7)
 trial.subject("model", path="weights.pt", revision="epoch-12")
 samples = measure(already_loaded_model, dataset)
@@ -125,7 +125,7 @@ trial.flush()
 ```
 
 - **职责边界**：`current_trial()` 仅负责在产物目录生成 `artifacts/context.json`（含 `conditions`、`subjects`、`artifacts`、`limitations` 以及本地 observer 捕获的进程内 `@capability` 调用次数与 `codeSHA`），不接管设备、不写 Shiori 事件流。
-- **产物与媒体引用**：`trial.artifact("name.json", value)` 写入新 JSON 文件（禁止覆盖同名文件）；`trial.artifact(external_path)` 按内容哈希复制外部文件；对于已录制的 `.rsa/timeline/` 媒体，传入 `trial.artifact(media)` 即可核验并登记原件引用与视频 PTS，无需重复复制图片或视频字节。
+- **产物与媒体引用**：`trial.artifact("name.json", value)` 写入新 JSON 文件（禁止覆盖同名文件）；`trial.artifact(external_path)` 按内容哈希复制外部文件；对于已录制的 `.ludens/timeline/` 媒体，传入 `trial.artifact(media)` 即可核验并登记原件引用与视频 PTS，无需重复复制图片或视频字节。
 
 ## 事实、评分与重评
 
@@ -135,12 +135,12 @@ Shiori 在启动 `tests/test.sh` 时清理实时设备 socket、控制 `epoch` �
 
 | 环境变量 | 指向路径与用途 |
 | --- | --- |
-| `RSA_BENCH_TASK_DIR` | 本次评分使用的固定任务包目录（`.core/benchmarks/tasks/<digest 十六进制部分>/`）。 |
-| `RSA_BENCH_INPUT` | 本次评分输入清单 JSON（含 trial 元数据与证据路径引用）。 |
-| `RSA_BENCH_ARTIFACTS` | 被测程序产出的 `logs/<run-id>/artifacts/` 目录，供评分器读取事实；不施加文件系统只读权限。 |
-| `RSA_BENCH_VERIFIER_DIR` | 本次评分独占的输出目录（`logs/<run-id>/verifier/<verification-id>/`）。 |
+| `LUDENS_BENCH_TASK_DIR` | 本次评分使用的固定任务包目录（`.core/benchmarks/tasks/<digest 十六进制部分>/`）。 |
+| `LUDENS_BENCH_INPUT` | 本次评分输入清单 JSON（含 trial 元数据与证据路径引用）。 |
+| `LUDENS_BENCH_ARTIFACTS` | 被测程序产出的 `logs/<run-id>/artifacts/` 目录，供评分器读取事实；不施加文件系统只读权限。 |
+| `LUDENS_BENCH_VERIFIER_DIR` | 本次评分独占的输出目录（`logs/<run-id>/verifier/<verification-id>/`）。 |
 
-`tests/test.sh` 将最终数值评分写入 `$RSA_BENCH_VERIFIER_DIR/reward.json`（可选将详细诊断写入同目录的 `details.json`）：
+`tests/test.sh` 将最终数值评分写入 `$LUDENS_BENCH_VERIFIER_DIR/reward.json`（可选将详细诊断写入同目录的 `details.json`）：
 
 ```json
 {"accuracy": 0.94, "latency_ms": 12.3, "success": 1}
@@ -151,9 +151,9 @@ Shiori 在启动 `tests/test.sh` 时清理实时设备 socket、控制 `epoch` �
 
 ### 2. 多版本重评、对比与数据集聚合
 
-- **无损重评（`rsa bench verify`）**：每次执行 `verify` 都会在 `verifier/<new-verification-id>/` 下追加一条独立评分记录，并在评分结束后原子更新当前默认 verification 指针；失败评分也成为当前版本，不自动回退使用上次分数。原执行状态（`trial.json`）与历史评分版本完整保留。若传入 `--task <new-task-dir>`，系统会将新任务包固定并记录新的评分 Task 摘要，同时保留试验原本的执行 Task 身份。
-- **双试验对比（`rsa bench compare`）**：对比两次试验（或同一试验的两个评分版本 `run-id@ver-id`）的任务摘要、参数、`conditions`、`subjects` 与数值维度差值。仅对双方均存在的指标计算差值，缺失维度保持缺失而不补零；当实验条件或被测版本不同时明确标注差异，不直接宣称能力提升。
-- **数据集聚合（`rsa bench aggregate`）**：对显式选定的一组 trial 执行统计。默认按 Task 分组输出 `byTask`（采用 Harbor 均值语义：缺失或 `null` 计为 `0`，同时输出 `total / valid / error` 计数）；若 Dataset 声明了自定义 `metric.py`（接收 `-i <JSONL> -o <JSON>`），则校验文件摘要后调用该脚本计算跨任务聚合指标。`--policy all` 保留全部选定试验，`--policy graded` 显式剔除无有效评分的试验并记录原因。
+- **无损重评（`ludens bench verify`）**：每次执行 `verify` 都会在 `verifier/<new-verification-id>/` 下追加一条独立评分记录，并在评分结束后原子更新当前默认 verification 指针；失败评分也成为当前版本，不自动回退使用上次分数。原执行状态（`trial.json`）与历史评分版本完整保留。若传入 `--task <new-task-dir>`，系统会将新任务包固定并记录新的评分 Task 摘要，同时保留试验原本的执行 Task 身份。
+- **双试验对比（`ludens bench compare`）**：对比两次试验（或同一试验的两个评分版本 `run-id@ver-id`）的任务摘要、参数、`conditions`、`subjects` 与数值维度差值。仅对双方均存在的指标计算差值，缺失维度保持缺失而不补零；当实验条件或被测版本不同时明确标注差异，不直接宣称能力提升。
+- **数据集聚合（`ludens bench aggregate`）**：对显式选定的一组 trial 执行统计。默认按 Task 分组输出 `byTask`（采用 Harbor 均值语义：缺失或 `null` 计为 `0`，同时输出 `total / valid / error` 计数）；若 Dataset 声明了自定义 `metric.py`（接收 `-i <JSONL> -o <JSON>`），则校验文件摘要后调用该脚本计算跨任务聚合指标。`--policy all` 保留全部选定试验，`--policy graded` 显式剔除无有效评分的试验并记录原因。
 
 ## 文件与展示
 

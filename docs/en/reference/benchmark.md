@@ -6,33 +6,33 @@ The core architectural principle is **a single execution kernel with decoupled j
 
 ## Entry points and run ownership
 
-### 1. Full `rsa bench` CLI command set
+### 1. Full `ludens bench` CLI command set
 
-Run `rsa bench --help` under the target workspace to see all subcommands:
+Run `ludens bench --help` under the target workspace to see all subcommands:
 
 ```sh
 # Discovery, help, and static contract checks
-rsa bench list
-rsa bench help ludens/ws-recovery
-rsa bench schema [task|reward|dataset]
-rsa bench validate task /path/to/task
-rsa bench validate reward /path/to/verifier-or-reward.json
-rsa bench validate dataset /path/to/dataset.toml
+ludens bench list
+ludens bench help ludens/ws-recovery
+ludens bench schema [task|reward|dataset]
+ludens bench validate task /path/to/task
+ludens bench validate reward /path/to/verifier-or-reward.json
+ludens bench validate dataset /path/to/dataset.toml
 
 # Run evaluations and independent regrades
-rsa bench run ludens/ws-recovery [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
-rsa bench verify <run-id> --reason "Regrade fixed measurements"
-rsa bench verify <run-id> --task /path/to/updated-task --reason "Updated grading criteria"
+ludens bench run ludens/ws-recovery [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
+ludens bench verify <run-id> --reason "Regrade fixed measurements"
+ludens bench verify <run-id> --task /path/to/updated-task --reason "Updated grading criteria"
 
 # History queries, single-run details, version comparison, and dataset aggregation
-rsa bench history [namespace/task] [--limit 20]
-rsa bench get <run-id[@verification-id]>
-rsa bench verifications <run-id>
-rsa bench compare <run-id[@verification-id]> <baseline-run-id[@verification-id]>
-rsa bench aggregate <dataset.toml> <run-id-1> <run-id-2> --policy all|graded
+ludens bench history [namespace/task] [--limit 20]
+ludens bench get <run-id[@verification-id]>
+ludens bench verifications <run-id>
+ludens bench compare <run-id[@verification-id]> <baseline-run-id[@verification-id]>
+ludens bench aggregate <dataset.toml> <run-id-1> <run-id-2> --policy all|graded
 ```
 
-- **Exit-code semantics**: `rsa bench run` returns `0` when execution completes with a valid score (including a score of `0`); `1` when the program under test fails; `2` when execution succeeds but the Verifier is missing or scoring fails.
+- **Exit-code semantics**: `ludens bench run` returns `0` when execution completes with a valid score (including a score of `0`); `1` when the program under test fails; `2` when execution succeeds but the Verifier is missing or scoring fails.
 - **Static checks**: `schema` prints the built-in `ludens-native` contract guide (`guideOnly: true`); `validate` checks file structure and fields with a static parser and never executes task code or Verifier scripts.
 
 ### 2. Run bindings
@@ -52,7 +52,7 @@ Placeholders and execution semantics supported by run configurations:
 
 | Placeholder / field | Resolved value and bounds |
 | --- | --- |
-| `{rsa}` / `{python}` / `{bun}` | RSA package root (`core/` in the repo), the selected framework Python interpreter (`RSA_PYTHON`), and the Bun executable path. |
+| `{ludens}` / `{python}` / `{bun}` | Ludens package root (`core/` in the repo), the selected framework Python interpreter (`LUDENS_PYTHON`), and the Bun executable path. |
 | `{workspace}` | Absolute path of the author's own workspace. |
 | `{workdir}` | The trial's actual execution directory (a freshly created isolated directory per trial when `workspace: "isolated"`). |
 | `{artifacts}` | The trial's exclusive artifact output directory (`logs/<run-id>/artifacts`). |
@@ -110,12 +110,12 @@ After modifying any built-in task file, the corresponding `digest` in `dataset.t
 
 ## Python helper registration is optional
 
-A Python program under test only needs to read the `RSA_BENCH_ARTIFACTS` environment variable and write measurement files (e.g. `measurements.json`) to complete a trial — importing any framework package is not required. For structured registration of experiment conditions, tested model versions, or automatic collection of in-process `@capability` call statistics, `rsa_tools.current_trial()` is available (full example in [clamp.py](../../../core/benchmarks/examples/clamp.py)):
+A Python program under test only needs to read the `LUDENS_BENCH_ARTIFACTS` environment variable and write measurement files (e.g. `measurements.json`) to complete a trial — importing any framework package is not required. For structured registration of experiment conditions, tested model versions, or automatic collection of in-process `@capability` call statistics, `ludens_tools.current_trial()` is available (full example in [clamp.py](../../../core/benchmarks/examples/clamp.py)):
 
 ```python
-from rsa_tools import current_trial
+from ludens_tools import current_trial
 
-trial = current_trial()  # Reads RSA_BENCH_* env vars; raises outside a Shiori trial environment
+trial = current_trial()  # Reads LUDENS_BENCH_* env vars; raises outside a Shiori trial environment
 trial.conditions(dataset_revision="v3", seed=7)
 trial.subject("model", path="weights.pt", revision="epoch-12")
 samples = measure(already_loaded_model, dataset)
@@ -125,7 +125,7 @@ trial.flush()
 ```
 
 - **Responsibility boundary**: `current_trial()` only generates `artifacts/context.json` in the artifact directory (with `conditions`, `subjects`, `artifacts`, `limitations`, plus in-process `@capability` call counts and `codeSHA` captured by the local observer) — it takes over no device and writes no Shiori event stream.
-- **Artifact and media references**: `trial.artifact("name.json", value)` writes a new JSON file (overwriting a same-named file is forbidden); `trial.artifact(external_path)` copies an external file by content hash; for already-recorded `.rsa/timeline/` media, passing `trial.artifact(media)` verifies and registers the original reference and video PTS without copying image or video bytes again.
+- **Artifact and media references**: `trial.artifact("name.json", value)` writes a new JSON file (overwriting a same-named file is forbidden); `trial.artifact(external_path)` copies an external file by content hash; for already-recorded `.ludens/timeline/` media, passing `trial.artifact(media)` verifies and registers the original reference and video PTS without copying image or video bytes again.
 
 ## Facts, scoring, and regrading
 
@@ -135,12 +135,12 @@ When Shiori starts `tests/test.sh`, it clears live device sockets, control `epoc
 
 | Environment variable | Target path and purpose |
 | --- | --- |
-| `RSA_BENCH_TASK_DIR` | Pinned task-package directory used for this scoring (`.core/benchmarks/tasks/<hex part of digest>/`). |
-| `RSA_BENCH_INPUT` | This scoring's input manifest JSON (with trial metadata and evidence path references). |
-| `RSA_BENCH_ARTIFACTS` | The program under test's `logs/<run-id>/artifacts/` directory for the scorer to read facts from; no read-only filesystem permission is imposed. |
-| `RSA_BENCH_VERIFIER_DIR` | This scoring's exclusive output directory (`logs/<run-id>/verifier/<verification-id>/`). |
+| `LUDENS_BENCH_TASK_DIR` | Pinned task-package directory used for this scoring (`.core/benchmarks/tasks/<hex part of digest>/`). |
+| `LUDENS_BENCH_INPUT` | This scoring's input manifest JSON (with trial metadata and evidence path references). |
+| `LUDENS_BENCH_ARTIFACTS` | The program under test's `logs/<run-id>/artifacts/` directory for the scorer to read facts from; no read-only filesystem permission is imposed. |
+| `LUDENS_BENCH_VERIFIER_DIR` | This scoring's exclusive output directory (`logs/<run-id>/verifier/<verification-id>/`). |
 
-`tests/test.sh` writes the final numeric score to `$RSA_BENCH_VERIFIER_DIR/reward.json` (optionally writing detailed diagnostics to `details.json` in the same directory):
+`tests/test.sh` writes the final numeric score to `$LUDENS_BENCH_VERIFIER_DIR/reward.json` (optionally writing detailed diagnostics to `details.json` in the same directory):
 
 ```json
 {"accuracy": 0.94, "latency_ms": 12.3, "success": 1}
@@ -151,9 +151,9 @@ When Shiori starts `tests/test.sh`, it clears live device sockets, control `epoc
 
 ### 2. Multi-version regrade, compare, and dataset aggregation
 
-- **Lossless regrade (`rsa bench verify`)**: each `verify` run appends an independent scoring record under `verifier/<new-verification-id>/` and atomically advances the current-default verification pointer after scoring; a failed scoring still becomes the current version — the previous score is never auto-restored. The original execution state (`trial.json`) and historical scoring versions are fully kept. With `--task <new-task-dir>`, the new task package is pinned and a new scoring-Task digest recorded, while the trial keeps its original execution-Task identity.
-- **Two-trial compare (`rsa bench compare`)**: compares two trials (or two scoring versions of one trial, `run-id@ver-id`) on task digests, parameters, `conditions`, `subjects`, and numeric dimension deltas. Deltas are computed only for metrics present on both sides; missing dimensions stay missing, never zero-filled; differing experiment conditions or tested versions are explicitly flagged rather than claimed as capability gains.
-- **Dataset aggregation (`rsa bench aggregate`)**: statistics over an explicitly selected trial set. By default grouped per task as `byTask` (Harbor mean semantics: missing or `null` counts as `0`, with `total / valid / error` counts); if the Dataset declares a custom `metric.py` (taking `-i <JSONL> -o <JSON>`), its file digest is verified and the script is called to compute cross-task aggregate metrics. `--policy all` keeps all selected trials; `--policy graded` explicitly drops trials with no valid score and records the reason.
+- **Lossless regrade (`ludens bench verify`)**: each `verify` run appends an independent scoring record under `verifier/<new-verification-id>/` and atomically advances the current-default verification pointer after scoring; a failed scoring still becomes the current version — the previous score is never auto-restored. The original execution state (`trial.json`) and historical scoring versions are fully kept. With `--task <new-task-dir>`, the new task package is pinned and a new scoring-Task digest recorded, while the trial keeps its original execution-Task identity.
+- **Two-trial compare (`ludens bench compare`)**: compares two trials (or two scoring versions of one trial, `run-id@ver-id`) on task digests, parameters, `conditions`, `subjects`, and numeric dimension deltas. Deltas are computed only for metrics present on both sides; missing dimensions stay missing, never zero-filled; differing experiment conditions or tested versions are explicitly flagged rather than claimed as capability gains.
+- **Dataset aggregation (`ludens bench aggregate`)**: statistics over an explicitly selected trial set. By default grouped per task as `byTask` (Harbor mean semantics: missing or `null` counts as `0`, with `total / valid / error` counts); if the Dataset declares a custom `metric.py` (taking `-i <JSONL> -o <JSON>`), its file digest is verified and the script is called to compute cross-task aggregate metrics. `--policy all` keeps all selected trials; `--policy graded` explicitly drops trials with no valid score and records the reason.
 
 ## Files and display
 

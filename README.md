@@ -10,11 +10,11 @@ Ludens connects agents to arbitrary PC desktops and console environments, giving
 
 ## Why Ludens
 
-- **Plug into any PC or console environment.** Discover device controls and workspace Python capabilities through a unified `rsa controller` interface, with parameters inspected on demand.
+- **Plug into any PC or console environment.** Discover device controls and workspace Python capabilities through a unified `ludens controller` interface, with parameters inspected on demand.
 - **Self-adaptation in a real workspace.** Resident `perception.py` and `action.py` processes keep models, state, and high-frequency sampling in memory across turns without modifying the agent runtime.
-- **Continuous self-improvement.** Agents turn repeated interaction patterns into callable `@capability` functions, compose tools via `rsa_tools.Client`, and persist experience in `skills/` and `memory/`.
+- **Continuous self-improvement.** Agents turn repeated interaction patterns into callable `@capability` functions, compose tools via `ludens_tools.Client`, and persist experience in `skills/` and `memory/`.
 - **Full-trace observability.** Inspect model inputs, tool calls, timing, and linked device actions in the web Dashboard or optional Ludens Pet desktop companion.
-- **Measurable progress.** Evaluate adaptation and skill reuse with Harbor task packages, Shiori execution budgets, and independent verifiers (`rsa bench`).
+- **Measurable progress.** Evaluate adaptation and skill reuse with Harbor task packages, Shiori execution budgets, and independent verifiers (`ludens bench`).
 
 ## Supported environments
 
@@ -44,20 +44,20 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PATH"
 Create a workspace for your local PC desktop (`--driver cua`, or attach an external driver package via `--driver-package`):
 
 ```sh
-rsa init --name my-task --driver cua
+ludens init --name my-task --driver cua
 cd "$HOME/.ludens/workspaces/my-task"
-rsa up
-rsa controller list
-rsa auto on
+ludens up
+ludens controller list
+ludens auto on
 ```
 
-Open [http://127.0.0.1:3015](http://127.0.0.1:3015) for the web console. `rsa auto on` grants the agent a device control lease and starts autonomous execution. On a fresh workspace, the agent initializes `perception.py` and loads it via `rsa perception reload`.
+Open [http://127.0.0.1:3015](http://127.0.0.1:3015) for the web console. `ludens auto on` grants the agent a device control lease and starts autonomous execution. On a fresh workspace, the agent initializes `perception.py` and loads it via `ludens perception reload`.
 
 To pause or shut down:
 
 ```sh
-rsa auto off  # Return device control; keep services running
-rsa down      # Stop workspace-managed services
+ludens auto off  # Return device control; keep services running
+ludens down      # Stop workspace-managed services
 ```
 
 For workspace management, multi-driver options, and the optional **Ludens Pet** desktop companion (`app`), see the [Quickstart guide](docs/en/tutorials/quickstart.md).
@@ -77,19 +77,19 @@ Each workspace is a standalone code directory outside the repository (`~/.ludens
 
 ```text
 my-task/
-├── rsa.json          # Workspace & driver launch configuration
+├── ludens.json          # Workspace & driver launch configuration
 ├── baseware.json     # Generated device capability reference
 ├── perception.py     # Resident, agent-authored perception process
 ├── action.py         # Resident control loop while auto is active
 ├── skills/           # Reusable @capability functions and scripts
 ├── memory/           # Task goals, state, and learned knowledge
-└── .rsa/ & logs/     # Session identity, timeline archives, and run logs
+└── .ludens/ & logs/     # Session identity, timeline archives, and run logs
 ```
 
 ## Boundaries and safety
 
 - **Trusted local execution:** The agent executes shell commands and Python directly on the host (and shares the desktop when using Cua). Use separate OS sessions or VMs if you require isolation.
-- **Explicit control leases:** Device input requires an active lease (`rsa auto on`). Revoking control (`rsa auto off`) immediately invalidates device input permissions.
+- **Explicit control leases:** Device input requires an active lease (`ludens auto on`). Revoking control (`ludens auto off`) immediately invalidates device input permissions.
 - **Privacy:** Local logs and model requests may include screenshots and desktop state; review before sharing.
 
 ## Documentation

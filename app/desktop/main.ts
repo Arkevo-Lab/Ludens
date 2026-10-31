@@ -24,7 +24,7 @@ if (values.help) {
     throw new Error('--dashboard must be a local HTTP URL')
   }
   const here = dirname(fileURLToPath(import.meta.url))
-  app.setName('Ludens Ludens Pet')
+  app.setName('Ludens Pet')
   app.setPath('userData', resolve(values.profile ?? join(ludensHome(), 'pet', 'profile')))
   mkdirSync(app.getPath('userData'), { recursive: true })
   if (!app.requestSingleInstanceLock()) {

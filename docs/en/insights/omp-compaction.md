@@ -61,4 +61,4 @@ The trade-off is clear: **because we reuse a minutes-old snapshot summary, messa
 To keep future upgrades from breaking this behavior, two checks guard it:
 
 - **Integration test**: [core/tests/omp-speculation.test.ts](../../../core/tests/omp-speculation.test.ts) runs the real OMP preparation / validation / commit / tail replay, verifying survival past 20k growth, waiting for in-flight candidates at the threshold, invalidation on branch or headroom failures, and clean cancellation without late commits.
-- **Built-in benchmark**: `rsa bench run ludens/background-compaction` (see [Benchmark](../reference/benchmark.md)), which replays the full background-compaction lifecycle offline with controlled streams.
+- **Built-in benchmark**: `ludens bench run ludens/background-compaction` (see [Benchmark](../reference/benchmark.md)), which replays the full background-compaction lifecycle offline with controlled streams.
