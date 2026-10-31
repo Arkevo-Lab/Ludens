@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import assert from 'node:assert/strict'
 import { createCompanion, resizeCompanionWindow, setCompanionBounds } from './companion.js'
-import type { LogBlock } from './rsa-source.js'
+import type { LogBlock } from './ludens-source.js'
 
 const home = mkdtempSync(join(tmpdir(), 'ludens-companion-'))
 app.setPath('userData', home)
@@ -148,7 +148,7 @@ void app.whenReady().then(async () => {
   })()`)
   assert.ok(audio.duration > 0 && audio.duration <= 10)
   assert.equal(audio.volume, .5)
-  // End-to-end RSA display acceptance uses a local fixture, never a model request.
+  // End-to-end Ludens display acceptance uses a local fixture, never a model request.
   // Keeping the owner visible must not redirect Pet's speech to a corner toast.
   owner.showInactive()
   const blocks: LogBlock[] = [{ id: 'fixture:thinking', kind: 'thinking', at: new Date().toISOString(),
@@ -167,7 +167,7 @@ void app.whenReady().then(async () => {
   assert.ok(activity.text.includes('Read the current screen'))
   assert.equal(activity.open, true)
   assert.ok(activity.id)
-  writeFileSync(join(home, 'rsa-activity.png'), (await pet.webContents.capturePage()).toPNG())
+  writeFileSync(join(home, 'ludens-activity.png'), (await pet.webContents.capturePage()).toPNG())
   blocks[0].status = 'complete'
   blocks.push(
     { id: 'fixture:text', kind: 'text', at: new Date().toISOString(), title: '文本', text: 'I will inspect the evidence.', status: 'complete' },
@@ -179,7 +179,7 @@ void app.whenReady().then(async () => {
     while (!(await pet.webContents.executeJavaScript('message.textContent')).includes(expected) && Date.now() < deadline)
       await new Promise(done => setTimeout(done, 100))
     assert.ok((await pet.webContents.executeJavaScript('message.textContent')).includes(expected), `Missing ${kind} bubble`)
-    writeFileSync(join(home, `rsa-${kind}.png`), (await pet.webContents.capturePage()).toPNG())
+    writeFileSync(join(home, `ludens-${kind}.png`), (await pet.webContents.capturePage()).toPNG())
   }
   await pet.webContents.executeJavaScript(`window.companion.dismissActivity(activityId)`)
   assert.equal(await pet.webContents.executeJavaScript(`bubble.classList.contains('open')`), false)
@@ -252,7 +252,7 @@ void app.whenReady().then(async () => {
   await new Promise(done => setTimeout(done, 100))
   assert.equal(await pet.webContents.executeJavaScript(`message.querySelector('details').open`), true, 'Streaming update collapsed an expanded result')
   writeFileSync(join(home, 'content-tool-result.png'), (await pet.webContents.capturePage()).toPNG())
-  console.log('[companion-preview] smoke passed', JSON.stringify({ ...info, audio, rsaActivity: activity.text }))
+  console.log('[companion-preview] smoke passed', JSON.stringify({ ...info, audio, ludensActivity: activity.text }))
   // Tear down native windows on a task boundary, outside the renderer IPC promise.
   await new Promise<void>(done => setImmediate(() => { owner.destroy(); done() }))
   assert.equal(pet.isDestroyed(), true)

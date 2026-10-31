@@ -36,6 +36,6 @@ test("package verification and navigation remain available without a usable work
     assert.match(html, /capabilitiesView\.discoverNote2a/);
     assert.match(html, /capabilitiesView\.discoverNote2b/);
     assert.match(html, /view=docs/);
-    assert.doesNotMatch(html, /rsa init/);
+    assert.doesNotMatch(html, /ludens init/);
   }
 });

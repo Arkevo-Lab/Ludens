@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { byteRange, fileResponse } from "../lib/file-response";
 
 test("media ranges cover full, suffix, open, invalid, HEAD and cancelled reads", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-media-range-")), file = join(directory, "video.mp4");
+  const directory = await mkdtemp(join(tmpdir(), "ludens-media-range-")), file = join(directory, "video.mp4");
   await writeFile(file, "0123456789");
   const media = { file, mediaType: "video/mp4" };
   const request = (range?: string, method = "GET") => new Request("http://localhost/media", { method,
@@ -31,7 +31,7 @@ test("media ranges cover full, suffix, open, invalid, HEAD and cancelled reads",
 });
 
 test("a range from an 8 GiB sparse video does not allocate the video in memory", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-large-video-")), file = join(directory, "video.mp4");
+  const directory = await mkdtemp(join(tmpdir(), "ludens-large-video-")), file = join(directory, "video.mp4");
   const handle = await open(file, "w");
   await handle.truncate(8 * 1024 ** 3); await handle.write(Buffer.from("tail"), 0, 4, 8 * 1024 ** 3 - 4); await handle.close();
   try {
@@ -44,7 +44,7 @@ test("a range from an 8 GiB sparse video does not allocate the video in memory",
 });
 
 test("published video snapshots keep their byte length while the file grows", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-video-snapshot-")), file = join(directory, "video.mp4");
+  const directory = await mkdtemp(join(tmpdir(), "ludens-video-snapshot-")), file = join(directory, "video.mp4");
   const media = { file, mediaType: "video/mp4", size: 4, cacheControl: "private, max-age=31536000, immutable" };
   const request = (range?: string) => new Request("http://localhost/video?bytes=4", { headers: range ? { Range: range } : undefined });
   try {

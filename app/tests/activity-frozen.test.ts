@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { awaitArchive } from "./fixtures/await-archive";
 
 test("getActivity keeps snapshots and cursor deltas readable while a published generation is frozen", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-activity-frozen-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-activity-frozen-")));
   const previousRoot = process.env.LUDENS_HOME;
   process.env.LUDENS_HOME = root;
   // getActivity resolves the same registry and retained index as the HTTP worker.

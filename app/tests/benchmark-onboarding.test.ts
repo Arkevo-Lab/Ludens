@@ -82,8 +82,8 @@ test("guidance links preserve workspace and document language without stale resu
 });
 
 test("read-only preparation commands quote paths and task names, and never start an execution", () => {
-  assert.equal(benchmarkListCommand("/work/it's here"), "rsa --workspace '/work/it'\\''s here' bench list");
-  assert.equal(benchmarkTaskHelpCommand("/work/it's here", "fixture/task", "sha256:abc"), "rsa --workspace '/work/it'\\''s here' bench help 'fixture/task' --digest 'sha256:abc'");
+  assert.equal(benchmarkListCommand("/work/it's here"), "ludens --workspace '/work/it'\\''s here' bench list");
+  assert.equal(benchmarkTaskHelpCommand("/work/it's here", "fixture/task", "sha256:abc"), "ludens --workspace '/work/it'\\''s here' bench help 'fixture/task' --digest 'sha256:abc'");
 });
 
 test("task filters change history scope without clearing independently selected evidence", () => {

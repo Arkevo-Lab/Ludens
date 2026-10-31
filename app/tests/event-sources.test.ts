@@ -20,7 +20,7 @@ function event(type: string, seq: number, ms: number, recordingId?: string, data
     origin: { eventId: `service:${seq}`, clockId: "service", seq, at, atMs: ms }, source: { component: "baseware" } };
 }
 async function fixture() {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-source-reader-"))), run = join(root, "run"), source = join(root, "device");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-source-reader-"))), run = join(root, "run"), source = join(root, "device");
   await Promise.all([mkdir(run), mkdir(join(source, "events"), { recursive: true }), mkdir(join(source, "diagnostics"), { recursive: true })]);
   await writeFile(join(source, "source.json"), JSON.stringify({ sourceId: "service", format: "baseware-events-v1" }));
   const dependency = { sourceId: "service", format: "baseware-events-v1", root: source, recordingId: "run-A", windows: [{ afterSeq: 0, throughSeq: 3 }] };

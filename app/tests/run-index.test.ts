@@ -12,11 +12,11 @@ function events() {
   let seq = 0;
   return (type: string, data: Record<string, any> = {}, trace: Record<string, string> = {}): Event => ({
     seq: ++seq, at: new Date(seq * 1000).toISOString(), atMs: seq * 1000, type, data,
-    trace: { epoch: "cycle", ...trace }, source: { component: "rsa" },
+    trace: { epoch: "cycle", ...trace }, source: { component: "ludens" },
   });
 }
 async function fixture(values: Event[], check: (index: LogIndex, path: string) => Promise<void>) {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-run-index-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-run-index-")));
   try {
     await writeFile(join(path, "events.jsonl"), values.map(value => JSON.stringify(value)).join("\n") + "\n");
     const index = await getLogIndex(path);

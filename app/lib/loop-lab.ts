@@ -43,7 +43,7 @@ export interface OmpLayers {
 }
 
 export interface LoopConfig {
-  rsa: RsaLayers;
+  ludens: RsaLayers;
   omp: OmpLayers;
 }
 
@@ -103,27 +103,27 @@ export interface LoopPreset {
 export const PRESETS: LoopPreset[] = [
   {
     id: "now",
-    cfg: { rsa: { ch1: true, ch2: false, gate: false, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
+    cfg: { ludens: { ch1: true, ch2: false, gate: false, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
   },
   {
     id: "legacy", legacy: true,
-    cfg: { rsa: { ch1: true, ch2: true, gate: false, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
+    cfg: { ludens: { ch1: true, ch2: true, gate: false, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
   },
   {
     id: "gate",
-    cfg: { rsa: { ch1: true, ch2: true, gate: true, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
+    cfg: { ludens: { ch1: true, ch2: true, gate: true, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
   },
   {
     id: "pull",
-    cfg: { rsa: { ch1: false, ch2: false, gate: false, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
+    cfg: { ludens: { ch1: false, ch2: false, gate: false, state: true, cont: true }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: true } },
   },
   {
     id: "bare",
-    cfg: { rsa: { ch1: false, ch2: false, gate: false, state: false, cont: false }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: false } },
+    cfg: { ludens: { ch1: false, ch2: false, gate: false, state: false, cont: false }, omp: { agents: true, dateCwd: true, schemas: true, pruning: true, compaction: true, imgInf: false } },
   },
 ];
 
-export const RSA_LAYER_DEFS: Array<{ key: keyof RsaLayers }> = [
+export const LUDENS_LAYER_DEFS: Array<{ key: keyof RsaLayers }> = [
   { key: "ch1" }, { key: "ch2" }, { key: "gate" }, { key: "state" }, { key: "cont" },
 ];
 
@@ -174,7 +174,7 @@ export function simulate(p: LoopParams, c: LoopConfig): LoopResult {
   const injectFrame = (ch: LoopEventChannel, tB: number): boolean => {
     // 屏幕语义变化窗口 = (上次交付边界, 本次边界];门控开启且无变化则跳过。
     const changed = changeTimes.some(x => x > Math.max(lastBoundary, 0) && x <= tB);
-    if (c.rsa.gate && !changed && tB > 0) {
+    if (c.ludens.gate && !changed && tB > 0) {
       gated++; lastBoundary = tB;
       return false;
     }
@@ -187,8 +187,8 @@ export function simulate(p: LoopParams, c: LoopConfig): LoopResult {
     return true;
   };
   const maybeInject = (ch: LoopEventChannel, tB: number) => {
-    if (ch === "prompt_start" && !c.rsa.ch1) return;
-    if (ch === "tool_batch" && !c.rsa.ch2) return;
+    if (ch === "prompt_start" && !c.ludens.ch1) return;
+    if (ch === "tool_batch" && !c.ludens.ch2) return;
     // 与 extension.ts 相同的去重:自动通道只在最新主样本 id 变化时交付。
     const newest = Math.floor(tB * p.hz);
     if (newest === lastMain) {
@@ -242,7 +242,7 @@ export function simulate(p: LoopParams, c: LoopConfig): LoopResult {
       } else {
         maybeInject("tool_batch", now);
       }
-      if (c.rsa.state && b === Math.floor(p.batches / 2) && rounds <= 2) {
+      if (c.ludens.state && b === Math.floor(p.batches / 2) && rounds <= 2) {
         ptext.tokens += 120;
         log.push({ ch: "state", tok: 120, t: now, omp: false });
       }
@@ -259,7 +259,7 @@ export function simulate(p: LoopParams, c: LoopConfig): LoopResult {
       convo.tokens += p.asst;
       log.push({ ch: "final", tok: p.asst, t: now, omp: true });
     }
-    if (!c.rsa.cont) break;
+    if (!c.ludens.cont) break;
   }
   return {
     series, frames, gated, compactions, pruned, requests, rounds, log,

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { consumerRecorder, rsaProjectId, RsaSource, type RsaActivitySnapshot, type RsaActivitySource, type RsaPetSnapshot } from './rsa-source.js'
+import { consumerRecorder, ludensProjectId, LudensSource, type LudensActivitySnapshot, type LudensActivitySource, type LudensPetSnapshot } from './ludens-source.js'
 
 export interface PetTarget {
   project: string
@@ -7,15 +7,15 @@ export interface PetTarget {
   revision: string
   updatedAt: string
 }
-type SourceFactory = (workspace: string, onSnapshot: (snapshot: RsaPetSnapshot) => void) => RsaActivitySource
+type SourceFactory = (workspace: string, onSnapshot: (snapshot: LudensPetSnapshot) => void) => LudensActivitySource
 type ConsumerPhase = 'idle' | 'switching' | 'following' | 'error'
 
 /** One desktop instance follows the Dashboard's selected workspace, independently of page navigation. */
-export class PetSessionCoordinator implements RsaActivitySource {
+export class PetSessionCoordinator implements LudensActivitySource {
   private target: PetTarget | null = null
-  private source: RsaActivitySource | undefined
+  private source: LudensActivitySource | undefined
   private generation = 0
-  private current: RsaPetSnapshot
+  private current: LudensPetSnapshot
   private phase: ConsumerPhase = 'idle'
   private loadedRevision: string | null = null
   private stopped = false
@@ -31,25 +31,25 @@ export class PetSessionCoordinator implements RsaActivitySource {
 
   constructor(private options: {
     dashboardUrl: string
-    onSnapshot(snapshot: RsaPetSnapshot): void
+    onSnapshot(snapshot: LudensPetSnapshot): void
     onTargetChanged(): void
     createSource?: SourceFactory
   }) {
     this.origin = new URL(options.dashboardUrl).origin
     this.current = this.empty('请选择要跟随的工作区')
-    this.createSource = options.createSource ?? ((workspace, onSnapshot) => new RsaSource({
+    this.createSource = options.createSource ?? ((workspace, onSnapshot) => new LudensSource({
       workspace, dashboardUrl: this.origin, record: consumerRecorder(workspace), onSnapshot,
     }))
   }
 
   identity() { return `${this.origin}:pet:${this.generation}` }
-  record: NonNullable<RsaActivitySource['record']> = (...args) => this.source?.record?.(...args)
-  private empty(phase: string): RsaPetSnapshot {
+  record: NonNullable<LudensActivitySource['record']> = (...args) => this.source?.record?.(...args)
+  private empty(phase: string): LudensPetSnapshot {
     return { workspace: this.target?.workspace ?? null, runId: null, epoch: null, phase,
       intent: null, observationUrl: null, updatedAt: null, error: null,
       dashboardUrl: this.target ? `${this.origin}/?project=${encodeURIComponent(this.target.project)}&view=live` : `${this.origin}/` }
   }
-  private publish(snapshot: RsaPetSnapshot) {
+  private publish(snapshot: LudensPetSnapshot) {
     this.current = snapshot
     this.options.onSnapshot(snapshot)
   }
@@ -67,7 +67,7 @@ export class PetSessionCoordinator implements RsaActivitySource {
     this.heartbeatTimer = setInterval(() => { void this.heartbeat() }, 2_500)
     // An explicit launch workspace only supplies the first-ever selection.
     if (workspace) {
-      try { await this.request('PUT', { project: rsaProjectId(workspace), ifUnset: true }) }
+      try { await this.request('PUT', { project: ludensProjectId(workspace), ifUnset: true }) }
       catch { /* The shared target remains authoritative; the next GET reports connection failures. */ }
     }
     await this.pollTarget()
@@ -119,7 +119,7 @@ export class PetSessionCoordinator implements RsaActivitySource {
     this.options.onTargetChanged()
     void this.heartbeat()
   }
-  async read(signal?: AbortSignal): Promise<RsaActivitySnapshot> {
+  async read(signal?: AbortSignal): Promise<LudensActivitySnapshot> {
     this.abort.signal.throwIfAborted()
     signal?.throwIfAborted()
     const generation = this.generation, source = this.source

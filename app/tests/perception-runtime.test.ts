@@ -59,8 +59,8 @@ test("runtime reads the canonical live host independently of saved settings, cat
   try {
     await f.listen();
     await writeFile(join(f.home, "registry", "unrelated.json"), "{");
-    await writeFile(join(f.workspace, ".rsa", "settings.json"), "{");
-    const before = await readdir(join(f.workspace, ".rsa"));
+    await writeFile(join(f.workspace, ".ludens", "settings.json"), "{");
+    const before = await readdir(join(f.workspace, ".ludens"));
     const result = await worker.call("perceptionRuntime", ["selected", f.workspace]);
     assert.equal(result.connection, "reachable", "connected:false describes the device, not the host transport");
     assert.equal(result.runId, f.runId);
@@ -70,8 +70,8 @@ test("runtime reads the canonical live host independently of saved settings, cat
     assert.equal(result.perception?.sampleHz, 30);
     assert.ok(Number.isFinite(Date.parse(result.checkedAt)));
     assert.deepEqual(f.requests, [{ kind: "status", argv: [] }], "no start, reload, observe, or controller request");
-    assert.equal(await readFile(join(f.workspace, ".rsa", "settings.json"), "utf8"), "{");
-    assert.deepEqual(await readdir(join(f.workspace, ".rsa")), before);
+    assert.equal(await readFile(join(f.workspace, ".ludens", "settings.json"), "utf8"), "{");
+    assert.deepEqual(await readdir(join(f.workspace, ".ludens")), before);
     await assert.rejects(perceptionSettings("selected", f.workspace, f.home), SyntaxError);
   } finally { await worker.close(); await f.cleanup(); }
 });
@@ -147,7 +147,7 @@ test("all perception operations reject stale canonical paths even when the old p
       () => perceptionRuntime("selected", f.workspace, f.home),
     ]) await assert.rejects(work(), { code: "WORKSPACE_SCOPE_CHANGED", status: 409 });
     assert.deepEqual(await perceptionSettings("selected", moved, f.home), {});
-    await assert.rejects(readFile(join(moved, ".rsa", "settings.json")), { code: "ENOENT" });
+    await assert.rejects(readFile(join(moved, ".ludens", "settings.json")), { code: "ENOENT" });
     for (const work of [
       () => perceptionSettings("selected", "", f.home),
       () => updatePerceptionSettings("selected", {}, "", f.home),

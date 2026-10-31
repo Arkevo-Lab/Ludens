@@ -37,8 +37,8 @@ contextBridge.exposeInMainWorld('ludens', {
     },
   },
 })
-contextBridge.exposeInMainWorld('rsaPet', {
-  getSnapshot: () => ipcRenderer.invoke('rsa-pet:snapshot'),
-  onSnapshot: (callback: (value: unknown) => void) => on('rsa-pet:snapshot', callback),
-  openDashboard: () => ipcRenderer.invoke('rsa-pet:open-dashboard'),
+contextBridge.exposeInMainWorld('ludensPet', {
+  getSnapshot: () => ipcRenderer.invoke('ludens-pet:snapshot'),
+  onSnapshot: (callback: (value: unknown) => void) => on('ludens-pet:snapshot', callback),
+  openDashboard: () => ipcRenderer.invoke('ludens-pet:open-dashboard'),
 })

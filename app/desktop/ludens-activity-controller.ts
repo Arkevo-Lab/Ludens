@@ -1,5 +1,5 @@
 import { briefNotification, type ActivityPreferences, type SerializedNotification } from './activity-policy.js'
-import type { ConsumerRecord, LogBlock, RsaActivitySnapshot, RsaActivitySource } from './rsa-source.js'
+import type { ConsumerRecord, LogBlock, LudensActivitySnapshot, LudensActivitySource } from './ludens-source.js'
 import { blockUrl } from './dashboard-window.js'
 
 export type ActivityDisplay =
@@ -16,10 +16,10 @@ const PREVIEW_MS = 4_000
 type Displayed = { blockId: string; displayId: string; surface: 'main' | 'pet'; input: SerializedNotification }
 
 /** One ordered block queue, one bubble. Streaming updates retain their block ID. */
-export class RsaActivityController {
+export class LudensActivityController {
   private sourceId: string | null = null
   private runId: string | null = null
-  private activity: RsaActivitySnapshot['activity'] = 'idle'
+  private activity: LudensActivitySnapshot['activity'] = 'idle'
   private pending = new Map<string, LogBlock>()
   private queuedAt = new Map<string, number>()
   private progress = ''
@@ -32,7 +32,7 @@ export class RsaActivityController {
   private timer: ReturnType<typeof setTimeout> | undefined
   private abort: AbortController | null = null
   private stopped = false
-  constructor(private source: RsaActivitySource, private surface: ActivitySurface, private prefs: ActivityPreferences,
+  constructor(private source: LudensActivitySource, private surface: ActivitySurface, private prefs: ActivityPreferences,
     private record: ConsumerRecord = (...args) => source.record?.(...args)) {}
 
   private chosenSurface(): 'main' | 'pet' | null {
@@ -101,7 +101,7 @@ export class RsaActivityController {
   }
   private render(block: LogBlock, surface: 'main' | 'pet') {
     const firstDispatch = !this.current || this.current.blockId !== block.id
-    const displayId = this.current?.displayId ?? `rsa:block:${++this.serial}`
+    const displayId = this.current?.displayId ?? `ludens:block:${++this.serial}`
     let input: SerializedNotification = {
       id: block.id, title: block.title, description: block.text, block,
       status: block.status === 'error' ? 'error' : block.status === 'running' ? 'running' : 'info',
@@ -141,7 +141,7 @@ export class RsaActivityController {
       if (next) this.render(next, surface)
     } finally { this.recordQueue() }
   }
-  private accept(snapshot: RsaActivitySnapshot) {
+  private accept(snapshot: LudensActivitySnapshot) {
     const changed = snapshot.identity !== this.runId || snapshot.mode === 'snapshot'
     this.context = { runId: snapshot.current.runId, epoch: snapshot.current.epoch }
     this.dashboardUrl = snapshot.current.dashboardUrl

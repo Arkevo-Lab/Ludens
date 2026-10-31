@@ -191,7 +191,7 @@ test("media conversion failures replace the input result and epoch history retai
 });
 
 test("media serving accepts archived perception output and preserves type and run-directory boundaries", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-hook-media-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-hook-media-")));
   try {
     const workspace = join(root, "workspace"), runDir = join(workspace, "logs/run");
     const mediaDir = join(runDir, "observations");
@@ -238,9 +238,9 @@ test("media serving accepts archived perception output and preserves type and ru
 });
 
 test("timeline media is shared across runs and resolved only within the registered workspace", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-timeline-media-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-timeline-media-")));
   try {
-    const workspace = join(root, "workspace"), timeline = join(workspace, ".rsa/timeline");
+    const workspace = join(root, "workspace"), timeline = join(workspace, ".ludens/timeline");
     const other = join(root, "other-workspace");
     await mkdir(join(timeline, "objects"), { recursive: true });
     await mkdir(join(timeline, "window"), { recursive: true });

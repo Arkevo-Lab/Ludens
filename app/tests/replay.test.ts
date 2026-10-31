@@ -17,8 +17,8 @@ function event(seq: number, ms: number, type: string, data: Record<string, unkno
   return { seq, at: iso(ms), atMs: ms, type, data, trace: { epoch, ...trace } };
 }
 async function fixture() {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-replay-")));
-  const workspace = join(root, "workspace"), run = join(workspace, "logs/run"), timeline = join(workspace, ".rsa/timeline");
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-replay-")));
+  const workspace = join(root, "workspace"), run = join(workspace, "logs/run"), timeline = join(workspace, ".ludens/timeline");
   await mkdir(run, { recursive: true });
   await mkdir(join(timeline, "segments"), { recursive: true }); await mkdir(join(timeline, "objects"));
   await registerFixture(root, "project", workspace);

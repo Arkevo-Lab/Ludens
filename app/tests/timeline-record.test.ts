@@ -14,9 +14,9 @@ const reference = { recordId: "temperature", sequence: 2 };
 const details = { recordId: "temperature", sequence: 2, data: { temperature: 21.5 }, space: { frame: "room" } };
 
 async function fixture() {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-record-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-record-")));
   const workspace = join(root, "workspace"), run = join(workspace, "logs/run");
-  const timeline = join(workspace, ".rsa/timeline"), segments = join(timeline, "segments");
+  const timeline = join(workspace, ".ludens/timeline"), segments = join(timeline, "segments");
   await mkdir(run, { recursive: true });
   await mkdir(segments, { recursive: true });
   await registerFixture(root, "project", workspace);

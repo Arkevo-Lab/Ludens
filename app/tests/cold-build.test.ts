@@ -15,7 +15,7 @@ import { refreshRunProjection, runProgress } from "../lib/run-index";
 import { prepareArchive } from "../lib/prepare-run";
 
 async function fixture() {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-cold-build-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-cold-build-")));
   await writeFile(join(path, "events.jsonl"), JSON.stringify({ seq: 1, at: "2026-10-27T00:00:00Z", atMs: 1,
     type: "control", trace: { epoch: "cycle" }, data: { mode: "auto" } }) + "\n");
   return path;
@@ -103,7 +103,7 @@ test("closing the manager stops a running child and cancels queued work without 
 
 test("reader and builder heap ceilings leave room above their configurable working budgets", () => {
   assert.deepEqual(archiveBudget({}), { cacheBytes: 256 * 1024 ** 2, buildBytes: 2 * 1024 ** 3, readerHeapMiB: 1024, builderHeapMiB: 4096 });
-  const larger = archiveBudget({ RSA_DASHBOARD_INDEX_CACHE_BYTES: String(512 * 1024 ** 2), RSA_DASHBOARD_BUILD_BYTES: String(4 * 1024 ** 3) });
+  const larger = archiveBudget({ LUDENS_APP_INDEX_CACHE_BYTES: String(512 * 1024 ** 2), LUDENS_APP_BUILD_BYTES: String(4 * 1024 ** 3) });
   assert.equal(larger.readerHeapMiB, 1792); assert.equal(larger.builderHeapMiB, 7168);
 });
 

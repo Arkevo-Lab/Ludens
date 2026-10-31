@@ -41,13 +41,13 @@ test("explicit runtime reads only canonical host status, independently of static
   const f = await fixture(), worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: f.home } });
   try {
     await f.listen();
-    for (const file of ["baseware.json", "rsa.json"]) await writeFile(join(f.workspace, file), "{");
+    for (const file of ["baseware.json", "ludens.json"]) await writeFile(join(f.workspace, file), "{");
     await writeFile(join(f.home, "registry", "unrelated.json"), "{");
     const result = await worker.call("capabilityRuntime", ["selected", f.workspace]);
     assert.equal(result.host, "reachable"); assert.equal(result.controlConnected, true); assert.equal(result.runId, f.runId);
     assert.ok(Number.isFinite(Date.parse(result.checkedAt)));
     assert.deepEqual(f.requests, [{ kind: "status", argv: [] }]);
-    for (const file of ["baseware.json", "rsa.json"]) assert.equal(await readFile(join(f.workspace, file), "utf8"), "{");
+    for (const file of ["baseware.json", "ludens.json"]) assert.equal(await readFile(join(f.workspace, file), "utf8"), "{");
     f.respond({ runId: f.runId, connected: false });
     const disconnected = await capabilityRuntime("selected", f.workspace, f.home);
     assert.equal(disconnected.host, "reachable"); assert.equal(disconnected.controlConnected, false);

@@ -104,7 +104,7 @@ test("only available docs become navigation links; source labels and unsafe path
   assert.equal([...html.matchAll(/data-doc=/g)].length, 1);
   assert.match(html, /<p>template<\/p>/);
   assert.match(html, /<p>missing<\/p>/);
-  assert.doesNotMatch(html, /doc-repo|rsa\/templates/);
+  assert.doesNotMatch(html, /doc-repo|ludens\/templates/);
 });
 
 test("current repository documents and their internal section links all resolve", async () => {

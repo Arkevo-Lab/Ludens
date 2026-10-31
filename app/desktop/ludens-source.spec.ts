@@ -3,19 +3,19 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rename
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { consumerRecorder, rsaProjectId, RsaSource, type ActivityChanges } from './rsa-source.js'
+import { consumerRecorder, ludensProjectId, LudensSource, type ActivityChanges } from './ludens-source.js'
 
 const directories: string[] = []
 function workspace() {
-  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'rsa-pet-source-')))
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'ludens-pet-source-')))
   directories.push(directory)
-  mkdirSync(join(directory, '.rsa'))
-  writeFileSync(join(directory, '.rsa', 'workspace.json'), JSON.stringify({ version: 1, id: `ws-${randomUUID()}` }))
+  mkdirSync(join(directory, '.ludens'))
+  writeFileSync(join(directory, '.ludens', 'workspace.json'), JSON.stringify({ version: 1, id: `ws-${randomUUID()}` }))
   return directory
 }
 function page(directory: string, overrides: Partial<ActivityChanges> = {}): ActivityChanges {
   return {
-    scope: { project: rsaProjectId(directory), runId: 'run-a', epoch: 'epoch-a' }, mode: 'snapshot', cursor: 'opaque:42', hasMore: false,
+    scope: { project: ludensProjectId(directory), runId: 'run-a', epoch: 'epoch-a' }, mode: 'snapshot', cursor: 'opaque:42', hasMore: false,
     blocks: [{ id: 'tool', createdRevision: 10, revision: 42, kind: 'tool', at: '2026-10-17T13:40:00Z',
       title: 'Tool', text: 'streamed intent', status: 'running' }],
     projection: { source: { component: 'dashboard' }, throughSeq: 42, revision: 42, generation: 'generation-a',
@@ -28,28 +28,28 @@ function page(directory: string, overrides: Partial<ActivityChanges> = {}): Acti
 }
 afterEach(() => { vi.unstubAllGlobals(); for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true }) })
 
-describe('RSA incremental activity source', () => {
+describe('Ludens incremental activity source', () => {
   it('keeps the persisted workspace identity after relocation and rejects missing identity files', () => {
-    const directory = workspace(), project = rsaProjectId(directory)
-    const source = new RsaSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
+    const directory = workspace(), project = ludensProjectId(directory)
+    const source = new LudensSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
     const relocated = directory + '-moved'; renameSync(directory, relocated); directories.push(relocated)
-    expect(rsaProjectId(relocated)).toBe(project)
-    const moved = new RsaSource({ workspace: relocated, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
+    expect(ludensProjectId(relocated)).toBe(project)
+    const moved = new LudensSource({ workspace: relocated, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
     expect(moved.identity()).toBe(source.identity())
     source.stop(); moved.stop()
-    rmSync(join(relocated, '.rsa', 'workspace.json'))
-    expect(() => rsaProjectId(relocated)).toThrow()
+    rmSync(join(relocated, '.ludens', 'workspace.json'))
+    expect(() => ludensProjectId(relocated)).toThrow()
   })
 
   it('makes one changes request, publishes thin current state, and commits the cursor only after acceptance', async () => {
     const directory = workspace(), link = directory + '-link'; symlinkSync(directory, link); directories.push(link)
     const onSnapshot = vi.fn(), response = page(directory)
-    const source = new RsaSource({ workspace: link, dashboardUrl: 'http://127.0.0.1:3015/', onSnapshot })
+    const source = new LudensSource({ workspace: link, dashboardUrl: 'http://127.0.0.1:3015/', onSnapshot })
     const fetch = vi.fn().mockImplementation(async () => Response.json(response)); vi.stubGlobal('fetch', fetch)
     const first = await source.read()
     expect(fetch).toHaveBeenCalledTimes(1)
     expect(new URL(fetch.mock.calls[0][0]).pathname).toBe('/api/activity')
-    expect(Object.fromEntries(new URL(fetch.mock.calls[0][0]).searchParams)).toEqual({ project: rsaProjectId(directory), mode: 'changes' })
+    expect(Object.fromEntries(new URL(fetch.mock.calls[0][0]).searchParams)).toEqual({ project: ludensProjectId(directory), mode: 'changes' })
     expect(first).toMatchObject({ mode: 'snapshot', revision: 42, blocks: response.blocks })
     expect(first.current).toMatchObject({ workspace: directory, phase: '等待模型首事件', intent: '查看证据' })
     expect(first.current.observationUrl).toContain('id=actual-model-input')
@@ -75,7 +75,7 @@ describe('RSA incremental activity source', () => {
     const reset = page(directory, { projection: { ...first.projection, generation: 'generation-b' }, cursor: 'new:42' })
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(delta))
       .mockResolvedValueOnce(Response.json(reset)); vi.stubGlobal('fetch', fetch)
-    const source = new RsaSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
+    const source = new LudensSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
     const initial = await source.read(); initial.acknowledge!()
     const changes = await source.read(); changes.acknowledge!()
     expect(changes).toMatchObject({ mode: 'delta', revision: 43, hasMore: true, blocks: delta.blocks, activity: 'manual' })
@@ -91,7 +91,7 @@ describe('RSA incremental activity source', () => {
     empty.scope.runId = null; empty.scope.epoch = null; empty.blocks = []; empty.cursor = null
     empty.current = { ...empty.current, runId: null, epoch: null, activity: 'idle', phase: '工作区尚无运行记录', observationId: null }
     const fetch = vi.fn().mockResolvedValue(Response.json(empty)); vi.stubGlobal('fetch', fetch)
-    const source = new RsaSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
+    const source = new LudensSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
     expect(await source.read()).toMatchObject({ activity: 'idle', blocks: [], current: { workspace: directory, runId: null } })
     expect(fetch).toHaveBeenCalledTimes(1); source.stop()
   })
@@ -102,7 +102,7 @@ describe('RSA incremental activity source', () => {
     response.blocks = [{ ...response.blocks[0], status: 'error', text: response.current.error! }]
     vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('connection refused'))
       .mockResolvedValueOnce(Response.json(response)))
-    const source = new RsaSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot })
+    const source = new LudensSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot })
     expect((await source.read()).current.error).toContain('connection refused')
     const recovered = await source.read()
     expect(recovered).toMatchObject({ activity: 'manual', blocks: response.blocks, current: { error: null } })
@@ -112,7 +112,7 @@ describe('RSA incremental activity source', () => {
 
   it('does not publish stale data after cancellation or stop', async () => {
     const directory = workspace(), onSnapshot = vi.fn(), abort = new AbortController()
-    const source = new RsaSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot })
+    const source = new LudensSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot })
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => ({ ok: true, json: async () => {
       abort.abort(new Error('switched workspace')); return page(directory)
     } })))
@@ -125,7 +125,7 @@ describe('RSA incremental activity source', () => {
   it('rejects data from a different workspace without advancing its cursor', async () => {
     const directory = workspace(), response = page(directory); response.current.workspace = '/another-workspace'
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(response)))
-    const source = new RsaSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
+    const source = new LudensSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {} })
     const result = await source.read()
     expect(result).toMatchObject({ activity: 'offline', blocks: [] })
     expect(result.current.error).toContain('当前工作区'); expect(result.acknowledge).toBeUndefined(); source.stop()
@@ -133,7 +133,7 @@ describe('RSA incremental activity source', () => {
 
   it('records cursor progress and failures once without a block-history fingerprint', async () => {
     const directory = workspace(), response = page(directory)
-    const source = new RsaSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {}, record: consumerRecorder(directory) })
+    const source = new LudensSource({ workspace: directory, dashboardUrl: 'http://localhost:3015', onSnapshot: () => {}, record: consumerRecorder(directory) })
     let fail = false
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async () => {
       if (fail) throw new Error('connection refused')

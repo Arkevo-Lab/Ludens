@@ -383,7 +383,7 @@
     "deviceGuide": "Device setup guide",
     "capabilityGuide": "Capability guide",
     "benchmarkGuide": "Eval task guide",
-    "existingWorkspaceHint": "Already have a workspace? Configure its rsa.json using the device guide; creating another workspace does not change the existing one.",
+    "existingWorkspaceHint": "Already have a workspace? Configure its ludens.json using the device guide; creating another workspace does not change the existing one.",
     "creationRechecks": "Creation checks the package again and may download or import it. It does not start services.",
     "sourcesTitle": "Workspace sources",
     "sourcesDescription": "Each source is read independently. Counts describe recorded or declared items, not successful execution.",
@@ -606,7 +606,7 @@
     "registerDir": "Register directory",
     "identityHint": "The directory must contain a Ludens workspace identity; register the new location after moving. Import legacy directories via the CLI import command first.",
     "createTitle": "Create workspace",
-    "createdNotice": "Workspace created and registered. Once devices are ready, run rsa up in that directory.",
+    "createdNotice": "Workspace created and registered. Once devices are ready, run ludens up in that directory.",
     "nameLabel": "Name",
     "experimentPlaceholder": "My experiment",
     "driverIdLabel": "Driver ID",
@@ -685,7 +685,7 @@
     },
     "anatomy": {
       "inner": "OMP inner loop (single prompt · per model request)",
-      "outer": "RSA outer loop (exists only during takeover)",
+      "outer": "Ludens outer loop (exists only during takeover)",
       "promptPrep": "prompt prep",
       "transform": "transform+decorate",
       "none": "none",
@@ -722,7 +722,7 @@
       "legacyTag": "Removed · reference only"
     },
     "cards": {
-      "rsa": "RSA injection layers ①②",
+      "ludens": "Ludens injection layers ①②",
       "omp": "OMP native layers",
       "imgCap": "Native image cap",
       "anatomy": "Loop anatomy",
@@ -759,7 +759,7 @@
       "histLayer": "Persistent history layer (accumulated)",
       "convo": "Dialogue user/assistant",
       "tools": "Tool results",
-      "ptext": "Perception JSON (RSA)",
+      "ptext": "Perception JSON (Ludens)",
       "pimg": "Perception images",
       "ofTotal": "/ of total",
       "trimmed": "images, native trimmed old ones",
@@ -804,10 +804,10 @@
       },
       "bare": {
         "name": "Bare OMP",
-        "desc": "One round with automatic RSA delivery and continuation disabled."
+        "desc": "One round with automatic Ludens delivery and continuation disabled."
       }
     },
-    "rsaLayers": {
+    "ludensLayers": {
       "ch1": {
         "name": "Round-start frame",
         "desc": "Deliver the latest frame at before_agent_start."
@@ -852,7 +852,7 @@
       },
       "imgInf": {
         "name": "Unlimited image budget",
-        "desc": "RSA override. Turn off to simulate the native image cap."
+        "desc": "Ludens override. Turn off to simulate the native image cap."
       }
     },
     "localOnly": "Local simulation",
@@ -870,7 +870,7 @@
     "resultsTitle": "Results overview",
     "estimate": "Estimated",
     "layersImmediate": "Layer changes update results immediately using the applied parameters.",
-    "rsaTitle": "RSA injection layers",
+    "ludensTitle": "Ludens injection layers",
     "ompTitle": "OMP native layers",
     "rangeHint": "{min}–{max} · step {step}",
     "validation": {
@@ -988,7 +988,7 @@
     },
     "emptyHint": {
       "connecting": "Connecting to local log service…",
-      "startRsa": "Start RSA in a workspace; live frames, activity and stats will show up here.",
+      "startRsa": "Start Ludens in a workspace; live frames, activity and stats will show up here.",
       "checkService": "Check the local log service; it will auto-refresh on reconnect.",
       "loadingObs": "Loading observations and actions for this workspace…"
     },
@@ -1585,7 +1585,7 @@
     "addTitle": "Add existing workspace",
     "addDescription": "Connect a workspace that is already on this machine.",
     "pathLabel": "Full workspace directory",
-    "addHint": "Use a folder containing .rsa/workspace.json. If you moved the workspace, enter its new location.",
+    "addHint": "Use a folder containing .ludens/workspace.json. If you moved the workspace, enter its new location.",
     "adding": "Adding…",
     "created": "Workspace created",
     "registered": "Workspace added",

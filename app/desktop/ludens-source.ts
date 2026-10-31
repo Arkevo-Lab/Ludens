@@ -25,7 +25,7 @@ export function consumerRecorder(workspace: string): ConsumerRecord {
   }
 }
 
-export interface RsaPetSnapshot {
+export interface LudensPetSnapshot {
   workspace: string | null
   runId: string | null
   epoch: string | null
@@ -37,11 +37,11 @@ export interface RsaPetSnapshot {
   dashboardUrl: string
 }
 
-export interface RsaActivitySnapshot {
+export interface LudensActivitySnapshot {
   /** Identifies one run/epoch, so switching it also clears old bubbles. */
   identity: string
   activity: 'running' | 'manual' | 'offline' | 'idle'
-  current: RsaPetSnapshot
+  current: LudensPetSnapshot
   blocks: ActivityBlock[]
   mode: 'snapshot' | 'delta'
   revision: number
@@ -51,15 +51,15 @@ export interface RsaActivitySnapshot {
   projection?: ActivityProjection
 }
 
-export interface RsaActivitySource {
+export interface LudensActivitySource {
   identity(): string | null
-  read(signal?: AbortSignal): Promise<RsaActivitySnapshot>
+  read(signal?: AbortSignal): Promise<LudensActivitySnapshot>
   stop?(): void
   record?: ConsumerRecord
 }
 
 /** Read the workspace's persistent identity without creating or registering it. */
-export function rsaProjectId(workspace: string): string {
+export function ludensProjectId(workspace: string): string {
   return readWorkspaceIdentitySync(workspace).id
 }
 
@@ -70,18 +70,18 @@ function url(base: string, path: string, query: Record<string, string | null> = 
 }
 
 /** Read-only polling source. It never calls the dashboard's control endpoint. */
-export class RsaSource implements RsaActivitySource {
+export class LudensSource implements LudensActivitySource {
   private readonly workspace: string
   private readonly project: string
   private readonly dashboardUrl: string
-  private latest: Omit<RsaActivitySnapshot, 'blocks' | 'acknowledge'>
+  private latest: Omit<LudensActivitySnapshot, 'blocks' | 'acknowledge'>
   private readonly client: ActivityChangesClient
   private abort = new AbortController()
   private progress = ''
   readonly record: ConsumerRecord
-  constructor(private options: { workspace: string; dashboardUrl: string; onSnapshot(snapshot: RsaPetSnapshot): void; record?: ConsumerRecord }) {
+  constructor(private options: { workspace: string; dashboardUrl: string; onSnapshot(snapshot: LudensPetSnapshot): void; record?: ConsumerRecord }) {
     this.workspace = realpathSync(options.workspace)
-    this.project = rsaProjectId(this.workspace)
+    this.project = ludensProjectId(this.workspace)
     this.dashboardUrl = new URL(options.dashboardUrl).origin
     this.client = new ActivityChangesClient({ project: this.project, baseUrl: this.dashboardUrl })
     this.latest = { identity: this.identity(), activity: 'idle', mode: 'snapshot', revision: 0, hasMore: false,
@@ -91,12 +91,12 @@ export class RsaSource implements RsaActivitySource {
   }
   identity(): string { return `${this.project}:${this.dashboardUrl}` }
   stop() { this.abort.abort() }
-  async read(signal?: AbortSignal): Promise<RsaActivitySnapshot> {
+  async read(signal?: AbortSignal): Promise<LudensActivitySnapshot> {
     const started = performance.now()
     this.abort.signal.throwIfAborted()
     const bounded = AbortSignal.timeout(8_000)
     const requestSignal = AbortSignal.any([this.abort.signal, bounded, ...(signal ? [signal] : [])])
-    let next: RsaActivitySnapshot
+    let next: LudensActivitySnapshot
     let readError: string | undefined
     try {
       const page = await this.client.read(requestSignal)

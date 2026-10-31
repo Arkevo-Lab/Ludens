@@ -227,9 +227,9 @@ test("offline, replaced and unregistered directories retain the saved choice wit
     await rename(workspace, moved); await unavailable();
     await rename(moved, workspace);
     assert.equal((await petState(root)).targetUnavailable, undefined, "the same registered directory can recover");
-    await writeFile(join(workspace, ".rsa/workspace.json"), JSON.stringify({ version: 1, id: "replacement" }));
+    await writeFile(join(workspace, ".ludens/workspace.json"), JSON.stringify({ version: 1, id: "replacement" }));
     await unavailable();
-    await writeFile(join(workspace, ".rsa/workspace.json"), JSON.stringify({ version: 1, id: "selected" }));
+    await writeFile(join(workspace, ".ludens/workspace.json"), JSON.stringify({ version: 1, id: "selected" }));
     await rm(join(root, "registry/selected.json"));
     await unavailable();
     await assert.rejects(setPetTarget("selected", false, root), /未找到/);

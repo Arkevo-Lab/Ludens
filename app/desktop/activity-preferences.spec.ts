@@ -10,7 +10,7 @@ describe('activity preferences', () => {
     expect(defaults.brief).toBe(false)
   })
   it('adds missing block defaults without replacing saved controls and persists partial block edits', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rsa-block-prefs-')), path = join(dir, 'prefs.json')
+    const dir = mkdtempSync(join(tmpdir(), 'ludens-block-prefs-')), path = join(dir, 'prefs.json')
     try {
       const { blocks, ...saved } = { ...defaults, enabled: false, brief: true, pet: false, pausedUntil: 1234 }
       writeFileSync(path, JSON.stringify(saved))
@@ -25,7 +25,7 @@ describe('activity preferences', () => {
     } finally { rmSync(dir, { recursive: true, force: true }) }
   })
   it('initializes, persists serial edits/restart, resets only blocks and validates writes', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'rsa-notify-')), path = join(dir, 'prefs.json')
+    const dir = mkdtempSync(join(tmpdir(), 'ludens-notify-')), path = join(dir, 'prefs.json')
     try {
       const store = createActivityPreferenceStore(path); expect(store.get()).toEqual(defaults)
       await Promise.all([store.update({ blocks: { diagnostic: true } }), store.update({ brief: true, enabled: false, main: false, pet: false, pausedUntil: 100, blocks: { tool: false } })])

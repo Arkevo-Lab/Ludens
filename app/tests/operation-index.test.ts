@@ -8,7 +8,7 @@ import { refreshOperationIndex, queryOperationRefs, getOperation } from "../lib/
 import type { Event } from "../lib/types";
 
 test("sparse intervals retain late terminal evidence and overlap without copying log bodies", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-intervals-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-intervals-")));
   let index: LogIndex | undefined;
   const event = (seq: number, type: string, at: number, data: Record<string, unknown> = {}): Event => ({ seq,
     type, at: new Date(at).toISOString(), atMs: at, trace: { epoch: "one", modelCallId: "model", toolCallId: "tool",

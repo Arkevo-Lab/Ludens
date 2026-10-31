@@ -15,7 +15,7 @@ async function fixture() {
   const root = join(base, "home"), workspace = join(base, "workspace");
   await mkdir(workspace);
   await registerFixture(root, "registered", workspace);
-  return { base, root, workspace, path: join(workspace, ".rsa/settings.json"),
+  return { base, root, workspace, path: join(workspace, ".ludens/settings.json"),
     cleanup: async () => { clearCatalogCache(); await rm(base, { recursive: true, force: true }); } };
 }
 
@@ -45,7 +45,7 @@ test("concurrent saves retain every field and leave one complete JSON file", asy
     const expected = { hotSeconds: 120, videoSegmentSeconds: 240, videoIdleSeconds: 30 };
     assert.deepEqual(await perceptionSettings("registered", f.workspace, f.root), expected);
     assert.deepEqual(JSON.parse(await readFile(f.path, "utf8")), expected);
-    assert.deepEqual((await readdir(join(f.workspace, ".rsa"))).sort(), ["settings.json", "workspace.json"]);
+    assert.deepEqual((await readdir(join(f.workspace, ".ludens"))).sort(), ["settings.json", "workspace.json"]);
     await writeFile(f.path, "broken JSON");
     await assert.rejects(updatePerceptionSettings("registered", { hotSeconds: 180 }, f.workspace, f.root), /JSON|Unexpected/);
     await writeFile(f.path, JSON.stringify(expected));
@@ -98,7 +98,7 @@ test("custom positive seconds remain readable and unrelated file settings surviv
 test("settings paths reject symlinks and saves do not follow a predictable temporary filename", async () => {
   const f = await fixture();
   try {
-    const outside = join(f.base, "outside"), directory = join(f.workspace, ".rsa");
+    const outside = join(f.base, "outside"), directory = join(f.workspace, ".ludens");
     await mkdir(outside);
     const externalFile = join(outside, "settings.json"), original = '{"hotSeconds": 90}\n';
     await writeFile(externalFile, original);
