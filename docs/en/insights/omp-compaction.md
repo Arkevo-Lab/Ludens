@@ -2,7 +2,7 @@
 
 For plain question-and-answer coding, OMP's native context compaction works fine. Once we ran OMP inside a **spatiotemporally consistent real-time environment**, however, its default optimistic compaction policy started falling back to synchronous blocking almost immediately.
 
-This note covers what happened and why we adjusted OMP's compaction structure under [rsa/patches/](../../rsa/patches/) (the Agent Loop itself is untouched; see [Architecture & Boundaries](../reference/architecture.md) for the boundary). Patches track OMP releases (currently `18.14.0`): upstream additions make our duplicated parts redundant while behavioral forks are kept and replayed.
+This note covers what happened and why we adjusted OMP's compaction structure under [rsa/patches/](../../../rsa/patches/) (the Agent Loop itself is untouched; see [Architecture & Boundaries](../reference/architecture.md) for the boundary). Patches track OMP releases (currently `18.14.0`): upstream additions make our duplicated parts redundant while behavioral forks are kept and replayed.
 
 ## How stock OMP thinks about it
 
@@ -52,7 +52,7 @@ If background summarization shares the session channel the foreground is using, 
 
 ### 4. Bind a unique `operationId` to every background candidate
 
-Previously, why a background compaction terminated and how long it took were hard to correlate in the logs. We added `diagnostics_channel("omp.compaction.speculation")`, binding a unique `operationId` from candidate creation and logging the full lifecycle and latency of `started / armed / failed / cancelled / applied / invalidated` (see [trace.ts](../../rsa/src/core/agent-omp/trace.ts) and the [logging contract](../reference/logging.md#shiori-compaction-and-transport)).
+Previously, why a background compaction terminated and how long it took were hard to correlate in the logs. We added `diagnostics_channel("omp.compaction.speculation")`, binding a unique `operationId` from candidate creation and logging the full lifecycle and latency of `started / armed / failed / cancelled / applied / invalidated` (see [trace.ts](../../../rsa/src/core/agent-omp/trace.ts) and the [logging contract](../reference/logging.md#shiori-compaction-and-transport)).
 
 ## Cost and verification
 
@@ -60,5 +60,5 @@ The trade-off is clear: **because we reuse a minutes-old snapshot summary, messa
 
 To keep future upgrades from breaking this behavior, two checks guard it:
 
-- **Integration test**: [rsa/tests/omp-speculation.test.ts](../../rsa/tests/omp-speculation.test.ts) runs the real OMP preparation / validation / commit / tail replay, verifying survival past 20k growth, waiting for in-flight candidates at the threshold, invalidation on branch or headroom failures, and clean cancellation without late commits.
+- **Integration test**: [rsa/tests/omp-speculation.test.ts](../../../rsa/tests/omp-speculation.test.ts) runs the real OMP preparation / validation / commit / tail replay, verifying survival past 20k growth, waiting for in-flight candidates at the threshold, invalidation on branch or headroom failures, and clean cancellation without late commits.
 - **Built-in benchmark**: `rsa bench run ludens/background-compaction` (see [Benchmark](../reference/benchmark.md)), which replays the full background-compaction lifecycle offline with controlled streams.

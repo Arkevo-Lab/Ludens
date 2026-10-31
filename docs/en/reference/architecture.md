@@ -34,9 +34,25 @@ flowchart LR
 
 Each component has its own `package.json` / `pyproject.toml` and lockfile. The RSA Harness depends only on Baseware's client and type contracts and never imports any concrete Driver implementation directly; `rsa up` orchestrates local processes from the workspace configuration and driver manifests.
 
+## Source Layout and Layering
+
+The repository is organized as a Bun workspace with `@ludens/protocol` as the zero-dependency contract layer:
+
+| Package / Directory | Layer and Responsibility |
+| --- | --- |
+| `protocol/` (`@ludens/protocol`) | **Contract foundation**: RPC schemas, run-event types, Timeline / Archive formats, Benchmark DTOs, and Dashboard activity projections; consumed by every other package via workspace imports only. |
+| `rsa/src/core/shiori/` | **Control kernel**: `epoch` control leases, time/request budgets, program execution, and cancellation; no dependency on OMP, CLI, or sockets. |
+| `rsa/src/core/storage/` | **Workspace and fact storage**: `.rsa/` identity and state, `logs/<run-id>/` event streams and archives, Benchmark trial/verification storage. |
+| `rsa/src/core/subsystems/` | **Workspace resident and device subsystems**: Python perception/action workers, `@capability` discovery, Baseware device sessions. |
+| `rsa/src/core/agent-omp/` | **OMP AgentRunner implementation**: OMP session assembly, the RSA extension, and model-trace recording behind a narrow `ExtensionHost` interface. |
+| `rsa/src/core/query/` | **Query and projection engine**: log/run/operation indexes, cold builds, activity/replay/telemetry projections consumed by the Dashboard and Ludens Pet. |
+| `rsa/src/daemon/`, `rsa/src/bench/`, `rsa/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, Harbor benchmark runner, and the pure CLI front end. |
+| `rsa-dashboard/shell/` + `rsa-dashboard/features/` | **Console views**: the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `benchmark`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `rsa-dashboard/components/ui/`. |
+
+
 ## Devices and Unified Capabilities
 
-1. **Unified Controller abstraction**: all capabilities a Driver exposes are collectively called **Controllers** (including controllers that execute inputs and sensors that capture frames/state). Each capability follows the CUA-native tool structure: `name`, `description`, `inputSchema`, optional `outputSchema` / `annotations`, and an MCP `CallToolResult` return value. See [Baseware Philosophy and Capability Contracts](baseware.md) for the design rationale and [baseware/src/contracts.ts](../../baseware/src/contracts.ts) / [baseware/src/catalog.ts](../../baseware/src/catalog.ts) for the type definitions.
+1. **Unified Controller abstraction**: all capabilities a Driver exposes are collectively called **Controllers** (including controllers that execute inputs and sensors that capture frames/state). Each capability follows the CUA-native tool structure: `name`, `description`, `inputSchema`, optional `outputSchema` / `annotations`, and an MCP `CallToolResult` return value. See [Baseware Philosophy and Capability Contracts](baseware.md) for the design rationale and [baseware/src/contracts.ts](../../../baseware/src/contracts.ts) / [baseware/src/catalog.ts](../../../baseware/src/catalog.ts) for the type definitions.
 2. **Dual-namespace aggregation with on-demand discovery**: RSA merges device capabilities (`controller/<id>`) and workspace Python decorator capabilities (`python/<path>:<fn>`) into the `rsa controller` directory. To avoid blowing up model context, no device capability or MCP tool is injected into OMP's model tool list by default; instead the Agent discovers and invokes them on demand via `baseware.json`, `rsa controller`, or `rsa_tools.Client`.
 3. **Pure hardware boundary**: a Driver only faithfully maps hardware interfaces (e.g. independent per-screen captures `screen.top.capture` / `screen.bottom.capture`, native touchscreen coordinates `touch.down / move / up`); cross-screen image stitching, coordinate transforms, and game strategy all live in workspace code.
 
@@ -63,7 +79,7 @@ rsa controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":500
 
 ### 3. Resident Action Process and Input Reset
 
-The workspace `action.py` resident action worker is permanently bound to the `epoch` and `inputGeneration` from startup. When `rsa action stop`, `rsa action reload`, or an `Action.step()` exception occurs inside an `auto` cycle, the system immediately cancels and releases all of this workspace's current inputs through Baseware (including concurrent CLI inputs), bumps `inputGeneration` to reject stale calls from the old instance, and keeps the current `epoch`, remaining budget, and OMP session. See [rsa/src/core/shiori/runtime.ts](../../rsa/src/core/shiori/runtime.ts).
+The workspace `action.py` resident action worker is permanently bound to the `epoch` and `inputGeneration` from startup. When `rsa action stop`, `rsa action reload`, or an `Action.step()` exception occurs inside an `auto` cycle, the system immediately cancels and releases all of this workspace's current inputs through Baseware (including concurrent CLI inputs), bumps `inputGeneration` to reject stale calls from the old instance, and keeps the current `epoch`, remaining budget, and OMP session. See [rsa/src/core/shiori/runtime.ts](../../../rsa/src/core/shiori/runtime.ts).
 
 ## Session and Loop
 
@@ -73,13 +89,13 @@ The RSA Host reuses a single OMP session per workspace (persisted under `.rsa/sh
 
 - Keeps OMP's native system prompt (a workspace `AGENTS.md`, if present, is injected via native `contextFiles`).
 - Explicitly enables the OMP-native tools `read`, `write`, `edit`, `bash`, `wait`, and registers the custom tool `observe`.
-- Overrides only what the host contract requires: disabling `retry.modelFallback` (keeps the chosen vision model sticky), disabling `title.refreshOnReplan` and `cacheWarming` (keeps every model request strictly attributed to its control cycle), setting `PROVIDER_IMAGE_BUDGETS` to `Infinity` (retains history images before compaction so mid-run image drops don't break the Prompt Cache prefix), plus the optional `compactionThreshold`. See [rsa/src/core/agent-omp/session.ts](../../rsa/src/core/agent-omp/session.ts).
+- Overrides only what the host contract requires: disabling `retry.modelFallback` (keeps the chosen vision model sticky), disabling `title.refreshOnReplan` and `cacheWarming` (keeps every model request strictly attributed to its control cycle), setting `PROVIDER_IMAGE_BUDGETS` to `Infinity` (retains history images before compaction so mid-run image drops don't break the Prompt Cache prefix), plus the optional `compactionThreshold`. See [rsa/src/core/agent-omp/session.ts](../../../rsa/src/core/agent-omp/session.ts).
 
 Inside an `auto` control cycle, the outer loop runs as follows:
 
-1. **Open a turn**: issues an OMP `prompt` using [continue.md](../../rsa/prompts/continue.md) (on first takeover with `auto on --message`, a one-shot reminder is appended).
+1. **Open a turn**: issues an OMP `prompt` using [continue.md](../../../rsa/prompts/continue.md) (on first takeover with `auto on --message`, a one-shot reminder is appended).
 2. **Perception and action run in parallel**: the environment keeps running while the model reasons — the resident `Perception.sample()` samples continuously at `sample_hz` into `.rsa/timeline/`, and the resident `Action.step()` continuously reads the spacetime axis and executes high-frequency control at `step_hz`.
-3. **Automatic context delivery**: the RSA extension hooks OMP's `before_agent_start` hook (see [extension.ts](../../rsa/src/core/agent-omp/extension.ts)). When auto-injection is on (default `inject on`), it automatically appends the latest undelivered primary-channel perception records plus sampler state transitions (`state / codeSHA / error`) at the start of each prompt; tool results are never appended with observations, the `tool_result` hook only records delivery receipts for native tool images, and mid-turn observation is composed explicitly by the model via `observe`. The former end-of-batch channel was removed on 2026-10-29; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
+3. **Automatic context delivery**: the RSA extension hooks OMP's `before_agent_start` hook (see [extension.ts](../../../rsa/src/core/agent-omp/extension.ts)). When auto-injection is on (default `inject on`), it automatically appends the latest undelivered primary-channel perception records plus sampler state transitions (`state / codeSHA / error`) at the start of each prompt; tool results are never appended with observations, the `tool_result` hook only records delivery receipts for native tool images, and mid-turn observation is composed explicitly by the model via `observe`. The former end-of-batch channel was removed on 2026-10-29; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
 4. **Continue or hand over**: when a single `prompt` ends and budget remains, the next turn starts automatically; on human handover or budget exhaustion, the `addBeforeModelCall` gate immediately blocks new model requests and releases device control.
 
 ### 2. Context Compaction and Transport Recovery

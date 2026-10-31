@@ -14,7 +14,7 @@
 
 ### 2. 安装核心组件
 
-默认安装 Baseware、RSA 与网页 Dashboard，各组件及 RSA Python 运行时分别维护独立锁文件。安装 `rsa` 时，Bun 会按 `package.json` 自动应用 [rsa/patches/](../../rsa/patches/) 下的 OMP 依赖补丁：
+默认安装 Baseware、RSA 与网页 Dashboard，各组件及 RSA Python 运行时分别维护独立锁文件。安装 `rsa` 时，Bun 会按 `package.json` 自动应用 [rsa/patches/](../../../rsa/patches/) 下的 OMP 依赖补丁：
 
 ```sh
 (cd baseware && bun install --frozen-lockfile)
@@ -29,7 +29,7 @@ export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
 
 ### 3. Python 运行时解析规则
 
-[rsa/python/pyproject.toml](../../rsa/python/pyproject.toml) 与 `uv.lock` 管理正式 `ludens-rsa` 包（导入名 `rsa_tools`）以及 PyAV、Pillow、jsonschema 等媒体与校验依赖。`rsa_tools` 仅提供能力声明、客户端与试验登记辅助，执行生命周期与评分由 Shiori 统一管理。
+[rsa/python/pyproject.toml](../../../rsa/python/pyproject.toml) 与 `uv.lock` 管理正式 `ludens-rsa` 包（导入名 `rsa_tools`）以及 PyAV、Pillow、jsonschema 等媒体与校验依赖。`rsa_tools` 仅提供能力声明、客户端与试验登记辅助，执行生命周期与评分由 Shiori 统一管理。
 
 框架按以下优先级选择 Python 解释器：
 
@@ -128,7 +128,7 @@ rsa workspace import /absolute/path/to/workspace \
 
 ### 2. `rsa.json` 配置参考
 
-`rsa.json` 由 [rsa/src/daemon/launcher.ts](../../rsa/src/daemon/launcher.ts) 解析校验，未知字段会直接报错：
+`rsa.json` 由 [rsa/src/daemon/launcher.ts](../../../rsa/src/daemon/launcher.ts) 解析校验，未知字段会直接报错：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -148,4 +148,4 @@ rsa workspace import /absolute/path/to/workspace \
 ### 3. 会话续接与后台服务目录
 
 - **会话续接**：工作区 OMP 会话保存在 `.rsa/shiori/sessions/`，当前默认续接指针位于 `.rsa/shiori/current-session.json`。重启 Host 默认续接原会话并开启新的 `logs/<run-id>/` 目录。前台 `rsa run` 可传 `--new-session` 开启全新上下文（保留工作区文件），或传 `--resume /absolute/path/to/session.jsonl` 切换到同工作区的指定历史会话。
-- **后台服务日志**：[launch-background.py](../../rsa/scripts/launch-background.py) 将工作区受管进程的标准输出与 launchd 状态写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（launchd label 为 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。所有后台服务均脱离终端运行，但不注册开机自启或崩溃死循环重启；排障时先查看 `rsa services` 与对应日志。
+- **后台服务日志**：[launch-background.py](../../../rsa/scripts/launch-background.py) 将工作区受管进程的标准输出与 launchd 状态写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（launchd label 为 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。所有后台服务均脱离终端运行，但不注册开机自启或崩溃死循环重启；排障时先查看 `rsa services` 与对应日志。

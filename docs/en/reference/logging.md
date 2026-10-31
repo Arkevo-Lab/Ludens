@@ -36,13 +36,13 @@ Files in a single run directory `workspace/logs/<run-id>/`:
 
 Three underlying stores shared across runs:
 
-1. **Baseware device fact sources (`logs/baseware/`)**: each Baseware instance independently maintains `source.json`, `events/`, and `diagnostics/` (segmented by 1 hour or 256 MiB); events are uniquely identified by `origin.eventId = "<serviceId>:<seq>"`. RSA records `{sourceId, root, format, recordingId, windows}` in `manifest.json`'s `eventSources`; readers merge on demand via [shared/event-sources.ts](../../shared/event-sources.ts). The `recordingId` is frozen at action start, so even actions that end late after the window closes are still attributed exactly to the original run.
+1. **Baseware device fact sources (`logs/baseware/`)**: each Baseware instance independently maintains `source.json`, `events/`, and `diagnostics/` (segmented by 1 hour or 256 MiB); events are uniquely identified by `origin.eventId = "<serviceId>:<seq>"`. RSA records `{sourceId, root, format, recordingId, windows}` in `manifest.json`'s `eventSources`; readers merge on demand via [protocol/src/event-sources.ts](../../../protocol/src/event-sources.ts). The `recordingId` is frozen at action start, so even actions that end late after the window closes are still attributed exactly to the original run.
 2. **Workspace spacetime axis (`.rsa/timeline/`)**: cross-run shared perception and capability archives — `video/<id>.mp4` with companion state files `.mp4.json` (distinguishing `pending / ready / error`), deduplicated non-video media `objects/<sha256>.bin`, and segmented records `segments/` (with JSONL, fixed-length `.idx` index, and `.meta.json`). With persistence off (`RSA_PERCEPTION_PERSIST=0`), only `window-<pid>-.../` temporary windows are used.
-3. **Content-addressed structured archive (`.rsa/archive/`)**: uniformly read/written by [shared/log-archive.ts](../../shared/log-archive.ts). Model messages, tool definitions, and large parameters/results are stored as `objects/<sha256>.json.gz` (using `encoding: "rsa-json-v1"` with tagged JSON to distinguish internal references from user `$ref` fields). Image/audio data in logs is not stored twice; instead it references `.rsa/timeline/` assets, with a lightweight hash-to-video-frame mapping index kept in `.rsa/archive/media/<sha256>.json` (in-memory LRU capped at 4096 entries).
+3. **Content-addressed structured archive (`.rsa/archive/`)**: uniformly read/written by [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts). Model messages, tool definitions, and large parameters/results are stored as `objects/<sha256>.json.gz` (using `encoding: "rsa-json-v1"` with tagged JSON to distinguish internal references from user `$ref` fields). Image/audio data in logs is not stored twice; instead it references `.rsa/timeline/` assets, with a lightweight hash-to-video-frame mapping index kept in `.rsa/archive/media/<sha256>.json` (in-memory LRU capped at 4096 entries).
 
 ### 2. Common event envelope
 
-Every JSONL event carries a top-level writer identity (`runId` or `serviceId`, incrementing `seq`, wall-clock `at`, monotonic `atMs`) plus four core blocks (defined in [rsa/src/core/storage/events.ts](../../rsa/src/core/storage/events.ts)):
+Every JSONL event carries a top-level writer identity (`runId` or `serviceId`, incrementing `seq`, wall-clock `at`, monotonic `atMs`) plus four core blocks (defined in [rsa/src/core/storage/events.ts](../../../rsa/src/core/storage/events.ts)):
 
 - **`source`**: the responsible component that produced the semantics (`shiori`, `rsa`, `workspace`, `baseware`, `benchmark`, `dashboard`, `pet`) and its concrete implementation and version.
 - **`origin`**: `{eventId, clockId, seq, at, atMs}` of the source process that first generated the fact; unchanged across forwarding and persistence (`atMs` may only be subtracted within the same `clockId`).
@@ -86,8 +86,8 @@ Quick reference of core event contracts:
 
 ## Shiori, compaction, and transport
 
-1. **Shiori OTel telemetry**: [shiori.ts](../../rsa/src/core/agent-omp/shiori.ts) mounts a scoped OpenTelemetry provider (with `captureMessageContent = "none"` to avoid duplicating bodies) and writes a `shiori_run_end` summary at the end of each `agentLoop`.
-2. **HTTP and WebSocket transport tracing**: [trace.ts](../../rsa/src/core/agent-omp/trace.ts) records full request payloads, transport protocol (WS full / WS delta / HTTP SSE), and phase latencies:
+1. **Shiori OTel telemetry**: [shiori.ts](../../../rsa/src/core/agent-omp/shiori.ts) mounts a scoped OpenTelemetry provider (with `captureMessageContent = "none"` to avoid duplicating bodies) and writes a `shiori_run_end` summary at the end of each `agentLoop`.
+2. **HTTP and WebSocket transport tracing**: [trace.ts](../../../rsa/src/core/agent-omp/trace.ts) records full request payloads, transport protocol (WS full / WS delta / HTTP SSE), and phase latencies:
    - **HTTP header wait**: from request dispatch to receipt of the HTTP response headers (streaming completion is marked by the content-stream end after `http_end`).
    - **WS first-event wait**: in WebSocket mode the outbound `response.create` only marks send completion; the Dashboard measures outbound-completion to first inbound server event as the first-response metric.
 3. **Background speculation-compaction tracing**: each background compaction candidate gets a unique `operationId` via `diagnostics_channel("omp.compaction.speculation")`, tracing `started → armed / failed / cancelled` end to end plus threshold-phase `waiting / applied / invalidated`; its internal HTTP requests and retries are mounted under that `operationId` and the original control `epoch`.
@@ -138,7 +138,7 @@ rsa/bin/rsa logs events --run /path/to/workspace/logs/run-id
 rsa/bin/rsa logs events --run /path/to/workspace/logs/run-id --diagnostics
 ```
 
-Core metric semantics of [analyze-run.py](../../rsa/scripts/analyze-run.py):
+Core metric semantics of [analyze-run.py](../../../rsa/scripts/analyze-run.py):
 
 - **Model latency and cache hit rate**: over completed model requests; P95 uses nearest-rank; Prompt Cache hit rate is Token-weighted with denominator `input + cacheRead + cacheWrite` (`warm` only excludes the period's first request, not cache rebuilds caused by later compaction).
 - **Effective device-action rate**: counts only successful `action_end` plus successful non-`actionId`, control-requiring, non-read-only `execution`; async action submissions (the `pad.play` request itself), status queries, `pad.wait`, and perception sampling are never double-counted as actions.

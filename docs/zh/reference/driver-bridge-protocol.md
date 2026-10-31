@@ -10,7 +10,7 @@
   - 成功响应：`{id}\tOK\t{fields...}\n`
   - 失败响应：`{id}\tERROR\t{message}\n`
 - **异步请求配对**：`id` 由 Provider 生成（`crypto.randomUUID()`），Bridge 必须在响应行首原样回传。请求依靠 `id` 精确配对；`APPLY` 以及需要等待设备采样或渲染的操作延迟响应，具体时机见各指令说明。
-- **字符转义约束**：所有字段内部严禁包含 `\t`、`\r` 或 `\n`（由 [baseware/src/drivers/bridge.ts](../../baseware/src/drivers/bridge.ts) 强制校验）。TCP 连接断开即视为设备断连，立即触发 Provider 的 `onDisconnect` 回调。
+- **字符转义约束**：所有字段内部严禁包含 `\t`、`\r` 或 `\n`（由 [baseware/src/drivers/bridge.ts](../../../baseware/src/drivers/bridge.ts) 强制校验）。TCP 连接断开即视为设备断连，立即触发 Provider 的 `onDisconnect` 回调。
 
 ## 会话与所有权
 
@@ -37,7 +37,7 @@
 
 `APPLY` 的终态计时字段按时钟模型区分：帧驱动桥返回 `<startFrame>\t<endFrame>`；轮询驱动桥返回 `<elapsedMs>\t<polls>`。Provider 据此保留模拟帧数或墙钟耗时与采样数，不把帧号当作毫秒。
 
-Provider 侧先通过 [timeline.ts](../../baseware/src/drivers/timeline.ts) 的 `compileTimeline` 将多通道 `pad.play` 输入校验并切分为不重叠的全状态切片（Span），再编码为逗号分隔的 `<sequence>` 字符串：
+Provider 侧先通过 [timeline.ts](../../../baseware/src/drivers/timeline.ts) 的 `compileTimeline` 将多通道 `pad.play` 输入校验并切分为不重叠的全状态切片（Span），再编码为逗号分隔的 `<sequence>` 字符串：
 
 - **帧驱动桥**：每个切片格式为 `mask:frames`（`frames >= 1`）。Provider 按 `ceil(elapsedMs * fps / 1000)` 累计取整将毫秒转换为模拟帧数。
 - **轮询墙钟驱动桥**：每个切片格式为 `mask:lx:ly:rx:ry:durationMs`（摇杆轴 `|v| <= 32767`，`durationMs >= 16`）。在模拟器输入轮询点按单调墙钟推进，每个切片持续时间不少于 16ms。
@@ -63,7 +63,7 @@ Provider 侧先通过 [timeline.ts](../../baseware/src/drivers/timeline.ts) 的 
 | 双屏分屏采集 | `CAPTURE\t<top\|bottom>\t<path>` | `OK\t<captureSequence>` | 截取上屏或下屏写入绝对路径 `<path>`，返回递增截图序号。双屏共用一个原生捕获槽，串行采样。 |
 | 单屏渲染回调采集 | `CAPTURE\t<path>` | `OK\t[frame]\t<surface>` | 在下一次渲染帧呈现回调时截图（15s 超时），`<surface>` 标明游戏画面或系统键盘弹窗（系统键盘弹窗时省略 `frame`）。 |
 
-图像字节不经过 TCP Socket 传输：Provider 通过 [capture.ts](../../baseware/src/drivers/capture.ts) 的 `withCaptureFile` 分配本地临时文件路径传给 Bridge，待 `CAPTURE` 返回 `OK` 后读取文件字节并在 `finally` 中立即删除临时文件。
+图像字节不经过 TCP Socket 传输：Provider 通过 [capture.ts](../../../baseware/src/drivers/capture.ts) 的 `withCaptureFile` 分配本地临时文件路径传给 Bridge，待 `CAPTURE` 返回 `OK` 后读取文件字节并在 `finally` 中立即删除临时文件。
 
 ## Keyboard
 

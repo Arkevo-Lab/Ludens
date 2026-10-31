@@ -8,7 +8,7 @@
 
 ### 1. `perception.py:Perception` 生命周期
 
-`perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [rsa/templates/perception.py](../../rsa/templates/perception.py)）：
+`perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [rsa/templates/perception.py](../../../rsa/templates/perception.py)）：
 
 - `start(self, context)`：进程启动或 `reload` 时执行一次，可在此加载深度学习权重、初始化状态或后台采样线程。`context` 包含 `workspace`、`runDir` 与 `generation`。
 - `sample(self)`：需标注 `@record` 与 `@capability`，由调度器按类属性 `sample_hz`（默认 `30.0` Hz，同时作为录像编码的名义帧率）连续调用。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
@@ -79,7 +79,7 @@ CLI `rsa observe`、Python `Client().observe(query)` 与 OMP 原生 `observe` �
 
 ## 常驻动作
 
-`action.py` 中的 `Action` 类在 `auto` 控制周期内运行于独立的常驻 Python 进程（模板见 [rsa/templates/action.py](../../rsa/templates/action.py)）：
+`action.py` 中的 `Action` 类在 `auto` 控制周期内运行于独立的常驻 Python 进程（模板见 [rsa/templates/action.py](../../../rsa/templates/action.py)）：
 
 - **方法契约**：`start(self, context)` 在接管或重载时初始化一次（`context` 含 `workspace`、`runDir`、`generation`、`epoch`）；`step(self)` 标注 `@capability`（如需将决策留档至时空轴可加 `@record`），按类属性 `step_hz`（默认 `30.0` Hz）循环执行；`close(self)` 释放资源。
 - **读取感知与执行动作**：在 `Action` 中通过 `self.device = Client()` 调用 `self.device.observe()` 读取最新或历史感知记录，并调用 `self.device.call("controller/...", {...})` 下发设备指令。异步 `pad.play` 提交后无需在单步内同步阻塞等待，后续 `step()` 可边观测边决策。
