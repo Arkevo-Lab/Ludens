@@ -1,9 +1,18 @@
 /** Interpreter and source paths shared by the RSA host and offline Dashboard readers. */
 import { existsSync } from "node:fs";
-import { dirname, delimiter, isAbsolute, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+/** The module may load from the source tree or from a copied workspace-package store. */
+const repository = (() => {
+  const candidates = [
+    resolve(dirname(fileURLToPath(import.meta.url)), "../.."),
+    resolve(process.cwd(), ".."),
+    process.cwd(),
+  ];
+  return candidates.find(root => existsSync(join(root, "rsa", "package.json"))
+    && existsSync(join(root, "protocol", "package.json"))) ?? candidates[0];
+})();
 const projectPython = resolve(repository, "rsa/python/.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 
 export function pythonExecutable(environment: NodeJS.ProcessEnv = process.env): string {

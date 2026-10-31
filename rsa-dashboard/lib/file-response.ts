@@ -1,7 +1,8 @@
 import { open } from "node:fs/promises";
 import { Readable } from "node:stream";
 
-export interface FileMedia { file: string; mediaType: string; cacheControl?: string; size?: number }
+export type { FileMedia } from "@ludens/rsa/core/query/replay-types";
+import type { FileMedia } from "@ludens/rsa/core/query/replay-types";
 
 /** Single byte ranges keep video seeking bounded, even for very large recordings. */
 export function byteRange(value: string | null, size: number): { start: number; end: number } | null {

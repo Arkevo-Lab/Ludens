@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./core/query/*": "./src/core/query/*.ts",
     "./core/shiori/*": "./src/core/shiori/*.ts",
     "./core/storage/*": "./src/core/storage/*.ts",
     "./core/subsystems/*": "./src/core/subsystems/*.ts",

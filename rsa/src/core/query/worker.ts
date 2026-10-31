@@ -1,18 +1,18 @@
 import { parentPort } from "node:worker_threads";
-import { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } from "../lib/data";
-import { diagnosticEvents } from "../lib/diagnostic-events";
-import { getActivity } from "../lib/activity";
-import { getReplay } from "../lib/replay";
-import { benchmarkAttachment, benchmarkCatalog, benchmarkEvidence } from "../lib/benchmark-data";
-import { capabilities, capabilityRuntime } from "../lib/capabilities";
-import { discoverDriver } from "../lib/drivers";
-import { docGroups, readDoc } from "../lib/docs";
-import { petState, setPetTarget, recordPetConsumer } from "../lib/pet-state";
-import { closeLogIndexes, indexCacheStats } from "../lib/log-index";
-import { workerFailure, type DashboardMethods, type DashboardMethod, type WorkerRequest, type WorkerResponse } from "../lib/dashboard-protocol";
-import { perceptionSettings, updatePerceptionSettings, perceptionRuntime } from "../lib/perception-config";
-import { closeArchiveBuilds } from "../lib/cold-build";
-import { workspaceSettings, updateWorkspaceRoot, openWorkspace, removeWorkspace, createWorkspace } from "../lib/workspaces";
+import { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } from "./data";
+import { diagnosticEvents } from "./diagnostic-events";
+import { getActivity } from "./activity";
+import { getReplay } from "./replay";
+import { benchmarkAttachment, benchmarkCatalog, benchmarkEvidence } from "./benchmark-data";
+import { capabilities, capabilityRuntime } from "./capabilities";
+import { discoverDriver } from "./drivers";
+import { docGroups, readDoc } from "./docs";
+import { petState, setPetTarget, recordPetConsumer } from "./pet-state";
+import { closeLogIndexes, indexCacheStats } from "./log-index";
+import { workerFailure, type DashboardMethods, type DashboardMethod, type WorkerRequest, type WorkerResponse } from "./dashboard-protocol";
+import { perceptionSettings, updatePerceptionSettings, perceptionRuntime } from "./perception-config";
+import { closeArchiveBuilds } from "./cold-build";
+import { workspaceSettings, updateWorkspaceRoot, openWorkspace, removeWorkspace, createWorkspace } from "./workspaces";
 const port = parentPort!;
 const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], signal: AbortSignal) => unknown } = {
   workspaceSettings: () => workspaceSettings(),

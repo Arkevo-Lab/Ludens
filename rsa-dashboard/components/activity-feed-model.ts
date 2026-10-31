@@ -5,19 +5,8 @@ export type { ActivityBlock, ActivityScope } from "@ludens/protocol/activity";
 
 export type ActivityFilter = "all" | LogBlock["kind"];
 
-export const blockLabels: Record<LogBlock["kind"], string> = {
-  thinking: "思考",
-  text: "文本",
-  tool: "工具",
-  system: "系统",
-  diagnostic: "诊断",
-};
-
-export function printable(value: unknown): string {
-  return typeof value === "string"
-    ? value
-    : (JSON.stringify(value, null, 2) ?? "");
-}
+export { blockLabels, activitySearchText, printable } from "@/lib/activity-view";
+import { printable, activitySearchText } from "@/lib/activity-view";
 
 /** A preview is always a prefix; a streamed replacement may stop needing expansion. */
 export function activityContentView(text: string, requestedExpanded = false) {
@@ -46,12 +35,6 @@ export function activityProvenance(block: LogBlock): ActivityProvenanceRow[] {
   return rows;
 }
 
-/** Shared by the server projection and incremental UI, never a full-run filter. */
-export function activitySearchText(block: LogBlock): string {
-  return [block.title, block.text, blockLabels[block.kind],
-    block.source?.component, block.source?.implementation, printable(block.tool), printable(block.trace), block.id]
-    .filter(Boolean).join("\n").toLocaleLowerCase();
-}
 
 export function matchesActivity(block: LogBlock, filter: ActivityFilter, query: string): boolean {
   const needle = query.trim().toLocaleLowerCase();

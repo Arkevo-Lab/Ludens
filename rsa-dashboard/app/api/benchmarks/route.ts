@@ -1,6 +1,6 @@
-import { dashboardWorker } from "@/lib/dashboard-worker";
+import { dashboardWorker } from "@ludens/rsa/core/query/dashboard-worker";
 import { localRequest, errorResponse } from "@/lib/local-request";
-import { parseBenchmarkRequest } from "@/lib/benchmarks";
+import { parseBenchmarkRequest } from "@ludens/rsa/core/query/benchmarks";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export async function GET(request: Request) {

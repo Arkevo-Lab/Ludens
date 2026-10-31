@@ -1,10 +1,10 @@
 import { performance } from "node:perf_hooks";
-import { LogIndex, SourceChanged, resetStorageMetrics, storageMetrics } from "../lib/log-index";
-import { createRunReducer } from "../lib/run-index";
-import { createActivityReducer } from "../lib/activity";
-import { refreshOperationIndex } from "../lib/operation-index";
-import { captureSources, verifySources } from "../lib/cold-source";
-import type { ArchiveBuildState, BuilderRequest, BuilderReply } from "../lib/cold-build-protocol";
+import { LogIndex, SourceChanged, resetStorageMetrics, storageMetrics } from "./log-index";
+import { createRunReducer } from "./run-index";
+import { createActivityReducer } from "./activity";
+import { refreshOperationIndex } from "./operation-index";
+import { captureSources, verifySources } from "./cold-source";
+import type { ArchiveBuildState, BuilderRequest, BuilderReply } from "./cold-build-protocol";
 
 const abort = new AbortController();
 let started = false;
