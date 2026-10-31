@@ -82,6 +82,8 @@ rsa run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 这是可选组件，网页控制台不依赖 Electron。完成 [可选桌宠安装](quickstart.md#可选桌宠) 并启动 Dashboard 后，在仓库根目录运行 `rsa-companion/bin/rsa-companion --show-window` 可单独启动桌面端；其主窗口加载同一份 Dashboard 控制台，桌宠角色（卢登斯）与气泡消费同一套增量活动日志。通过 `rsa up` 管理桌宠时，在新工作区的 `rsa init` 命令中追加 `--pet`，或在已有 `rsa.json` 设置 `pet: true`。`rsa up --pet` / `--no-pet` 可临时覆盖配置，两者互斥且不写回文件；`--no-pet` 不会关闭已运行的共享桌宠。
 
 - **工作区跟随**：在工作区页面使用**设为关注目标**，或在设置中选择**已保存的工作区**。选择保存在 `$LUDENS_HOME/pet/target.json`；**桌面端状态**独立显示 Ludens Pet 是否已连接并应用选择。浏览其他工作区或历史记录不会更改此选择。桌宠未连接或目录不可用时，仍会显示已保存的选择。保存响应无法确认时，请先重新读取已保存目标，再进行其他更改；该恢复操作不会重复保存。 心跳保存在 `$LUDENS_HOME/pet/consumer.json`。桌宠使用 `.rsa/workspace.json` 中的稳定 ID，工作区移动并重新登记后仍保留同一身份。
+- **语言与游戏**：设置中的语言同时应用于控制台、原生菜单、桌宠台词、日志控件和游戏。桌宠启动时使用已保存语言或操作系统语言，随后跟随 Dashboard 恢复的偏好。右键桌宠选择**玩一会儿 · 接星星**开始 20 秒一局，接到 10 颗星星即获胜，按 Esc 可退出。主动启动游戏时会聚焦桌宠，从托盘启动也一样，因此可立即按 Esc 退出；普通活动通知不会抢占焦点。实时日志到来时会立即结束本局并接管气泡。最佳成绩仅保留在当前桌宠进程中。
+- **简略通知**：脱敏后的通知保留通用状态标题；语言渲染不会根据保留的连接 ID 推断运行已结束或正在等待 AI 接管。
 - **启动参数**：`--workspace PATH`（或 `RSA_WORKSPACE`）指定首次默认工作区，`--dashboard URL` 指定控制台地址，`--profile PATH` 指定独立偏好目录（默认 `$LUDENS_HOME/pet/profile/`），`LUDENS_DISABLE_COMPANION=1` 可禁用桌宠挂件。未设置 `LUDENS_HOME` 时使用 `~/.ludens`，所有组件需使用同一 home。关闭主窗口仅隐藏到托盘，双击桌宠或通过系统托盘菜单可重新唤出，选择 Quit 才彻底退出进程。
 - **构建同步**：当修改了 Dashboard 供桌宠消费的共享日志客户端代码时，需重新执行 `(cd rsa-companion && pnpm build)` 并重启 Electron 主进程。
 
@@ -118,10 +120,10 @@ node --expose-gc --max-old-space-size=1024 --import tsx scripts/check-index-memo
 
 执行 `(cd rsa-companion && pnpm pet:smoke)` 会使用临时 profile 自动验证窗口几何、点击穿透、尺寸缩放、音频与五类日志气泡；执行 `pnpm pet:preview` 则保留桌宠交互窗口供人工体验。
 
-卢登斯桌宠采用静态透明 WebP 素材（定义于 `rsa-companion/ui/public/companion/ludens/manifest.json`，含 24 个全身姿态、8 个叠加特效、3 个头像与托盘图标；修改 manifest 后需同步 `catalog.js`）：
+卢登斯桌宠采用静态透明 WebP 素材（定义于 `rsa-companion/ui/public/companion/ludens/manifest.json`，含 24 个全身姿态、8 个叠加特效、3 个头像与托盘图标；修改 manifest 后需同步 `catalog.js`）。中英界面共享文案位于 `rsa-companion/ui/public/companion/companion-i18n.cjs`，修改时必须同步更新两种语言。
 
 - **视觉校准**：各姿态通过 `display_scale` 以默认站立姿态的头部大小做底部居中缩放，气泡大小保持恒定。
-- **姿态优先级**：鼠标互动（点击惊讶/开心、按住拎起、拖拽落地） > 当前可见日志状态（思考→思考、工具运行→操作、工具完成→得意、错误→吃瘪） > 右键菜单手选姿态/特效（仅当次进程有效） > 闲置计时（30s 托坐 → 90s 犯困 → 120s 睡觉）。
+- **姿态优先级**：鼠标互动（点击惊讶/开心、按住拎起、拖拽落地） > 当前可见日志状态（思考→思考、工具运行→操作、工具完成→得意、错误→吃瘪） > 进行中的接星星游戏 > 右键菜单手选姿态/特效（仅当次进程有效） > 闲置计时（30s 托坐 → 90s 犯困 → 120s 睡觉）。
 
 ### 3. 实机与模拟器联调测试
 

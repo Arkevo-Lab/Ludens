@@ -7,6 +7,9 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { settleCompanion, snapEase, type Rect } from './companion-geometry.js'
 import { createCompanionSoundStore, DEFAULT_SOUND, type CompanionSound } from './companion-sound.js'
+import companionI18n from '../../../ui/public/companion/companion-i18n.cjs'
+
+type CompanionLocale = keyof typeof companionI18n
 
 /** Keep the renderer viewport dimensions stable across native window frames. */
 export function resizeCompanionWindow(window: BrowserWindow, width: number, height: number): void {
@@ -28,6 +31,8 @@ export interface CompanionHandle {
   readonly window: BrowserWindow
   configureActivity(source: RsaActivitySource): void
   trayMenuItems(): Electron.MenuItemConstructorOptions[]
+  locale(): CompanionLocale
+  copy(): (typeof companionI18n)[CompanionLocale]['menu']
 }
 
 /**
@@ -36,7 +41,7 @@ export interface CompanionHandle {
  * https://github.com/MeteorNOX/DeepSeek-Balance-Whale-Widget
  * Press/release, mirroring, bubble timing and snapping follow that MIT project (see companion/NOTICE.md).
  */
-export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}): CompanionHandle | undefined {
+export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, onLocale: (locale: CompanionLocale) => void = () => {}): CompanionHandle | undefined {
   if (process.env.LUDENS_DISABLE_COMPANION === '1') return
   const here = dirname(fileURLToPath(import.meta.url))
   const assets = app.isPackaged
@@ -47,13 +52,16 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}):
   let selectedPose: string | null = null
   let selectedEffect: string | null = null
   const publishPose = () => { if (!pet.isDestroyed()) pet.webContents.send('ludens:companion:pose', { state: selectedPose, effect: selectedEffect }) }
+  const publishLocale = () => { if (!pet.isDestroyed()) pet.webContents.send('ludens:companion:locale', locale) }
   let size = 220
   let enabled = true
+  let locale: CompanionLocale = app.getLocale().toLowerCase().startsWith('zh') ? 'zh' : 'en'
   let saved: Partial<Rect> = {}
   try {
     const value = JSON.parse(readFileSync(statePath, 'utf8'))
     if ([170, 220, 280].includes(value.size)) size = value.size
     if (typeof value.enabled === 'boolean') enabled = value.enabled
+    if (value.locale === 'en' || value.locale === 'zh') locale = value.locale
     if (Number.isFinite(value.x) && Number.isFinite(value.y)) saved = { x: value.x, y: value.y }
   } catch { /* First launch or damaged launcher preference: use defaults. */ }
   const area = screen.getDisplayMatching(owner.getBounds()).workArea
@@ -107,7 +115,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}):
   const save = () => {
     if (pet.isDestroyed()) return
     const { x, y } = companionBounds(pet)
-    const payload = JSON.stringify({ x, y, size, enabled })
+    const payload = JSON.stringify({ x, y, size, enabled, locale })
     writeQueue = writeQueue.then(async () => {
       await writeFile(statePath + '.tmp', payload)
       await rename(statePath + '.tmp', statePath)
@@ -142,6 +150,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}):
       && (!access.trustedOwner || access.trustedOwner(event))
   const visibilityChannel = 'ludens:companion:get-visible'
   const toggleChannel = 'ludens:companion:toggle'
+  const localeChannel = 'ludens:companion:set-locale'
   const defaultSound: CompanionSound = {
     ...DEFAULT_SOUND,
     source: {
@@ -184,50 +193,68 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}):
     toggle()
     return enabled
   })
+  ipcMain.handle(localeChannel, (event, value: unknown) => {
+    if (!ownerTrusted(event)) throw new Error('Unauthorized companion access')
+    if (value !== 'en' && value !== 'zh') throw new Error('Unsupported companion locale')
+    if (value !== locale) {
+      locale = value
+      save(); publishLocale(); onLocale(locale)
+    }
+    return locale
+  })
   pet.once('closed', () => {
     ipcMain.removeHandler(visibilityChannel)
     ipcMain.removeHandler(toggleChannel)
+    ipcMain.removeHandler(localeChannel)
     ipcMain.removeHandler(soundGet)
     ipcMain.removeHandler(soundUpdate)
     ipcMain.removeHandler(soundReset)
   })
   const activity = installCompanionActivity(owner, pet, access)
-  const trayMenuItems = (): Electron.MenuItemConstructorOptions[] => [
-    { label: '姿态', submenu: [
-      // Pose selection spans submenus; native radio groups are local to each menu.
-      { label: '自动（随活动与闲置切换）', type: 'checkbox', checked: selectedPose === null,
-        click: () => { selectedPose = null; publishPose() } },
-      ...[...new Set(catalog.assets.filter(a => a.kind === 'state').map(a => a.category))].map(category => ({
-        label: category, submenu: catalog.assets.filter(a => a.kind === 'state' && a.category === category).map(asset => ({
-          label: asset.label, type: 'checkbox' as const, checked: selectedPose === asset.id,
-          click: () => { selectedPose = asset.id; publishPose() },
+  const play = () => {
+    if (!enabled) toggle()
+    if (ready) { pet.show(); pet.focus(); pet.webContents.send('ludens:companion:game', 'start') }
+  }
+  const trayMenuItems = (): Electron.MenuItemConstructorOptions[] => {
+    const text = companionI18n[locale].menu
+    return [
+      { label: text.play, click: play },
+      { label: text.poses, submenu: [
+        // Pose selection spans submenus; native radio groups are local to each menu.
+        { label: text.automatic, type: 'checkbox', checked: selectedPose === null,
+          click: () => { selectedPose = null; publishPose() } },
+        ...[...new Set(catalog.assets.filter(a => a.kind === 'state').map(a => a.category))].map(category => ({
+          label: text.categories[category] ?? category, submenu: catalog.assets.filter(a => a.kind === 'state' && a.category === category).map(asset => ({
+            label: companionI18n[locale].assets[asset.id] ?? asset.label, type: 'checkbox' as const, checked: selectedPose === asset.id,
+            click: () => { selectedPose = asset.id; publishPose() },
+          })),
         })),
-      })),
-    ] },
-    { label: '特效', submenu: [
-      { label: '无', type: 'radio', checked: selectedEffect === null, click: () => { selectedEffect = null; publishPose() } },
-      ...catalog.assets.filter(a => a.kind === 'effect').map(asset => ({
-        label: asset.label, type: 'radio' as const, checked: selectedEffect === asset.id,
-        click: () => { selectedEffect = asset.id; publishPose() },
-      })),
-    ] },
-    { label: enabled ? 'Hide pet' : 'Show pet', click: toggle },
-    { label: 'Size', submenu: [170, 220, 280].map(value => ({
-      label: value === 170 ? 'Small' : value === 220 ? 'Medium' : 'Large', type: 'radio' as const, checked: size === value,
-      click: () => {
-        if (pet.isDestroyed()) return
-        const old = companionBounds(pet); size = value
-        const { width, height } = petSize()
-        setCompanionBounds(pet, { x: Math.round(old.x + (old.width - width) / 2), y: old.y + old.height - height, width, height })
-        settle(false); save()
-      },
-    })) },
-  ]
+      ] },
+      { label: text.effects, submenu: [
+        { label: text.none, type: 'radio', checked: selectedEffect === null, click: () => { selectedEffect = null; publishPose() } },
+        ...catalog.assets.filter(a => a.kind === 'effect').map(asset => ({
+          label: companionI18n[locale].assets[asset.id] ?? asset.label, type: 'radio' as const, checked: selectedEffect === asset.id,
+          click: () => { selectedEffect = asset.id; publishPose() },
+        })),
+      ] },
+      { label: enabled ? text.hide : text.show, click: toggle },
+      { label: text.size, submenu: [170, 220, 280].map(value => ({
+        label: value === 170 ? text.small : value === 220 ? text.medium : text.large, type: 'radio' as const, checked: size === value,
+        click: () => {
+          if (pet.isDestroyed()) return
+          const old = companionBounds(pet); size = value
+          const { width, height } = petSize()
+          setCompanionBounds(pet, { x: Math.round(old.x + (old.width - width) / 2), y: old.y + old.height - height, width, height })
+          settle(false); save()
+        },
+      })) },
+    ]
+  }
   const menu = () => Menu.buildFromTemplate([
-    { label: '打开 Ludens 控制台', click: open },
+    { label: companionI18n[locale].menu.open, click: open },
     ...trayMenuItems(),
     { type: 'separator' },
-    { label: '退出卢登斯', click: () => app.quit() },
+    { label: companionI18n[locale].menu.quit, click: () => app.quit() },
   ])
   const trusted = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => event.sender === pet.webContents && event.senderFrame === pet.webContents.mainFrame
   const listen = (action: string, callback: (input: unknown) => void) => {
@@ -236,7 +263,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}):
     ipcMain.on(channel, handler)
     pet.once('closed', () => ipcMain.removeListener(channel, handler))
   }
-  listen('ready', () => { ready = true; pet.webContents.send('ludens:companion:flip', flipped); if (enabled) pet.showInactive() })
+  listen('ready', () => { ready = true; pet.webContents.send('ludens:companion:flip', flipped); publishLocale(); if (enabled) pet.showInactive() })
   listen('reduced-motion', value => { if (typeof value === 'boolean') reducedMotion = value })
   listen('interactive', value => { if (typeof value === 'boolean') pet.setIgnoreMouseEvents(drag ? false : !value, { forward: true }) })
   listen('begin-drag', () => { stopSnap(); drag = { start: screen.getCursorScreenPoint(), bounds: companionBounds(pet), moved: false }; pet.setIgnoreMouseEvents(false) })
@@ -277,5 +304,6 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}):
     console.error('[companion] load failed:', error.message)
     if (!pet.isDestroyed()) pet.destroy()
   })
-  return { window: pet, trayMenuItems, configureActivity: activity.configure }
+  return { window: pet, trayMenuItems, configureActivity: activity.configure,
+    locale: () => locale, copy: () => companionI18n[locale].menu }
 }

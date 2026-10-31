@@ -1,10 +1,11 @@
-/* Static poses only. Interaction > visible activity > chosen pose > idle. */
+/* Static poses only. Interaction > visible activity > game > chosen pose > idle. */
 function createPetState(render, clock = () => Date.now()) {
-  let activity = null, chosen = null, effect = null, interaction = null;
+  let activity = null, chosen = null, effect = null, interaction = null, playing = false;
   let touched = clock(), until = 0;
   function current() {
     if (interaction && clock() < until) return { state: interaction, effect: interaction === '14-petted' ? 'fx-heart' : null };
     if (activity) return activity;
+    if (playing) return { state: '21-gaming', effect: null };
     if (chosen) return { state: chosen, effect };
     const age = clock() - touched;
     return { state: age >= 120000 ? '05-sleep' : age >= 90000 ? '04-drowsy' : age >= 30000 ? '02-perch' : '01-idle', effect: age >= 120000 ? 'fx-sleep' : effect };
@@ -15,6 +16,7 @@ function createPetState(render, clock = () => Date.now()) {
     touch() { touched = clock(); refresh(); },
     interact(state, duration = 1800) { touched = clock(); interaction = state; until = clock() + duration; refresh(); },
     choose(state, nextEffect = null) { chosen = state; effect = nextEffect; touched = clock(); interaction = null; refresh(); },
+    game(active) { playing = active; touched = clock(); interaction = null; refresh(); },
     activity(input) {
       if (!input) activity = null;
       else {

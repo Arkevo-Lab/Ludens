@@ -16,6 +16,7 @@ contextBridge.exposeInMainWorld('ludens', {
     getVisible: () => ipcRenderer.invoke('ludens:companion:get-visible'),
     toggle: () => ipcRenderer.invoke('ludens:companion:toggle'),
     onVisibility: (callback: (value: boolean) => void) => on('ludens:companion:visibility', callback),
+    setLocale: (locale: string) => ipcRenderer.invoke('ludens:companion:set-locale', locale),
     activity: {
       getPreferences: () => ipcRenderer.invoke('ludens:activity:preferences'),
       updatePreferences: (value: unknown) => ipcRenderer.invoke('ludens:activity:update-preferences', value),

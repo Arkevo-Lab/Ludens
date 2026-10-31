@@ -57,7 +57,7 @@
   },
   "settings": {
     "language": "语言",
-    "languageDescription": "控制台显示语言。默认跟随浏览器。",
+    "languageDescription": "控制台与桌宠显示语言。默认跟随浏览器。",
     "languageEnglish": "English",
     "languageChinese": "中文",
     "consoleDescription": "此控制台的显示偏好。工作区选项在各自页面中设置。",

@@ -7,7 +7,8 @@ import type { LogBlock } from './rsa-source.js'
 
 // Exercise the exact classic script loaded by the native pet window.
 const source = readFileSync(resolve('ui/public/companion/log-content.js'), 'utf8')
-const render = new Function(`${source}\nreturn renderLogContent;`)() as (target: HTMLElement, input: SerializedNotification) => void
+const i18n = readFileSync(resolve('ui/public/companion/companion-i18n.cjs'), 'utf8')
+const render = new Function(`${i18n}\n${source}\nreturn (target, input, locale = 'zh') => renderLogContent(target, input, companionI18n[locale].activity);`)() as (target: HTMLElement, input: SerializedNotification, locale?: 'en' | 'zh') => void
 
 function notification(kind: LogBlock['kind'], overrides: Partial<LogBlock> = {}): SerializedNotification {
   const block: LogBlock = { id: 'block-1', kind, at: '2026-10-17T17:00:00Z', title: `${kind} title`,
@@ -132,6 +133,25 @@ describe('pet log content', () => {
     expect(target.querySelector('.log-event')?.textContent).toBe('已交还控制权')
     const fields = Object.fromEntries([...target.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]))
     expect(fields).toEqual({ mode: 'manual', reason: 'budget', elapsedMs: '1800000' })
+  })
+
+  it('renders English status, tool and control chrome while preserving source content', () => {
+    render(target, notification('tool', { title: '工具', status: 'running', tool: { args: 'inspect', result: 'ok' } }), 'en')
+    expect(target.querySelector('.log-title')?.textContent).toBe('工具')
+    expect(target.querySelector('.log-status')?.textContent).toBe('Running')
+    expect(target.querySelector('pre')?.getAttribute('aria-label')).toBe('Arguments')
+    expect(target.querySelector('summary')?.textContent).toBe('Result')
+    render(target, notification('system', { title: 'control', data: { mode: 'manual' } }), 'en')
+    expect(target.querySelector('.log-event')?.textContent).toBe('Control returned to you')
+  })
+
+  it.each(['en', 'zh'] as const)('preserves redacted manual connection status in %s', locale => {
+    const brief = briefNotification(notification('system', {
+      id: 'connected:manual', title: '本轮已结束，控制权已交还',
+    }))
+    render(target, brief, locale)
+    expect(target.querySelector('.log-title')?.textContent).toBe(brief.title)
+    expect(target.querySelector('.log-body')?.textContent).toBe('')
   })
 
   it('renders brief notifications without any private source fields', () => {

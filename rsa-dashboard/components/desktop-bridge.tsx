@@ -6,7 +6,7 @@ import {
   type ActivityDisplay,
 } from "../lib/desktop";
 import "./pet-settings.css";
-import { useTranslations } from "@/lib/locale";
+import { useLocale, useTranslations } from "@/lib/locale";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
@@ -17,6 +17,7 @@ export function DesktopBridge({
   onNavigate(url: string): void;
 }) {
   const t = useTranslations("desktopBridge");
+  const { locale, ready } = useLocale();
   const [messages, setMessages] = useState<
     Map<string, Extract<ActivityDisplay, { type: "show" }>["input"]>
   >(() => new Map());
@@ -25,6 +26,10 @@ export function DesktopBridge({
   useEffect(() => {
     navigate.current = onNavigate;
   }, [onNavigate]);
+  useEffect(() => {
+    const companion = window.ludens?.companion;
+    if (ready && companion) void companion.setLocale(locale).catch(() => {});
+  }, [locale, ready]);
   useEffect(() => {
     const companion = window.ludens?.companion;
     if (!companion) return;

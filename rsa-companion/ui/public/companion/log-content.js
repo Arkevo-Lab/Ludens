@@ -1,5 +1,5 @@
 /* Present the existing RSA block kinds; source text is always inserted as text. */
-function renderLogContent(target, input) {
+function renderLogContent(target, input, copy) {
   const block = input.block;
   const kind = block?.kind ?? 'text';
   const id = block?.id ?? input.id;
@@ -30,35 +30,39 @@ function renderLogContent(target, input) {
   const path = document.createElementNS(icon.namespaceURI, 'path');
   path.setAttribute('d', paths[kind]);
   icon.append(path);
-  const title = block?.title ?? input.title;
+  let title = block?.title ?? input.title;
+  if (id === 'connected:manual') {
+    if (title === '本轮已结束，控制权已交还') title = copy.returned;
+    else if (title === '已连接，等待 AI 接管') title = copy.waiting;
+  }
   const header = el('div', 'log-header');
   const heading = el('span', 'log-title', title);
   heading.title = title;
   header.append(icon, heading);
   const status = block?.status ?? input.status;
   if (kind === 'tool' || status === 'error') {
-    header.append(el('span', 'log-status', status === 'running' ? '运行中' : status === 'error' ? '出错' : '完成'));
+    header.append(el('span', 'log-status', status === 'running' ? copy.running : status === 'error' ? copy.error : copy.complete));
   } else if (status === 'running') {
     const dots = el('span', 'log-stream', '•••');
-    dots.setAttribute('aria-label', '正在生成');
+    dots.setAttribute('aria-label', copy.generating);
     header.append(dots);
   }
   const content = el('div', 'log-body');
   content.tabIndex = 0;
   content.setAttribute('role', 'region');
-  content.setAttribute('aria-label', `${title}内容，可滚动`);
+  content.setAttribute('aria-label', copy.content.replace('{title}', title));
   if (kind === 'tool' && block.tool) {
     const tool = block.tool;
     if (tool.intent) content.append(el('p', 'log-intent', tool.intent));
     if (tool.args !== undefined) {
       const args = el('pre', 'log-code', typeof tool.args === 'string' ? tool.args : JSON.stringify(tool.args));
-      args.setAttribute('aria-label', '参数');
+      args.setAttribute('aria-label', copy.arguments);
       content.append(args);
     }
     if (tool.result !== undefined) {
       const details = el('details', 'log-result');
       details.open = resultOpen ?? status === 'error';
-      const summary = el('summary', '', '结果');
+      const summary = el('summary', '', copy.result);
       summary.addEventListener('click', event => {
         event.preventDefault();
         details.open = !details.open;
@@ -69,7 +73,7 @@ function renderLogContent(target, input) {
     }
   } else if ((kind === 'system' || kind === 'diagnostic') && block.data && Object.keys(block.data).length) {
     if (kind === 'system' && block.title === 'control') {
-      const label = { auto: 'AI 已接管', manual: '已交还控制权' }[block.data.mode];
+      const label = { auto: copy.aiControl, manual: copy.manualControl }[block.data.mode];
       if (label) content.append(el('p', 'log-event', label));
     }
     const fields = el('dl', 'log-fields');

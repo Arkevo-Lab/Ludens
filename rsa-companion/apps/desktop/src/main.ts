@@ -91,8 +91,9 @@ if (values.help) {
         if (!owner || owner.isDestroyed() || !isDashboardUrl(url, dashboard.origin)) return
         void owner.loadURL(url).catch(error => console.error('[ludens-pet] dashboard navigation failed:', error))
       }
-      const pet = createCompanion(owner, { trustedOwner: trusted, openDetails })
+      const pet = createCompanion(owner, { trustedOwner: trusted, openDetails }, () => updateApplicationMenu())
       if (!pet) throw new Error('Ludens Pet is disabled by LUDENS_DISABLE_COMPANION')
+      const companion = pet
       ipcMain.handle('rsa-pet:snapshot', event => {
         if (!trusted(event)) throw new Error('Unauthorized pet access')
         return snapshot
@@ -116,16 +117,19 @@ if (values.help) {
       tray.setToolTip('Ludens Pet · RSA')
       tray.on('click', showOwner)
       tray.on('right-click', () => Menu.buildFromTemplate([
-        { label: 'Open Ludens Pet', click: showOwner },
+        { label: pet.copy().open, click: showOwner },
         ...pet.trayMenuItems(),
         { type: 'separator' },
-        { label: 'Quit Ludens Pet', click: () => app.quit() },
+        { label: pet.copy().quit, click: () => app.quit() },
       ]).popup())
-      Menu.setApplicationMenu(Menu.buildFromTemplate([
-        { label: 'Ludens Pet', submenu: [ { label: 'Open Ludens Pet', click: showOwner }, { type: 'separator' }, { role: 'quit' } ] },
-        { role: 'editMenu' },
-        { role: 'windowMenu' },
-      ]))
+      function updateApplicationMenu() {
+        Menu.setApplicationMenu(Menu.buildFromTemplate([
+          { label: 'Ludens Pet', submenu: [ { label: companion.copy().open, click: showOwner }, { type: 'separator' }, { role: 'quit' } ] },
+          { role: 'editMenu' },
+          { role: 'windowMenu' },
+        ]))
+      }
+      updateApplicationMenu()
       const loadDashboard = async () => {
         if (loadingDashboard || dashboardReady || quitting || !owner || owner.isDestroyed() || owner.webContents.isLoadingMainFrame()) return
         loadingDashboard = true

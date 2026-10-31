@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('companion', {
   onPose: (callback: (selection: unknown) => void) => {
     ipcRenderer.on('ludens:companion:pose', (_event, selection) => callback(selection))
   },
+  onLocale: (callback: (locale: unknown) => void) => {
+    ipcRenderer.on('ludens:companion:locale', (_event, locale) => callback(locale))
+  },
+  onGame: (callback: (action: unknown) => void) => {
+    ipcRenderer.on('ludens:companion:game', (_event, action) => callback(action))
+  },
   onFlip: (callback: (flipped: boolean) => void) => {
     ipcRenderer.on('ludens:companion:flip', (_event, flipped) => callback(flipped))
   },

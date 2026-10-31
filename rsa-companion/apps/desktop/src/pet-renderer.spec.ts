@@ -20,8 +20,8 @@ beforeEach(async () => {
   vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({
     drawImage() {}, getImageData: () => ({ width: 2, height: 1, data: new Uint8ClampedArray([0, 0, 0, 255, 0, 0, 0, 0]) }),
   } as any)
-  renderer = new Function(read('ludens/catalog.js') + '\n' + read('pet-state.js') + '\n' + read('pet.js') +
-    '\nreturn {showPose,hit,speak,poses,stop:()=>clearInterval(poseTimer)};')()
+  renderer = new Function(read('companion-i18n.cjs') + '\n' + read('ludens/catalog.js') + '\n' + read('pet-state.js') + '\n' + read('pet.js') +
+    '\nreturn {showPose,hit,speak,poses,setLocale,stop:()=>clearInterval(poseTimer)};')()
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve()
   // Finish the initial pose requested by prepare().
   for (const image of pending) image.resolve()
@@ -54,9 +54,15 @@ it('retains usable artwork after decode failure and retries on the next refresh'
   pending[1].resolve(); await retry
   expect(document.querySelector('#pet')?.getAttribute('data-state')).toBe('24-battle')
 })
-it('keeps keyboard dialogue and reaction poses working without a native bridge', async () => {
+it('switches dialogue and accessible copy between English and Chinese without a native bridge', async () => {
   document.querySelector('#pet')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
-  expect(document.querySelector('#message')?.textContent).toBe('我在。')
-  expect(document.querySelector('#bubble')?.classList.contains('open')).toBe(true)
+  expect(document.querySelector('#message')?.textContent).toBe('I’m here.')
+  expect(document.documentElement.lang).toBe('en')
   expect(pending.at(-1)?.src).toContain('13-poked')
+  renderer.setLocale('zh')
+  expect(document.querySelector('#message')?.textContent).toBe('我在。')
+  expect(document.documentElement.lang).toBe('zh-CN')
+  expect(document.querySelector('#activity-open')?.textContent).toContain('详情')
+  renderer.setLocale('en')
+  expect(document.querySelector('#message')?.textContent).toBe('I’m here.')
 })

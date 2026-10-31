@@ -62,3 +62,14 @@ html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background:
 
 #pet #effect { position: absolute; width: 26%; height: 26%; right: 2%; top: 2%; }
 #pet #effect[hidden] { display: none; }
+
+#game[hidden], #game-target[hidden] { display: none; }
+#game { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+#game-hud { position: absolute; top: 8px; left: 50%; transform: translateX(-50%); display: flex; gap: 12px; align-items: center; padding: 5px 10px; border: 1px solid rgb(255 255 255 / 55%); border-radius: 999px; background: rgb(32 35 33 / 82%); color: #fff4c2; box-shadow: 0 3px 14px rgb(0 0 0 / 18%); font: 650 13px/1.2 system-ui, sans-serif; white-space: nowrap; font-variant-numeric: tabular-nums; }
+#game-target { position: absolute; width: clamp(48px, 11%, 68px); aspect-ratio: 1; padding: 3px; border: 0; border-radius: 50%; background: rgb(255 248 196 / 22%); cursor: pointer; pointer-events: auto; animation: star-arrive .18s cubic-bezier(.2,.9,.3,1.4), star-hover .7s ease-in-out .18s infinite alternate; filter: drop-shadow(0 0 8px rgb(255 224 105 / 65%)); }
+#game-target img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+#game-target:hover { background: rgb(255 248 196 / 40%); }
+#game-target:focus-visible { outline: 3px solid #fff0a8; outline-offset: 2px; }
+@keyframes star-arrive { from { opacity: 0; scale: .35; } to { opacity: 1; scale: 1; } }
+@keyframes star-hover { to { translate: 0 -5px; rotate: 8deg; } }
+@media (prefers-reduced-motion: reduce) { #game-target { animation: none; } }
