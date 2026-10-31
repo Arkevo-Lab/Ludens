@@ -7,10 +7,10 @@ Ludens（RSA，Recursive Self-Adaptation）将设备驱动、Agent 执行运行�
 | 组件 | 进程形态与核心职责 |
 | --- | --- |
 | `baseware/` | **独立设备服务**：加载内置或外部 Driver，提供统一 Controller 能力目录、控制权租约（`epoch`）仲裁、输入取消与设备事实日志，对外暴露 CLI、TS/Python API 与 MCP 接口。 |
-| `rsa/` | **自适应 Harness**：管理工作区配置与生命周期、能力发现与路由、常驻感知（`perception.py`）与常驻动作（`action.py`）Python 子进程、Harbor 评测以及运行日志归档。 |
+| `core/` | **自适应 Harness**（`@ludens/core`）：管理工作区配置与生命周期、能力发现与路由、常驻感知（`perception.py`）与常驻动作（`action.py`）Python 子进程、Harbor 评测以及运行日志归档。 |
 | **Shiori** | **唯一执行内核（职责名）**：由 RSA Host Runtime 实现，统一管控控制周期、时间/请求预算、信号取消与退出清理。Agent 模式挂载 **OMP 18.14.0**；普通评测程序、Verifier 与 Metric 共用同一生命周期而不启动模型。 |
-| `rsa-dashboard/` | **本地控制台服务**：通过独立 Node Worker 构建与查询日志索引，提供实时活动流、时空轴视频回放、运行统计、文档浏览、能力目录与人工交还入口。 |
-| `rsa-companion/` | **可选桌面伴侣（Ludens Pet）**：Electron 桌面壳，主窗口复用同一 Dashboard 视图，原生透明桌宠窗口与音频引擎增量消费同一套活动日志。 |
+| `app/` | **本地控制台服务（`@ludens/app`，Web）**：通过独立 Node Worker 构建与查询日志索引，提供实时活动流、时空轴视频回放、运行统计、文档浏览、能力目录与人工交还入口。 |
+| `app/desktop/` | **可选桌面伴侣（Ludens Pet）**：Electron 桌面壳，主窗口复用同一 Dashboard 视图，原生透明桌宠窗口与音频引擎增量消费同一套活动日志。 |
 
 ```mermaid
 flowchart LR
@@ -41,13 +41,13 @@ flowchart LR
 | 包 / 目录 | 分层与职责 |
 | --- | --- |
 | `protocol/`（`@ludens/protocol`） | **契约基座**：RPC Schema、运行事件类型、Timeline / Archive 格式、Benchmark DTO 与 Dashboard 活动投影；其余包只通过 workspace 导入消费。 |
-| `rsa/src/core/shiori/` | **控制内核**：`epoch` 控制租约、时间/请求预算、程序执行与取消；不依赖 OMP、CLI 或 Socket。 |
-| `rsa/src/core/storage/` | **工作区与事实存储**：`.rsa/` 身份与状态、`logs/<run-id>/` 事件流与归档、Benchmark Trial/Verification 存储。 |
-| `rsa/src/core/subsystems/` | **工作区常驻与设备子系统**：Python 感知/动作 Worker、`@capability` 发现、Baseware 设备会话。 |
-| `rsa/src/core/agent-omp/` | **OMP AgentRunner 实现**：OMP 会话组装、RSA 扩展与模型 Trace 记录，通过窄接口 `ExtensionHost` 暴露宿主能力。 |
-| `rsa/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、冷构建、活动/回放/遥测投影，供 Dashboard 与 Ludens Pet 消费。 |
-| `rsa/src/daemon/`、`rsa/src/bench/`、`rsa/src/cli/` | **外壳层**：Unix Socket RPC 守护进程与服务编排、Harbor 评测执行器、纯 CLI 前端。 |
-| `rsa-dashboard/shell/` + `rsa-dashboard/features/` | **控制台视图**：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`benchmark`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `rsa-dashboard/components/ui/`。 |
+| `core/src/core/shiori/` | **控制内核**：`epoch` 控制租约、时间/请求预算、程序执行与取消；不依赖 OMP、CLI 或 Socket。 |
+| `core/src/core/storage/` | **工作区与事实存储**：`.rsa/` 身份与状态、`logs/<run-id>/` 事件流与归档、Benchmark Trial/Verification 存储。 |
+| `core/src/core/subsystems/` | **工作区常驻与设备子系统**：Python 感知/动作 Worker、`@capability` 发现、Baseware 设备会话。 |
+| `core/src/core/agent-omp/` | **OMP AgentRunner 实现**：OMP 会话组装、RSA 扩展与模型 Trace 记录，通过窄接口 `ExtensionHost` 暴露宿主能力。 |
+| `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、冷构建、活动/回放/遥测投影，供 Dashboard 与 Ludens Pet 消费。 |
+| `core/src/daemon/`、`core/src/bench/`、`core/src/cli/` | **外壳层**：Unix Socket RPC 守护进程与服务编排、Harbor 评测执行器、纯 CLI 前端。 |
+| `app/shell/` + `app/features/` | **控制台视图**：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`benchmark`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
 
 
 ## 设备与统一能力
@@ -79,7 +79,7 @@ rsa controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":500
 
 ### 3. 常驻动作进程与输入重置
 
-工作区 `action.py` 的常驻动作 worker 固定绑定启动时的 `epoch` 与 `inputGeneration`。当在 `auto` 周期内执行 `rsa action stop`、`rsa action reload` 或 `Action.step()` 抛出异常时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [rsa/src/core/shiori/runtime.ts](../../../rsa/src/core/shiori/runtime.ts)。
+工作区 `action.py` 的常驻动作 worker 固定绑定启动时的 `epoch` 与 `inputGeneration`。当在 `auto` 周期内执行 `rsa action stop`、`rsa action reload` 或 `Action.step()` 抛出异常时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
 
 ## 会话与 Loop
 
@@ -89,13 +89,13 @@ RSA Host 在单工作区内复用同一个 OMP 会话（持久化于 `.rsa/shior
 
 - 保留 OMP 原生系统提示词（若工作区存在 `AGENTS.md`，通过原生 `contextFiles` 注入）。
 - 显式启用 OMP 原生工具 `read`、`write`、`edit`、`bash`、`wait`，并注册自定义工具 `observe`。
-- 仅覆盖宿主契约必需项：关闭 `retry.modelFallback`（保证所选视觉模型粘性）、关闭 `title.refreshOnReplan` 与 `cacheWarming`（确保每次模型请求严格归属控制周期）、将 `PROVIDER_IMAGE_BUDGETS` 设为 `Infinity`（在压缩前保留历史图像，避免中途丢图破坏 Prompt Cache 前缀），以及应用可选的 `compactionThreshold`。详见 [rsa/src/core/agent-omp/session.ts](../../../rsa/src/core/agent-omp/session.ts)。
+- 仅覆盖宿主契约必需项：关闭 `retry.modelFallback`（保证所选视觉模型粘性）、关闭 `title.refreshOnReplan` 与 `cacheWarming`（确保每次模型请求严格归属控制周期）、将 `PROVIDER_IMAGE_BUDGETS` 设为 `Infinity`（在压缩前保留历史图像，避免中途丢图破坏 Prompt Cache 前缀），以及应用可选的 `compactionThreshold`。详见 [core/src/core/agent-omp/session.ts](../../../core/src/core/agent-omp/session.ts)。
 
 在 `auto` 控制周期内，外层循环按以下步骤运转：
 
-1. **发起轮次**：使用 [continue.md](../../../rsa/prompts/continue.md) 发起 OMP `prompt`（首次接管若带 `auto on --message` 则附加一次性提醒）。
+1. **发起轮次**：使用 [continue.md](../../../core/prompts/continue.md) 发起 OMP `prompt`（首次接管若带 `auto on --message` 则附加一次性提醒）。
 2. **感知与动作并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按 `sample_hz` 持续采样写入 `.rsa/timeline/`，常驻 `Action.step()` 按 `step_hz` 持续读取时空轴并执行高频控制。
-3. **自动上下文交付**：RSA 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../../rsa/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
+3. **自动上下文交付**：RSA 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../../core/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
 4. **续轮或交还**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工交还或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
 
 ### 2. 上下文压缩与传输恢复
@@ -110,7 +110,7 @@ RSA Host 在单工作区内复用同一个 OMP 会话（持久化于 `.rsa/shior
 
 ## TypeScript 与 Python
 
-RSA 由 TypeScript 宿主（`rsa/src/`）与 Python 工具包（`rsa/python/rsa_tools/`）共同组成：
+RSA 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python/rsa_tools/`）共同组成：
 
 - **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、跨进程 RPC 与 CLI / Benchmark 编排。
 - **Python 侧**：负责 `@capability` 静态发现与动态执行、常驻 `Perception` / `Action` 循环、PyAV 视频段编码、冷帧按需解码以及 `current_trial()` 评测证据登记。视频编解码直接在常驻感知进程内按需完成，不额外引入独立的流媒体服务。

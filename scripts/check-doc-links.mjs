@@ -9,8 +9,8 @@ const roots = [
   ...globSync("docs/en/**/*.md"),
   ...globSync("docs/zh/**/*.md"),
   "README.md",
-  "rsa/README.md",
-  "rsa-dashboard/AGENTS.md",
+  "core/README.md",
+  "app/AGENTS.md",
 ];
 
 const linkRe = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;

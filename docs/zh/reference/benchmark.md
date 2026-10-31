@@ -37,7 +37,7 @@ rsa bench aggregate <dataset.toml> <run-id-1> <run-id-2> --policy all|graded
 
 ### 2. 运行配置绑定（Run Bindings）
 
-Harbor 任务包只描述“测什么与怎么判分”，而“运行什么程序”由独立的 JSON 运行配置（Run Binding）声明。系统自动从仓库 `rsa/benchmarks/runs/` 与工作区 `<workspace>/benchmarks/runs/` 扫描配置，并按 JSON 内的 `"task"` 字段关联到对应 Task（若任务仅有唯一绑定则作为默认配置，否则需通过 `--config <path>` 指定）：
+Harbor 任务包只描述“测什么与怎么判分”，而“运行什么程序”由独立的 JSON 运行配置（Run Binding）声明。系统自动从仓库 `core/benchmarks/runs/` 与工作区 `<workspace>/benchmarks/runs/` 扫描配置，并按 JSON 内的 `"task"` 字段关联到对应 Task（若任务仅有唯一绑定则作为默认配置，否则需通过 `--config <path>` 指定）：
 
 ```json
 {
@@ -52,18 +52,18 @@ Harbor 任务包只描述“测什么与怎么判分”，而“运行什么程�
 
 | 占位符 / 字段 | 解析值与边界 |
 | --- | --- |
-| `{rsa}` / `{python}` / `{bun}` | RSA 包根目录（仓库中的 `rsa/`）、选定框架 Python 解释器（`RSA_PYTHON`）与 Bun 可执行文件路径。 |
+| `{rsa}` / `{python}` / `{bun}` | RSA 包根目录（仓库中的 `core/`）、选定框架 Python 解释器（`RSA_PYTHON`）与 Bun 可执行文件路径。 |
 | `{workspace}` | 作者所在的原工作区绝对路径。 |
 | `{workdir}` | 本次试验的实际执行目录（`workspace: "isolated"` 时为每次试验独立创建的隔离目录）。 |
 | `{artifacts}` | 本次试验独占的产物输出目录（`logs/<run-id>/artifacts`）。 |
 | `{task}` / `{param.<key>}` | 本次固定后的 Task 目录路径，以及默认 `parameters` 与 CLI `--args` 合并后的参数值。 |
-| `Shiori 执行模式` | 普通命令运行于 Shiori `program` 模式，不启动模型；需要 Agent 参与的任务（如 `ludens/capability-reuse`）则通过公共 [host.ts](../../../rsa/src/core/shiori/host.ts) 挂载完整 OMP、Controller 与感知循环。预算由外层 Runtime 统一计时（含启动耗时），到期后给予最多 2 秒收尾期写出事实。 |
+| `Shiori 执行模式` | 普通命令运行于 Shiori `program` 模式，不启动模型；需要 Agent 参与的任务（如 `ludens/capability-reuse`）则通过公共 [host.ts](../../../core/src/core/shiori/host.ts) 挂载完整 OMP、Controller 与感知循环。预算由外层 Runtime 统一计时（含启动耗时），到期后给予最多 2 秒收尾期写出事实。 |
 
 ## Task 与 Dataset
 
 ### 1. Task 目录结构与内容摘要（Digest）
 
-仓库内置任务位于 `rsa/benchmarks/tasks/`，工作区自定义任务位于 `<workspace>/benchmarks/tasks/`：
+仓库内置任务位于 `core/benchmarks/tasks/`，工作区自定义任务位于 `<workspace>/benchmarks/tasks/`：
 
 ```text
 benchmarks/tasks/example/
@@ -87,12 +87,12 @@ version = "1"
 description = "Measure a capability on fixed examples."
 ```
 
-- **命名与内容寻址固定**：`ludens-native` 要求 `task.name` 必须采用 `org/name` 命名空间格式。Shiori 按 Harbor 发布文件选择规则计算确定性 `sha256:<64位十六进制>` 内容摘要（Digest）：根目录选择 `task.toml`、`instruction.md`、可选 `README.md` 与 `trajectory.json`，再扫描 `environment/`、`tests/`、`solution/`、`steps/` 并应用 `.gitignore` / `.harborignore` 排除规则（见 [task.ts](../../../rsa/src/bench/task.ts)）。运行前将选定文件快照固定至 `<workspace>/.rsa/benchmarks/tasks/<digest 十六进制部分>/`。
+- **命名与内容寻址固定**：`ludens-native` 要求 `task.name` 必须采用 `org/name` 命名空间格式。Shiori 按 Harbor 发布文件选择规则计算确定性 `sha256:<64位十六进制>` 内容摘要（Digest）：根目录选择 `task.toml`、`instruction.md`、可选 `README.md` 与 `trajectory.json`，再扫描 `environment/`、`tests/`、`solution/`、`steps/` 并应用 `.gitignore` / `.harborignore` 排除规则（见 [task.ts](../../../core/src/bench/task.ts)）。运行前将选定文件快照固定至 `<workspace>/.core/benchmarks/tasks/<digest 十六进制部分>/`。
 - **执行溯源分离**：被测外部脚本或模型权重不纳入 Task 包摘要，而是由 Shiori 在 `input.json` 与 `manifest.json` 中自动记录 Git commit/dirty 状态、实际 `argv`、预算及模型标识，或由被测程序通过 `current_trial().subject(...)` 显式登记。
 
 ### 2. Dataset 清单（`dataset.toml`）
 
-Dataset 采用 Harbor `1.0` 格式，通过任务名与精确的 `sha256` 摘要锁定任务集合（仓库内置清单见 [rsa/benchmarks/dataset.toml](../../../rsa/benchmarks/dataset.toml)）：
+Dataset 采用 Harbor `1.0` 格式，通过任务名与精确的 `sha256` 摘要锁定任务集合（仓库内置清单见 [core/benchmarks/dataset.toml](../../../core/benchmarks/dataset.toml)）：
 
 ```toml
 schema_version = "1.0"
@@ -110,7 +110,7 @@ digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde
 
 ## Python 辅助登记是可选的
 
-被测 Python 程序只需直接读取环境变量 `RSA_BENCH_ARTIFACTS` 并写入测量文件（如 `measurements.json`）即可完成试验，无需强制导入任何框架包。若需结构化登记实验条件、被测模型版本或自动收集进程内 `@capability` 调用统计，可选用 `rsa_tools.current_trial()`（完整示例见 [clamp.py](../../../rsa/benchmarks/examples/clamp.py)）：
+被测 Python 程序只需直接读取环境变量 `RSA_BENCH_ARTIFACTS` 并写入测量文件（如 `measurements.json`）即可完成试验，无需强制导入任何框架包。若需结构化登记实验条件、被测模型版本或自动收集进程内 `@capability` 调用统计，可选用 `rsa_tools.current_trial()`（完整示例见 [clamp.py](../../../core/benchmarks/examples/clamp.py)）：
 
 ```python
 from rsa_tools import current_trial
@@ -135,7 +135,7 @@ Shiori 在启动 `tests/test.sh` 时清理实时设备 socket、控制 `epoch` �
 
 | 环境变量 | 指向路径与用途 |
 | --- | --- |
-| `RSA_BENCH_TASK_DIR` | 本次评分使用的固定任务包目录（`.rsa/benchmarks/tasks/<digest 十六进制部分>/`）。 |
+| `RSA_BENCH_TASK_DIR` | 本次评分使用的固定任务包目录（`.core/benchmarks/tasks/<digest 十六进制部分>/`）。 |
 | `RSA_BENCH_INPUT` | 本次评分输入清单 JSON（含 trial 元数据与证据路径引用）。 |
 | `RSA_BENCH_ARTIFACTS` | 被测程序产出的 `logs/<run-id>/artifacts/` 目录，供评分器读取事实；不施加文件系统只读权限。 |
 | `RSA_BENCH_VERIFIER_DIR` | 本次评分独占的输出目录（`logs/<run-id>/verifier/<verification-id>/`）。 |
@@ -185,7 +185,7 @@ CLI 与 Dashboard 的 Benchmark 视图直接读取 `Trial + Verification + Rewar
 
 ## 内置任务与证据边界
 
-仓库内置 8 个标准评测任务（定义于 `rsa/benchmarks/tasks/` 与 `rsa/src/bench/cases/`）：
+仓库内置 8 个标准评测任务（定义于 `core/benchmarks/tasks/` 与 `core/src/bench/cases/`）：
 
 | Task 名称 | 运行模式与被测对象 | 核心验证指标与证据边界 |
 | --- | --- | --- |
@@ -198,4 +198,4 @@ CLI 与 Dashboard 的 Benchmark 视图直接读取 `Trial + Verification + Rewar
 | `ludens/video-storage` | 离线 · 双流合成图像 + PyAV 编码器 | 测量 MP4 视频分段编码吞吐、历史冷帧解码精度与进程 RSS 内存占用。 |
 | `ludens/index-memory` | 离线 · 隔离缓存目录 + Dashboard Builder | 测量冷历史索引构建子进程峰值内存、查询分页准确性与退出后缓存释放（不替代线上 Next.js 压测）。 |
 
-**`ludens/capability-reuse` 复用证据判定规则**：其独立评分器 [evaluate.ts](../../../rsa/benchmarks/tasks/capability-reuse/tests/evaluate.ts) 仅从执行期已记录的事件流与审计事实判定，绝不重跑工作区代码。有效复用要求同一自主创建的 Python 函数在**两个独立订单批次**、**不同模型推理轮次**中被真实调用并产生被环境接受的成功设备终态；仅创建文件、仅 `import` 而未调用、或仅在任务结束后做 AST 静态盘点，均不计入有效复用得分。
+**`ludens/capability-reuse` 复用证据判定规则**：其独立评分器 [evaluate.ts](../../../core/benchmarks/tasks/capability-reuse/tests/evaluate.ts) 仅从执行期已记录的事件流与审计事实判定，绝不重跑工作区代码。有效复用要求同一自主创建的 Python 函数在**两个独立订单批次**、**不同模型推理轮次**中被真实调用并产生被环境接受的成功设备终态；仅创建文件、仅 `import` 而未调用、或仅在任务结束后做 AST 静态盘点，均不计入有效复用得分。

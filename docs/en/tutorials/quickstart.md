@@ -9,43 +9,43 @@ Unless a `cd` into the target workspace is shown explicitly, run all commands fr
 ### 1. Environment prerequisites & credentials
 
 - **OS**: full background-service orchestration (`rsa up` / `rsa down` / `rsa services`) requires **macOS launchd**.
-- **Toolchain**: **Bun 1.4**, **Python 3.12+**, **Node.js 22.x (22.13+) or 24+**, and **uv**. The optional pet additionally requires **pnpm 11**.
+- **Toolchain**: **Bun 1.4**, **Python 3.12+**, **Node.js 22.x (22.13+) or 24+**, and **uv**. The optional pet shares the same JavaScript workspace install (Electron is a `app` devDependency).
 - **Model credentials**: complete **OMP model login** on the machine before starting an agent. RSA pins **OMP 18.14.0** and reuses its credential store directly; the default model is `openai-codex/gpt-6.1-sol`.
 
 ### 2. Install core components
 
-Install the JavaScript workspaces once from the repository root using the root `bun.lock`, then build the web Dashboard. Bun automatically applies the OMP dependency patches under [rsa/patches/](../../../rsa/patches/) per the root `package.json`. The RSA Python runtime keeps its separate `uv.lock`; the optional pet's pnpm setup is covered below. Do not run `npm ci` in `rsa-dashboard`: npm selects the root workspace, which uses Bun rather than an npm lockfile.
+Install the JavaScript workspaces once from the repository root using the root `bun.lock`, then build the web Dashboard. Bun automatically applies the OMP dependency patches under [core/patches/](../../../core/patches/) per the root `package.json`. The RSA Python runtime keeps its separate `uv.lock`; the optional pet shares the `app` workspace install. Do not run `npm ci` in `app`: npm selects the root workspace, which uses Bun rather than an npm lockfile.
 
 ```sh
 bun install --frozen-lockfile
-uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm run build)
+uv sync --project core/python --frozen
+(cd app && npm run build)
 
-export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
+export PATH="$PWD/baseware/bin:$PWD/core/bin:$PATH"
 ```
 
-`export PATH` only affects the current terminal; configure your shell profile in new terminals or use the absolute `baseware/bin/baseware` and `rsa/bin/rsa` paths.
+`export PATH` only affects the current terminal; configure your shell profile in new terminals or use the absolute `baseware/bin/baseware` and `core/bin/rsa` paths.
 
 ### 3. Python runtime resolution
 
-[rsa/python/pyproject.toml](../../../rsa/python/pyproject.toml) and `uv.lock` manage the official `ludens-rsa` package (import name `rsa_tools`) plus media and validation dependencies such as PyAV, Pillow, and jsonschema. `rsa_tools` only provides capability declarations, the client, and experiment-registration helpers; the execution lifecycle and scoring are managed centrally by Shiori.
+[core/python/pyproject.toml](../../../core/python/pyproject.toml) and `uv.lock` manage the official `ludens-rsa` package (import name `rsa_tools`) plus media and validation dependencies such as PyAV, Pillow, and jsonschema. `rsa_tools` only provides capability declarations, the client, and experiment-registration helpers; the execution lifecycle and scoring are managed centrally by Shiori.
 
 The framework picks a Python interpreter with this priority:
 
 1. Explicit `RSA_PYTHON` environment variable;
-2. In-repo virtualenv `rsa/python/.venv/bin/python`;
+2. In-repo virtualenv `core/python/.venv/bin/python`;
 3. System `python3` on `PATH`.
 
-The OMP native shell injects `RSA_PYTHON` automatically. To reuse `rsa_tools` and the framework dependencies in workspace scripts, call `"$RSA_PYTHON" script.py`; running a bare `python3` follows the user's login shell and is not equivalent to the framework virtualenv. If you point `RSA_PYTHON` at an external training environment (e.g. a conda/venv with PyTorch), pre-install the `rsa/python` package and its dependencies there.
+The OMP native shell injects `RSA_PYTHON` automatically. To reuse `rsa_tools` and the framework dependencies in workspace scripts, call `"$RSA_PYTHON" script.py`; running a bare `python3` follows the user's login shell and is not equivalent to the framework virtualenv. If you point `RSA_PYTHON` at an external training environment (e.g. a conda/venv with PyTorch), pre-install the `core/python` package and its dependencies there.
 
 `rsa up` preserves the `RSA_PYTHON` from the current environment when creating new background services. If services are already running, changing the terminal environment does not update them; stop and restart the relevant services before the new interpreter takes effect. After completing the installation above (and the optional pet below, if needed), prepare the target emulator or desktop driver via [Devices & driver setup](devices.md), then return to [Starting and stopping workspaces](#starting-and-stopping-workspaces).
 
 ## Optional pet
 
-The Dashboard is served in a browser by default — no Electron install is needed to run games or view the console. For Ludens Pet, prepare **pnpm 11** and run from the repository root:
+The Dashboard is served in a browser by default — no Electron install is needed to run games or view the console. For Ludens Pet, build the Electron desktop shell from the repository root:
 
 ```sh
-(cd rsa-companion && pnpm install --frozen-lockfile && pnpm build)
+(cd app && npm run desktop:build)
 ```
 
 When creating a workspace, append `--pet` to the chosen `rsa init --name <name> --driver ...` command to explicitly enable the pet. For an existing workspace, set `"pet": true` in `rsa.json`; it starts on the next `rsa up`. An explicit `pet: true` already in the file stays enabled. Setting `"pet": false` keeps later starts on the web console only.
@@ -127,7 +127,7 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 
 ### 2. `rsa.json` reference
 
-`rsa.json` is parsed and validated by [rsa/src/daemon/launcher.ts](../../../rsa/src/daemon/launcher.ts); unknown fields are hard errors:
+`rsa.json` is parsed and validated by [core/src/daemon/launcher.ts](../../../core/src/daemon/launcher.ts); unknown fields are hard errors:
 
 | Field | Default | Description |
 | --- | --- | --- |
@@ -147,4 +147,4 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 ### 3. Session resumption & background service directories
 
 - **Session resumption**: workspace OMP sessions live in `.rsa/shiori/sessions/`, with the current resume pointer at `.rsa/shiori/current-session.json`. Restarting Host resumes the original session by default and opens a new `logs/<run-id>/` directory. Foreground `rsa run` accepts `--new-session` to start a fresh context (keeping workspace files), or `--resume /absolute/path/to/session.jsonl` to switch to a given historical session of the same workspace.
-- **Background service logs**: [launch-background.py](../../../rsa/scripts/launch-background.py) writes stdio and launchd state for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (launchd label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. Background services detach from the terminal without boot-time autostart or crash-loop restarts; check `rsa services` and the corresponding logs first when troubleshooting.
+- **Background service logs**: [launch-background.py](../../../core/scripts/launch-background.py) writes stdio and launchd state for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (launchd label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. Background services detach from the terminal without boot-time autostart or crash-loop restarts; check `rsa services` and the corresponding logs first when troubleshooting.

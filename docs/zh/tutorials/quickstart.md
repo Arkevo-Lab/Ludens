@@ -9,43 +9,43 @@
 ### 1. 环境前提与凭据
 
 - **操作系统**：完整后台服务编排（`rsa up` / `rsa down` / `rsa services`）依赖 **macOS launchd**。
-- **工具链**：准备 **Bun 1.4**、**Python 3.12+**、**Node.js 22.x（22.13 起）或 24+** 与 **uv**。可选桌宠另需 **pnpm 11**。
+- **工具链**：准备 **Bun 1.4**、**Python 3.12+**、**Node.js 22.x（22.13 起）或 24+** 与 **uv**。可选桌宠共用同一套 JavaScript workspace 安装（Electron 是 `app` 的 devDependency）。
 - **模型凭据**：启动 Agent 前需在本机完成 **OMP 模型登录**。RSA 固定使用 **OMP 18.14.0** 并直接复用其凭据存储，默认模型为 `openai-codex/gpt-6.1-sol`。
 
 ### 2. 安装核心组件
 
-在仓库根目录使用根 `bun.lock` 一次安装 JavaScript workspaces，再构建网页 Dashboard。Bun 会按根 `package.json` 自动应用 [rsa/patches/](../../../rsa/patches/) 下的 OMP 依赖补丁。RSA Python 运行时保留独立的 `uv.lock`，可选桌宠的 pnpm 安装方式见下文。不要在 `rsa-dashboard` 中运行 `npm ci`：npm 会选择根 workspace，而根目录使用 Bun，不维护 npm 锁文件。
+在仓库根目录使用根 `bun.lock` 一次安装 JavaScript workspaces，再构建网页 Dashboard。Bun 会按根 `package.json` 自动应用 [core/patches/](../../../core/patches/) 下的 OMP 依赖补丁。RSA Python 运行时保留独立的 `uv.lock`，可选桌宠共用 `app` workspace 安装。不要在 `app` 中运行 `npm ci`：npm 会选择根 workspace，而根目录使用 Bun，不维护 npm 锁文件。
 
 ```sh
 bun install --frozen-lockfile
-uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm run build)
+uv sync --project core/python --frozen
+(cd app && npm run build)
 
-export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
+export PATH="$PWD/baseware/bin:$PWD/core/bin:$PATH"
 ```
 
-`export PATH` 仅对当前终端生效；新开终端请同步配置 shell profile 或使用 `baseware/bin/baseware`、`rsa/bin/rsa` 绝对路径。
+`export PATH` 仅对当前终端生效；新开终端请同步配置 shell profile 或使用 `baseware/bin/baseware`、`core/bin/rsa` 绝对路径。
 
 ### 3. Python 运行时解析规则
 
-[rsa/python/pyproject.toml](../../../rsa/python/pyproject.toml) 与 `uv.lock` 管理正式 `ludens-rsa` 包（导入名 `rsa_tools`）以及 PyAV、Pillow、jsonschema 等媒体与校验依赖。`rsa_tools` 仅提供能力声明、客户端与试验登记辅助，执行生命周期与评分由 Shiori 统一管理。
+[core/python/pyproject.toml](../../../core/python/pyproject.toml) 与 `uv.lock` 管理正式 `ludens-rsa` 包（导入名 `rsa_tools`）以及 PyAV、Pillow、jsonschema 等媒体与校验依赖。`rsa_tools` 仅提供能力声明、客户端与试验登记辅助，执行生命周期与评分由 Shiori 统一管理。
 
 框架按以下优先级选择 Python 解释器：
 
 1. 显式环境变量 `RSA_PYTHON`；
-2. 仓库内置虚拟环境 `rsa/python/.venv/bin/python`；
+2. 仓库内置虚拟环境 `core/python/.venv/bin/python`；
 3. 系统 `PATH` 中的 `python3`。
 
-OMP 原生 shell 会自动注入 `RSA_PYTHON`。在工作区脚本中若需复用 `rsa_tools` 及框架依赖，应调用 `"$RSA_PYTHON" script.py`；直接运行裸 `python3` 仍遵循用户 login shell，不等同于框架虚拟环境。若将 `RSA_PYTHON` 指向外部训练环境（如包含 PyTorch 的 conda/venv），需在该环境中预先安装 `rsa/python` 包及其依赖。
+OMP 原生 shell 会自动注入 `RSA_PYTHON`。在工作区脚本中若需复用 `rsa_tools` 及框架依赖，应调用 `"$RSA_PYTHON" script.py`；直接运行裸 `python3` 仍遵循用户 login shell，不等同于框架虚拟环境。若将 `RSA_PYTHON` 指向外部训练环境（如包含 PyTorch 的 conda/venv），需在该环境中预先安装 `core/python` 包及其依赖。
 
 `rsa up` 新建后台服务时会保留当前环境中的 `RSA_PYTHON`。若服务已经运行，修改终端环境不会更新它；需停止并重新启动相关服务后才会使用新解释器。完成以上安装（及下方按需选配的桌宠）后，若尚未准备目标模拟器或桌面驱动，请先转入 [设备与驱动准备](devices.md)，准备就绪后再回到本页执行 [工作区启动与停止](#工作区启动与停止)。
 
 ## 可选桌宠
 
-默认通过浏览器访问 Dashboard，运行游戏与查看控制台无需安装 Electron。需要 Ludens Pet 时，准备 **pnpm 11**，在仓库根目录执行：
+默认通过浏览器访问 Dashboard，运行游戏与查看控制台无需安装 Electron。需要 Ludens Pet 时，在仓库根目录构建 Electron 桌面外壳：
 
 ```sh
-(cd rsa-companion && pnpm install --frozen-lockfile && pnpm build)
+(cd app && npm run desktop:build)
 ```
 
 新建工作区时，在所选 `rsa init --name <name> --driver ...` 命令中追加 `--pet`，显式启用桌宠。已有工作区可在 `rsa.json` 设置 `"pet": true`，下次 `rsa up` 时按需启动；已有文件中的显式 `pet: true` 保持启用。设为 `"pet": false` 可在后续启动时仅使用网页控制台。
@@ -127,7 +127,7 @@ rsa workspace import /absolute/path/to/workspace \
 
 ### 2. `rsa.json` 配置参考
 
-`rsa.json` 由 [rsa/src/daemon/launcher.ts](../../../rsa/src/daemon/launcher.ts) 解析校验，未知字段会直接报错：
+`rsa.json` 由 [core/src/daemon/launcher.ts](../../../core/src/daemon/launcher.ts) 解析校验，未知字段会直接报错：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -147,4 +147,4 @@ rsa workspace import /absolute/path/to/workspace \
 ### 3. 会话续接与后台服务目录
 
 - **会话续接**：工作区 OMP 会话保存在 `.rsa/shiori/sessions/`，当前默认续接指针位于 `.rsa/shiori/current-session.json`。重启 Host 默认续接原会话并开启新的 `logs/<run-id>/` 目录。前台 `rsa run` 可传 `--new-session` 开启全新上下文（保留工作区文件），或传 `--resume /absolute/path/to/session.jsonl` 切换到同工作区的指定历史会话。
-- **后台服务日志**：[launch-background.py](../../../rsa/scripts/launch-background.py) 将工作区受管进程的标准输出与 launchd 状态写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（launchd label 为 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。所有后台服务均脱离终端运行，但不注册开机自启或崩溃死循环重启；排障时先查看 `rsa services` 与对应日志。
+- **后台服务日志**：[launch-background.py](../../../core/scripts/launch-background.py) 将工作区受管进程的标准输出与 launchd 状态写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（launchd label 为 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。所有后台服务均脱离终端运行，但不注册开机自启或崩溃死循环重启；排障时先查看 `rsa services` 与对应日志。
