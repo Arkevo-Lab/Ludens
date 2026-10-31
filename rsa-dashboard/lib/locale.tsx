@@ -22,20 +22,23 @@ function lookup(dict: Dictionary, key: string): string | undefined {
   return typeof node === "string" ? node : undefined;
 }
 
-const LocaleContext = createContext<{ locale: Locale; setLocale: (locale: Locale) => void; t: (key: string) => string }>({
+const LocaleContext = createContext<{ locale: Locale; ready: boolean; setLocale: (locale: Locale) => void; t: (key: string) => string }>({
   locale: "en",
+  ready: false,
   setLocale: () => {},
   t: key => key,
 });
 
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
+  const [ready, setReady] = useState(false);
   useEffect(() => {
     // Match the server on the first client render, then restore local preferences.
     try {
       const stored = window.localStorage.getItem(STORAGE_KEY);
       setLocaleState(stored === "zh" || stored === "en" ? stored : browserLocale());
     } catch { setLocaleState(browserLocale()); }
+    setReady(true);
   }, []);
   useEffect(() => {
     document.documentElement.lang = locale === "zh" ? "zh-CN" : "en";
@@ -45,7 +48,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     try { window.localStorage.setItem(STORAGE_KEY, next); } catch { /* private mode */ }
   }, []);
   const t = useCallback((key: string) => lookup(dictionaries[locale], key) ?? lookup(en, key) ?? key, [locale]);
-  const value = useMemo(() => ({ locale, setLocale, t }), [locale, setLocale, t]);
+  const value = useMemo(() => ({ locale, ready, setLocale, t }), [locale, ready, setLocale, t]);
   return <LocaleContext.Provider value={value}>{children}</LocaleContext.Provider>;
 }
 

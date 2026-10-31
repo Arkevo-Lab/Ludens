@@ -7,6 +7,14 @@ const body = document.querySelector('#body');
 const mirror = document.querySelector('#mirror');
 const bubble = document.querySelector('#bubble');
 const message = document.querySelector('#message');
+const game = document.querySelector('#game');
+const gameScore = document.querySelector('#game-score');
+const gameTime = document.querySelector('#game-time');
+const gameTarget = document.querySelector('#game-target');
+let locale = navigator.language.toLowerCase().startsWith('zh') ? 'zh' : 'en';
+let copy = companionI18n[locale];
+let activityInput = null;
+let lastSpeech = null;
 let alpha;
 let flipped = false;
 let held = null;
@@ -26,9 +34,11 @@ function activityHit(point) {
 bridge?.onActivity(event => {
   if (event.type === 'hide') { if (event.displayId === activityId) hideBubble(); return; }
   if (event.type !== 'show' || typeof event.displayId !== 'string') return;
+  stopGame();
   clearTimeout(hideTimer);
   activityId = event.displayId;
-  renderLogContent(message, event.input);
+  activityInput = event.input;
+  renderLogContent(message, event.input, copy.activity);
   poses.activity(event.input);
   activityActions.hidden = false;
   bubble.classList.add('open', 'activity');
@@ -38,6 +48,7 @@ bridge?.onActivity(event => {
 document.querySelector('#activity-open').addEventListener('click', () => { if (activityId) void bridge?.openActivity(activityId); });
 document.querySelector('#activity-dismiss').addEventListener('click', () => { if (activityId) void bridge?.dismissActivity(activityId); hideBubble(); });
 document.addEventListener('keydown', event => {
+  if (event.key === 'Escape' && gameActive) { event.preventDefault(); stopGame(); return; }
   if (event.key === 'Escape' && activityId) { void bridge?.dismissActivity(activityId); hideBubble(); }
 });
 let sound = { enabled: true, volume: .5, source: null };
@@ -55,8 +66,35 @@ function playClickSound() {
   clickAudio.currentTime = 0;
   void clickAudio.play().catch(() => console.warn('Pet click sound could not play'));
 }
+function formatSpeech(speech) {
+  if (!speech) return '';
+  if (speech.kind === 'line') return copy.lines[speech.index];
+  return `${speech.score >= 10 ? copy.game.win : copy.game.lose}\n${copy.game.score.replace('{score}', speech.score)} · ${copy.game.best.replace('{best}', bestScore)}`;
+}
+function setLocale(next) {
+  if (!companionI18n[next]) return;
+  locale = next;
+  copy = companionI18n[locale];
+  document.documentElement.lang = copy.lang;
+  document.title = copy.name;
+  pet.setAttribute('aria-label', copy.petLabel);
+  pet.title = copy.petTitle;
+  activityOpen.firstChild.textContent = copy.details + ' ';
+  const dismiss = document.querySelector('#activity-dismiss');
+  dismiss.textContent = copy.dismiss;
+  dismiss.setAttribute('aria-label', copy.dismissLabel);
+  dismiss.title = copy.dismissLabel;
+  game.setAttribute('aria-label', copy.game.label);
+  gameTarget.setAttribute('aria-label', copy.game.target);
+  gameTarget.title = copy.game.target;
+  const asset = assets.get(pet.dataset.state);
+  if (asset) portrait.alt = copy.name + ' · ' + (copy.assets[asset.id] ?? asset.label);
+  if (activityInput) renderLogContent(message, activityInput, copy.activity);
+  else if (bubble.classList.contains('open') && lastSpeech) message.textContent = formatSpeech(lastSpeech);
+  updateGameHud();
+}
+bridge?.onLocale?.(setLocale);
 let lastPoint = { x: -1, y: -1 };
-const lines = ['我在。', '先观察，再行动。', '嗯？叫卢登斯。', '别戳了，在想了。', '这次有把握。大概。', '蛛腿也要休息。', '再试一次。', '一起看看？'];
 const assets = new Map(ludensCatalog.assets.map(asset => [asset.id, asset]));
 const effectImage = document.querySelector('#effect');
 let requestedState = null, requestVersion = 0;
@@ -82,7 +120,7 @@ async function showPose({ state, effect }) {
     pet.style.setProperty('--pose-scale', asset.display_scale ?? 1);
     // Commit art, layout and alpha together; slow decodes cannot overwrite a newer pose.
     portrait.src = image.src; alpha = pixels;
-    portrait.alt = '卢登斯 · ' + asset.label;
+    portrait.alt = copy.name + ' · ' + (copy.assets[asset.id] ?? asset.label);
     pet.dataset.state = state;
     update(lastPoint);
   } catch (error) {
@@ -97,7 +135,7 @@ bridge?.onPose?.(value => {
   poses.choose(value.state, value.effect);
 });
 const poseTimer = setInterval(() => poses.refresh(), 1000);
-window.addEventListener('pagehide', () => clearInterval(poseTimer));
+window.addEventListener('pagehide', () => { clearInterval(poseTimer); stopGame(); });
 
 function hit(point) {
   const rect = portrait.getBoundingClientRect();
@@ -110,24 +148,113 @@ function hit(point) {
   const px = Math.min(alpha.width - 1, Math.floor(x * alpha.width));
   return alpha.data[(Math.floor(y * alpha.height) * alpha.width + px) * 4 + 3] > 10;
 }
+function gameHit(point) {
+  if (!gameActive || gameTarget.hidden) return false;
+  const rect = gameTarget.getBoundingClientRect();
+  return point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
+}
 function update(point) {
   lastPoint = point;
-  const next = held !== null || hit(point) || activityHit(point);
+  const next = held !== null || hit(point) || activityHit(point) || gameHit(point);
   if (next !== interactive) { interactive = next; bridge?.interactive(next); }
 }
 function speak() {
-  poses.interact(line % 2 ? '14-petted' : '13-poked');
+  if (gameActive) return;
+  const index = line % copy.lines.length;
+  poses.interact(index % 2 ? '14-petted' : '13-poked');
   playClickSound();
   if (activityId) { activityOpen.focus(); return; }
+  line++;
   clearTimeout(hideTimer);
-  message.textContent = lines[line++ % lines.length];
+  lastSpeech = { kind: 'line', index };
+  message.textContent = formatSpeech(lastSpeech);
   bubble.classList.add('open');
   bubble.setAttribute('aria-hidden', 'false');
   hideTimer = setTimeout(hideBubble, 5000);
 }
-function hideBubble() { poses.activity(null); activityId = null; if (bubble.contains(document.activeElement)) pet.focus(); activityActions.hidden = true; delete message.dataset.blockId; bubble.classList.remove('open', 'activity'); bubble.setAttribute('aria-hidden', 'true'); update(lastPoint); }
+function hideBubble() { poses.activity(null); activityId = null; activityInput = null; lastSpeech = null; if (bubble.contains(document.activeElement)) pet.focus(); activityActions.hidden = true; delete message.dataset.blockId; bubble.classList.remove('open', 'activity'); bubble.setAttribute('aria-hidden', 'true'); update(lastPoint); }
+let gameActive = false, gameFrame = 0, gameScoreValue = 0, bestScore = 0;
+let gameStartedAt = 0, gameEndsAt = 0, targetExpiresAt = 0, nextSpawnAt = 0, lastHudAt = 0, lastSpot = -1;
+const gameSpots = [[7, 20], [79, 18], [9, 59], [77, 57]];
+function updateGameHud(seconds = 20) {
+  gameScore.textContent = `★ ${gameScoreValue} / 10`;
+  gameTime.textContent = `${seconds.toFixed(1)}s`;
+}
+function spawnStar(now) {
+  let spot = Math.floor(Math.random() * gameSpots.length);
+  if (spot === lastSpot) spot = (spot + 1) % gameSpots.length;
+  lastSpot = spot;
+  gameTarget.style.left = gameSpots[spot][0] + '%';
+  gameTarget.style.top = gameSpots[spot][1] + '%';
+  gameTarget.hidden = false;
+  targetExpiresAt = now + Math.max(550, 1150 - (now - gameStartedAt) * .03);
+  update(lastPoint);
+}
+function gameTick(now) {
+  if (!gameActive) return;
+  const remaining = Math.max(0, gameEndsAt - now);
+  if (remaining === 0) { finishGame(); return; }
+  if (now - lastHudAt >= 100) { updateGameHud(remaining / 1000); lastHudAt = now; }
+  if (!gameTarget.hidden && now >= targetExpiresAt) {
+    gameTarget.hidden = true;
+    nextSpawnAt = now + 140;
+    update(lastPoint);
+  }
+  if (gameTarget.hidden && now >= nextSpawnAt) spawnStar(now);
+  gameFrame = requestAnimationFrame(gameTick);
+}
+function startGame() {
+  if (activityId) { void bridge?.dismissActivity(activityId); hideBubble(); }
+  stopGame();
+  hideBubble();
+  gameActive = true;
+  gameScoreValue = 0;
+  gameStartedAt = performance.now();
+  gameEndsAt = gameStartedAt + 20000;
+  nextSpawnAt = gameStartedAt;
+  lastHudAt = 0;
+  lastSpot = -1;
+  poses.game(true);
+  game.hidden = false;
+  gameTarget.hidden = true;
+  updateGameHud();
+  gameFrame = requestAnimationFrame(gameTick);
+  update(lastPoint);
+}
+function stopGame() {
+  if (!gameActive) return;
+  gameActive = false;
+  cancelAnimationFrame(gameFrame);
+  game.hidden = true;
+  gameTarget.hidden = true;
+  poses.game(false);
+  update(lastPoint);
+}
+function finishGame() {
+  const score = gameScoreValue;
+  stopGame();
+  bestScore = Math.max(bestScore, score);
+  poses.interact(score >= 10 ? '10-success' : '11-failure', 1800);
+  lastSpeech = { kind: 'game', score };
+  message.textContent = formatSpeech(lastSpeech);
+  bubble.classList.add('open');
+  bubble.setAttribute('aria-hidden', 'false');
+  clearTimeout(hideTimer);
+  hideTimer = setTimeout(hideBubble, 5000);
+}
+gameTarget.addEventListener('click', () => {
+  if (!gameActive || gameTarget.hidden) return;
+  gameScoreValue++;
+  playClickSound();
+  poses.interact('14-petted', 260);
+  gameTarget.hidden = true;
+  nextSpawnAt = performance.now() + 100;
+  updateGameHud(Math.max(0, gameEndsAt - performance.now()) / 1000);
+  update(lastPoint);
+});
+bridge?.onGame?.(value => { if (value === 'start') startGame(); });
 pet.addEventListener('pointerdown', event => {
-  if (event.button !== 0 || !hit({ x: event.clientX, y: event.clientY })) return;
+  if (gameActive || event.button !== 0 || !hit({ x: event.clientX, y: event.clientY })) return;
   event.preventDefault();
   held = event.pointerId;
   pet.setPointerCapture(held);
@@ -175,6 +302,7 @@ document.addEventListener('transitionrun', () => {
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
 bridge?.reducedMotion(reducedMotion.matches);
 reducedMotion.addEventListener('change', event => bridge?.reducedMotion(event.matches));
+setLocale(locale);
 async function prepare() {
   await portrait.decode();
   const canvas = document.createElement('canvas');

@@ -36,6 +36,7 @@ export interface DesktopCompanion {
   getVisible(): Promise<boolean>;
   toggle(): Promise<boolean>;
   onVisibility(callback: (visible: boolean) => void): () => void;
+  setLocale(locale: "en" | "zh"): Promise<"en" | "zh">;
   activity: {
     getPreferences(): Promise<ActivityPreferences>;
     updatePreferences(

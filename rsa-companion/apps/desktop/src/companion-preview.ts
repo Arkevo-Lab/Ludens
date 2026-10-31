@@ -86,7 +86,8 @@ void app.whenReady().then(async () => {
   assert.equal(await pet.webContents.executeJavaScript(`bubble.classList.contains('open')`), true,
     await pet.webContents.executeJavaScript(`JSON.stringify({events:window.smokeEvents,held,pressed:body.className})`))
   assert.equal(await pet.webContents.executeJavaScript(`body.classList.contains('pressed')`), false)
-  const expectedLines = ['我在。', '先观察，再行动。', '嗯？叫卢登斯。', '别戳了，在想了。', '这次有把握。大概。', '蛛腿也要休息。', '再试一次。', '一起看看？']
+  await pet.webContents.executeJavaScript(`setLocale('zh')`)
+  const expectedLines = await pet.webContents.executeJavaScript(`companionI18n.zh.lines`)
   assert.equal(await pet.webContents.executeJavaScript(`message.textContent`), expectedLines[0])
   for (let i = 1; i <= expectedLines.length; i++) {
     const text = await pet.webContents.executeJavaScript(`(() => {
@@ -95,6 +96,10 @@ void app.whenReady().then(async () => {
     })()`)
     assert.equal(text, expectedLines[i % expectedLines.length], 'Dialogue must cycle through all eight Ludens lines')
   }
+  await pet.webContents.executeJavaScript(`setLocale('en')`)
+  assert.equal(await pet.webContents.executeJavaScript(`message.textContent`), 'I’m here.')
+  await pet.webContents.executeJavaScript(`setLocale('zh')`)
+  assert.equal(await pet.webContents.executeJavaScript(`message.textContent`), expectedLines[0])
   writeFileSync(join(home, 'bubble.png'), (await pet.webContents.capturePage()).toPNG())
   // A light renderer backdrop exposes outline/tail placement hidden by dark previews.
   await pet.webContents.executeJavaScript(`document.documentElement.style.backgroundColor = '#f5f5f5'`)
@@ -123,6 +128,16 @@ void app.whenReady().then(async () => {
       assert.ok(layout.top >= 0, 'Raised bubble must remain inside the window')
     }
   }
+  pet.webContents.send('ludens:companion:game', 'start')
+  await new Promise(done => setTimeout(done, 100))
+  assert.equal(await pet.webContents.executeJavaScript(`game.hidden`), false)
+  assert.equal(await pet.webContents.executeJavaScript(`gameTarget.hidden`), false)
+  await pet.webContents.executeJavaScript(`gameTarget.click()`)
+  assert.equal(await pet.webContents.executeJavaScript(`gameScoreValue`), 1)
+  await new Promise(done => setTimeout(done, 120))
+  writeFileSync(join(home, 'game.png'), (await pet.webContents.capturePage()).toPNG())
+  await pet.webContents.executeJavaScript(`document.dispatchEvent(new KeyboardEvent('keydown', {key:'Escape',bubbles:true}))`)
+  assert.equal(await pet.webContents.executeJavaScript(`game.hidden`), true)
   // Verify the original audio can actually decode and play, beyond file hashes.
   const audio = await pet.webContents.executeJavaScript(`(async () => {
     const settings = await window.companion.getSound();
