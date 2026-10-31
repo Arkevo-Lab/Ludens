@@ -1,8 +1,8 @@
 import type { Event } from "./types";
-import type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, TrialPage, VerificationPage, VerificationStatus, TrialStatus } from "../../rsa/src/benchmark/contract";
-import type { TaskWithBindings } from "../../rsa/src/benchmark/bindings";
-export { compareResults, comparisonChanges } from "../../rsa/src/benchmark/contract";
-export type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, Trial, Verification, VerificationSummary } from "../../rsa/src/benchmark/contract";
+import type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, TrialPage, VerificationPage, VerificationStatus, TrialStatus } from "@ludens/rsa/core/storage/contract";
+import type { TaskWithBindings } from "@ludens/rsa/bench/bindings";
+export { compareResults, comparisonChanges } from "@ludens/rsa/core/storage/contract";
+export type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, Trial, Verification, VerificationSummary } from "@ludens/rsa/core/storage/contract";
 
 export interface BenchmarkQuery { project?: string; taskName?: string; cursor?: string; limit?: number }
 export interface BenchmarkDetailQuery { verification?: string; verificationCursor?: string; evidenceCursor?: string }

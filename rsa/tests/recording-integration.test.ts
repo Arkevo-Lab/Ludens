@@ -6,12 +6,12 @@ import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenDevice } from "@ludens/baseware/server";
 import { EventLog as DeviceLog } from "../../baseware/src/events.ts";
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
-import { connectBaseware } from "../src/harness/baseware.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
-import { EventLog } from "../src/harness/events.ts";
-import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { Runtime } from "../src/harness/runtime.ts";
-import { listen } from "../src/harness/transport.ts";
+import { connectBaseware } from "../src/core/subsystems/baseware.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
+import { EventLog } from "../src/core/storage/events.ts";
+import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { listen } from "../src/daemon/transport.ts";
 import { readRunEvents } from "@ludens/protocol/event-sources";
 import { readArtifact } from "@ludens/protocol/log-archive";
 import { pythonEnvironment, pythonExecutable } from "@ludens/protocol/python";
@@ -58,9 +58,9 @@ test("resident sampling records data without per-frame audit across Python, RSA 
     await writeFile(join(runDir, "manifest.json"), JSON.stringify({ runId, workspace, eventSources: devices.eventSources, logging: { diagnostics } }));
     const env = pythonEnvironment({ RSA_SOCKET: hostSocket, RSA_WORKSPACE: workspace, RSA_RUN_ID: runId, RSA_LOG_DIAGNOSTICS: diagnostics });
     const runtime = new Runtime(devices, log.record, 60, runId, diagnostics);
-    runtime.controller = new WorkspaceController({ workspace, devices, record: log.record, env });
-    runtime.perception = new PerceptionRuntime({ workspace, runDir, record: log.record, env, diagnostics,
-      registerMedia: media => { mediaRegistrations++; log.registerMedia(media); } });
+    runtime.attach({ controller: new WorkspaceController({ workspace, devices, record: log.record, env }) });
+    runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: log.record, env, diagnostics,
+      registerMedia: media => { mediaRegistrations++; log.registerMedia(media); } }) });
     const closeHost = await listen(hostSocket, () => { rsaRpcCalls++; return runtime; });
     try {
       await writeFile(join(workspace, "senses.py"), `from rsa_tools import Client, capability
@@ -85,17 +85,17 @@ class Perception:
     def close(self): pass
 `);
       await runtime.start();
-      expect((await runtime.perception.reload()).state).not.toBe("error");
+      expect((await runtime.perception!.reload()).state).not.toBe("error");
       const started = performance.now();
       await Bun.sleep(6100);
-      expect(runtime.perception.status().state).toBe("ready");
-      const observed = await runtime.perception.observe(new AbortController().signal);
+      expect(runtime.perception!.status().state).toBe("ready");
+      const observed = await runtime.perception!.observe(new AbortController().signal);
       expect(observed.error).toBeUndefined();
       expect(observed.records.flatMap(record => record.media)).toHaveLength(2);
       const image = observed.records[0]!.media[0]!;
       const modelInput = log.artifact({ type: "image", mimeType: image.mediaType, data: image.data });
       expect((await readArtifact(runDir, modelInput)).data.$media).toMatchObject({ asset: image.timeline!.asset, status: "referenced", video: image.timeline!.video });
-      await runtime.perception.stop();
+      await runtime.perception!.stop();
       const elapsedSeconds = (performance.now() - started) / 1000;
       await runtime.stop("fixture completed");
       devices.close();
@@ -129,8 +129,8 @@ class Perception:
         expect(detailed.filter(event => event.type === "python_call_start")).toHaveLength(records.length * 4);
         expect(detailed.every(event => event.channel === "diagnostic")).toBe(true);
       }
-      expect((await readdir(join(runDir, "perception", runtime.perception.status().generation!))).includes("stderr.log")).toBe(true);
-      expect(await readFile(join(runDir, "perception", runtime.perception.status().generation!, "stderr.log"), "utf8")).toBe("");
+      expect((await readdir(join(runDir, "perception", runtime.perception!.status().generation!))).includes("stderr.log")).toBe(true);
+      expect(await readFile(join(runDir, "perception", runtime.perception!.status().generation!, "stderr.log"), "utf8")).toBe("");
       const manifest = JSON.parse(await readFile(join(runDir, "manifest.json"), "utf8"));
       expect(manifest.eventSources).toHaveLength(1);
       expect(manifest.eventSources[0]).toMatchObject({ ...deviceLog.source, recordingId: runId,

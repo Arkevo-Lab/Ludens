@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
-import { send } from "../src/harness/transport.ts";
+import { send } from "../src/daemon/transport.ts";
 import { BasewareClient } from "@ludens/baseware/client";
 import { defaultSocket } from "@ludens/baseware/address";
 import type { ExecutionResult, ToolArguments, ToolExecutionResult } from "@ludens/baseware/contracts";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
-import { resolveWorkspaceAddress } from "../src/harness/workspace-state.ts";
+import { resolveWorkspaceAddress } from "../src/core/storage/workspace-state.ts";
 
 async function control(socket: string, value: "on" | "off") {
   const status = await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null };

@@ -52,7 +52,7 @@ If background summarization shares the session channel the foreground is using, 
 
 ### 4. Bind a unique `operationId` to every background candidate
 
-Previously, why a background compaction terminated and how long it took were hard to correlate in the logs. We added `diagnostics_channel("omp.compaction.speculation")`, binding a unique `operationId` from candidate creation and logging the full lifecycle and latency of `started / armed / failed / cancelled / applied / invalidated` (see [trace.ts](../../rsa/src/harness/omp/trace.ts) and the [logging contract](../reference/logging.md#shiori-compaction-and-transport)).
+Previously, why a background compaction terminated and how long it took were hard to correlate in the logs. We added `diagnostics_channel("omp.compaction.speculation")`, binding a unique `operationId` from candidate creation and logging the full lifecycle and latency of `started / armed / failed / cancelled / applied / invalidated` (see [trace.ts](../../rsa/src/core/agent-omp/trace.ts) and the [logging contract](../reference/logging.md#shiori-compaction-and-transport)).
 
 ## Cost and verification
 

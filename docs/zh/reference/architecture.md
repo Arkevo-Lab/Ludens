@@ -63,7 +63,7 @@ rsa controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":500
 
 ### 3. 常驻动作进程与输入重置
 
-工作区 `action.py` 的常驻动作 worker 固定绑定启动时的 `epoch` 与 `inputGeneration`。当在 `auto` 周期内执行 `rsa action stop`、`rsa action reload` 或 `Action.step()` 抛出异常时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [rsa/src/harness/runtime.ts](../../rsa/src/harness/runtime.ts)。
+工作区 `action.py` 的常驻动作 worker 固定绑定启动时的 `epoch` 与 `inputGeneration`。当在 `auto` 周期内执行 `rsa action stop`、`rsa action reload` 或 `Action.step()` 抛出异常时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [rsa/src/core/shiori/runtime.ts](../../rsa/src/core/shiori/runtime.ts)。
 
 ## 会话与 Loop
 
@@ -73,13 +73,13 @@ RSA Host 在单工作区内复用同一个 OMP 会话（持久化于 `.rsa/shior
 
 - 保留 OMP 原生系统提示词（若工作区存在 `AGENTS.md`，通过原生 `contextFiles` 注入）。
 - 显式启用 OMP 原生工具 `read`、`write`、`edit`、`bash`、`wait`，并注册自定义工具 `observe`。
-- 仅覆盖宿主契约必需项：关闭 `retry.modelFallback`（保证所选视觉模型粘性）、关闭 `title.refreshOnReplan` 与 `cacheWarming`（确保每次模型请求严格归属控制周期）、将 `PROVIDER_IMAGE_BUDGETS` 设为 `Infinity`（在压缩前保留历史图像，避免中途丢图破坏 Prompt Cache 前缀），以及应用可选的 `compactionThreshold`。详见 [rsa/src/harness/omp/session.ts](../../rsa/src/harness/omp/session.ts)。
+- 仅覆盖宿主契约必需项：关闭 `retry.modelFallback`（保证所选视觉模型粘性）、关闭 `title.refreshOnReplan` 与 `cacheWarming`（确保每次模型请求严格归属控制周期）、将 `PROVIDER_IMAGE_BUDGETS` 设为 `Infinity`（在压缩前保留历史图像，避免中途丢图破坏 Prompt Cache 前缀），以及应用可选的 `compactionThreshold`。详见 [rsa/src/core/agent-omp/session.ts](../../rsa/src/core/agent-omp/session.ts)。
 
 在 `auto` 控制周期内，外层循环按以下步骤运转：
 
 1. **发起轮次**：使用 [continue.md](../../rsa/prompts/continue.md) 发起 OMP `prompt`（首次接管若带 `auto on --message` 则附加一次性提醒）。
 2. **感知与动作并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按 `sample_hz` 持续采样写入 `.rsa/timeline/`，常驻 `Action.step()` 按 `step_hz` 持续读取时空轴并执行高频控制。
-3. **自动上下文交付**：RSA 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../rsa/src/harness/omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
+3. **自动上下文交付**：RSA 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../rsa/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
 4. **续轮或交还**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工交还或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
 
 ### 2. 上下文压缩与传输恢复

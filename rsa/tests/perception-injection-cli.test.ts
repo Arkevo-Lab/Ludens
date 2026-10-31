@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { PerceptionRuntime, type PerceptionRead } from "../src/harness/perception.ts";
-import { dispatch, listen } from "../src/harness/transport.ts";
+import { PerceptionRuntime, type PerceptionRead } from "../src/core/subsystems/perception.ts";
+import { dispatch, listen } from "../src/daemon/transport.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("perception injection CLI changes only context policy and rejects stale epochs", async () => {
@@ -11,10 +11,10 @@ test("perception injection CLI changes only context policy and rejects stale epo
   const socket = `/tmp/rsa-injection-${crypto.randomUUID()}.sock`;
   const events: { type: string; data: any; trace: any }[] = [];
   const runtime = createTestRuntime({ controllers: [] }, (type, data, trace) => events.push({ type, data, trace }));
-  runtime.perception = new PerceptionRuntime({ workspace, runDir: join(workspace, "logs", "test"), record: runtime.record });
+  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir: join(workspace, "logs", "test"), record: runtime.record }) });
   const close = await listen(socket, runtime);
   const run = async (args: string[], epoch?: string) => {
-    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), ...args], {
+    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), ...args], {
       cwd: workspace, env: { ...process.env, RSA_SOCKET: socket, BASEWARE_EPOCH: epoch,
         BASEWARE_TRACE: JSON.stringify({ modelCallId: "context-change" }) }, stdout: "pipe", stderr: "pipe",
     });
@@ -41,7 +41,7 @@ class Perception:
         return {"text": str(self.count)}
 `);
     await reload();
-    const generation = runtime.perception.status().generation;
+    const generation = runtime.perception!.status().generation;
     const first = await read();
     expect(JSON.parse((await run(["perception", "inject"])).stdout)).toEqual({ perceptionInjection: true });
     const { epoch } = await runtime.start();
@@ -73,7 +73,7 @@ class Perception:
     await runtime.start();
     expect(JSON.parse((await run(["status"])).stdout).context).toEqual({ perceptionInjection: false });
     expect(JSON.parse((await run(["perception", "inject", "on"])).stdout)).toEqual({ perceptionInjection: true });
-    expect(runtime.perception.status().state).toBe("ready");
+    expect(runtime.perception!.status().state).toBe("ready");
   } finally { await runtime.close(); await close(); await rm(workspace, { recursive: true, force: true }); }
 }, 15_000);
 
@@ -84,7 +84,7 @@ test("context policy works before perception exists and help distinguishes stop 
     expect(await dispatch(runtime, { kind: "perception", argv: ["inject", "off"] })).toEqual({ perceptionInjection: false });
     expect(runtime.perception).toBeUndefined();
     expect(freshHost.perceptionInjectionEnabled()).toBe(true);
-    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), "perception", "inject", "--help"],
+    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "perception", "inject", "--help"],
       { env: { ...process.env, RSA_SOCKET: "/tmp/unused-context-help.sock" }, stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect({ code, stderr }).toEqual({ code: 0, stderr: "" });

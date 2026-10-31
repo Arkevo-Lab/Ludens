@@ -42,7 +42,7 @@ Three underlying stores shared across runs:
 
 ### 2. Common event envelope
 
-Every JSONL event carries a top-level writer identity (`runId` or `serviceId`, incrementing `seq`, wall-clock `at`, monotonic `atMs`) plus four core blocks (defined in [rsa/src/harness/events.ts](../../rsa/src/harness/events.ts)):
+Every JSONL event carries a top-level writer identity (`runId` or `serviceId`, incrementing `seq`, wall-clock `at`, monotonic `atMs`) plus four core blocks (defined in [rsa/src/core/storage/events.ts](../../rsa/src/core/storage/events.ts)):
 
 - **`source`**: the responsible component that produced the semantics (`shiori`, `rsa`, `workspace`, `baseware`, `benchmark`, `dashboard`, `pet`) and its concrete implementation and version.
 - **`origin`**: `{eventId, clockId, seq, at, atMs}` of the source process that first generated the fact; unchanged across forwarding and persistence (`atMs` may only be subtracted within the same `clockId`).
@@ -86,8 +86,8 @@ Quick reference of core event contracts:
 
 ## Shiori, compaction, and transport
 
-1. **Shiori OTel telemetry**: [shiori.ts](../../rsa/src/harness/omp/shiori.ts) mounts a scoped OpenTelemetry provider (with `captureMessageContent = "none"` to avoid duplicating bodies) and writes a `shiori_run_end` summary at the end of each `agentLoop`.
-2. **HTTP and WebSocket transport tracing**: [trace.ts](../../rsa/src/harness/omp/trace.ts) records full request payloads, transport protocol (WS full / WS delta / HTTP SSE), and phase latencies:
+1. **Shiori OTel telemetry**: [shiori.ts](../../rsa/src/core/agent-omp/shiori.ts) mounts a scoped OpenTelemetry provider (with `captureMessageContent = "none"` to avoid duplicating bodies) and writes a `shiori_run_end` summary at the end of each `agentLoop`.
+2. **HTTP and WebSocket transport tracing**: [trace.ts](../../rsa/src/core/agent-omp/trace.ts) records full request payloads, transport protocol (WS full / WS delta / HTTP SSE), and phase latencies:
    - **HTTP header wait**: from request dispatch to receipt of the HTTP response headers (streaming completion is marked by the content-stream end after `http_end`).
    - **WS first-event wait**: in WebSocket mode the outbound `response.create` only marks send completion; the Dashboard measures outbound-completion to first inbound server event as the first-response metric.
 3. **Background speculation-compaction tracing**: each background compaction candidate gets a unique `operationId` via `diagnostics_channel("omp.compaction.speculation")`, tracing `started → armed / failed / cancelled` end to end plus threshold-phase `waiting / applied / invalidated`; its internal HTTP requests and retries are mounted under that `operationId` and the original control `epoch`.

@@ -2,12 +2,12 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { runTask, verifyTask, aggregateTasks } from "../src/harness/shiori-benchmark.ts";
-import { get, history, inspectEvidence } from "../src/benchmark/store.ts";
-import { compareResults, type BenchmarkResult } from "../src/benchmark/contract.ts";
-import { readTask } from "../src/benchmark/task.ts";
-import { discoverTasks, resolveTask } from "../src/benchmark/catalog.ts";
-import { readRunConfiguration } from "../src/benchmark/bindings.ts";
+import { runTask, verifyTask, aggregateTasks } from "../src/bench/shiori-benchmark.ts";
+import { get, history, inspectEvidence } from "../src/core/storage/store.ts";
+import { compareResults, type BenchmarkResult } from "../src/core/storage/contract.ts";
+import { readTask } from "../src/bench/task.ts";
+import { discoverTasks, resolveTask } from "../src/bench/catalog.ts";
+import { readRunConfiguration } from "../src/bench/bindings.ts";
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "shiori-benchmark-")), workspace = join(root, "workspace"), task = join(workspace, "benchmarks/tasks/jump");
   await mkdir(join(task, "tests"), { recursive: true }); await mkdir(join(task, "environment"));
@@ -29,7 +29,7 @@ Path(os.environ["RSA_BENCH_ARTIFACTS"],"measurements.json").write_text('{"height
     config: { task: "local/jump", argv: ["{python}", program] } }, cleanup: () => rm(root, { recursive: true, force: true }) };
 }
 test("CLI uses separate binding; reward zero, offline reads and verification never repeat actions", async () => {
-  const f = await fixture(), cli = resolve(import.meta.dir, "../src/benchmark/cli.ts"), binding = join(f.workspace, "benchmarks/runs/arbitrary-name.json");
+  const f = await fixture(), cli = resolve(import.meta.dir, "../src/cli/bench-cli.ts"), binding = join(f.workspace, "benchmarks/runs/arbitrary-name.json");
   await mkdir(join(f.workspace, "benchmarks/runs"), { recursive: true });
   await writeFile(binding, JSON.stringify(f.options.config));
   const command = async (args: string[], code = 0) => {

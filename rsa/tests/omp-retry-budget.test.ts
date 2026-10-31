@@ -6,9 +6,9 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { createRsaExtension, type Cycle } from "../src/harness/omp/extension.ts";
-import { createOmpSession } from "../src/harness/omp/session.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createOmpSession } from "../src/core/agent-omp/session.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test.each(["request budget", "human handback"] as const)("native OMP retries respect RSA %s", async mode => {
@@ -66,7 +66,7 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
       stream.push({ type: "error", reason: "error", error });
       return stream;
     };
-    runtime.agent = {
+    runtime.attach({ agent: {
       async run(context) {
         cycle = context;
         try { await session.prompt("Retry transient failures until control ends."); }
@@ -75,7 +75,7 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
       async consolidate() {},
       abort: () => session.abort(),
       async close() { unsubscribe(); removeGate(); await session.dispose(); },
-    };
+    } });
     const { epoch } = await runtime.start();
     if (!epoch) throw new Error("Runtime did not create a control epoch");
     const deadline = performance.now() + 5000;

@@ -1,2 +1,2 @@
 #!/bin/sh
-exec bun "$(dirname "$0")/../src/app/main.ts" "$@"
+exec bun "$(dirname "$0")/../src/cli/main.ts" "$@"

@@ -6,16 +6,16 @@ import { EventLog as DeviceEventLog } from "../../baseware/src/events.ts";
 import { readRunEvents } from "@ludens/protocol/event-sources";
 import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenBaseware } from "@ludens/baseware/server";
-import { connectBaseware } from "../src/harness/baseware.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
-import { PythonCapabilities, pythonModulePaths } from "../src/harness/python-capabilities.ts";
-import { EventLog, type RecordEvent } from "../src/harness/events.ts";
-import { Runtime } from "../src/harness/runtime.ts";
-import { listen as listenRsa } from "../src/harness/transport.ts";
-import { renderBoard } from "../src/benchmark/fixtures/reuse-board.ts";
-import { ReuseEnvironment } from "../src/benchmark/fixtures/reuse-environment.ts";
+import { connectBaseware } from "../src/core/subsystems/baseware.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
+import { PythonCapabilities, pythonModulePaths } from "../src/core/subsystems/python-capabilities.ts";
+import { EventLog, type RecordEvent } from "../src/core/storage/events.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { listen as listenRsa } from "../src/daemon/transport.ts";
+import { renderBoard } from "../src/bench/fixtures/reuse-board.ts";
+import { ReuseEnvironment } from "../src/bench/fixtures/reuse-environment.ts";
 import { evaluateReuse, type ReuseEvent } from "../benchmarks/tasks/capability-reuse/tests/evaluate.ts";
-import { freezeReuseEvents } from "../src/benchmark/fixtures/reuse-facts.ts";
+import { freezeReuseEvents } from "../src/bench/fixtures/reuse-facts.ts";
 import { readArtifactSync } from "@ludens/protocol/log-archive";
 
 const passed = (events: ReuseEvent[], epoch: string, id: string, runDir?: string) =>
@@ -79,7 +79,7 @@ for (const route of ["controller", "local", "import"] as const) test(`evaluator 
     RSA_WORKSPACE: workspace, RSA_RUN_ID: runtime.status().runId,
     PYTHONPATH: pythonModulePaths().join(":"),
     PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH ?? ""].join(":") };
-  runtime.controller = new WorkspaceController({ workspace, devices, env, record });
+  runtime.attach({ controller: new WorkspaceController({ workspace, devices, env, record }) });
   const closeRsa = await listenRsa(rsaSocket, runtime);
   const epoch = (await runtime.start()).epoch!;
   let round = 0;

@@ -128,7 +128,7 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 
 ### 2. `rsa.json` reference
 
-`rsa.json` is parsed and validated by [rsa/src/app/workspace.ts](../../rsa/src/app/workspace.ts); unknown fields are hard errors:
+`rsa.json` is parsed and validated by [rsa/src/daemon/launcher.ts](../../rsa/src/daemon/launcher.ts); unknown fields are hard errors:
 
 | Field | Default | Description |
 | --- | --- | --- |

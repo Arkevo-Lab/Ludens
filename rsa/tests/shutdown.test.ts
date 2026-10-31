@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { BasewareClient } from "@ludens/baseware/client";
 import { readRunEvents } from "@ludens/protocol/event-sources";
-import { send } from "../src/harness/transport.ts";
-import { initializeWorkspaceState } from "../src/harness/workspace-state.ts";
+import { send } from "../src/daemon/transport.ts";
+import { initializeWorkspaceState } from "../src/core/storage/workspace-state.ts";
 
 test("SIGTERM waits for runtime cleanup before recording run_end with OMP's real signal handler", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-shutdown-"));
@@ -36,7 +36,7 @@ test("SIGTERM waits for runtime cleanup before recording run_end with OMP's real
   // Mock only the agent. The real OMP signal handler shuts down the RSA host,
   // which must release its lease through an independently running Baseware.
   await writeFile(preload, `import { mock } from "bun:test";
-mock.module(${JSON.stringify(resolve(import.meta.dir, "../src/harness/omp/session.ts"))}, () => ({
+mock.module(${JSON.stringify(resolve(import.meta.dir, "../src/core/agent-omp/session.ts"))}, () => ({
   createOmpAgent: async ({ log }) => ({
     run: ({ signal }) => new Promise(resolve => signal.addEventListener("abort", resolve, { once: true })),
     consolidate: async () => {},
@@ -70,7 +70,7 @@ mock.module(${JSON.stringify(resolve(import.meta.dir, "../src/harness/omp/sessio
   }
   try {
     expect(await readReady(service.stdout, serviceStderr)).toMatchObject({ ready: true, mode: "manual" });
-    const host = Bun.spawn([process.execPath, "--preload", preload, resolve(import.meta.dir, "../src/app/main.ts"),
+    const host = Bun.spawn([process.execPath, "--preload", preload, resolve(import.meta.dir, "../src/cli/main.ts"),
       "run", "--baseware-socket", basewareSocket, "--workspace", join(directory, "workspace")], {
       cwd: resolve(import.meta.dir, ".."),
       env: { ...process.env, LUDENS_HOME: state.globalHome, RSA_SOCKET: socketPath, PI_CODING_AGENT_DIR: join(directory, "omp") },

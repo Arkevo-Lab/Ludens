@@ -7,7 +7,7 @@ import type { DriverCreateOptions } from "@ludens/baseware/drivers/registry.ts";
 import { Bridge } from "@ludens/baseware/drivers/bridge.ts";
 import { createTestDeviceSession } from "./runtime-fixture.ts";
 import type { ToolArguments, ControllerContext, ToolExecutionResult } from "@ludens/baseware/contracts";
-import { Runtime } from "../src/harness/runtime.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
 
 async function createBridgeProvider(options: DriverCreateOptions) {
   const id = process.env.RSA_BRIDGE_DRIVER;

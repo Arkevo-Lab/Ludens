@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runTask } from "../src/harness/shiori-benchmark.ts";
+import { runTask } from "../src/bench/shiori-benchmark.ts";
 test("offline packaged programs, verifiers and storage bindings share Shiori", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "shiori-packaged-"))), workspace = join(root, "workspace");
   await mkdir(workspace);

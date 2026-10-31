@@ -7,10 +7,10 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { buildTransformedCodexRequestBody } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { buildResponsesDeltaInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import { createRsaExtension } from "../src/harness/omp/extension.ts";
-import { createOmpSession } from "../src/harness/omp/session.ts";
+import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { captureResult, readTestController, createTestRuntime, installTestPerception } from "./runtime-fixture.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 
 test.each([1, 26])("OMP persists batches of %i images and reuses the Codex prefix across tools and prompts", async (batchSize) => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-history-"));

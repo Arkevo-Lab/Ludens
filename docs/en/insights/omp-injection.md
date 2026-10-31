@@ -9,7 +9,7 @@ The RSA extension hung two automatic injection channels on the OMP loop:
 1. **Turn-start channel**: the `before_agent_start` hook, which hands the model the latest main-channel perception record plus sampler state transitions (`state / codeSHA / error`) as a persisted custom message at the start of every prompt;
 2. **End-of-batch channel**: the `tool_result` hook, which appends the latest frame to the result of the **last tool to finish** in a tool batch.
 
-The end-of-batch channel had a very "clever" justification: of all OMP hooks, `tool_result` is the only one **awaited before result persistence and the next model request** — `turn_end` is just a notification and cannot change content. To guarantee "the model holds the latest frame before every decision", this was the only point with precise enough timing (`rsa/src/harness/omp/extension.ts`).
+The end-of-batch channel had a very "clever" justification: of all OMP hooks, `tool_result` is the only one **awaited before result persistence and the next model request** — `turn_end` is just a notification and cannot change content. To guarantee "the model holds the latest frame before every decision", this was the only point with precise enough timing (`rsa/src/core/agent-omp/extension.ts`).
 
 Sounds reasonable on paper, but in practice it introduced four clear flaws.
 

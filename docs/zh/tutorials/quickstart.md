@@ -128,7 +128,7 @@ rsa workspace import /absolute/path/to/workspace \
 
 ### 2. `rsa.json` 配置参考
 
-`rsa.json` 由 [rsa/src/app/workspace.ts](../../rsa/src/app/workspace.ts) 解析校验，未知字段会直接报错：
+`rsa.json` 由 [rsa/src/daemon/launcher.ts](../../rsa/src/daemon/launcher.ts) 解析校验，未知字段会直接报错：
 
 | 字段 | 默认值 | 说明 |
 | --- | --- | --- |

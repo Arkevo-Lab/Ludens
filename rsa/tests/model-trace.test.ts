@@ -10,17 +10,17 @@ import { getBundledModels } from "@oh-my-pi/pi-catalog";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
 import { trace as otelTrace } from "@opentelemetry/api";
-import { SHIORI_SOURCE } from "../src/harness/omp/shiori.ts";
-import { EventLog } from "../src/harness/events.ts";
-import { installCompactionHttpTrace, installCompactionSpeculationTrace, ModelTrace } from "../src/harness/omp/trace.ts";
+import { SHIORI_SOURCE } from "../src/core/agent-omp/shiori.ts";
+import { EventLog } from "../src/core/storage/events.ts";
+import { installCompactionHttpTrace, installCompactionSpeculationTrace, ModelTrace } from "../src/core/agent-omp/trace.ts";
 import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenBaseware } from "@ludens/baseware/server";
-import { connectBaseware } from "../src/harness/baseware.ts";
-import { Runtime } from "../src/harness/runtime.ts";
-import { Workspace } from "../src/harness/workspace.ts";
-import { createRsaExtension } from "../src/harness/omp/extension.ts";
-import { createOmpSession } from "../src/harness/omp/session.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
+import { connectBaseware } from "../src/core/subsystems/baseware.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
+import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createOmpSession } from "../src/core/agent-omp/session.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { captureResult, readTestController, installTestPerception } from "./runtime-fixture.ts";
 
 const speculation = channel("omp.compaction.speculation");
@@ -339,7 +339,7 @@ test("real OMP preserves image prefixes and native tool traces while shell IPC r
   const closeSocket = await listenBaseware(basewareSocket, core);
   const devices = await connectBaseware({socket: basewareSocket, seconds: 300, runDir: directory, record: log.record});
   const runtime = new Runtime(devices, log.record);
-  runtime.controller = new WorkspaceController({ workspace, devices, record: log.record, env: {} });
+  runtime.attach({ controller: new WorkspaceController({ workspace, devices, record: log.record, env: {} }) });
   installTestPerception(runtime, workspace, directory, (signal, trace) =>
     readTestController(runtime, "camera-q", {}, signal, trace));
   devices.onHandback(reason => { void runtime.stop(reason); });

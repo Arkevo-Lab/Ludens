@@ -1,9 +1,9 @@
 import { BasewareCore } from "@ludens/baseware/core";
 import type { Capabilities, ExecutionResult, Observation, ToolArguments, ToolExecutionResult } from "@ludens/baseware/contracts";
-import { childTrace, type EventTrace, type RecordEvent } from "../src/harness/events.ts";
-import { Runtime, type DeviceSession } from "../src/harness/runtime.ts";
-import { PerceptionRuntime, perceptionMetadata, type PerceptionRead } from "../src/harness/perception.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
+import { childTrace, type EventTrace, type RecordEvent } from "../src/core/storage/events.ts";
+import { Runtime, type DeviceSession } from "../src/core/shiori/runtime.ts";
+import { PerceptionRuntime, perceptionMetadata, type PerceptionRead } from "../src/core/subsystems/perception.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 
 /** Exercise the production device core without a socket or a real device. */
 export function createTestDeviceSession(capabilities: Capabilities, record: RecordEvent = () => {}, maxSeconds = 300) {
@@ -27,7 +27,7 @@ export function captureResult(observations: Observation[]): ToolExecutionResult 
 export function createTestRuntime(capabilities: Capabilities, record: RecordEvent = () => {}, maxSeconds = 300, runId?: string) {
   const { devices } = createTestDeviceSession(capabilities, record, maxSeconds);
   const runtime = new Runtime(devices, record, maxSeconds, runId);
-  runtime.controller = new WorkspaceController({ workspace: process.cwd(), devices, record, env: {} });
+  runtime.attach({ controller: new WorkspaceController({ workspace: process.cwd(), devices, record, env: {} }) });
   return runtime;
 }
 
@@ -63,6 +63,6 @@ export function installTestPerception(
       durationMs: performance.now() - started }, trace);
     return value;
   };
-  runtime.perception = perception;
+  runtime.attach({ perception: perception });
   return perception;
 }

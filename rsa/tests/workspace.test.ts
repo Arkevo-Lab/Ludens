@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Workspace } from "../src/harness/workspace.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 
 test("skill and script edits update the next index while preserving earlier evidence", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-skills-"));

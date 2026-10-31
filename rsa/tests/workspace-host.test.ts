@@ -3,11 +3,11 @@ import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises
 import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { send } from "../src/harness/transport.ts";
-import { initializeWorkspaceState, writeCurrentSession, type WorkspaceState } from "../src/harness/workspace-state.ts";
+import { send } from "../src/daemon/transport.ts";
+import { initializeWorkspaceState, writeCurrentSession, type WorkspaceState } from "../src/core/storage/workspace-state.ts";
 
 const rsaDirectory = resolve(import.meta.dir, "..");
-const entry = join(rsaDirectory, "src/app/main.ts");
+const entry = join(rsaDirectory, "src/cli/main.ts");
 type Ready = { ready: true; runId: string; runDir: string; stateDir: string; workspace: string; socket: string };
 type Host = { child: Bun.Subprocess<"ignore", "pipe", "pipe">; stderr: Promise<string> };
 
@@ -40,7 +40,7 @@ async function fixture() {
   await writeFile(preload, `import { mock } from "bun:test";
 import { appendFile, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-mock.module(${JSON.stringify(join(rsaDirectory, "src/harness/omp/session.ts"))}, () => ({
+mock.module(${JSON.stringify(join(rsaDirectory, "src/core/agent-omp/session.ts"))}, () => ({
   createOmpAgent: async ({ workspace, resume, runDir }) => {
     // The interface snapshot is available before the agent starts.
     await readFile(join(workspace, "baseware.json"), "utf8");

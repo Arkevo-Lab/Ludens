@@ -118,7 +118,7 @@ test("offline CLI reads event references without a runtime and reports unavailab
   const { run, store } = setup();
   const ref = store.write({ text: "inspect me", image: { type: "image", data: Buffer.from("unrecorded").toString("base64") } });
   writeFileSync(join(run, "events.jsonl"), JSON.stringify({ seq: 9, data: { payload: ref } }) + "\n");
-  const command = join(import.meta.dir, "../src/app/main.ts");
+  const command = join(import.meta.dir, "../src/cli/main.ts");
   const call = async (...args: string[]) => {
     const child = Bun.spawn([process.execPath, command, "logs", "read", "--run", run, ...args], {
       cwd: run, stdout: "pipe", stderr: "pipe",

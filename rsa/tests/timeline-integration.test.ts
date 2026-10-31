@@ -2,10 +2,10 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { WorkspaceController } from "../src/harness/controller.ts";
-import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { Runtime } from "../src/harness/runtime.ts";
-import { listen, send } from "../src/harness/transport.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
+import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { listen, send } from "../src/daemon/transport.ts";
 import { createTestDeviceSession } from "./runtime-fixture.ts";
 
 test("local Python, Controller and CLI share a workspace timeline across runs without duplicate media", async () => {
@@ -23,9 +23,9 @@ test("local Python, Controller and CLI share a workspace timeline across runs wi
   let runtime = new Runtime(devices, record, 60, "first-run");
   const configure = (runId: string) => {
     runtime = new Runtime(devices, record, 60, runId);
-    runtime.controller = new WorkspaceController({workspace, devices, record, env: {...env, RSA_RUN_ID: runId}});
-    runtime.perception = new PerceptionRuntime({workspace, runDir: join(workspace, "logs", runId),
-      env: {...env, RSA_RUN_ID: runId}, record});
+    runtime.attach({ controller: new WorkspaceController({workspace, devices, record, env: {...env, RSA_RUN_ID: runId}}) });
+    runtime.attach({ perception: new PerceptionRuntime({workspace, runDir: join(workspace, "logs", runId),
+      env: {...env, RSA_RUN_ID: runId}, record}) });
   };
   configure("first-run");
   const closeServer = await listen(socket, () => runtime);

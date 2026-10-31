@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmod, cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { launchPlan, parseConfig, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/app/workspace.ts";
+import { launchPlan, parseConfig, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
 import { getDriver } from "@ludens/baseware/drivers/registry.ts";
 import { ensureWorkspaceIdentity, ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
 
@@ -140,7 +140,7 @@ test("up rejects unidentified and conflicting workspaces before loading drivers,
       for (const extra of [[], ["--dry-run"]]) {
         const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
         delete env.RSA_WORKSPACE; delete env.RSA_SOCKET; delete env.BASEWARE_SOCKET;
-        const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), "--workspace", workspace, "up", ...extra], {
+        const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "--workspace", workspace, "up", ...extra], {
           env, stdout: "pipe", stderr: "pipe",
         });
         const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);
@@ -338,7 +338,7 @@ test("init and dry-run preserve existing workspace files and never invoke servic
     }
     await writeFile(join(workspace, "AGENTS.md"), "My existing workspace instructions\n");
     const run = async (...args: string[]) => {
-      const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), ...args], {
+      const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), ...args], {
         cwd: workspace, env: { ...process.env, LUDENS_HOME: join(directory, "global"), PATH: bin, SERVICE_MARKER: marker, RSA_WORKSPACE: workspace }, stdout: "pipe", stderr: "pipe",
       });
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -398,7 +398,7 @@ test("external packages resolve workspace-relative file specs and check only exe
       await chmod(path, 0o755);
     }
     const run = async (...args: string[]) => {
-      const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), "--workspace", workspace, ...args], {
+      const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "--workspace", workspace, ...args], {
         cwd: directory, env: { ...process.env, LUDENS_HOME: join(directory, "global"), PATH: bin }, stdout: "pipe", stderr: "pipe",
       });
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

@@ -14,7 +14,7 @@ async function fixture() {
   const run = async (...args: string[]) => {
     const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
     delete env.RSA_WORKSPACE; delete env.RSA_SOCKET; delete env.BASEWARE_SOCKET;
-    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), "workspace", ...args], {
+    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "workspace", ...args], {
       cwd: root, env, stdout: "pipe", stderr: "pipe",
     });
     const [code, stderr] = await Promise.all([child.exited, new Response(child.stderr).text()]);

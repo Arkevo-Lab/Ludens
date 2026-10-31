@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { createOmpSession } from "../src/harness/omp/session.ts";
-import { importLegacyWorkspaceState, openWorkspaceSession, selectWorkspaceSession, validateSessionWorkspace } from "../src/harness/omp/workspace-session.ts";
-import { readCurrentSession, initializeWorkspaceState } from "../src/harness/workspace-state.ts";
+import { createOmpSession } from "../src/core/agent-omp/session.ts";
+import { importLegacyWorkspaceState, openWorkspaceSession, selectWorkspaceSession, validateSessionWorkspace } from "../src/core/agent-omp/workspace-session.ts";
+import { readCurrentSession, initializeWorkspaceState } from "../src/core/storage/workspace-state.ts";
 
 test("explicit legacy import copies history, tool output and skill versions without retaining source dependencies", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-session-import-"));

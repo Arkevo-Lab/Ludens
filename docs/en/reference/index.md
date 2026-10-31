@@ -6,12 +6,12 @@ This directory defines the Ludens system architecture, process responsibility bo
 
 | Layer | Core Concerns | Spec Document | Authoritative Source |
 | --- | --- | --- | --- |
-| **System topology and control loop** | Five-component boundaries, the Shiori execution kernel, OMP session assembly, control `epoch`, and cross-process store ownership | [Architecture and Boundaries](architecture.md) | `rsa/src/harness/runtime.ts` · `rsa/src/harness/omp/session.ts` |
+| **System topology and control loop** | Five-component boundaries, the Shiori execution kernel, OMP session assembly, control `epoch`, and cross-process store ownership | [Architecture and Boundaries](architecture.md) | `rsa/src/core/shiori/runtime.ts` · `rsa/src/core/agent-omp/session.ts` |
 | **Device services and capability catalog** | CUA-native tool structure, the `ExecutionResult` envelope, `requiresControl` arbitration, external driver package discovery and loading | [Baseware Philosophy and Capability Contracts](baseware.md) | `baseware/src/contracts.ts` · `baseware/src/catalog.ts` |
 | **Emulator wire communication** | TCP single-client line protocol, the `HELLO / OWN / APPLY / CAPTURE / TOUCH` instruction set and error codes | [Driver Bridge Protocol](driver-bridge-protocol.md) | `baseware/src/drivers/bridge.ts` · each emulator satellite repo's Provider |
-| **Observability and console consumption** | `normal / full` recording modes, `.rsa/timeline/` and `.rsa/archive/` storage, Trace pairing, Dashboard hot/cold indexes and replay | [Logging and Call Chains](logging.md) | `rsa/src/harness/events.ts` · `shared/log-archive.ts` · `rsa-dashboard/lib/` |
+| **Observability and console consumption** | `normal / full` recording modes, `.rsa/timeline/` and `.rsa/archive/` storage, Trace pairing, Dashboard hot/cold indexes and replay | [Logging and Call Chains](logging.md) | `rsa/src/core/storage/events.ts` · `protocol/src/log-archive.ts` · `rsa-dashboard/lib/` |
 | **Console interface** | shadcn/ui primitives, Tailwind theme tokens and style layers, form and interaction conventions | [Dashboard UI](dashboard-ui.md) | `rsa-dashboard/components/ui/` · `rsa-dashboard/app/globals.css` |
-| **Evaluation and independent scoring** | Harbor 1.4 Native Profile, `task.toml / dataset.toml`, `current_trial()`, `reward.json`, and the 8 built-in tasks | [Benchmark](benchmark.md) | `rsa/src/benchmark/` · `rsa/benchmarks/` |
+| **Evaluation and independent scoring** | Harbor 1.4 Native Profile, `task.toml / dataset.toml`, `current_trial()`, `reward.json`, and the 8 built-in tasks | [Benchmark](benchmark.md) | `rsa/src/bench/` · `rsa/benchmarks/` |
 
 ## Reading Guide
 

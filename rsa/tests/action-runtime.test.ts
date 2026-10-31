@@ -6,12 +6,12 @@ import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenDevice } from "@ludens/baseware/server";
 import { createPadPlayer } from "../../baseware/src/drivers/pad.ts";
 import type { Bridge } from "../../baseware/src/drivers/bridge.ts";
-import { ActionRuntime } from "../src/harness/action.ts";
-import { connectBaseware } from "../src/harness/baseware.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
-import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { Runtime } from "../src/harness/runtime.ts";
-import { listen, send } from "../src/harness/transport.ts";
+import { ActionRuntime } from "../src/core/subsystems/action.ts";
+import { connectBaseware } from "../src/core/subsystems/baseware.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
+import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { listen, send } from "../src/daemon/transport.ts";
 import { pythonEnvironment } from "@ludens/protocol/python";
 
 async function until(check: () => boolean | Promise<boolean>, label = "condition") {
@@ -59,13 +59,13 @@ async function fixture(hz = 30, diagnostics: "normal" | "full" = "normal", secon
   const devices = await connectBaseware({ socket: deviceSocket, seconds, runDir, record });
   const env = pythonEnvironment({ RSA_SOCKET: socket, RSA_WORKSPACE: workspace, RSA_RUN_ID: "run-action", RSA_LOG_DIAGNOSTICS: diagnostics });
   const runtime = new Runtime(devices, record, seconds, "run-action", diagnostics);
-  runtime.controller = new WorkspaceController({ workspace, devices, record, env });
-  runtime.perception = new PerceptionRuntime({ workspace, runDir, record, env, diagnostics });
-  runtime.action = new ActionRuntime({ workspace, runDir, record, env, diagnostics,
+  runtime.attach({ controller: new WorkspaceController({ workspace, devices, record, env }) });
+  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record, env, diagnostics }) });
+  runtime.attach({ action: new ActionRuntime({ workspace, runDir, record, env, diagnostics,
     isAuto: epoch => runtime.status().mode === "auto" && runtime.status().epoch === epoch,
     setInputGeneration: (epoch, generation) => generation && grant
       ? grant(() => devices.setInputGeneration!(epoch, generation)) : devices.setInputGeneration!(epoch, generation),
-    onCleanupError: error => { void runtime.stop(error.message); } });
+    onCleanupError: error => { void runtime.stop(error.message); } }) });
   const closeHost = await listen(socket, runtime);
   await writeFile(join(workspace, "perception.py"), `from rsa_tools import capability, record
 class Perception:
@@ -100,7 +100,7 @@ ${body ?? `        self.n += 1
     def close(self): pass
 `;
   await writeFile(join(workspace, "action.py"), source());
-  await runtime.perception.reload();
+  await runtime.perception!.reload();
   await until(() => runtime.perception!.status().state === "ready", "perception ready");
   return { workspace, runDir, runtime, core, events, socket, states, held, source, reads: () => reads,
     write: (text: string) => writeFile(join(workspace, "action.py"), text),
@@ -170,7 +170,7 @@ test("reload replaces only Action, rejects stale generation and handback release
     expect(f.held.size).toBe(2);
     await expect(send(f.socket, { kind: "controller", argv: [], action: "call", id: "controller/sensor", epoch,
       trace: { inputGeneration: old.generation! } })).rejects.toThrow("STALE_INPUT_GENERATION");
-    const staleCli = Bun.spawn([process.execPath, join(import.meta.dir, "../src/app/main.ts"), "action", "stop"], {
+    const staleCli = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), "action", "stop"], {
       cwd: f.workspace, env: { ...process.env, RSA_SOCKET: f.socket, BASEWARE_EPOCH: epoch,
         BASEWARE_TRACE: JSON.stringify({ inputGeneration: old.generation! }) }, stdout: "pipe", stderr: "pipe",
     });

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/prom
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { PerceptionRuntime, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/harness/perception.ts";
+import { PerceptionRuntime, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/core/subsystems/perception.ts";
 
 async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv } = {}) {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-perception-")));
@@ -308,7 +308,7 @@ test("host exit closes the detached recorder and invokes workspace close", async
   try {
     await writeFile(join(f.workspace, "perception.py"), source('        return {}', "", '        Path("closed").write_text(str(os.getpid()))'));
     const host = join(f.workspace, "host.ts");
-    await writeFile(host, `import { PerceptionRuntime } from ${JSON.stringify(resolve(import.meta.dir, "../src/harness/perception.ts"))};
+    await writeFile(host, `import { PerceptionRuntime } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/subsystems/perception.ts"))};
 const runtime = new PerceptionRuntime({workspace:${JSON.stringify(f.workspace)},runDir:${JSON.stringify(join(f.workspace, "logs", "run"))},record(){}});
 console.log(JSON.stringify(await runtime.reload())); process.exit(0);`);
     const launched = Bun.spawn(["bun", host], { stdout: "pipe", stderr: "pipe" });

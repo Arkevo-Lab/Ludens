@@ -46,7 +46,7 @@
 
 ### 2. 事件通用信封结构
 
-每条 JSONL 事件均包含写入者顶层标识（`runId` 或 `serviceId`、递增 `seq`、墙钟 `at`、单调时钟 `atMs`）以及以下四个核心块（定义见 [rsa/src/harness/events.ts](../../rsa/src/harness/events.ts)）：
+每条 JSONL 事件均包含写入者顶层标识（`runId` 或 `serviceId`、递增 `seq`、墙钟 `at`、单调时钟 `atMs`）以及以下四个核心块（定义见 [rsa/src/core/storage/events.ts](../../rsa/src/core/storage/events.ts)）：
 
 - **`source`**：产生该语义的职责组件（`shiori`、`rsa`、`workspace`、`baseware`、`benchmark`、`dashboard`、`pet`）及其具体实现与版本。
 - **`origin`**：源进程首次生成该事实的 `{eventId, clockId, seq, at, atMs}`，跨进程转发与落盘保持不变（`atMs` 仅允许在相同 `clockId` 内相减）。
@@ -90,8 +90,8 @@
 
 ## Shiori、压缩与传输
 
-1. **Shiori OTel 遥测**：[shiori.ts](../../rsa/src/harness/omp/shiori.ts) 挂载局部 OpenTelemetry provider（设置 `captureMessageContent = "none"` 避免重复复制正文），在单次 `agentLoop` 结束时写入 `shiori_run_end` 汇总。
-2. **HTTP 与 WebSocket 传输追踪**：[trace.ts](../../rsa/src/harness/omp/trace.ts) 记录完整的请求载荷、传输协议（WS full / WS delta / HTTP SSE）与阶段耗时：
+1. **Shiori OTel 遥测**：[shiori.ts](../../rsa/src/core/agent-omp/shiori.ts) 挂载局部 OpenTelemetry provider（设置 `captureMessageContent = "none"` 避免重复复制正文），在单次 `agentLoop` 结束时写入 `shiori_run_end` 汇总。
+2. **HTTP 与 WebSocket 传输追踪**：[trace.ts](../../rsa/src/core/agent-omp/trace.ts) 记录完整的请求载荷、传输协议（WS full / WS delta / HTTP SSE）与阶段耗时：
    - **HTTP 响应头等待**：从请求发出（dispatch）到收到 HTTP 响应头的耗时（流式接收完成由 `http_end` 之后的内容流结束标识）。
    - **WS 首事件等待**：WebSocket 模式下出站 `response.create` 仅为发送完成，Dashboard 统计从出站完成到收到**第一个入站服务端事件**的耗时作为首包响应指标。
 3. **后台预测压缩追踪**：通过 `diagnostics_channel("omp.compaction.speculation")` 为每个后台压缩候选分配唯一 `operationId`，全链路记录 `started → armed / failed / cancelled` 及阈值阶段的 `waiting / applied / invalidated`，其内部发起的 HTTP 请求与重试均挂载在该 `operationId` 与原控制 `epoch` 下。

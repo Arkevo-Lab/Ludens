@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { createRsaExtension, type Cycle } from "../src/harness/omp/extension.ts";
-import { consolidateOmpSession, createOmpSession } from "../src/harness/omp/session.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { consolidateOmpSession, createOmpSession } from "../src/core/agent-omp/session.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("workspace Python capabilities do not grow OMP's tool list across writes, removal or consolidation", async () => {

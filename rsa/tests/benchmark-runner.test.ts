@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { runTask } from "../src/harness/shiori-benchmark.ts";
-import { compareResults } from "../src/benchmark/contract.ts";
-import { history } from "../src/benchmark/store.ts";
+import { runTask } from "../src/bench/shiori-benchmark.ts";
+import { compareResults } from "../src/core/storage/contract.ts";
+import { history } from "../src/core/storage/store.ts";
 test("offline handoff uses Shiori and one event writer; repeat isolates fixtures without online model", async () => {
   const root = await mkdtemp(join(tmpdir(), "shiori-native-"));
   const options = { workspace: join(root, "workspace"), globalHome: join(root, "index"), seconds: 20 };

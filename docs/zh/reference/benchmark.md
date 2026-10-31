@@ -57,7 +57,7 @@ Harbor 任务包只描述“测什么与怎么判分”，而“运行什么程�
 | `{workdir}` | 本次试验的实际执行目录（`workspace: "isolated"` 时为每次试验独立创建的隔离目录）。 |
 | `{artifacts}` | 本次试验独占的产物输出目录（`logs/<run-id>/artifacts`）。 |
 | `{task}` / `{param.<key>}` | 本次固定后的 Task 目录路径，以及默认 `parameters` 与 CLI `--args` 合并后的参数值。 |
-| `Shiori 执行模式` | 普通命令运行于 Shiori `program` 模式，不启动模型；需要 Agent 参与的任务（如 `ludens/capability-reuse`）则通过公共 [host.ts](../../rsa/src/harness/host.ts) 挂载完整 OMP、Controller 与感知循环。预算由外层 Runtime 统一计时（含启动耗时），到期后给予最多 2 秒收尾期写出事实。 |
+| `Shiori 执行模式` | 普通命令运行于 Shiori `program` 模式，不启动模型；需要 Agent 参与的任务（如 `ludens/capability-reuse`）则通过公共 [host.ts](../../rsa/src/core/shiori/host.ts) 挂载完整 OMP、Controller 与感知循环。预算由外层 Runtime 统一计时（含启动耗时），到期后给予最多 2 秒收尾期写出事实。 |
 
 ## Task 与 Dataset
 
@@ -87,7 +87,7 @@ version = "1"
 description = "Measure a capability on fixed examples."
 ```
 
-- **命名与内容寻址固定**：`ludens-native` 要求 `task.name` 必须采用 `org/name` 命名空间格式。Shiori 按 Harbor 发布文件选择规则计算确定性 `sha256:<64位十六进制>` 内容摘要（Digest）：根目录选择 `task.toml`、`instruction.md`、可选 `README.md` 与 `trajectory.json`，再扫描 `environment/`、`tests/`、`solution/`、`steps/` 并应用 `.gitignore` / `.harborignore` 排除规则（见 [task.ts](../../rsa/src/benchmark/task.ts)）。运行前将选定文件快照固定至 `<workspace>/.rsa/benchmarks/tasks/<digest 十六进制部分>/`。
+- **命名与内容寻址固定**：`ludens-native` 要求 `task.name` 必须采用 `org/name` 命名空间格式。Shiori 按 Harbor 发布文件选择规则计算确定性 `sha256:<64位十六进制>` 内容摘要（Digest）：根目录选择 `task.toml`、`instruction.md`、可选 `README.md` 与 `trajectory.json`，再扫描 `environment/`、`tests/`、`solution/`、`steps/` 并应用 `.gitignore` / `.harborignore` 排除规则（见 [task.ts](../../rsa/src/bench/task.ts)）。运行前将选定文件快照固定至 `<workspace>/.rsa/benchmarks/tasks/<digest 十六进制部分>/`。
 - **执行溯源分离**：被测外部脚本或模型权重不纳入 Task 包摘要，而是由 Shiori 在 `input.json` 与 `manifest.json` 中自动记录 Git commit/dirty 状态、实际 `argv`、预算及模型标识，或由被测程序通过 `current_trial().subject(...)` 显式登记。
 
 ### 2. Dataset 清单（`dataset.toml`）
@@ -185,7 +185,7 @@ CLI 与 Dashboard 的 Benchmark 视图直接读取 `Trial + Verification + Rewar
 
 ## 内置任务与证据边界
 
-仓库内置 8 个标准评测任务（定义于 `rsa/benchmarks/tasks/` 与 `rsa/src/benchmark/cases/`）：
+仓库内置 8 个标准评测任务（定义于 `rsa/benchmarks/tasks/` 与 `rsa/src/bench/cases/`）：
 
 | Task 名称 | 运行模式与被测对象 | 核心验证指标与证据边界 |
 | --- | --- | --- |

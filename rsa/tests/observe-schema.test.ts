@@ -6,9 +6,9 @@ import Ajv from "ajv";
 import { customToolToDefinition, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { convertOpenAICodexResponsesTools } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import { createRsaExtension } from "../src/harness/omp/extension.ts";
-import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("observe wire schema accepts unused fields and real OMP calls deliver requested historical pixels", async () => {
@@ -31,10 +31,10 @@ print(json.dumps(records))`, workspace], {env: {...process.env, PYTHONPATH: join
   const records = JSON.parse(seeded) as {id: string}[];
   await writeFile(join(workspace, "perception.py"), 'from rsa_tools import capability, record\nclass Perception:\n    def start(self, context): pass\n    @record\n    @capability\n    def sample(self): return {"text": "live"}\n    def close(self): pass\n');
   const runtime = createTestRuntime({ controllers: [] });
-  runtime.perception = new PerceptionRuntime({ workspace, runDir, record: runtime.record });
+  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: runtime.record }) });
   const signal = new AbortController().signal;
   try {
-    await runtime.perception.reload();
+    await runtime.perception!.reload();
     const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(workspace, "versions")),
       runDir, basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 1,
       cycle: () => ({ epoch: "offline", signal }),
@@ -66,7 +66,7 @@ print(json.dumps(records))`, workspace], {env: {...process.env, PYTHONPATH: join
     const failed = await tool.execute("invalid-query", invalid, signal, () => {}, {} as ExtensionContext);
     expect(failed.isError).toBe(true);
     expect(JSON.parse(failed.content.find(part => part.type === "text")!.text).error.message).toContain("cannot be combined");
-    expect(runtime.perception.status().state).toBe("ready");
+    expect(runtime.perception!.status().state).toBe("ready");
     const passthrough = await handlers.tool_result!({ toolName: "observe", toolCallId: "invalid-query", input: invalid, ...failed });
     expect(passthrough).toBeUndefined();
   } finally {

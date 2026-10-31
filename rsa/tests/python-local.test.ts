@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { pythonModulePaths } from "../src/harness/python-capabilities.ts";
+import { pythonModulePaths } from "../src/core/subsystems/python-capabilities.ts";
 
 async function runPython(workspace: string, source: string) {
   const child = Bun.spawn(["python3", "-B", "-c", source], {cwd: workspace, stdout: "pipe", stderr: "pipe",

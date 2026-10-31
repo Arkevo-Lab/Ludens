@@ -1,0 +1,140 @@
+import { send, type Request } from "../daemon/transport.ts";
+import { parseArgs } from "node:util";
+import type { ObservationQuery, PerceptionRead, TimelineMedia } from "../core/subsystems/perception.ts";
+import { readToolArguments } from "@ludens/baseware/tool-contract";
+import type { ExecutionResult } from "@ludens/baseware/contracts";
+
+export const HELP = `rsa status
+rsa auto on [--message <text>]
+rsa auto off
+rsa consolidate [--seconds <n>]
+rsa perception status | reload | stop
+rsa perception inject [on|off]
+rsa action status | reload | stop
+rsa observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
+rsa controller list | <id> --help | <id> [--args '<JSON object>' | --file <arguments.json>]
+
+Control management is unavailable inside agent cycles carrying BASEWARE_EPOCH.
+The current directory is the workspace; --workspace <path> or RSA_WORKSPACE overrides it.
+RSA_SOCKET overrides its default host address. Each workspace resumes its own session.
+Use rsa controller for device and workspace capabilities.`;
+
+export const OBSERVE_HELP = `rsa observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
+Read the workspace timeline without sampling. Default: latest Perception.sample record.
+--capability selects a recorded capability, or '*' for the whole timeline; --id selects a record.
+--at selects the last record at or before the given recordedAt timestamp.
+--start and --end select an inclusive time range; either bound may be omitted.
+Range pages follow recording sequence, default to 8 records (maximum 64), and return hasMore/nextAfter.
+--after continues after a record sequence. Query times use recordedAt (sampling completion);
+sampledAt, when supplied by the producer, describes the source time separately.
+Default output is one query result: queryId, ok, records with media, and pagination.
+An empty range succeeds; missing point/latest data, expiration and query errors have explicit error codes.
+--images displays the same compact observation text and requested pixels through
+OMP's native terminal image support; use it when reading pictures through bash.
+availability reports the retained range; non-persistent history expires outside its hot window.
+The same command is available as rsa perception observe.`;
+
+const PERCEPTION_HELP = `rsa perception status | reload | stop
+rsa perception inject [on|off]
+${OBSERVE_HELP}
+Loads workspace/perception.py:Perception in a resident process and calls sample() continuously.
+Set sample_hz to choose a target and video nominal rate (default 30 Hz). Reload after editing code or weights.
+Mark sample() with @capability and @record from rsa_tools. Only marked results enter the timeline.
+Persistent history survives reload and new runs. Defaults: 10-minute hot window, hourly segments.
+Set RSA_PERCEPTION_PERSIST=0 in the host environment for hot-window-only history.
+inject off disables automatic observation attachment to model context; sampling, recording and explicit observe continue.
+inject on restores automatic attachment; inject without arguments shows the policy (also in rsa status).
+The policy survives perception reload and control cycles in this host; a new host defaults to on.
+stop ends the sampling process and timeline writer, including video recording. Use inject off to reduce context instead.
+Empty or failed perception supplies no default images.`;
+
+export const ACTION_HELP = `rsa action status | reload | stop
+Loads workspace/action.py:Action in its own persistent Python process during auto control.
+Implement start(context), @capability step(), close(); step_hz defaults to 30.
+Use asynchronous play to keep observing while inputs run. @record optionally retains a result
+in the existing timeline; Client().observe() reads it without resampling.
+Reload starts a new instance in the current epoch, or arms it for the next takeover while manual.
+Stop disables this program until reload. Errors halt the loop; repair and reload explicitly.
+Stop/reload clears this workspace's current device inputs, including concurrent CLI inputs.
+It preserves the control epoch, remaining budget and OMP session. Human handback ends the worker.`;
+
+async function observe(argv: string[], socket: string) {
+  if (argv.includes("--help")) { console.log(OBSERVE_HELP); return; }
+  const { values } = parseArgs({ args: argv, options: {
+    capability: { type: "string" }, id: { type: "string" },
+    at: { type: "string" }, start: { type: "string" }, end: { type: "string" },
+    limit: { type: "string" }, after: { type: "string" }, images: { type: "boolean", default: false },
+  } });
+  const query: ObservationQuery = {
+    ...(values.capability !== undefined ? { capability: values.capability } : {}),
+    ...(values.id !== undefined ? { id: values.id } : {}),
+    ...(values.at !== undefined ? { at: values.at } : {}),
+    ...(values.start !== undefined ? { start: values.start } : {}),
+    ...(values.end !== undefined ? { end: values.end } : {}),
+    ...(values.limit !== undefined ? { limit: Number(values.limit) } : {}),
+    ...(values.after !== undefined ? { after: Number(values.after) } : {}),
+  };
+  const value = await send(socket, { kind: "perception", argv: ["observe"], query,
+    epoch: process.env.BASEWARE_EPOCH,
+    trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined }) as PerceptionRead;
+  process.exitCode = value.ok ? 0 : 1;
+  const output = values.images
+    ? await (await import("../core/agent-omp/terminal-observation.ts")).terminalObservation(value,
+      (media, id) => send(socket, { kind: "timeline", action: "derive", argv: [], media, id,
+        trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined }) as Promise<TimelineMedia>)
+    : JSON.stringify(value, null, 2);
+  console.log(output);
+}
+
+export const CONTROLLER_HELP = `rsa controller list
+rsa controller <id> --help
+rsa controller controller/<native name> [--args '<JSON object>' | --file <arguments.json>]
+rsa controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
+
+Device controllers (including sensors) and decorated Python functions share this workspace catalog.
+List and help discover capabilities without executing workspace code.
+Calls requiring control use BASEWARE_EPOCH from an existing takeover; they never acquire control.
+Sensor controllers return observations alongside the execution result and can run without takeover.
+Python: from rsa_tools import Client; Client().list(), .help(id), .call(id, arguments).
+All arguments are objects; --file reads the same complete argument object as --args.`;
+
+async function controller(argv: string[], socket: string) {
+  const [id, ...args] = argv;
+  if (!id || id === "--help") { console.log(CONTROLLER_HELP); return; }
+  const request: Request = { kind: "controller", argv: [], epoch: process.env.BASEWARE_EPOCH,
+    trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined };
+  if (id === "list" && args.length === 0) request.action = "list";
+  else {
+    request.id = id;
+    if (args.length === 1 && args[0] === "--help") request.action = "help";
+    else {
+      request.action = "call";
+      request.arguments = await readToolArguments(args);
+    }
+  }
+  const value = await send(socket, request);
+  const execution = request.action === "call" && id.startsWith("controller/") ? value as ExecutionResult : undefined;
+  console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+  if (execution) process.exitCode = execution.exitCode;
+}
+
+export async function cli(argv: string[], socket: string) {
+  const [kind, ...rest] = argv;
+  if (!kind || kind === "--help") { console.log(HELP); return; }
+  if (kind === "controller") return controller(rest, socket);
+  if (kind === "observe") return observe(rest, socket);
+  if (kind === "perception" && rest[0] === "observe") return observe(rest.slice(1), socket);
+  if (kind === "perception" && (!rest.length || rest.includes("--help"))) {
+    console.log(PERCEPTION_HELP);
+    return;
+  }
+  if (kind === "action" && (!rest.length || rest[0] === "--help")) { console.log(ACTION_HELP); return; }
+  if (!["status", "auto", "consolidate", "perception", "action"].includes(kind)) throw new Error("Unknown command; see rsa --help");
+  const control = kind === "auto" || kind === "consolidate" ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null } : undefined;
+  const value = await send(socket, {
+    kind, argv: rest, epoch: process.env.BASEWARE_EPOCH,
+    trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined,
+    ...(control ? { runId: control.runId, expectedEpoch: control.epoch } : {}),
+  });
+  console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
+}

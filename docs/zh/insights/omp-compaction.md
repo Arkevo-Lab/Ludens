@@ -54,7 +54,7 @@
 
 ### 4. 给每个后台候选绑定唯一标识（`operationId`）
 
-以前后台压缩为什么终止、花了多久，在日志里很难对齐追踪。我们加了 `diagnostics_channel("omp.compaction.speculation")`，从候选创建起就绑定唯一的 `operationId`，把 `started / armed / failed / cancelled / applied / invalidated` 全生命周期和耗时写进日志（见 [trace.ts](../../rsa/src/harness/omp/trace.ts) 与 [日志契约](../reference/logging.md#shiori-压缩与传输)）。
+以前后台压缩为什么终止、花了多久，在日志里很难对齐追踪。我们加了 `diagnostics_channel("omp.compaction.speculation")`，从候选创建起就绑定唯一的 `operationId`，把 `started / armed / failed / cancelled / applied / invalidated` 全生命周期和耗时写进日志（见 [trace.ts](../../rsa/src/core/agent-omp/trace.ts) 与 [日志契约](../reference/logging.md#shiori-压缩与传输)）。
 
 ## 改完之后的代价与验证
 

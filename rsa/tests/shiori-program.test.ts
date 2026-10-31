@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile, readdir, readFile, realpath } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Runtime } from "../src/harness/runtime.ts";
-import { runTask, verifyTask } from "../src/harness/shiori-benchmark.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { runTask, verifyTask } from "../src/bench/shiori-benchmark.ts";
 
 test("a completed program cannot leave a background process holding output pipes and consuming the remaining budget", async () => {
   const root = await mkdtemp(join(tmpdir(), "shiori-pipes-"));
@@ -65,10 +65,10 @@ async function budgetFixture(mode: "cooperative" | "blocked" | "failed" | "initi
     import { spawn } from "node:child_process";
     import { readFile, writeFile } from "node:fs/promises";
     import { join } from "node:path";
-    import { createHostRuntime } from ${JSON.stringify(resolve(import.meta.dir, "../src/harness/host.ts"))};
-    import { initializeWorkspaceState } from ${JSON.stringify(resolve(import.meta.dir, "../src/harness/workspace-state.ts"))};
+    import { createHostRuntime } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/shiori/host.ts"))};
+    import { initializeWorkspaceState } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/storage/workspace-state.ts"))};
     import { createTestDeviceSession } from ${JSON.stringify(resolve(import.meta.dir, "runtime-fixture.ts"))};
-    import type { BenchmarkContext } from ${JSON.stringify(resolve(import.meta.dir, "../src/benchmark/types.ts"))};
+    import type { BenchmarkContext } from ${JSON.stringify(resolve(import.meta.dir, "../src/bench/types.ts"))};
     const mode = ${JSON.stringify(mode)};
     if (mode === "initializing") {
       await writeFile(${JSON.stringify(ready)}, "{}");
@@ -90,7 +90,7 @@ async function budgetFixture(mode: "cooperative" | "blocked" | "failed" | "initi
         log: ctx.log, rsaSocket: "", basewareSocket: "", seconds: ctx.seconds / 10, budget: ctx.budget,
         maxRequests: 1, action: false });
       const finished = Promise.withResolvers<void>();
-      runtime.agent = {
+      runtime.attach({ agent: {
         async run({ signal }) {
           const stopped = Promise.withResolvers<void>();
           if (signal.aborted) stopped.resolve(); else signal.addEventListener("abort", () => stopped.resolve(), { once: true });
@@ -99,7 +99,7 @@ async function budgetFixture(mode: "cooperative" | "blocked" | "failed" | "initi
           finished.resolve();
         },
         async consolidate() {}, async abort() {}, async close() {},
-      };
+      } });
       const cancel = () => { void runtime.stop("cancelled"); };
       ctx.signal?.addEventListener("abort", cancel, { once: true });
       try {
@@ -117,7 +117,7 @@ async function budgetFixture(mode: "cooperative" | "blocked" | "failed" | "initi
     }
   `);
   return { root, workspace, ready, options: { workspace, globalHome: join(root, "index"),
-    seconds: 1, config: { task: "local/budget", argv: [process.execPath, resolve(import.meta.dir, "../src/harness/module-program.ts"), program] } } };
+    seconds: 1, config: { task: "local/budget", argv: [process.execPath, resolve(import.meta.dir, "../src/core/shiori/module-program.ts"), program] } } };
 }
 
 async function waitForReady(path: string) {
