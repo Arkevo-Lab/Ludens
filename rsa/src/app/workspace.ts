@@ -7,7 +7,7 @@ import { resolveDriver, defaultDriverCacheRoot } from "@ludens/baseware/drivers/
 import workspaceGuide from "../../templates/AGENTS.md" with { type: "text" };
 import perceptionTemplate from "../../templates/perception.py" with { type: "text" };
 import actionTemplate from "../../templates/action.py" with { type: "text" };
-import { ensureWorkspaceIdentity, ludensHome, readGlobalConfig, registerWorkspace, validateWorkspaceRegistration } from "../../../shared/ludens.ts";
+import { ensureWorkspaceIdentity, ludensHome, readGlobalConfig, registerWorkspace, validateWorkspaceRegistration } from "@ludens/protocol/ludens";
 
 export const WORKSPACE_HELP = `Workspace startup (macOS):
 rsa init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]

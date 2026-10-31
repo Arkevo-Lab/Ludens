@@ -4,7 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, realpath, rename, rm, writeFile } from "n
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerFixture } from "./fixtures/registry";
-import { registerWorkspace, renewWorkspaceIdentity } from "../../shared/ludens";
+import { registerWorkspace, renewWorkspaceIdentity } from "@ludens/protocol/ludens";
 import { catalog, clearCatalogCache, controlState, openRun } from "../lib/data";
 import { eventFiles } from "../lib/event-files";
 import { LogIndex, closeLogIndexes } from "../lib/log-index";

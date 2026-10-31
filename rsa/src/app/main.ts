@@ -17,7 +17,7 @@ import perceptionTemplate from "../../templates/perception.py" with { type: "tex
 import actionTemplate from "../../templates/action.py" with { type: "text" };
 import { WORKSPACE_HELP, workspaceCommand } from "./workspace.ts";
 import { LOG_HELP, logCommand } from "./log-archive.ts";
-import { ludensHome, registerWorkspace } from "../../../shared/ludens.ts";
+import { ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
 import { GLOBAL_HELP, globalCommand } from "./global.ts";
 
 const globalHome = ludensHome();

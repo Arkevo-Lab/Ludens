@@ -4,7 +4,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { BasewareClient } from "@ludens/baseware/client";
-import { readRunEvents } from "../../shared/event-sources.ts";
+import { readRunEvents } from "@ludens/protocol/event-sources";
 import { send } from "../src/harness/transport.ts";
 import { initializeWorkspaceState } from "../src/harness/workspace-state.ts";
 

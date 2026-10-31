@@ -18,6 +18,8 @@
     "typescript": "6.0.2"
   },
   "dependencies": {
+    "@ludens/baseware": "file:../baseware",
+    "@ludens/protocol": "file:../protocol",
     "@oh-my-pi/omptype": "18.14.0",
     "@oh-my-pi/pi-agent-core": "18.14.0",
     "@oh-my-pi/pi-ai": "18.14.0",
@@ -27,14 +29,8 @@
     "@oh-my-pi/snapcompact": "18.14.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/sdk-trace-base": "2.12.0",
-    "@ludens/baseware": "file:../baseware",
     "ajv": "8",
     "ignore": "^7.0.14",
     "smol-toml": "^1.9.1"
-  },
-  "patchedDependencies": {
-    "@oh-my-pi/pi-ai@18.14.0": "patches/@oh-my-pi%2Fpi-ai@18.14.0.patch",
-    "@oh-my-pi/pi-coding-agent@18.14.0": "patches/@oh-my-pi%2Fpi-coding-agent@18.14.0.patch",
-    "@oh-my-pi/pi-agent-core@18.14.0": "patches/@oh-my-pi%2Fpi-agent-core@18.14.0.patch"
   }
 }

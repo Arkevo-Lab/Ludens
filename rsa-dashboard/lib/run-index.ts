@@ -1,5 +1,5 @@
 import { positionKey, type LogIndex, type RecordPointer } from "./log-index";
-import { readArtifact } from "../../shared/log-archive";
+import { readArtifact } from "@ludens/protocol/log-archive";
 import { aggregate, isCompletedControllerAction } from "./aggregate";
 import { projectTelemetry } from "./telemetry";
 import { advanceTelemetry, telemetryFromState, telemetryFactKeys, type TelemetryState, type TelemetryRecipe } from "./telemetry-reducer";

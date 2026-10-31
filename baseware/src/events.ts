@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, realpathSync, renameSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { EventMetadata, RecordEvent } from "./protocol.ts";
-import type { EventChannel, EventSegment, EventSourceDescriptor } from "../../shared/event-sources.ts";
+import type { EventChannel, EventSegment, EventSourceDescriptor } from "@ludens/protocol/event-sources";
 
 /** Device facts belong to this service, including calls from clients other than RSA. */
 export class EventLog {

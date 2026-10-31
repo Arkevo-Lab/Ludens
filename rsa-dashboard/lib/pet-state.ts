@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { globalHome } from "./data";
-import { registeredWorkspace, readWorkspaceIdentity, validWorkspaceId, withWorkspaceRegistrationLock, withPetTargetLock } from "../../shared/ludens";
+import { registeredWorkspace, readWorkspaceIdentity, validWorkspaceId, withWorkspaceRegistrationLock, withPetTargetLock } from "@ludens/protocol/ludens";
 import type { PetConsumer, PetConsumerReceipt, PetState, PetTarget, PetTargetReceipt } from "./pet";
 
 const targetFile = "pet/target.json";

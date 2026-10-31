@@ -10,7 +10,7 @@ import type { Clock, Observation } from "@ludens/baseware/contracts";
 import type { Runtime } from "../runtime.ts";
 import { Workspace } from "../workspace.ts";
 import { childTrace, type EventTrace, type RecordEvent } from "../events.ts";
-import { pythonEnvironment } from "../../../../shared/python.ts";
+import { pythonEnvironment } from "@ludens/protocol/python";
 import { observationBytes, perceptionInput, type DeriveMedia, type TimelineMedia, type ObservationQuery, type PerceptionRead, type PerceptionRecord, type PerceptionStatus } from "../perception.ts";
 
 export async function media(observations: Observation[], record?: RecordEvent, trace?: EventTrace, derive?: DeriveMedia) {

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, delimiter, join, resolve } from "node:path";
-import { pythonExecutable } from "../../../shared/python.ts";
+import { pythonExecutable } from "@ludens/protocol/python";
 import { pythonModulePaths } from "./python-capabilities.ts";
 import { childTrace, type DiagnosticsMode, type EventTrace, type RecordEvent } from "./events.ts";
 import { PythonWorker } from "./python-worker.ts";

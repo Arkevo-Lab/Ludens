@@ -1,4 +1,4 @@
-import { readArtifactSync } from "../../../../shared/log-archive.ts";
+import { readArtifactSync } from "@ludens/protocol/log-archive";
 
 /** Freeze only the input required by the offline reuse verifier. Missing source
  * evidence remains missing; verification never falls back to a live log. */

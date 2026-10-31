@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { JsonArchive } from "../../shared/log-archive.ts";
+import { JsonArchive } from "@ludens/protocol/log-archive";
 import { EventLog as DeviceEventLog } from "../../baseware/src/events.ts";
 
 const script = new URL("../scripts/analyze-run.py", import.meta.url).pathname;

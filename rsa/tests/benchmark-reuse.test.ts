@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { EventLog as DeviceEventLog } from "../../baseware/src/events.ts";
-import { readRunEvents } from "../../shared/event-sources.ts";
+import { readRunEvents } from "@ludens/protocol/event-sources";
 import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenBaseware } from "@ludens/baseware/server";
 import { connectBaseware } from "../src/harness/baseware.ts";
@@ -16,7 +16,7 @@ import { renderBoard } from "../src/benchmark/fixtures/reuse-board.ts";
 import { ReuseEnvironment } from "../src/benchmark/fixtures/reuse-environment.ts";
 import { evaluateReuse, type ReuseEvent } from "../benchmarks/tasks/capability-reuse/tests/evaluate.ts";
 import { freezeReuseEvents } from "../src/benchmark/fixtures/reuse-facts.ts";
-import { readArtifactSync } from "../../shared/log-archive.ts";
+import { readArtifactSync } from "@ludens/protocol/log-archive";
 
 const passed = (events: ReuseEvent[], epoch: string, id: string, runDir?: string) =>
   evaluateReuse(runDir ? freezeReuseEvents(events, runDir) : events, epoch).checks![id]?.passed;

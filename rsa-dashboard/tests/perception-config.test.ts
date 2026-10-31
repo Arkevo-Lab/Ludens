@@ -8,7 +8,7 @@ import { perceptionSettings, updatePerceptionSettings } from "../lib/perception-
 import { clearCatalogCache } from "../lib/data";
 import { DashboardWorker } from "../lib/dashboard-worker";
 import * as route from "../app/api/perception-config/route";
-import { withWorkspaceRegistrationLock } from "../../shared/ludens";
+import { withWorkspaceRegistrationLock } from "@ludens/protocol/ludens";
 
 async function fixture() {
   const base = await realpath(await mkdtemp(join(tmpdir(), "perception-config-")));

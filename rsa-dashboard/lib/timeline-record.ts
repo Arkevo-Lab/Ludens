@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { open, readdir, readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import type { VideoFrameReference } from "../../shared/timeline-media";
+import type { VideoFrameReference } from "@ludens/protocol/timeline-media";
 
 export interface TimelineRecordDetail {
   recordId: string;

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import type { Event } from "./types";
 import { eventFiles, type EventFile } from "./event-files";
-import { matchesSourceEvent, type EventChannel } from "../../shared/event-sources";
+import { matchesSourceEvent, type EventChannel } from "@ludens/protocol/event-sources";
 
 const FORMAT = "files-4";
 const CHUNK = 1024 * 1024;

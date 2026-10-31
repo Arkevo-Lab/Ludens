@@ -9,7 +9,7 @@ import { petState, recordPetConsumer, setPetTarget, PET_HEARTBEAT_TTL_MS } from 
 import { petStatus, petStatusKey, type PetState } from "../lib/pet";
 import { catalog } from "../lib/data";
 import { registerFixture } from "./fixtures/registry";
-import { withPetTargetLock, withWorkspaceRegistrationLock } from "../../shared/ludens";
+import { withPetTargetLock, withWorkspaceRegistrationLock } from "@ludens/protocol/ludens";
 import { DashboardWorker } from "../lib/dashboard-worker";
 
 const consumerInput = () => ({

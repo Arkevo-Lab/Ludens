@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { launchPlan, parseConfig, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/app/workspace.ts";
 import { getDriver } from "@ludens/baseware/drivers/registry.ts";
-import { ensureWorkspaceIdentity, ludensHome, registerWorkspace } from "../../shared/ludens.ts";
+import { ensureWorkspaceIdentity, ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
 
 const fixtureManifests: Record<string, DriverManifest> = {
   "bridge-fixture": { id: "bridge-fixture", transport: "bridge", defaultPort: 47991, needsGame: true,

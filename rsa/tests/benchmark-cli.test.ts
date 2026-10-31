@@ -68,7 +68,7 @@ test("a moved benchmark workspace retains history, evidence and verification thr
     const regraded = await verifyTask(moved, first.trial.id, { globalHome: f.options.globalHome });
     expect(regraded.verifier_result.rewards).toEqual({ height: 24, landed: 0 });
     expect(await readFile(join(moved, "actions.txt"), "utf8")).toBe("1");
-    const { renewWorkspaceIdentity } = await import("../../shared/ludens.ts");
+    const { renewWorkspaceIdentity } = await import("@ludens/protocol/ludens");
     await renewWorkspaceIdentity(moved, f.options.globalHome);
     const independent = join(f.root, "independent");
     await rename(moved, independent);

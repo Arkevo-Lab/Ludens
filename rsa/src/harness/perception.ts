@@ -4,9 +4,9 @@ import { basename, delimiter, join, resolve } from "node:path";
 import type { Clock, Observation } from "@ludens/baseware/contracts";
 import { childTrace, type EventTrace, type RecordEvent, type RegisterMedia, type DiagnosticsMode, type EventMetadata } from "./events.ts";
 import { pythonModulePaths } from "./python-capabilities.ts";
-import { pythonExecutable } from "../../../shared/python.ts";
+import { pythonExecutable } from "@ludens/protocol/python";
 import { PythonWorker, type WorkerReply } from "./python-worker.ts";
-import type { VideoFrameReference } from "../../../shared/timeline-types.ts";
+import type { VideoFrameReference } from "@ludens/protocol/timeline-types";
 
 export interface PerceptionStatus {
   state: "unimplemented" | "loading" | "ready" | "stopped" | "error";

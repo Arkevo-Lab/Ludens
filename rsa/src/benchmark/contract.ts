@@ -1,4 +1,4 @@
-import type { TimelineAssetReference } from "../../../shared/timeline-types";
+import type { TimelineAssetReference } from "@ludens/protocol/timeline-types";
 
 /** Public file contract. Shiori owns execution; these types do not start work or infer a verdict. */
 export type Rewards = Record<string, number>;

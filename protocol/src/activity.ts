@@ -1,4 +1,3 @@
-import { readArchiveJson } from "./archive-client";
 /** Shared read-only activity protocol for the Dashboard hook and Ludens Pet. */
 export interface EventSource { component: string; implementation?: string; implementationVersion?: string }
 export interface LogBlock {
@@ -68,6 +67,29 @@ export function acceptsScope(scope: ActivityScope, project: string, run?: string
   return scope.project === project && (run === undefined || scope.runId === run)
     && (epoch === undefined || scope.epoch === epoch);
 }
+
+/** HTTP reads wait for a finite archive build; abort only stops this reader. */
+async function readArchiveJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  for (;;) {
+    signal?.throwIfAborted();
+    const response = await fetch(url, { cache: "no-store", signal });
+    const body = await response.json();
+    signal?.throwIfAborted();
+    if (response.status === 202 && body.code === "ARCHIVE_PREPARING") {
+      const { promise, resolve, reject } = Promise.withResolvers<void>();
+      const aborted = () => { clearTimeout(timer); reject(signal?.reason); };
+      const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, 250);
+      signal?.addEventListener("abort", aborted, { once: true });
+      if (signal?.aborted) aborted();
+      await promise;
+      continue;
+    }
+    if (!response.ok) throw Object.assign(new Error(body.error ?? `读取失败 · HTTP ${response.status}`),
+      { code: body.code, progress: body.progress });
+    return body;
+  }
+}
+
 export async function requestActivity(params: URLSearchParams, signal: AbortSignal, baseUrl?: string): Promise<ActivityResponse> {
   const path = "/api/activity?" + params;
   return readArchiveJson<ActivityResponse>(baseUrl ? new URL(path, baseUrl).href : path, signal);

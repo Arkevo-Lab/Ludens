@@ -4,10 +4,10 @@ import { mkdir, readFile, readdir, realpath, rename, rm, stat, writeFile } from 
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
-import { readRunEvents } from "../../../shared/event-sources.ts";
-import { validateVideoReference } from "../../../shared/timeline-media.ts";
+import { readRunEvents } from "@ludens/protocol/event-sources";
+import { validateVideoReference } from "@ludens/protocol/timeline-media";
 import { initializeWorkspaceState } from "../harness/workspace-state.ts";
-import { ludensHome, readWorkspaceIdentity, registerWorkspace } from "../../../shared/ludens.ts";
+import { ludensHome, readWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { isObject, trialSummary, validId, validateTrial, validateVerification, verificationSummary,
   type BenchmarkResult, type EvidenceReference, type Failure, type HistoryQuery, type PageQuery,
   type Trial, type TrialPage, type TrialSummary, type Verification, type VerificationPage } from "./contract.ts";

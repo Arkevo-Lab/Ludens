@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
 import { randomBytes } from "node:crypto";
-import { JsonArchive, type JsonArchiveRef } from "../../../shared/log-archive.ts";
+import { JsonArchive, type JsonArchiveRef } from "@ludens/protocol/log-archive";
 import type { Clock } from "@ludens/baseware/contracts";
 import type { EventMetadata, EventSource } from "@ludens/baseware/protocol";
 

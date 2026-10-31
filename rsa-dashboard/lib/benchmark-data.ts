@@ -2,7 +2,7 @@ import { open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { discoverTasks } from "../../rsa/src/benchmark/catalog";
 import { get, history, inspectEvidence, verifications } from "../../rsa/src/benchmark/store";
-import { readWorkspaceIdentity } from "../../shared/ludens";
+import { readWorkspaceIdentity } from "@ludens/protocol/ludens";
 import { globalHome, catalog, resolveRun } from "./data";
 import type { Event, Manifest } from "./types";
 import type { BenchmarkAttachment, BenchmarkCatalog, BenchmarkDetailQuery, BenchmarkEvidence, BenchmarkQuery, BenchmarkResult } from "./benchmarks";

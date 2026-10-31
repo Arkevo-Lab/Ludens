@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
 import { media } from "../src/harness/omp/extension.ts";
 import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { decodeTimelineFrame } from "../../shared/timeline-media.ts";
+import { decodeTimelineFrame } from "@ludens/protocol/timeline-media";
 
 test("model image versions reference one video source and archive errors do not alter model input", async () => {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-derived-media-")));

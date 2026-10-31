@@ -19,7 +19,7 @@ import { Runtime } from "../src/harness/runtime.ts";
 import { listen as listenRsa } from "../src/harness/transport.ts";
 import { Workspace } from "../src/harness/workspace.ts";
 import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { pythonExecutable } from "../../shared/python.ts";
+import { pythonExecutable } from "@ludens/protocol/python";
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
 import { encodeTerminalImage, TerminalGraphicsDecoder } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
 

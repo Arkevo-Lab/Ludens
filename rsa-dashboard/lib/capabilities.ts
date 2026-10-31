@@ -5,7 +5,7 @@ import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { resolveWorkspaceAddress } from "../../rsa/src/harness/workspace-state";
 import { discoverTasks } from "../../rsa/src/benchmark/catalog";
 import { isObject } from "../../rsa/src/benchmark/contract";
-import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "../../shared/python";
+import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
 
 export interface CapabilityEntry {
   id: string;

@@ -3,7 +3,7 @@ import { copyFile, lstat, mkdir, readFile, readdir, readlink, realpath, writeFil
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { createInterface } from "node:readline";
 import type { SessionManager } from "@oh-my-pi/pi-coding-agent";
-import { readWorkspaceIdentity, registerWorkspace } from "../../../../shared/ludens.ts";
+import { readWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { initializeWorkspaceState, writeCurrentSession, type WorkspaceState } from "../workspace-state.ts";
 
 const ownershipType = "ludens.workspace";

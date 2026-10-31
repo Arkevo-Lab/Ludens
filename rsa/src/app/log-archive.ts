@@ -3,9 +3,9 @@ import { readFile, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
-import { readArtifact } from "../../../shared/log-archive.ts";
+import { readArtifact } from "@ludens/protocol/log-archive";
 import { once } from "node:events";
-import { readRunEvents } from "../../../shared/event-sources.ts";
+import { readRunEvents } from "@ludens/protocol/event-sources";
 
 export const LOG_HELP = `rsa logs events --run <run-directory> [--diagnostics]
 Stream saved events as NDJSON, resolving registered device sources without copying them.

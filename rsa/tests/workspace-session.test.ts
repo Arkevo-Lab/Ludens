@@ -190,7 +190,7 @@ test("moving preserves identity and context; same-named foreign sessions and ren
     expect(await readCurrentSession(second)).toBeUndefined();
     const alias = join(directory, "alias"); await symlink(moved.workspace, alias);
     await validateSessionWorkspace(selected, alias);
-    const { renewWorkspaceIdentity } = await import("../../shared/ludens.ts");
+    const { renewWorkspaceIdentity } = await import("@ludens/protocol/ludens");
     await renewWorkspaceIdentity(moved.workspace, home);
     const renewed = await initializeWorkspaceState(moved.workspace, home);
     expect(await readCurrentSession(renewed)).toBeUndefined();

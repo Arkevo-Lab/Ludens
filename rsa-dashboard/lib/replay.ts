@@ -6,10 +6,10 @@ import { getOperation, queryOperationRefs, refreshOperationIndex, type Operation
 import { timelineRecord, timelinePath, timelineWindow, type StoredTimelineRecord, type TimelineCursor } from "./timeline-record";
 import { eventObservations, modelInputEvents } from "./observation-events";
 import { aggregate } from "./aggregate";
-import { readArtifact } from "../../shared/log-archive";
+import { readArtifact } from "@ludens/protocol/log-archive";
 import type { Event } from "./types";
 import type { ReplayCoverage, ReplayDetail, ReplayFrame, ReplayItem, ReplayOverview, ReplayOverviewResult, ReplayPreparing, ReplaySearchResult, ReplaySummary, ReplayTrack, ReplayWindow } from "./replay-types";
-import { decodeTimelineFrame, type VideoFrameReference } from "../../shared/timeline-media";
+import { decodeTimelineFrame, type VideoFrameReference } from "@ludens/protocol/timeline-media";
 import { archiveBuildState } from "./cold-build";
 import type { FileMedia } from "./file-response";
 

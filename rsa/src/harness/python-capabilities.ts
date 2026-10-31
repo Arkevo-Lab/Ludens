@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { delimiter, resolve } from "node:path";
-import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "../../../shared/python.ts";
-export { pythonModulePaths } from "../../../shared/python.ts";
+import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
+export { pythonModulePaths } from "@ludens/protocol/python";
 import { childTrace, type EventTrace, type RecordEvent } from "./events.ts";
 
 export interface PythonCapability {

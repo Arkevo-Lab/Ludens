@@ -4,7 +4,7 @@ import { lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from "n
 import { join } from "node:path";
 import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { resolveWorkspaceAddress } from "../../rsa/src/harness/workspace-state";
-import { withWorkspaceRegistrationLock } from "../../shared/ludens";
+import { withWorkspaceRegistrationLock } from "@ludens/protocol/ludens";
 
 /** Workspace overrides only; absent values inherit the perception process environment. */
 export interface PerceptionSettings {

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } f
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { ensureWorkspaceIdentity } from "../../shared/ludens.ts";
+import { ensureWorkspaceIdentity } from "@ludens/protocol/ludens";
 
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-import-command-")));

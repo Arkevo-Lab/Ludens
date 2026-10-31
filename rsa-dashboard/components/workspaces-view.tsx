@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { WorkspaceCreateForm } from "@/components/workspace-create-form";
 import type { WorkspaceCreationIntent } from "@/components/workspace-create-model";
 import type { CreateWorkspaceInput, WorkspaceRootResult, WorkspaceRemovalResult, WorkspaceSettings } from "../lib/workspaces";
-import type { WorkspaceRegistration } from "../../shared/ludens";
+import type { WorkspaceRegistration } from "@ludens/protocol/ludens";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useRetryFocus } from "./use-retry-focus";
 

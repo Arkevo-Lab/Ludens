@@ -12,7 +12,7 @@ import { WorkspaceController } from "../src/harness/controller.ts";
 import { PerceptionRuntime } from "../src/harness/perception.ts";
 import { Runtime } from "../src/harness/runtime.ts";
 import { listen, send } from "../src/harness/transport.ts";
-import { pythonEnvironment } from "../../shared/python.ts";
+import { pythonEnvironment } from "@ludens/protocol/python";
 
 async function until(check: () => boolean | Promise<boolean>, label = "condition") {
   const deadline = performance.now() + 5000;

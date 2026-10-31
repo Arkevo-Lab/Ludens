@@ -12,9 +12,9 @@ import { EventLog } from "../src/harness/events.ts";
 import { PerceptionRuntime } from "../src/harness/perception.ts";
 import { Runtime } from "../src/harness/runtime.ts";
 import { listen } from "../src/harness/transport.ts";
-import { readRunEvents } from "../../shared/event-sources.ts";
-import { readArtifact } from "../../shared/log-archive.ts";
-import { pythonEnvironment, pythonExecutable } from "../../shared/python.ts";
+import { readRunEvents } from "@ludens/protocol/event-sources";
+import { readArtifact } from "@ludens/protocol/log-archive";
+import { pythonEnvironment, pythonExecutable } from "@ludens/protocol/python";
 
 async function jsonLines(path: string): Promise<any[]> {
   return (await readFile(path, "utf8").catch(error => { if (error.code === "ENOENT") return ""; throw error; }))

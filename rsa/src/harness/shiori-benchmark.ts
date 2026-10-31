@@ -2,8 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, stat, writeFile, copyFile } from "node:fs/promises";
 import { basename, join, resolve, relative } from "node:path";
-import { pythonEnvironment, pythonExecutable } from "../../../shared/python.ts";
-import type { TimelineAssetReference } from "../../../shared/timeline-types.ts";
+import { pythonEnvironment, pythonExecutable } from "@ludens/protocol/python";
+import type { TimelineAssetReference } from "@ludens/protocol/timeline-types";
 import workspaceGuide from "../../templates/AGENTS.md" with { type: "text" };
 import { Runtime as Shiori } from "./runtime.ts";
 import { runProvenance } from "./provenance.ts";

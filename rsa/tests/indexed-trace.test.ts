@@ -9,7 +9,7 @@ import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
 import { EventLog } from "../src/harness/events.ts";
 import { installCompactionHttpTrace, ModelTrace } from "../src/harness/omp/trace.ts";
-import { readArtifact } from "../../shared/log-archive.ts";
+import { readArtifact } from "@ludens/protocol/log-archive";
 
 const lines = async (path: string) => (await readFile(path, "utf8")).trim().split("\n").map(line => JSON.parse(line));
 async function fixture() {

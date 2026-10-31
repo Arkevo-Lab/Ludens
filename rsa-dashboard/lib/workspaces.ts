@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, join, resolve } from "node:path";
 import { readGlobalConfig, updateGlobalConfig, listRegisteredWorkspaces, registerWorkspace, forgetWorkspace,
-  registeredWorkspace, readWorkspaceIdentity, type LudensConfig, type WorkspaceRegistration } from "../../shared/ludens";
+  registeredWorkspace, readWorkspaceIdentity, type LudensConfig, type WorkspaceRegistration } from "@ludens/protocol/ludens";
 import { globalHome, clearCatalogCache } from "./data";
 
 export interface CreateWorkspaceInput {

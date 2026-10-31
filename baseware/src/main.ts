@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 import { basename, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import { ludensHome } from "../../shared/ludens.ts";
+import { ludensHome } from "@ludens/protocol/ludens";
 import { cli, HELP } from "./cli.ts";
 import { defaultSocket } from "./address.ts";
 import { BasewareCore } from "./core.ts";

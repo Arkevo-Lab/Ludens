@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { capabilities } from "../lib/capabilities";
 import { catalog, clearCatalogCache } from "../lib/data";
 import { DashboardWorker } from "../lib/dashboard-worker";
-import { registerWorkspace } from "../../shared/ludens";
+import { registerWorkspace } from "@ludens/protocol/ludens";
 
 const json = (path: string, value: unknown) => writeFile(path, JSON.stringify(value));
 async function fixture() {

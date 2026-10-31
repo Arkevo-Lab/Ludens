@@ -1,7 +1,7 @@
 import { readFile, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { listEventSourceFiles, type EventChannel, type EventSourceFile, type SourceDependency } from "../../shared/event-sources";
-import { readWorkspaceIdentity } from "../../shared/ludens";
+import { listEventSourceFiles, type EventChannel, type EventSourceFile, type SourceDependency } from "@ludens/protocol/event-sources";
+import { readWorkspaceIdentity } from "@ludens/protocol/ludens";
 import type { SourceSnapshot } from "./cold-build-protocol";
 
 export type EventFile = { name: string; path: string; sourceId?: string; dependency?: SourceDependency };

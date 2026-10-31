@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { appendFileSync, mkdirSync, realpathSync } from 'node:fs'
 import { join } from 'node:path'
-import { readWorkspaceIdentitySync } from '../../../../shared/ludens.js'
-import { ActivityChangesClient, type ActivityBlock, type ActivityProjection } from '../../../../rsa-dashboard/lib/activity-client.js'
-export type { ActivityBlock, ActivityProjection, ActivityChanges, LogBlock } from '../../../../rsa-dashboard/lib/activity-client.js'
+import { readWorkspaceIdentitySync } from '@ludens/protocol/ludens'
+import { ActivityChangesClient, type ActivityBlock, type ActivityProjection } from '@ludens/protocol/activity'
+export type { ActivityBlock, ActivityProjection, ActivityChanges, LogBlock } from '@ludens/protocol/activity'
 
 export type ConsumerRecord = (type: string, data: Record<string, unknown>, context?: {
   runId?: string | null; epoch?: string | null; trace?: Record<string, string>

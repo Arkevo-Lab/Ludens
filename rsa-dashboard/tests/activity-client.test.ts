@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ActivityChangesClient, requestActivity, type ActivityResponse } from "../lib/activity-client";
+import { ActivityChangesClient, requestActivity, type ActivityResponse } from "@ludens/protocol/activity";
 
 function page(revision: number, runId = "run-a", generation = "one"): ActivityResponse {
   return { scope: { project: "project", runId, epoch: "epoch" }, mode: "delta", blocks: [],

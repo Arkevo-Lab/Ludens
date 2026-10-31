@@ -1,6 +1,6 @@
 import { readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readRunEvents } from "../../../../shared/event-sources.ts";
+import { readRunEvents } from "@ludens/protocol/event-sources";
 import { freezeReuseEvents } from "../fixtures/reuse-facts.ts";
 import { EventLog as DeviceEventLog } from "../../../../baseware/src/events.ts";
 import { atomicJson } from "../store.ts";

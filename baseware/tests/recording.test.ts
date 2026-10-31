@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { BasewareCore } from "../src/core.ts";
 import { EventLog } from "../src/events.ts";
 import { SamplingStats } from "../src/sampling-stats.ts";
-import { listEventSourceFiles, matchesSourceEvent, readRunEvents, type SourceDependency } from "../../shared/event-sources.ts";
+import { listEventSourceFiles, matchesSourceEvent, readRunEvents, type SourceDependency } from "@ludens/protocol/event-sources";
 import type { ControllerContext, ToolExecutionResult } from "../src/contracts.ts";
 import type { DeviceEvent, Trace } from "../src/protocol.ts";
 

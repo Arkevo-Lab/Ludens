@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { dirname, delimiter, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const repository = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const repository = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const projectPython = resolve(repository, "rsa/python/.venv", process.platform === "win32" ? "Scripts/python.exe" : "bin/python");
 
 export function pythonExecutable(environment: NodeJS.ProcessEnv = process.env): string {

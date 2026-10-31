@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { forgetWorkspace, listRegisteredWorkspaces, ludensHome, readGlobalConfig, readWorkspaceIdentity,
-  registerWorkspace, renewWorkspaceIdentity, updateGlobalConfig } from "../../../shared/ludens.ts";
+  registerWorkspace, renewWorkspaceIdentity, updateGlobalConfig } from "@ludens/protocol/ludens";
 
 export const GLOBAL_HELP = `Ludens settings and workspace registry:
 rsa config [show]

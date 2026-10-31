@@ -9,8 +9,8 @@ import { controlArchiveBuild } from "./cold-build";
 import { latestGameRun } from "./initial-selection";
 import { readTimelineRecord, timelinePath, type TimelineRecordDetail } from "./timeline-record";
 import type { Event, Manifest, Project, RunData, LiveStatus } from "./types";
-import { decodeTimelineFrame } from "../../shared/timeline-media";
-import { ludensHome, listRegisteredWorkspaces, registeredWorkspace, readWorkspaceIdentity } from "../../shared/ludens";
+import { decodeTimelineFrame } from "@ludens/protocol/timeline-media";
+import { ludensHome, listRegisteredWorkspaces, registeredWorkspace, readWorkspaceIdentity } from "@ludens/protocol/ludens";
 export const globalHome = ludensHome();
 const safePart = (value: string) =>
   /^[a-zA-Z0-9._-]+$/.test(value) && value !== "." && value !== "..";

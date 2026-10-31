@@ -1,4 +1,4 @@
-import { readRunEvents } from "../../../../shared/event-sources.ts";
+import { readRunEvents } from "@ludens/protocol/event-sources";
 import type { EventTrace } from "../../harness/events.ts";
 
 export interface EvidenceEvent {

@@ -10,7 +10,7 @@ import { advanceLivePhase, emptyLivePhase, livePhaseValue, type LivePhaseState }
 import { eventObservations } from "./observation-events";
 import type { Event } from "./types";
 import { projectPythonCall, pythonSummaryBlock, advancePythonSummary, type PythonSummary } from "./python-activity";
-import { readArtifact } from "../../shared/log-archive";
+import { readArtifact } from "@ludens/protocol/log-archive";
 
 export interface LogBlock {
   id: string;

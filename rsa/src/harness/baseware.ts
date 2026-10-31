@@ -5,7 +5,7 @@ import type { RecordEvent, EventTrace } from "./events.ts";
 import type { DeviceSession } from "./runtime.ts";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import type { EventSourceDescriptor, SourceDependency } from "../../../shared/event-sources.ts";
+import type { EventSourceDescriptor, SourceDependency } from "@ludens/protocol/event-sources";
 
 interface ControlStatus { mode: string; epoch: string | null; connected: boolean; remainingSeconds: number | null;
   source?: EventSourceDescriptor; seq?: number; diagnostics?: "normal" | "full" }

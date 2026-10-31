@@ -1,7 +1,7 @@
 import type { LogBlock } from "@/lib/activity";
-import type { ActivityBlock } from "../lib/activity-client";
-export { sameScope, acceptsScope } from "../lib/activity-client";
-export type { ActivityBlock, ActivityScope } from "../lib/activity-client";
+import type { ActivityBlock } from "@ludens/protocol/activity";
+export { sameScope, acceptsScope } from "@ludens/protocol/activity";
+export type { ActivityBlock, ActivityScope } from "@ludens/protocol/activity";
 
 export type ActivityFilter = "all" | LogBlock["kind"];
 

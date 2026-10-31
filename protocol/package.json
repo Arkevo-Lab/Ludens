@@ -1,0 +1,24 @@
+{
+  "name": "@ludens/protocol",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./activity": "./src/activity.ts",
+    "./event-sources": "./src/event-sources.ts",
+    "./log-archive": "./src/log-archive.ts",
+    "./ludens": "./src/ludens.ts",
+    "./python": "./src/python.ts",
+    "./timeline-media": "./src/timeline-media.ts",
+    "./timeline-types": "./src/timeline-types.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "typescript": "6.0.2"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  }
+}

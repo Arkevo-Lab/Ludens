@@ -1,4 +1,4 @@
-import type { SourceDependency } from "../../shared/event-sources";
+import type { SourceDependency } from "@ludens/protocol/event-sources";
 export type SourceSnapshot = Record<string, { identity: string; size: number; mtime: number;
   source?: { path: string; sourceId: string; dependency: SourceDependency } }>;
 

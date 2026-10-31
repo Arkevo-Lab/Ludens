@@ -1,4 +1,4 @@
-import type { VideoFrameReference } from "../../shared/timeline-media";
+import type { VideoFrameReference } from "@ludens/protocol/timeline-media";
 
 export interface Event {
   /** Present on canonical device files; mirrored historical RSA rows keep their local sequence. */

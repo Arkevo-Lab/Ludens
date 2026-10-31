@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, readdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
-import { ensureWorkspaceIdentity, ludensHome, readWorkspaceIdentity } from "../../../shared/ludens.ts";
+import { ensureWorkspaceIdentity, ludensHome, readWorkspaceIdentity } from "@ludens/protocol/ludens";
 
 export interface WorkspaceState {
   workspace: string;

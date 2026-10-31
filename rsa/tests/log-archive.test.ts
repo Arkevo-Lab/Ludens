@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { gunzipSync, gzipSync } from "node:zlib";
-import { JsonArchive, readArtifact, readArtifactSync } from "../../shared/log-archive.ts";
+import { JsonArchive, readArtifact, readArtifactSync } from "@ludens/protocol/log-archive";
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });

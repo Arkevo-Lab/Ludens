@@ -7,7 +7,7 @@ import {
   type ActivityBlock, type ActivityFilter, type ActivityScope,
 } from "./activity-feed-model";
 
-import { ActivityChangesClient, requestActivity } from "../lib/activity-client";
+import { ActivityChangesClient, requestActivity } from "@ludens/protocol/activity";
 import { ReadPoller } from "../lib/read-poller";
 import { useTranslations } from "../lib/locale";
 
