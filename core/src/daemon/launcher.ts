@@ -92,7 +92,7 @@ export async function launchPlan(config: LaunchConfig, workspace: string, repo =
   const bridge = manifest ? manifest.transport !== "stdio" : true;
   return {
     workspace, config, manifest, dashboardUrl: "http://127.0.0.1:3015", background, sharedPet,
-    dashboardCheck: ["npm", "--prefix", join(repo, "rsa-dashboard"), "run", "build:check"],
+    dashboardCheck: ["npm", "--prefix", join(repo, "app"), "run", "build:check"],
     launcher: join(repo, "core/scripts/launch-background.py"), rsa, baseware, basewareSocket,
     commands: {
       ...(config.game && bridge && manifest?.launchCommand ? { emulator: ["env",
@@ -111,8 +111,8 @@ export async function launchPlan(config: LaunchConfig, workspace: string, repo =
           ? ["--compaction-threshold", String(config.compactionThreshold)] : []),
         "--diagnostics", config.logging.diagnostics,
       ],
-      ...(config.dashboard ? { dashboard: ["npm", "--prefix", join(repo, "rsa-dashboard"), "run", "start"] } : {}),
-      ...(config.pet ? { pet: [join(repo, "rsa-companion/bin/rsa-companion"), "--workspace", workspace, "--show-window"] } : {}),
+      ...(config.dashboard ? { dashboard: ["npm", "--prefix", join(repo, "app"), "run", "start"] } : {}),
+      ...(config.pet ? { pet: [join(repo, "app/bin/rsa-companion"), "--workspace", workspace, "--show-window"] } : {}),
     },
   };
 }

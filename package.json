@@ -6,8 +6,7 @@
     "protocol",
     "baseware",
     "core",
-    "rsa-dashboard",
-    "rsa-companion"
+    "app"
   ],
   "patchedDependencies": {
     "@oh-my-pi/pi-ai@18.14.0": "core/patches/@oh-my-pi%2Fpi-ai@18.14.0.patch",

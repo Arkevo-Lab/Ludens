@@ -107,8 +107,8 @@ export class ArchiveBuildManager {
   }
   private async child(job: Job, directory: string): Promise<{ source: CapturedSource; value: Partial<ArchiveBuildState> }> {
     const env = this.options.env ?? process.env, budget = archiveBudget(env);
-    // The tsx loader and worker entry stay inside rsa-dashboard; anchor them to the repository root.
-    const entry = this.options.entry ?? join(repoRoot, "rsa-dashboard/worker/cold-builder.mjs");
+    // The tsx loader and worker entry stay inside app; anchor them to the repository root.
+    const entry = this.options.entry ?? join(repoRoot, "app/worker/cold-builder.mjs");
     // Plain spawn: bundlers must not try to resolve the entry as a module import.
     const child = spawn(process.execPath, [`--max-old-space-size=${budget.builderHeapMiB}`, entry], {
       env, stdio: ["ignore", "ignore", "pipe", "ipc"] });

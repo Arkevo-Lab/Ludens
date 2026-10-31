@@ -6,8 +6,8 @@ import { briefNotification, type SerializedNotification } from './activity-polic
 import type { LogBlock } from './rsa-source.js'
 
 // Exercise the exact classic script loaded by the native pet window.
-const source = readFileSync(resolve('ui/public/companion/log-content.js'), 'utf8')
-const i18n = readFileSync(resolve('ui/public/companion/companion-i18n.cjs'), 'utf8')
+const source = readFileSync(resolve('public/companion/log-content.js'), 'utf8')
+const i18n = readFileSync(resolve('public/companion/companion-i18n.cjs'), 'utf8')
 const render = new Function(`${i18n}\n${source}\nreturn (target, input, locale = 'zh') => renderLogContent(target, input, companionI18n[locale].activity);`)() as (target: HTMLElement, input: SerializedNotification, locale?: 'en' | 'zh') => void
 
 function notification(kind: LogBlock['kind'], overrides: Partial<LogBlock> = {}): SerializedNotification {

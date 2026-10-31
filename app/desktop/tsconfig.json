@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["apps/desktop/src/**/*.ts"],
-  "exclude": ["apps/desktop/src/**/*.spec.ts"]
+  "include": ["**/*.ts"],
+  "exclude": ["**/*.spec.ts"]
 }

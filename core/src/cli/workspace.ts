@@ -97,8 +97,8 @@ export async function workspaceCommand(command: string, args: string[], selected
     const repo = resolve(import.meta.dir, "../../..");
     const required = [
       ...(config.game && manifest.launchCommand ? [resolve(workspace, config.game)] : []),
-      ...(config.dashboard ? [join(repo, "rsa-dashboard/node_modules/next/package.json")] : []),
-      ...(config.pet ? [join(repo, "rsa-companion/dist/electron/main.js"), join(repo, "rsa-companion/node_modules/electron/package.json")] : []),
+      ...(config.dashboard ? [join(repo, "app/node_modules/next/package.json")] : []),
+      ...(config.pet ? [join(repo, "app/dist/electron/main.js"), join(repo, "app/node_modules/electron/package.json")] : []),
     ];
     for (const path of required) if (!await Bun.file(path).exists()) throw new Error(`Missing ${path}. Install/build the components as described in README.md.`);
     const executable = config.game ? manifest.launchCommand?.[0] : undefined;

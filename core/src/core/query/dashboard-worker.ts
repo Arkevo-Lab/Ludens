@@ -22,8 +22,8 @@ export class DashboardWorker {
     if (this.worker) return this.worker;
     // Keep this a native Node constructor. Turbopack rewrites `new Worker(...)`
     // and would otherwise bundle the TypeScript backend back into the React runtime.
-    // The tsx bootstrap stays inside rsa-dashboard; anchor it to the repository root.
-    const file = this.options.file ?? join(repoRoot, "rsa-dashboard/worker/bootstrap.mjs");
+    // The tsx bootstrap stays inside app; anchor it to the repository root.
+    const file = this.options.file ?? join(repoRoot, "app/worker/bootstrap.mjs");
     const worker: Worker = Reflect.construct(Worker, [file, { execArgv: [], env: this.options.env,
       resourceLimits: { maxOldGenerationSizeMb: archiveBudget(this.options.env).readerHeapMiB } }]);
     this.worker = worker;

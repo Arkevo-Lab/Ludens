@@ -7,7 +7,7 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { settleCompanion, snapEase, type Rect } from './companion-geometry.js'
 import { createCompanionSoundStore, DEFAULT_SOUND, type CompanionSound } from './companion-sound.js'
-import companionI18n from '../../../ui/public/companion/companion-i18n.cjs'
+import companionI18n from '../public/companion/companion-i18n.cjs'
 
 type CompanionLocale = keyof typeof companionI18n
 
@@ -46,7 +46,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, 
   const here = dirname(fileURLToPath(import.meta.url))
   const assets = app.isPackaged
     ? join(process.resourcesPath, 'runtime/ui/dist/companion')
-    : resolve(here, '../../ui/public/companion')
+    : resolve(here, '../public/companion')
   const statePath = join(app.getPath('userData'), 'companion.json')
   const catalog = JSON.parse(readFileSync(join(assets, 'ludens/manifest.json'), 'utf8')) as { assets: { id: string; label: string; kind: string; category: string }[] }
   let selectedPose: string | null = null

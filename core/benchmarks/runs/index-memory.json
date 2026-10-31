@@ -12,5 +12,5 @@
   "workspace": "isolated",
   "seconds": 300,
   "parameters": {},
-  "cwd": "{rsa}/../rsa-dashboard"
+  "cwd": "{rsa}/../app"
 }

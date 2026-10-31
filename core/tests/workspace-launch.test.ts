@@ -213,7 +213,7 @@ test("Dashboard reuse requires the same global home and rejects occupied mismatc
 
 test("managed Dashboard uses a current production build and fails before starting devices when stale", async () => {
   const value = await plan();
-  expect(value.commands.dashboard).toEqual(["npm", "--prefix", "/tmp/Source with spaces/rsa-dashboard", "run", "start"]);
+  expect(value.commands.dashboard).toEqual(["npm", "--prefix", "/tmp/Source with spaces/app", "run", "start"]);
   const io = new FakeServices(value);
   io.dashboardBuild = false;
   await expect(new WorkspaceLauncher(value, io).up()).rejects.toThrow("production build is stale");

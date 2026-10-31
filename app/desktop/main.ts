@@ -112,7 +112,7 @@ if (values.help) {
       } })
       pet.configureActivity(source)
       void source.start(workspace)
-      const icon = nativeImage.createFromPath(resolve(here, '../../ui/public/companion/ludens/icons/icon-tray.png')).resize({ width: 20, height: 20 })
+      const icon = nativeImage.createFromPath(resolve(here, '../public/companion/ludens/icons/icon-tray.png')).resize({ width: 20, height: 20 })
       tray = new Tray(icon)
       tray.setToolTip('Ludens Pet · RSA')
       tray.on('click', showOwner)

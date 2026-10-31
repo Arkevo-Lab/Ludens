@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-const root = resolve('ui/public/companion')
+const root = resolve('public/companion')
 const source = readFileSync(resolve(root, 'pet-state.js'), 'utf8')
 const create = new Function(`${source}\nreturn createPetState;`)()
 

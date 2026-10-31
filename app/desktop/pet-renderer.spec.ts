@@ -2,7 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-const root = resolve('ui/public/companion')
+const root = resolve('public/companion')
 const read = (name: string) => readFileSync(resolve(root, name), 'utf8')
 let pending: { src: string; resolve: () => void; reject: () => void }[]
 let renderer: any
