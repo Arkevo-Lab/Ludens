@@ -14,13 +14,12 @@ Unless a `cd` into the target workspace is shown explicitly, run all commands fr
 
 ### 2. Install core components
 
-Install Baseware, RSA, and the web Dashboard by default; each component and the RSA Python runtime keeps its own lockfile. When installing `rsa`, Bun automatically applies the OMP dependency patches under [rsa/patches/](../../rsa/patches/) per `package.json`:
+Install the JavaScript workspaces once from the repository root using the root `bun.lock`, then build the web Dashboard. Bun automatically applies the OMP dependency patches under [rsa/patches/](../../../rsa/patches/) per the root `package.json`. The RSA Python runtime keeps its separate `uv.lock`; the optional pet's pnpm setup is covered below. Do not run `npm ci` in `rsa-dashboard`: npm selects the root workspace, which uses Bun rather than an npm lockfile.
 
 ```sh
-(cd baseware && bun install --frozen-lockfile)
-(cd rsa && bun install --frozen-lockfile)
+bun install --frozen-lockfile
 uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm ci && npm run build)
+(cd rsa-dashboard && npm run build)
 
 export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
 ```
@@ -29,7 +28,7 @@ export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
 
 ### 3. Python runtime resolution
 
-[rsa/python/pyproject.toml](../../rsa/python/pyproject.toml) and `uv.lock` manage the official `ludens-rsa` package (import name `rsa_tools`) plus media and validation dependencies such as PyAV, Pillow, and jsonschema. `rsa_tools` only provides capability declarations, the client, and experiment-registration helpers; the execution lifecycle and scoring are managed centrally by Shiori.
+[rsa/python/pyproject.toml](../../../rsa/python/pyproject.toml) and `uv.lock` manage the official `ludens-rsa` package (import name `rsa_tools`) plus media and validation dependencies such as PyAV, Pillow, and jsonschema. `rsa_tools` only provides capability declarations, the client, and experiment-registration helpers; the execution lifecycle and scoring are managed centrally by Shiori.
 
 The framework picks a Python interpreter with this priority:
 
@@ -128,7 +127,7 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 
 ### 2. `rsa.json` reference
 
-`rsa.json` is parsed and validated by [rsa/src/app/workspace.ts](../../rsa/src/app/workspace.ts); unknown fields are hard errors:
+`rsa.json` is parsed and validated by [rsa/src/daemon/launcher.ts](../../../rsa/src/daemon/launcher.ts); unknown fields are hard errors:
 
 | Field | Default | Description |
 | --- | --- | --- |
@@ -148,4 +147,4 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 ### 3. Session resumption & background service directories
 
 - **Session resumption**: workspace OMP sessions live in `.rsa/shiori/sessions/`, with the current resume pointer at `.rsa/shiori/current-session.json`. Restarting Host resumes the original session by default and opens a new `logs/<run-id>/` directory. Foreground `rsa run` accepts `--new-session` to start a fresh context (keeping workspace files), or `--resume /absolute/path/to/session.jsonl` to switch to a given historical session of the same workspace.
-- **Background service logs**: [launch-background.py](../../rsa/scripts/launch-background.py) writes stdio and launchd state for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (launchd label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. Background services detach from the terminal without boot-time autostart or crash-loop restarts; check `rsa services` and the corresponding logs first when troubleshooting.
+- **Background service logs**: [launch-background.py](../../../rsa/scripts/launch-background.py) writes stdio and launchd state for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (launchd label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. Background services detach from the terminal without boot-time autostart or crash-loop restarts; check `rsa services` and the corresponding logs first when troubleshooting.

@@ -7,9 +7,9 @@ import { BasewareClient } from "@ludens/baseware/client";
 import { listen } from "@ludens/baseware/server";
 import type { Capabilities, ToolExecutionResult } from "@ludens/baseware/contracts";
 import type { EventMetadata } from "@ludens/baseware/protocol";
-import { connectBaseware } from "../src/harness/baseware.ts";
-import { Runtime } from "../src/harness/runtime.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
+import { connectBaseware } from "../src/core/subsystems/baseware.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { captureResult, readTestController } from "./runtime-fixture.ts";
 
 async function until(check: () => boolean) {
@@ -68,16 +68,16 @@ async function fixture(seconds = 60, acquisition?: Promise<void>, releaseFailure
   const closeServer = await listen(socket, core);
   const adapter = await connectBaseware({ socket, seconds, runDir, record: (type, data, trace, metadata) => events.push({ type, data, trace, ...metadata }) });
   const runtime = new Runtime(adapter, () => {}, seconds);
-  runtime.controller = new WorkspaceController({ workspace: directory, devices: adapter, record: () => {}, env: {} });
+  runtime.attach({ controller: new WorkspaceController({ workspace: directory, devices: adapter, record: () => {}, env: {} }) });
   adapter.onHandback(reason => { void runtime.stop(reason); });
   adapter.onDisconnect(error => { void runtime.disconnected(error); });
-  runtime.agent = {
+  runtime.attach({ agent: {
     async run({ signal }) {
       agentCalls++;
       await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true }));
     },
     consolidate: async () => {}, abort: async () => {}, close: async () => {},
-  };
+  } });
   const external = await BasewareClient.connect(socket);
   return { socket, runDir, sources, pixels, core, runtime, adapter, external, events, deviceEvents,
     acquiring: acquiring.promise, acting: acting.promise,

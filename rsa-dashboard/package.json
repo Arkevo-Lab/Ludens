@@ -12,6 +12,8 @@
     "test": "tsx --test tests/*.test.ts"
   },
   "dependencies": {
+    "@ludens/protocol": "file:../protocol",
+    "@ludens/rsa": "file:../rsa",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.5.0",
     "lucide-react": "^1.64.0",

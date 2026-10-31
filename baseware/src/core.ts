@@ -3,7 +3,7 @@ import type { Capabilities, ExecutionResult, Observation, ToolArguments } from "
 import { argumentValidator, archivedToolResult, observationMetadata } from "./tool-contract.ts";
 import type { Catalog, DeviceEvent, EventMetadata, RecordEvent, Request, Trace } from "./protocol.ts";
 import type { DriverManifest } from "./drivers/registry.ts";
-import type { EventSourceDescriptor } from "../../shared/event-sources.ts";
+import type { EventSourceDescriptor } from "@ludens/protocol/event-sources";
 import { SamplingStats } from "./sampling-stats.ts";
 
 export type DriverInfo = Pick<DriverManifest, "id" | "transport" | "defaultPort" | "needsGame" | "launchHint" | "launchCommand" | "launchEnv" | "source"> & { version: string };

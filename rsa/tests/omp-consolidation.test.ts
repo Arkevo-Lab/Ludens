@@ -5,10 +5,10 @@ import { tmpdir } from "node:os";
 import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { createRsaExtension, type Cycle } from "../src/harness/omp/extension.ts";
-import { consolidateOmpSession, createOmpSession } from "../src/harness/omp/session.ts";
+import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { consolidateOmpSession, createOmpSession } from "../src/core/agent-omp/session.ts";
 import { captureResult, readTestController, createTestRuntime, installTestPerception } from "./runtime-fixture.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 
 test("consolidation uses the same session with file tools, records memory reads, and skips sensors", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-consolidation-"));

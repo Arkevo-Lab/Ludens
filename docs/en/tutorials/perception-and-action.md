@@ -8,7 +8,7 @@ All CLI commands below run in the **target workspace directory**, assuming the r
 
 ### 1. `perception.py:Perception` Lifecycle
 
-The `Perception` class in `perception.py` runs in a dedicated resident Python process (template: [rsa/templates/perception.py](../../rsa/templates/perception.py)):
+The `Perception` class in `perception.py` runs in a dedicated resident Python process (template: [rsa/templates/perception.py](../../../rsa/templates/perception.py)):
 
 - `start(self, context)`: runs once when the process starts or on `reload`; load deep-learning weights, initialize state, or start background sampling threads here. `context` contains `workspace`, `runDir`, and `generation`.
 - `sample(self)`: must be annotated with `@record` and `@capability`, and is called continuously by the scheduler at the class attribute `sample_hz` (default `30.0` Hz, which also serves as the nominal frame rate for recording). If a single sample takes longer than one period, the next sample is deferred rather than overlapping concurrently or catching up with a backlog.
@@ -79,7 +79,7 @@ Video uses fragmented MP4 (`+frag_keyframe+empty_moov`), with roughly one keyfra
 
 ## Resident Actions
 
-The `Action` class in `action.py` runs in a dedicated resident Python process during an `auto` control period (template: [rsa/templates/action.py](../../rsa/templates/action.py)):
+The `Action` class in `action.py` runs in a dedicated resident Python process during an `auto` control period (template: [rsa/templates/action.py](../../../rsa/templates/action.py)):
 
 - **Method contract**: `start(self, context)` initializes once on takeover or reload (`context` contains `workspace`, `runDir`, `generation`, `epoch`); `step(self)` is annotated with `@capability` (add `@record` if decisions should be archived to the timeline) and runs in a loop at the class attribute `step_hz` (default `30.0` Hz); `close(self)` releases resources.
 - **Reading perception and issuing actions**: inside `Action`, use `self.device = Client()` to call `self.device.observe()` for the latest or historical perception records, and `self.device.call("controller/...", {...})` to issue device commands. After an async `pad.play` submission there is no need to block synchronously within a single step; later `step()` calls can observe and decide concurrently.

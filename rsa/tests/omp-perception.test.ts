@@ -5,11 +5,11 @@ import { tmpdir } from "node:os";
 import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
-import { createRsaExtension } from "../src/harness/omp/extension.ts";
-import { createOmpSession } from "../src/harness/omp/session.ts";
-import { Workspace } from "../src/harness/workspace.ts";
-import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { listen } from "../src/harness/transport.ts";
+import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createOmpSession } from "../src/core/agent-omp/session.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
+import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
+import { listen } from "../src/daemon/transport.ts";
 import { captureResult, createTestRuntime } from "./runtime-fixture.ts";
 
 test("OMP bootstraps empty perception and repairs it through the real reload CLI without default images", async () => {
@@ -30,8 +30,8 @@ test("OMP bootstraps empty perception and repairs it through the real reload CLI
   const abort = new AbortController();
   const socket = `/tmp/rsa-perception-${crypto.randomUUID()}.sock`;
   const closeServer = await listen(socket, runtime);
-  runtime.perception = new PerceptionRuntime({ workspace, runDir, record: runtime.record });
-  await runtime.perception.reload();
+  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: runtime.record }) });
+  await runtime.perception!.reload();
   const { epoch } = await runtime.start();
   const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")), runDir,
     basewareSocket: "/tmp/unused.sock", rsaSocket: socket, binDir: resolve(import.meta.dir, "../bin"),

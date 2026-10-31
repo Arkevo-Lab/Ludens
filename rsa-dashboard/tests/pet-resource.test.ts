@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDesktopResource, DesktopResourceCancelled, type DesktopResourceState } from '../components/pet-resource';
+import { createDesktopResource, DesktopResourceCancelled, type DesktopResourceState } from '../features/pet/pet-resource';
 const deferred = <T,>() => { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no }); return { promise, resolve, reject } };
 const tick = () => new Promise<void>(resolve => setImmediate(resolve));
 function fixture<T>(read: () => Promise<T>, timeoutMs = 1000) {

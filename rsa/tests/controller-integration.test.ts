@@ -5,11 +5,11 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenBaseware } from "@ludens/baseware/server";
-import { connectBaseware } from "../src/harness/baseware.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
-import { Runtime } from "../src/harness/runtime.ts";
-import { listen as listenRsa, send, type Request } from "../src/harness/transport.ts";
-import type { RecordEvent } from "../src/harness/events.ts";
+import { connectBaseware } from "../src/core/subsystems/baseware.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
+import { Runtime } from "../src/core/shiori/runtime.ts";
+import { listen as listenRsa, send, type Request } from "../src/daemon/transport.ts";
+import type { RecordEvent } from "../src/core/storage/events.ts";
 import { captureResult } from "./runtime-fixture.ts";
 
 async function until(check: () => boolean | Promise<boolean>) {
@@ -60,7 +60,7 @@ async function fixture() {
   const env = { ...process.env, RSA_SOCKET: rsaSocket, RSA_WORKSPACE: workspace, RSA_RUN_ID: "integration-run", BASEWARE_SOCKET: basewareSocket,
     PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(":"),
     PYTHONPATH: join(import.meta.dir, "../python") };
-  runtime.controller = new WorkspaceController({workspace, devices, env, record});
+  runtime.attach({ controller: new WorkspaceController({workspace, devices, env, record}) });
   devices.onHandback(reason => { void runtime.stop(reason); });
   devices.onDisconnect(error => { void runtime.disconnected(error); });
   const closeRsa = await listenRsa(rsaSocket, runtime);

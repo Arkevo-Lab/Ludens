@@ -14,6 +14,7 @@
     "start": "electron dist/electron/main.js"
   },
   "dependencies": {
+    "@ludens/protocol": "file:../protocol",
     "zod": "4.3.6"
   },
   "devDependencies": {

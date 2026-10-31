@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { registerWorkspace } from "../../../shared/ludens";
+import { registerWorkspace } from "@ludens/protocol/ludens";
 
 /** Register only disposable fixture directories; never use the caller's global home. */
 export async function registerFixture(home: string, id: string, workspace: string) {

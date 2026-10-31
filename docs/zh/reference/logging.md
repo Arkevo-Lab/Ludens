@@ -38,15 +38,15 @@
 
 跨运行共享的三类底层存储：
 
-1. **Baseware 设备事实源（`logs/baseware/`）**：每个 Baseware 实例独立维护 `source.json`、`events/` 与 `diagnostics/`（按 1 小时或 256 MiB 切段），事件以 `origin.eventId = "<serviceId>:<seq>"` 唯一标识。RSA 在 `manifest.json` 的 `eventSources` 中记录 `{sourceId, root, format, recordingId, windows}`；读取端通过 [shared/event-sources.ts](../../shared/event-sources.ts) 按需归并。动作启动时冻结 `recordingId`，即便动作在窗口关闭后晚到结束，仍精确归属原运行。
+1. **Baseware 设备事实源（`logs/baseware/`）**：每个 Baseware 实例独立维护 `source.json`、`events/` 与 `diagnostics/`（按 1 小时或 256 MiB 切段），事件以 `origin.eventId = "<serviceId>:<seq>"` 唯一标识。RSA 在 `manifest.json` 的 `eventSources` 中记录 `{sourceId, root, format, recordingId, windows}`；读取端通过 [protocol/src/event-sources.ts](../../../protocol/src/event-sources.ts) 按需归并。动作启动时冻结 `recordingId`，即便动作在窗口关闭后晚到结束，仍精确归属原运行。
 2. **工作区时空轴（`.rsa/timeline/`）**：存放跨 run 共享的感知与能力留档——`video/<id>.mp4` 及配套状态文件 `.mp4.json`（区分 `pending / ready / error`）、非视频去重媒体 `objects/<sha256>.bin`、以及分段记录 `segments/`（含 JSONL、定长 `.idx` 索引与 `.meta.json`）。关闭持久化（`RSA_PERCEPTION_PERSIST=0`）时仅使用 `window-<pid>-.../` 临时窗口。
-3. **内容寻址结构化归档（`.rsa/archive/`）**：由 [shared/log-archive.ts](../../shared/log-archive.ts) 统一读写。模型消息、工具定义与大参数/结果存为 `objects/<sha256>.json.gz`（使用 `encoding: "rsa-json-v1"` 与 tagged JSON 区分内部引用与用户 `$ref` 字段）。日志中的图像/音频数据不重复存盘，而是引用 `.rsa/timeline/` 资产，并在 `.rsa/archive/media/<sha256>.json` 维护轻量级哈希到视频帧的映射索引（内存 LRU 上限 4096 项）。
+3. **内容寻址结构化归档（`.rsa/archive/`）**：由 [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts) 统一读写。模型消息、工具定义与大参数/结果存为 `objects/<sha256>.json.gz`（使用 `encoding: "rsa-json-v1"` 与 tagged JSON 区分内部引用与用户 `$ref` 字段）。日志中的图像/音频数据不重复存盘，而是引用 `.rsa/timeline/` 资产，并在 `.rsa/archive/media/<sha256>.json` 维护轻量级哈希到视频帧的映射索引（内存 LRU 上限 4096 项）。
 
 上述 Baseware 路径由工作区编排显式指定。独立 `baseware serve` 省略 `--data-dir` 时使用 `$LUDENS_HOME/logs/baseware/<socket-name>/`；显式目录始终优先。共享桌宠的偏好与后台日志在 `$LUDENS_HOME/pet/`，其针对工作区的消费事件仍写入 `<workspace>/logs/consumers/`。
 
 ### 2. 事件通用信封结构
 
-每条 JSONL 事件均包含写入者顶层标识（`runId` 或 `serviceId`、递增 `seq`、墙钟 `at`、单调时钟 `atMs`）以及以下四个核心块（定义见 [rsa/src/harness/events.ts](../../rsa/src/harness/events.ts)）：
+每条 JSONL 事件均包含写入者顶层标识（`runId` 或 `serviceId`、递增 `seq`、墙钟 `at`、单调时钟 `atMs`）以及以下四个核心块（定义见 [rsa/src/core/storage/events.ts](../../../rsa/src/core/storage/events.ts)）：
 
 - **`source`**：产生该语义的职责组件（`shiori`、`rsa`、`workspace`、`baseware`、`benchmark`、`dashboard`、`pet`）及其具体实现与版本。
 - **`origin`**：源进程首次生成该事实的 `{eventId, clockId, seq, at, atMs}`，跨进程转发与落盘保持不变（`atMs` 仅允许在相同 `clockId` 内相减）。
@@ -90,8 +90,8 @@
 
 ## Shiori、压缩与传输
 
-1. **Shiori OTel 遥测**：[shiori.ts](../../rsa/src/harness/omp/shiori.ts) 挂载局部 OpenTelemetry provider（设置 `captureMessageContent = "none"` 避免重复复制正文），在单次 `agentLoop` 结束时写入 `shiori_run_end` 汇总。
-2. **HTTP 与 WebSocket 传输追踪**：[trace.ts](../../rsa/src/harness/omp/trace.ts) 记录完整的请求载荷、传输协议（WS full / WS delta / HTTP SSE）与阶段耗时：
+1. **Shiori OTel 遥测**：[shiori.ts](../../../rsa/src/core/agent-omp/shiori.ts) 挂载局部 OpenTelemetry provider（设置 `captureMessageContent = "none"` 避免重复复制正文），在单次 `agentLoop` 结束时写入 `shiori_run_end` 汇总。
+2. **HTTP 与 WebSocket 传输追踪**：[trace.ts](../../../rsa/src/core/agent-omp/trace.ts) 记录完整的请求载荷、传输协议（WS full / WS delta / HTTP SSE）与阶段耗时：
    - **HTTP 响应头等待**：从请求发出（dispatch）到收到 HTTP 响应头的耗时（流式接收完成由 `http_end` 之后的内容流结束标识）。
    - **WS 首事件等待**：WebSocket 模式下出站 `response.create` 仅为发送完成，Dashboard 统计从出站完成到收到**第一个入站服务端事件**的耗时作为首包响应指标。
 3. **后台预测压缩追踪**：通过 `diagnostics_channel("omp.compaction.speculation")` 为每个后台压缩候选分配唯一 `operationId`，全链路记录 `started → armed / failed / cancelled` 及阈值阶段的 `waiting / applied / invalidated`，其内部发起的 HTTP 请求与重试均挂载在该 `operationId` 与原控制 `epoch` 下。
@@ -142,7 +142,7 @@ rsa/bin/rsa logs events --run /path/to/workspace/logs/run-id
 rsa/bin/rsa logs events --run /path/to/workspace/logs/run-id --diagnostics
 ```
 
-[analyze-run.py](../../rsa/scripts/analyze-run.py) 的核心指标统计口径：
+[analyze-run.py](../../../rsa/scripts/analyze-run.py) 的核心指标统计口径：
 
 - **模型延迟与缓存命中率**：统计已完成的模型请求，P95 采用 nearest-rank；Prompt Cache 命中率按 Token 加权计算，分母为 `input + cacheRead + cacheWrite`（`warm` 口径仅剔除周期首请求，不剔除后续压缩引起的缓存重建）。
 - **有效设备动作频率**：仅计入成功的 `action_end` 以及不带 `actionId`、要求控制权且非只读的成功 `execution`；异步动作提交（`pad.play` 请求本身）、状态查询、`pad.wait` 与感知采样均不重复计入动作次数。

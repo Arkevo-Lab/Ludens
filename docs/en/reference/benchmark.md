@@ -57,7 +57,7 @@ Placeholders and execution semantics supported by run configurations:
 | `{workdir}` | The trial's actual execution directory (a freshly created isolated directory per trial when `workspace: "isolated"`). |
 | `{artifacts}` | The trial's exclusive artifact output directory (`logs/<run-id>/artifacts`). |
 | `{task}` / `{param.<key>}` | The pinned Task directory path for this trial, plus merged values of default `parameters` and CLI `--args`. |
-| `Shiori execution mode` | Plain commands run in Shiori `program` mode with no model started; tasks needing Agent participation (e.g. `ludens/capability-reuse`) mount the full OMP, Controller, and perception loop through the shared [host.ts](../../rsa/src/harness/host.ts). Budgets are timed by the outer Runtime (including startup time), with at most a 2-second grace period to write out facts on expiry. |
+| `Shiori execution mode` | Plain commands run in Shiori `program` mode with no model started; tasks needing Agent participation (e.g. `ludens/capability-reuse`) mount the full OMP, Controller, and perception loop through the shared [host.ts](../../../rsa/src/core/shiori/host.ts). Budgets are timed by the outer Runtime (including startup time), with at most a 2-second grace period to write out facts on expiry. |
 
 ## Tasks and datasets
 
@@ -87,12 +87,12 @@ version = "1"
 description = "Measure a capability on fixed examples."
 ```
 
-- **Naming and content-addressed pinning**: `ludens-native` requires `task.name` in `org/name` namespace form. Shiori computes a deterministic `sha256:<64 hex chars>` content digest per the Harbor published-file selection rules: at the root it selects `task.toml`, `instruction.md`, optional `README.md`, and `trajectory.json`, then scans `environment/`, `tests/`, `solution/`, `steps/` applying `.gitignore` / `.harborignore` exclusion rules (see [task.ts](../../rsa/src/benchmark/task.ts)). Before the run, the selected files are snapshotted and pinned to `<workspace>/.rsa/benchmarks/tasks/<hex part of digest>/`.
+- **Naming and content-addressed pinning**: `ludens-native` requires `task.name` in `org/name` namespace form. Shiori computes a deterministic `sha256:<64 hex chars>` content digest per the Harbor published-file selection rules: at the root it selects `task.toml`, `instruction.md`, optional `README.md`, and `trajectory.json`, then scans `environment/`, `tests/`, `solution/`, `steps/` applying `.gitignore` / `.harborignore` exclusion rules (see [task.ts](../../../rsa/src/bench/task.ts)). Before the run, the selected files are snapshotted and pinned to `<workspace>/.rsa/benchmarks/tasks/<hex part of digest>/`.
 - **Execution-provenance separation**: tested external scripts or model weights are not part of the Task package digest; Shiori automatically records Git commit/dirty state, actual `argv`, budgets, and model identity in `input.json` and `manifest.json`, or the program under test explicitly registers them via `current_trial().subject(...)`.
 
 ### 2. Dataset manifest (`dataset.toml`)
 
-Datasets use the Harbor `1.0` format, pinning the task set by task name and exact `sha256` digest (built-in manifest in [rsa/benchmarks/dataset.toml](../../rsa/benchmarks/dataset.toml)):
+Datasets use the Harbor `1.0` format, pinning the task set by task name and exact `sha256` digest (built-in manifest in [rsa/benchmarks/dataset.toml](../../../rsa/benchmarks/dataset.toml)):
 
 ```toml
 schema_version = "1.0"
@@ -110,7 +110,7 @@ After modifying any built-in task file, the corresponding `digest` in `dataset.t
 
 ## Python helper registration is optional
 
-A Python program under test only needs to read the `RSA_BENCH_ARTIFACTS` environment variable and write measurement files (e.g. `measurements.json`) to complete a trial — importing any framework package is not required. For structured registration of experiment conditions, tested model versions, or automatic collection of in-process `@capability` call statistics, `rsa_tools.current_trial()` is available (full example in [clamp.py](../../rsa/benchmarks/examples/clamp.py)):
+A Python program under test only needs to read the `RSA_BENCH_ARTIFACTS` environment variable and write measurement files (e.g. `measurements.json`) to complete a trial — importing any framework package is not required. For structured registration of experiment conditions, tested model versions, or automatic collection of in-process `@capability` call statistics, `rsa_tools.current_trial()` is available (full example in [clamp.py](../../../rsa/benchmarks/examples/clamp.py)):
 
 ```python
 from rsa_tools import current_trial
@@ -185,7 +185,7 @@ Task filters, the selected run, and the comparison baseline are independent. Cha
 
 ## Built-in tasks and evidence boundaries
 
-The repo ships 8 standard evaluation tasks (defined in `rsa/benchmarks/tasks/` and `rsa/src/benchmark/cases/`):
+The repo ships 8 standard evaluation tasks (defined in `rsa/benchmarks/tasks/` and `rsa/src/bench/cases/`):
 
 | Task name | Mode and object under test | Core metrics and evidence boundary |
 | --- | --- | --- |
@@ -198,4 +198,4 @@ The repo ships 8 standard evaluation tasks (defined in `rsa/benchmarks/tasks/` a
 | `ludens/video-storage` | Offline · dual-stream synthetic images + PyAV encoder | MP4 video segment encode throughput, cold-frame decode accuracy from history, and process RSS memory. |
 | `ludens/index-memory` | Offline · isolated cache dir + Dashboard Builder | Cold-history index-builder subprocess peak memory, query pagination accuracy, and cache release after exit (not a substitute for production Next.js load tests). |
 
-**`ludens/capability-reuse` reuse-evidence rule**: its independent scorer [evaluate.ts](../../rsa/benchmarks/tasks/capability-reuse/tests/evaluate.ts) judges only from recorded runtime event streams and audit facts, never by re-running workspace code. Valid reuse requires the same self-authored Python function to be genuinely called in **two independent order batches** across **different model-inference rounds**, producing environment-accepted successful device terminal states; merely creating files, merely `import`ing without calling, or only doing an AST static inventory after the task ends does not count toward the reuse score.
+**`ludens/capability-reuse` reuse-evidence rule**: its independent scorer [evaluate.ts](../../../rsa/benchmarks/tasks/capability-reuse/tests/evaluate.ts) judges only from recorded runtime event streams and audit facts, never by re-running workspace code. Valid reuse requires the same self-authored Python function to be genuinely called in **two independent order batches** across **different model-inference rounds**, producing environment-accepted successful device terminal states; merely creating files, merely `import`ing without calling, or only doing an AST static inventory after the task ends does not count toward the reuse score.

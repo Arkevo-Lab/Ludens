@@ -5,8 +5,8 @@ import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const sources = ["app", "components", "lib", "messages", "worker", "scripts", "public", "package.json", "package-lock.json",
-  "next.config.ts", "tsconfig.json", "postcss.config.mjs", "../shared", "../rsa/src"];
+const sources = ["app", "shell", "features", "components", "lib", "messages", "worker", "scripts", "public", "package.json", "../package.json", "../bun.lock",
+  "next.config.ts", "tsconfig.json", "postcss.config.mjs", "../protocol", "../rsa/src"];
 
 export async function sourceHash(root = directory) {
   const hash = createHash("sha256");

@@ -2,8 +2,8 @@
   "task": "ludens/capability-reuse",
   "argv": [
     "{bun}",
-    "{rsa}/src/harness/module-program.ts",
-    "{rsa}/src/benchmark/cases/capability-reuse.ts"
+    "{rsa}/src/core/shiori/module-program.ts",
+    "{rsa}/src/bench/cases/capability-reuse.ts"
   ],
   "workspace": "isolated",
   "seconds": 180,

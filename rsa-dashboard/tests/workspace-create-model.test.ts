@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   emptyWorkspaceDraft, normalizedWorkspacePath, switchWorkspaceEnvironment, workspaceCreateInput,
   workspaceDriverCapabilities, workspaceLocation, initialWorkspaceSetup,
-} from "../components/workspace-create-model";
+} from "../features/workspaces/workspace-create-model";
 import type { DiscoveredDriver } from "../lib/drivers";
 
 const root = "/Users/example/workspaces";

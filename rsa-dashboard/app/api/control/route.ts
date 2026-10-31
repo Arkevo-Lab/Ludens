@@ -1,4 +1,4 @@
-import { dashboardWorker } from "@/lib/dashboard-worker";
+import { dashboardWorker } from "@ludens/rsa/core/query/dashboard-worker";
 import { localRequest, errorResponse } from "@/lib/local-request";
 export const runtime = "nodejs";
 export async function POST(request: Request) {

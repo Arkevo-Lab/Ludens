@@ -5,7 +5,7 @@ import { appendFile, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile 
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { JsonArchive } from "../../shared/log-archive";
+import { JsonArchive } from "@ludens/protocol/log-archive";
 import { activityBlocks, refreshActivity, queryActivity } from "../lib/activity";
 import { closeLogIndexes, getLogIndex } from "../lib/log-index";
 import { openRun } from "../lib/data";

@@ -1,6 +1,6 @@
-import { dashboardWorker } from "@/lib/dashboard-worker";
+import { dashboardWorker } from "@ludens/rsa/core/query/dashboard-worker";
 import { localRequest, errorResponse } from "@/lib/local-request";
-import type { DiagnosticQuery } from "@/lib/diagnostic-events";
+import type { DiagnosticQuery } from "@ludens/rsa/core/query/diagnostic-events";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 export async function GET(request: Request) {

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { workspaceSettings, updateWorkspaceRoot, openWorkspace, removeWorkspace, createWorkspace } from "../lib/workspaces";
 import { readGlobalConfig, writeGlobalConfig, registeredWorkspace, registerWorkspace, forgetWorkspace,
-  withPetTargetLock } from "../../shared/ludens";
+  withPetTargetLock } from "@ludens/protocol/ludens";
 import { setPetTarget, petState } from "../lib/pet-state";
 import { registerFixture } from "./fixtures/registry";
 import { DashboardWorker } from "../lib/dashboard-worker";

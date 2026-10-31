@@ -4,7 +4,7 @@ Baseware 是 Ludens 的独立设备驱动服务：负责连接模拟器或桌面
 
 ## 共用约定，保留设备语义
 
-Baseware 以 CUA Driver 的原生工具契约为结构蓝本，在仓库内独立维护协议定义（见 [tool-contract.ts](../../baseware/src/tool-contract.ts) 与 [contracts.ts](../../baseware/src/contracts.ts)）：
+Baseware 以 CUA Driver 的原生工具契约为结构蓝本，在仓库内独立维护协议定义（见 [tool-contract.ts](../../../baseware/src/tool-contract.ts) 与 [contracts.ts](../../../baseware/src/contracts.ts)）：
 
 - **结构统一**：每项能力（`Controller`）均由 `name`、`description`、`inputSchema` 以及可选的 `outputSchema`、`annotations`、`_meta` 描述；调用入参统一为 JSON 对象，原生返回体统一遵循 MCP `CallToolResult`（含 `content`、`structuredContent`、`isError`）。
 - **语义保真**：统一调用信封并不抹平硬件差异。CUA 桌面工具保留上游原名与参数结构；模拟器则声明各自的硬件能力——手柄时间表为 `pad.play`，触屏为 `touch.down / move / up`，双屏设备为 `screen.top.capture` 与 `screen.bottom.capture`。电脑鼠标不会伪装成模拟器触屏，模拟器按键也不会伪装成桌面键盘；所有坐标边界、按键枚举与时间单位均可从实时能力目录中直接查得。
@@ -29,7 +29,7 @@ flowchart LR
 
 ## 调用与结果
 
-能力目录由当前连接的 Driver 动态生成。执行 `baseware export`（或启动 RSA Host）会将实时目录导出为工作区的 `baseware.json` 快照（契约见 [catalog.ts](../../baseware/src/catalog.ts)）。
+能力目录由当前连接的 Driver 动态生成。执行 `baseware export`（或启动 RSA Host）会将实时目录导出为工作区的 `baseware.json` 快照（契约见 [catalog.ts](../../../baseware/src/catalog.ts)）。
 
 ### 1. 三类调用入口
 
@@ -120,7 +120,7 @@ Baseware 支持通过 `--driver <id> --driver-package <spec>` 加载外部驱动
 | `needsGame` | 可选布尔值，标识 Bridge 就绪前是否需要启动后端并加载游戏；可手动准备设备，或由启动器使用 `rsa.json.game` 启动。 |
 | `launchHint` | 设备准备与手动启动提示文本（在 Dashboard 与 CLI 帮助中展示）。 |
 | `launchCommand` / `launchEnv` | 可选后端启动命令数组（不含游戏路径，由启动器追加）与环境变量映射（`RSA_BRIDGE_PORT` 由实际端口覆盖）。 |
-| `load({ port, command, clock })` | 异步工厂函数，连接设备并返回 `{ capabilities: { controllers }, onDisconnect, close }`，可另带 `version`；具体类型见 [registry.ts](../../baseware/src/drivers/registry.ts)。 |
+| `load({ port, command, clock })` | 异步工厂函数，连接设备并返回 `{ capabilities: { controllers }, onDisconnect, close }`，可另带 `version`；具体类型见 [registry.ts](../../../baseware/src/drivers/registry.ts)。 |
 
 模拟器侧 TCP 协议实现规范见 [Driver Bridge 协议](driver-bridge-protocol.md)。
 
@@ -137,4 +137,4 @@ baseware driver discover --package 'github:org/repo#rev'
 
 ## 上游契约与升级
 
-[baseware/contracts/cua-driver/](../../baseware/contracts/cua-driver/) 目录固定保存了上游 CUA Driver 的版本、来源哈希、许可证与工具快照。该快照用于离线审计原子能力与运行 `python3 baseware/scripts/sync-cua-contract.py --check` 回归测试，运行期不会用快照裁剪上游新增的平台工具。由于 MCP SDK 默认 schema 解析会裁剪未知嵌套字段，Baseware 在协议边界校验结构后原样保留原始字段，并通过 MCP 往返测试保障保真度。
+[baseware/contracts/cua-driver/](../../../baseware/contracts/cua-driver/) 目录固定保存了上游 CUA Driver 的版本、来源哈希、许可证与工具快照。该快照用于离线审计原子能力与运行 `python3 baseware/scripts/sync-cua-contract.py --check` 回归测试，运行期不会用快照裁剪上游新增的平台工具。由于 MCP SDK 默认 schema 解析会裁剪未知嵌套字段，Baseware 在协议边界校验结构后原样保留原始字段，并通过 MCP 往返测试保障保真度。

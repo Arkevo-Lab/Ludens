@@ -4,10 +4,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { customToolToDefinition, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { resizeImage } from "@oh-my-pi/pi-coding-agent/utils/image-resize";
-import { createRsaExtension, type Cycle } from "../src/harness/omp/extension.ts";
-import { PerceptionRuntime, perceptionInput, type PerceptionRead, type PerceptionStatus } from "../src/harness/perception.ts";
+import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { PerceptionRuntime, perceptionInput, type PerceptionRead, type PerceptionStatus } from "../src/core/subsystems/perception.ts";
 import { captureResult, createTestRuntime } from "./runtime-fixture.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 
 test("request budgets reset on a new takeover while repeated prompts share the same epoch budget", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-epoch-budget-"));
@@ -18,7 +18,7 @@ test("request budgets reset on a new takeover while repeated prompts share the s
     if (type === "context") requests.push({epoch: trace?.epoch, request: (data as {request: number}).request});
   });
   let cycle: Cycle;
-  runtime.agent = {
+  runtime.attach({ agent: {
     async run(context) {
       cycle = context;
       await new Promise<void>(resolve => context.signal.addEventListener("abort", () => resolve(), {once: true}));
@@ -26,7 +26,7 @@ test("request budgets reset on a new takeover while repeated prompts share the s
     async consolidate() {},
     async abort() {},
     async close() {},
-  };
+  } });
   const extension = createRsaExtension({runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 2,
     cycle: () => cycle,
@@ -85,9 +85,9 @@ class Perception:
     def sample(self):
         return {"text": "active-window:Document", "media": [{"path": "../sample.png", "mediaType": "image/png"}, {"path": "../tree.json", "mediaType": "application/json"}]}
 `);
-    runtime.perception = new PerceptionRuntime({ workspace: work, runDir: join(directory, "run"), record: runtime.record });
-    await runtime.perception.reload();
-  for (let i = 0; i < 200 && runtime.perception.status().state === "loading"; i++) await Bun.sleep(10);
+    runtime.attach({ perception: new PerceptionRuntime({ workspace: work, runDir: join(directory, "run"), record: runtime.record }) });
+    await runtime.perception!.reload();
+  for (let i = 0; i < 200 && runtime.perception!.status().state === "loading"; i++) await Bun.sleep(10);
   }
   const control = new AbortController();
   const extension = createRsaExtension({ runtime, workspace: new Workspace(join(directory, "workspace"), join(directory, "skill-versions")),
@@ -133,9 +133,9 @@ class Perception:
         self.count += 1
         return {"text": "Window " + str(self.count)}
 `);
-  runtime.perception = new PerceptionRuntime({ workspace, runDir: join(directory, "run"), record: runtime.record });
-  await runtime.perception.reload();
-  for (let i = 0; i < 200 && runtime.perception.status().state === "loading"; i++) await Bun.sleep(10);
+  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir: join(directory, "run"), record: runtime.record }) });
+  await runtime.perception!.reload();
+  for (let i = 0; i < 200 && runtime.perception!.status().state === "loading"; i++) await Bun.sleep(10);
   const control = new AbortController();
   const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 3,
@@ -205,7 +205,9 @@ test("automatic delivery stays bounded across fast tools, unavailable sampling a
   await mkdir(join(directory, "skills"));
   const events: { type: string; data: any }[] = [];
   const runtime = createTestRuntime({ controllers: [] }, (type, data) => events.push({ type, data }));
-  const perception = runtime.perception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
+  const localPerception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
+  runtime.attach({ perception: localPerception });
+  const perception = localPerception;
   let status: PerceptionStatus = { state: "ready", generation: "generation" };
   perception.status = () => status;
   let reads = 0, sequence = 1;
@@ -287,7 +289,9 @@ test.each(["injection disabled", "explicit observe", "context replacement"])(
   async (suppression) => {
     const directory = await mkdtemp(join(tmpdir(), "rsa-state-delivery-"));
     const runtime = createTestRuntime({ controllers: [] });
-    const perception = runtime.perception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
+    const localPerception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
+  runtime.attach({ perception: localPerception });
+  const perception = localPerception;
     let status: PerceptionStatus = { state: "error", generation: "generation", codeSHA: "source", error: "original failure" };
     perception.status = () => status;
     perception.observe = async () => ({ queryId: "explicit-query", ok: true, query: {}, hasMore: false, records: [] });
@@ -336,7 +340,9 @@ test.each(["injection disabled", "explicit observe", "context replacement"])(
 test("cancelled perception reads do not consume an undelivered sampler state", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-state-abort-"));
   const runtime = createTestRuntime({ controllers: [] });
-  const perception = runtime.perception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
+  const localPerception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
+  runtime.attach({ perception: localPerception });
+  const perception = localPerception;
   perception.status = () => ({ state: "ready", generation: "generation", codeSHA: "source" });
   let abort = new AbortController();
   perception.observe = async (signal) => { abort.abort(); signal.throwIfAborted(); throw new Error("unreachable"); };

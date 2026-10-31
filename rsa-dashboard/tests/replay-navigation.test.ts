@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseReplayElapsed, replayElapsedInput, replayEvidenceFromSearch, replayEvidencePatch } from "../components/replay-navigation";
+import { parseReplayElapsed, replayElapsedInput, replayEvidenceFromSearch, replayEvidencePatch } from "../features/replay/replay-navigation";
 
 test("four-hour navigation accepts precise elapsed time without confusing wall-clock timestamps", () => {
   assert.equal(parseReplayElapsed("02:37:15"), 9_435_000);

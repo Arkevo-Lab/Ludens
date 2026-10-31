@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { getBundledModels } from "@oh-my-pi/pi-catalog";
-import { EventLog } from "../src/harness/events.ts";
-import { ModelTrace } from "../src/harness/omp/trace.ts";
-import { readArtifact } from "../../shared/log-archive.ts";
+import { EventLog } from "../src/core/storage/events.ts";
+import { ModelTrace } from "../src/core/agent-omp/trace.ts";
+import { readArtifact } from "@ludens/protocol/log-archive";
 
 test("native background deliveries retain launch traces across turns and reused service names", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-native-background-"));

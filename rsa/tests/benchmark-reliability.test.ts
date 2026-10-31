@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { readEvents } from "../src/benchmark/fixtures/evidence.ts";
+import { readEvents } from "../src/bench/fixtures/evidence.ts";
 
 // Each benchmark owns its transport globals, matching the production benchmark runner.
 test.each([
@@ -13,8 +13,8 @@ test.each([
 ] as const)("%s evaluates real production events without network or devices", async (id, requiredEvents) => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-benchmark-test-"));
   const runDir = join(directory, "logs/run"), workspace = join(directory, "workspace");
-  const source = `import { run } from ${JSON.stringify(resolve(import.meta.dir, `../src/benchmark/cases/${id}.ts`))};
-import { EventLog } from ${JSON.stringify(resolve(import.meta.dir, "../src/harness/events.ts"))};
+  const source = `import { run } from ${JSON.stringify(resolve(import.meta.dir, `../src/bench/cases/${id}.ts`))};
+import { EventLog } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/storage/events.ts"))};
 const log = new EventLog(${JSON.stringify(runDir)}, {id: "offline-benchmark", now: () => performance.now()});
 const result = await run({runDir: ${JSON.stringify(runDir)}, workspace: ${JSON.stringify(workspace)}, log, metadata: {}, model: "openai-codex/gpt-6.1-sol", seconds: 30, maxRequests: 10, seed: 7, budget: {deadlineMs: Date.now() + 30_000, signal: new AbortController().signal}});
 await Bun.write(${JSON.stringify(join(directory, "outcome.json"))}, JSON.stringify(result));`;
@@ -58,8 +58,8 @@ await Bun.write(${JSON.stringify(join(directory, "outcome.json"))}, JSON.stringi
 test.each(["control-handoff", "ws-recovery", "background-compaction"])("%s cancellation cleans up before returning", async id => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-benchmark-abort-"));
   const runDir = join(directory, "logs/run"), workspace = join(directory, "workspace");
-  const source = `import { run } from ${JSON.stringify(resolve(import.meta.dir, `../src/benchmark/cases/${id}.ts`))};
-import { EventLog } from ${JSON.stringify(resolve(import.meta.dir, "../src/harness/events.ts"))};
+  const source = `import { run } from ${JSON.stringify(resolve(import.meta.dir, `../src/bench/cases/${id}.ts`))};
+import { EventLog } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/storage/events.ts"))};
 const control = new AbortController(), beforeFetch = globalThis.fetch, beforeSocket = globalThis.WebSocket;
 const log = new EventLog(${JSON.stringify(runDir)}, {id: "cancel-benchmark", now: () => performance.now()});
 const record = log.record;

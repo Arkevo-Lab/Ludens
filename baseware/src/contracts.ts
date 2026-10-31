@@ -12,7 +12,7 @@ export interface Observation {
   mediaType: string;
   /** Explicit caller-owned output or a timeline asset; inline media has no path. */
   path?: string;
-  timeline?: { recordId?: string; sequence?: number; asset: string; video?: import("../../shared/timeline-types").VideoFrameReference };
+  timeline?: { recordId?: string; sequence?: number; asset: string; video?: import("@ludens/protocol/timeline-types").VideoFrameReference };
   /** Transient response bytes; never written into device event logs. */
   data?: string;
   timing: { clock: string; requestedAtMs: number; receivedAtMs: number };

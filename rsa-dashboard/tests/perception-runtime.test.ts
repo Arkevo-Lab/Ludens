@@ -6,8 +6,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { perceptionRuntime, perceptionSettings, updatePerceptionSettings } from "../lib/perception-config";
 import { DashboardWorker } from "../lib/dashboard-worker";
-import { resolveWorkspaceAddress } from "../../rsa/src/harness/workspace-state";
-import { registerWorkspace } from "../../shared/ludens";
+import { resolveWorkspaceAddress } from "@ludens/rsa/core/storage/workspace-state";
+import { registerWorkspace } from "@ludens/protocol/ludens";
 import { registerFixture } from "./fixtures/registry";
 import { GET } from "../app/api/perception-config/runtime/route";
 

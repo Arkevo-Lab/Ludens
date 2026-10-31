@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   ACTIVITY_WINDOW_SIZE, acceptsScope, activityContentView, activityProvenance, activitySearchText, matchesActivity,
   mergeActivity, sameScope, type ActivityBlock,
-} from "../components/activity-feed-model";
+} from "../features/live/activity-feed-model";
 
 const block = (id: string, revision = 1, kind: ActivityBlock["kind"] = "text"): ActivityBlock => ({
   id, kind, title: id, text: id, at: "2026-10-19T00:00:00Z", status: "complete",

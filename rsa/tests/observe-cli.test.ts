@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { TerminalGraphicsDecoder } from "@oh-my-pi/pi-coding-agent/utils/terminal-graphics";
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
-import type { PerceptionRead, PerceptionRecord } from "../src/harness/perception.ts";
+import type { PerceptionRead, PerceptionRecord } from "../src/core/subsystems/perception.ts";
 
 // Offline reproduction of the 2026-10-22 history read: the CLI must
 // deliver the requested old pixels through OMP's real terminal decoder.
@@ -43,7 +43,7 @@ async function fixture() {
   return {
     records, reply, setResponse(value: PerceptionRead) { response = value; },
     async run(args: string[]) {
-      const entry = resolve(import.meta.dir, "../src/harness/cli.ts");
+      const entry = resolve(import.meta.dir, "../src/cli/control-cli.ts");
       const child = Bun.spawn([process.execPath, "-e", `import { cli } from ${JSON.stringify(entry)}; await cli(${JSON.stringify(["observe", ...args])}, ${JSON.stringify(socket)});`],
         { cwd: root, env: { ...process.env, BASEWARE_EPOCH: undefined, BASEWARE_TRACE: undefined }, stdout: "pipe", stderr: "pipe" });
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

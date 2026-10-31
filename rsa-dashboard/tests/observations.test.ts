@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { selectObservations } from "../components/observation-model";
+import { selectObservations } from "../features/live/observation-model";
 import type { Observation } from "../lib/types";
 
 const image = (id: string): Observation => ({

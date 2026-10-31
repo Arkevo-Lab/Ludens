@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capabilityRuntime } from "../lib/capabilities";
 import { DashboardWorker } from "../lib/dashboard-worker";
-import { resolveWorkspaceAddress } from "../../rsa/src/harness/workspace-state";
+import { resolveWorkspaceAddress } from "@ludens/rsa/core/storage/workspace-state";
 import { registerFixture } from "./fixtures/registry";
 import { GET } from "../app/api/capabilities/runtime/route";
 

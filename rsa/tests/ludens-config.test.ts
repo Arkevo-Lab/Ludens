@@ -4,7 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile 
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ensureWorkspaceIdentity, forgetWorkspace, listRegisteredWorkspaces, readGlobalConfig,
-  readWorkspaceIdentity, registerWorkspace, renewWorkspaceIdentity, updateGlobalConfig, writeGlobalConfig } from "../../shared/ludens.ts";
+  readWorkspaceIdentity, registerWorkspace, renewWorkspaceIdentity, updateGlobalConfig, writeGlobalConfig } from "@ludens/protocol/ludens";
 
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-layout-")));
@@ -13,7 +13,7 @@ async function fixture() {
   const run = async (...args: string[]) => {
     const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
     delete env.RSA_WORKSPACE; delete env.RSA_SOCKET; delete env.BASEWARE_SOCKET;
-    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), ...args], { cwd, env, stdout: "pipe", stderr: "pipe" });
+    const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd, env, stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { code, stdout, stderr };
   };
@@ -67,7 +67,7 @@ test("invalid global settings never overwrite the saved configuration", async ()
 
 test("concurrent CLI and process config edits keep independently changed fields", async () => {
   const f = await fixture();
-  const entry = resolve(import.meta.dir, "../../shared/ludens.ts");
+  const entry = import.meta.resolve("@ludens/protocol/ludens");
   const child = Bun.spawn([process.execPath, "--eval", `
     import { updateGlobalConfig } from ${JSON.stringify(entry)};
     await updateGlobalConfig(async config => {
@@ -97,7 +97,7 @@ test("concurrent CLI and process config edits keep independently changed fields"
 
 test("exited lock owners are recovered without competing recoverers deleting a new owner's lock", async () => {
   const f = await fixture();
-  const entry = resolve(import.meta.dir, "../../shared/ludens.ts");
+  const entry = import.meta.resolve("@ludens/protocol/ludens");
   const crashed = Bun.spawn([process.execPath, "--eval", `
     import { updateGlobalConfig } from ${JSON.stringify(entry)};
     await updateGlobalConfig(async config => { console.log("locked"); await Bun.stdin.text(); return config; }, ${JSON.stringify(f.home)});

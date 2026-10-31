@@ -3,9 +3,9 @@ import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Capabilities, Controller } from "@ludens/baseware/contracts";
 import { captureResult, createTestRuntime, createTestDeviceSession, readTestController } from "./runtime-fixture.ts";
-import { Runtime, type DeviceSession } from "../src/harness/runtime.ts";
-import { WorkspaceController } from "../src/harness/controller.ts";
-import { dispatch, listen, send } from "../src/harness/transport.ts";
+import { Runtime, type DeviceSession } from "../src/core/shiori/runtime.ts";
+import { WorkspaceController } from "../src/core/subsystems/controller.ts";
+import { dispatch, listen, send } from "../src/daemon/transport.ts";
 
 function fixture() {
   let angle = 0, owner: string | undefined;
@@ -32,7 +32,7 @@ function fixture() {
   };
   const { core, devices } = createTestDeviceSession(capabilities);
   const runtime = new Runtime(devices, () => {});
-  runtime.controller = new WorkspaceController({ workspace: process.cwd(), devices, record: () => {}, env: {} });
+  runtime.attach({ controller: new WorkspaceController({ workspace: process.cwd(), devices, record: () => {}, env: {} }) });
   return { controller, capabilities, core, devices, runtime, angle: () => angle, owner: () => owner };
 }
 
@@ -78,13 +78,13 @@ test("a nested Runtime retains the enclosing deadline across takeovers and relea
 test("a human takeover message reaches only its own cycle and malformed arguments cannot acquire control", async () => {
   const { runtime, owner } = fixture();
   const messages: (string | undefined)[] = [];
-  runtime.agent = {
+  runtime.attach({ agent: {
     run: async ({ message, signal }) => {
       messages.push(message);
       await new Promise<void>(done => signal.addEventListener("abort", () => done(), { once: true }));
     },
     consolidate: async () => {}, abort: async () => {}, close: async () => {},
-  };
+  } });
   const runId = runtime.status().runId;
   try {
     await expect(dispatch(runtime, { kind: "auto", argv: ["on", "--message"], runId })).rejects.toThrow("Usage");
@@ -139,14 +139,14 @@ test("catalog help is inert and device execution receives literal argument value
 
 test("RSA IPC requires a workspace controller and an agent environment cannot enable control through the CLI", async () => {
   const { runtime, devices } = fixture();
-  runtime.controller = undefined;
+  runtime.attach({ controller: undefined });
   const acquire = spyOn(devices, "acquire");
   const path = `/tmp/rsa-management-${crypto.randomUUID()}.sock`;
   const close = await listen(path, runtime);
   try {
     await expect(send(path, { kind: "sensor", argv: ["any", "command"] })).rejects.toThrow("Unknown command");
     await expect(send(path, { kind: "controller", argv: [] })).rejects.toThrow("Workspace controller is unavailable");
-    const cli = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), "auto", "on"], {
+    const cli = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "auto", "on"], {
       env: { ...process.env, RSA_SOCKET: path, BASEWARE_EPOCH: "agent-cycle" }, stdout: "pipe", stderr: "pipe",
     });
     const errors = new Response(cli.stderr).text();
@@ -210,7 +210,7 @@ test("parallel hosts route to independent devices and reject each other's epochs
 test("off completes device handback without waiting for the model, and prevents overlapping cycles", async () => {
   const { runtime, owner } = fixture();
   const model = Promise.withResolvers<void>();
-  runtime.agent = { run: async () => model.promise, consolidate: async () => {}, abort: async () => {}, close: async () => {} };
+  runtime.attach({ agent: { run: async () => model.promise, consolidate: async () => {}, abort: async () => {}, close: async () => {} } });
   await runtime.start();
   await runtime.stop();
   expect(owner()).toBeUndefined();
@@ -227,11 +227,11 @@ test("consolidation keeps devices manual, rejects overlap, and drains cancellati
   capabilities.controllers[1]!.execute = async () => { deviceCalls++; return captureResult([]); };
   const prompt = Promise.withResolvers<void>(), cleanup = Promise.withResolvers<void>();
   let signal: AbortSignal | undefined;
-  runtime.agent = {
+  runtime.attach({ agent: {
     run: async () => {},
     consolidate: async (context) => { signal = context.signal; await prompt.promise; },
     abort: async () => { prompt.resolve(); await cleanup.promise; }, close: async () => {},
-  };
+  } });
   const request = { kind: "consolidate", argv: [], runId: runtime.status().runId, expectedEpoch: null };
   await expect(dispatch(runtime, { ...request, epoch: "agent" })).rejects.toThrow("human");
   await expect(dispatch(runtime, { ...request, runId: "stale" })).rejects.toThrow("STALE_RUN");
@@ -262,14 +262,14 @@ test("consolidation reports completion, failure, and time budget cancellation se
       if (type === "consolidation_end") done.resolve();
     });
     const prompt = Promise.withResolvers<void>();
-    runtime.agent = {
+    runtime.attach({ agent: {
       run: async () => {},
       consolidate: async () => {
         if (expected === "failed") throw new Error("model error");
         if (expected === "aborted") await prompt.promise;
       },
       abort: async () => { prompt.resolve(); }, close: async () => {},
-    };
+    } });
     await runtime.consolidate(expected === "aborted" ? 0.005 : 60);
     await done.promise;
     expect(events.find(e => e.type === "consolidation_end")?.data.outcome).toBe(expected);

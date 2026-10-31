@@ -3,8 +3,19 @@
   "license": "MIT",
   "private": true,
   "type": "module",
+  "exports": {
+    "./core/query/*": "./src/core/query/*.ts",
+    "./core/shiori/*": "./src/core/shiori/*.ts",
+    "./core/storage/*": "./src/core/storage/*.ts",
+    "./core/subsystems/*": "./src/core/subsystems/*.ts",
+    "./core/agent-omp/*": "./src/core/agent-omp/*.ts",
+    "./daemon/*": "./src/daemon/*.ts",
+    "./bench/*": "./src/bench/*.ts",
+    "./cli/*": "./src/cli/*.ts",
+    "./package.json": "./package.json"
+  },
   "scripts": {
-    "rsa": "bun src/app/main.ts",
+    "rsa": "bun src/cli/main.ts",
     "test": "bun run typescript:test && bun run python:test",
     "typecheck": "bun run typescript:typecheck && bun run python:typecheck",
     "typescript:test": "uv run --project python --frozen bun test",
@@ -18,6 +29,8 @@
     "typescript": "6.0.2"
   },
   "dependencies": {
+    "@ludens/baseware": "file:../baseware",
+    "@ludens/protocol": "file:../protocol",
     "@oh-my-pi/omptype": "18.14.0",
     "@oh-my-pi/pi-agent-core": "18.14.0",
     "@oh-my-pi/pi-ai": "18.14.0",
@@ -27,14 +40,8 @@
     "@oh-my-pi/snapcompact": "18.14.0",
     "@opentelemetry/api": "1.9.1",
     "@opentelemetry/sdk-trace-base": "2.12.0",
-    "@ludens/baseware": "file:../baseware",
     "ajv": "8",
     "ignore": "^7.0.14",
     "smol-toml": "^1.9.1"
-  },
-  "patchedDependencies": {
-    "@oh-my-pi/pi-ai@18.14.0": "patches/@oh-my-pi%2Fpi-ai@18.14.0.patch",
-    "@oh-my-pi/pi-coding-agent@18.14.0": "patches/@oh-my-pi%2Fpi-coding-agent@18.14.0.patch",
-    "@oh-my-pi/pi-agent-core@18.14.0": "patches/@oh-my-pi%2Fpi-agent-core@18.14.0.patch"
   }
 }

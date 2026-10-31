@@ -32,10 +32,9 @@ Drivers only expose raw device capabilities (screen capture, input events, contr
 Requires **macOS** (for `launchd` service management), **Bun 1.4**, **Python 3.12+**, **Node.js 22.13+ / 24+**, **uv**, and configured local **OMP model credentials** (default model: `openai-codex/gpt-6.1-sol`).
 
 ```sh
-(cd baseware && bun install --frozen-lockfile)
-(cd rsa && bun install --frozen-lockfile)
+bun install --frozen-lockfile
 uv sync --project rsa/python --frozen
-(cd rsa-dashboard && npm ci && npm run build)
+(cd rsa-dashboard && npm run build)
 
 export PATH="$PWD/baseware/bin:$PWD/rsa/bin:$PATH"
 ```
@@ -70,6 +69,7 @@ Ludens separates device access, the agent harness, and the workspace code evolve
 | Component | Responsibility |
 | --- | --- |
 | [Baseware](baseware/README.md) | Device drivers, screen/audio observation, control leases, and CLI / API / MCP access. |
+| [Protocol](protocol/README.md) | Zero-dependency contract layer (`@ludens/protocol`): RPC schemas, run-event types, Timeline / Archive formats, and Dashboard DTOs shared by all packages. |
 | [RSA](rsa/README.md) | Agent harness powered by **Shiori** and **OMP 18.14.0**: session lifecycle, resident perception/action, benchmarks, and logging. |
 | [Dashboard](rsa-dashboard/README.md) | Local web console for live runs, timeline replay, trace analysis, and benchmark comparison. |
 | [Ludens Pet](rsa-companion/README.md) | Optional Electron companion shell, native desktop pet, tray controls, and audio. |

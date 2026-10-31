@@ -2,8 +2,8 @@
   "task": "ludens/ws-recovery",
   "argv": [
     "{bun}",
-    "{rsa}/src/harness/module-program.ts",
-    "{rsa}/src/benchmark/cases/ws-recovery.ts"
+    "{rsa}/src/core/shiori/module-program.ts",
+    "{rsa}/src/bench/cases/ws-recovery.ts"
   ],
   "workspace": "isolated",
   "seconds": 180,

@@ -7,8 +7,8 @@ import type { AssistantMessage, Message } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { getBundledModels } from "@oh-my-pi/pi-catalog";
 import * as z from "@oh-my-pi/omptype/zod";
-import { EventLog } from "../src/harness/events.ts";
-import { ModelTrace } from "../src/harness/omp/trace.ts";
+import { EventLog } from "../src/core/storage/events.ts";
+import { ModelTrace } from "../src/core/agent-omp/trace.ts";
 
 test("native Shiori runs preserve tool errors, aborted chats and thrown provider failures within one epoch", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-shiori-native-"));

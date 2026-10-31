@@ -1,0 +1,120 @@
+/** Shared read-only activity protocol for the Dashboard hook and Ludens Pet. */
+export interface EventSource { component: string; implementation?: string; implementationVersion?: string }
+export interface LogBlock {
+  id: string;
+  kind: "thinking" | "text" | "tool" | "system" | "diagnostic";
+  at: string;
+  title: string;
+  text: string;
+  status: "running" | "complete" | "error";
+  /** A completed diagnostic/assessment is not necessarily an execution failure. */
+  outcome?: "raised" | "unmet";
+  tool?: { intent?: string; args?: unknown; result?: unknown };
+  data?: Record<string, unknown>;
+  source?: EventSource;
+  trace?: Record<string, string>;
+  eventId?: string;
+  seq?: number;
+  updatedAt?: string;
+}
+export interface ActivityBlock extends LogBlock { createdRevision: number; revision: number }
+export interface ActivityScope { project: string; runId: string | null; epoch: string | null }
+export interface ActivityProjection {
+  source: EventSource;
+  throughSeq: number;
+  latestEventAt: string | null;
+  latestSourceAt: string | null;
+  generatedAt: string;
+  durationMs: number;
+  blockCount: number;
+  revision: number;
+  generation: string;
+}
+export interface ActivityCurrent {
+  workspace: string | null;
+  runId: string | null;
+  epoch: string | null;
+  activity: "running" | "manual" | "offline" | "idle";
+  phase: string | null;
+  intent: string | null;
+  observationId: string | null;
+  updatedAt: string | null;
+  error: string | null;
+}
+export interface ActivityResponse {
+  scope: ActivityScope;
+  mode: "snapshot" | "delta" | "history" | "block";
+  blocks: ActivityBlock[];
+  cursor?: string | null;
+  before?: string | null;
+  hasMore: boolean;
+  total?: number;
+  projection: ActivityProjection;
+  current: ActivityCurrent;
+}
+export interface ActivityChanges extends ActivityResponse {
+  mode: "snapshot" | "delta";
+  cursor: string | null;
+}
+export interface ActivityChangesPage extends ActivityChanges {
+  /** Call only after the consumer has accepted the blocks into its bounded state or queue. */
+  acknowledge(): void;
+}
+export function sameScope(left: ActivityScope | null, right: ActivityScope | null): boolean {
+  return left?.project === right?.project && left?.runId === right?.runId && left?.epoch === right?.epoch;
+}
+export function acceptsScope(scope: ActivityScope, project: string, run?: string, epoch?: string): boolean {
+  return scope.project === project && (run === undefined || scope.runId === run)
+    && (epoch === undefined || scope.epoch === epoch);
+}
+
+/** HTTP reads wait for a finite archive build; abort only stops this reader. */
+async function readArchiveJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  for (;;) {
+    signal?.throwIfAborted();
+    const response = await fetch(url, { cache: "no-store", signal });
+    const body = await response.json();
+    signal?.throwIfAborted();
+    if (response.status === 202 && body.code === "ARCHIVE_PREPARING") {
+      await new Promise<void>((resolve, reject) => {
+        const aborted = () => { clearTimeout(timer); reject(signal?.reason); };
+        const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, 250);
+        signal?.addEventListener("abort", aborted, { once: true });
+        if (signal?.aborted) aborted();
+      });
+      continue;
+    }
+    if (!response.ok) throw Object.assign(new Error(body.error ?? `读取失败 · HTTP ${response.status}`),
+      { code: body.code, progress: body.progress });
+    return body;
+  }
+}
+
+export async function requestActivity(params: URLSearchParams, signal: AbortSignal, baseUrl?: string): Promise<ActivityResponse> {
+  const path = "/api/activity?" + params;
+  return readArchiveJson<ActivityResponse>(baseUrl ? new URL(path, baseUrl).href : path, signal);
+}
+
+/** Holds only an opaque cursor. The server owns projection, ordering and reset snapshots. */
+export class ActivityChangesClient {
+  private cursor: string | null = null;
+  constructor(private options: { project: string; run?: string; epoch?: string; limit?: number; baseUrl?: string }) {}
+
+  async read(signal: AbortSignal): Promise<ActivityChangesPage> {
+    signal.throwIfAborted();
+    const { project, run, epoch, limit, baseUrl } = this.options;
+    const previousCursor = this.cursor;
+    const params = new URLSearchParams({ project, mode: "changes" });
+    if (run !== undefined) params.set("run", run);
+    if (epoch !== undefined) params.set("epoch", epoch);
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (previousCursor) params.set("cursor", previousCursor);
+    const result = await requestActivity(params, signal, baseUrl);
+    if (!acceptsScope(result.scope, project, run, epoch)) throw new Error("日志返回了其他运行范围");
+    if (result.mode !== "snapshot" && result.mode !== "delta") throw new Error("日志返回了非增量页面");
+    const cursor = result.cursor ?? null;
+    return { ...result, mode: result.mode, cursor, acknowledge: () => {
+      if (!signal.aborted && this.cursor === previousCursor) this.cursor = cursor;
+    } };
+  }
+}

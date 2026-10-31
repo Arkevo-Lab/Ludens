@@ -4,7 +4,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { driverCreationHref } from "../lib/driver-onboarding";
 import { isPlainNavigationClick } from "../lib/dashboard-navigation";
-import { CapabilitiesView } from "../components/capabilities-view";
+import { CapabilitiesView } from "../features/capabilities/capabilities-view";
 
 test("driver handoff URLs preserve the package literally but never transmit trusted metadata", () => {
   for (const spec of ["github:org/repo#rev", "file:/tmp/a driver's folder/$(echo x)&verified=true&driver=cua.ts"]) {

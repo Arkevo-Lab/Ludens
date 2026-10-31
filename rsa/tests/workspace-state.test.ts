@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { mkdtemp, mkdir, readFile, readdir, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { Workspace } from "../src/harness/workspace.ts";
-import { readCurrentSession, initializeWorkspaceState, resolveWorkspaceAddress, resolveWorkspaceState, writeCurrentSession } from "../src/harness/workspace-state.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
+import { readCurrentSession, initializeWorkspaceState, resolveWorkspaceAddress, resolveWorkspaceState, writeCurrentSession } from "../src/core/storage/workspace-state.ts";
 
 test("address and state resolution never initialize a bare or missing directory", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-read-only-"));
@@ -31,7 +31,7 @@ test("CLI queries and direct run cannot create an identity in an uninitialized d
   for (const key of ["RSA_SOCKET", "RSA_WORKSPACE", "BASEWARE_SOCKET", "BASEWARE_EPOCH"]) delete env[key];
   try {
     for (const args of [["status"], ["controller", "list"], ["perception", "status"], ["action", "status"], ["run", "--device-only"]]) {
-      const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/app/main.ts"), "--workspace", workspace, ...args],
+      const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "--workspace", workspace, ...args],
         { cwd: workspace, env, stdout: "pipe", stderr: "pipe" });
       const [code, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect({ code, output }).toEqual({ code: 1, output: "" });

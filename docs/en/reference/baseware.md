@@ -4,7 +4,7 @@ Baseware is Ludens' standalone device-driver service: it connects to an emulator
 
 ## Shared conventions, device semantics preserved
 
-Baseware takes the CUA Driver's native tool contract as the structural model and maintains its protocol definitions independently in the repo (see [tool-contract.ts](../../baseware/src/tool-contract.ts) and [contracts.ts](../../baseware/src/contracts.ts)):
+Baseware takes the CUA Driver's native tool contract as the structural model and maintains its protocol definitions independently in the repo (see [tool-contract.ts](../../../baseware/src/tool-contract.ts) and [contracts.ts](../../../baseware/src/contracts.ts)):
 
 - **Uniform structure**: every capability (`Controller`) is described by `name`, `description`, `inputSchema`, plus optional `outputSchema`, `annotations`, and `_meta`; call arguments are uniformly JSON objects, and native return bodies uniformly follow the MCP `CallToolResult` (with `content`, `structuredContent`, `isError`).
 - **Faithful semantics**: the unified call envelope does not blur hardware differences. CUA desktop tools keep their upstream names and parameter shapes; emulators declare their own hardware capabilities — gamepad timelines as `pad.play`, touchscreens as `touch.down / move / up`, and dual-screen devices as `screen.top.capture` and `screen.bottom.capture`. A PC mouse never masquerades as an emulator touchscreen, and emulator buttons never masquerade as a desktop keyboard; all coordinate bounds, button enumerations, and time units are directly discoverable from the live capability catalog.
@@ -29,7 +29,7 @@ flowchart LR
 
 ## Calls and results
 
-The capability catalog is generated dynamically by the currently connected Driver. Running `baseware export` (or starting the RSA Host) exports the live catalog as the workspace's `baseware.json` snapshot (contract in [catalog.ts](../../baseware/src/catalog.ts)).
+The capability catalog is generated dynamically by the currently connected Driver. Running `baseware export` (or starting the RSA Host) exports the live catalog as the workspace's `baseware.json` snapshot (contract in [catalog.ts](../../../baseware/src/catalog.ts)).
 
 ### 1. Three call entry points
 
@@ -120,7 +120,7 @@ An external driver package must export a `DriverRegistration` (as the `default` 
 | `needsGame` | Optional boolean: whether the backend must be started and a game loaded before Bridge readiness; the device may be prepared manually, or the launcher may start it with `rsa.json.game`. |
 | `launchHint` | Device-preparation and manual-start hint text (shown in the Dashboard and CLI help). |
 | `launchCommand` / `launchEnv` | Optional backend launch command array (excluding the game path, appended by the launcher) and environment-variable map (`RSA_BRIDGE_PORT` is overridden with the actual port). |
-| `load({ port, command, clock })` | Async factory function: connects the device and returns `{ capabilities: { controllers }, onDisconnect, close }`, optionally with `version`; exact types in [registry.ts](../../baseware/src/drivers/registry.ts). |
+| `load({ port, command, clock })` | Async factory function: connects the device and returns `{ capabilities: { controllers }, onDisconnect, close }`, optionally with `version`; exact types in [registry.ts](../../../baseware/src/drivers/registry.ts). |
 
 The emulator-side TCP protocol implementation spec is in [Driver Bridge protocol](driver-bridge-protocol.md).
 
@@ -137,4 +137,4 @@ baseware driver discover --package 'github:org/repo#rev'
 
 ## Upstream contract and upgrades
 
-The [baseware/contracts/cua-driver/](../../baseware/contracts/cua-driver/) directory pins the upstream CUA Driver's version, source hashes, license, and tool snapshot. The snapshot is used for offline auditing of atomic capabilities and for running the `python3 baseware/scripts/sync-cua-contract.py --check` regression test; at runtime the snapshot never trims newly added upstream platform tools. Because the MCP SDK's default schema parsing clips unknown nested fields, Baseware validates structure at the protocol boundary while preserving the original fields verbatim, and guarantees fidelity through MCP round-trip tests.
+The [baseware/contracts/cua-driver/](../../../baseware/contracts/cua-driver/) directory pins the upstream CUA Driver's version, source hashes, license, and tool snapshot. The snapshot is used for offline auditing of atomic capabilities and for running the `python3 baseware/scripts/sync-cua-contract.py --check` regression test; at runtime the snapshot never trims newly added upstream platform tools. Because the MCP SDK's default schema parsing clips unknown nested fields, Baseware validates structure at the protocol boundary while preserving the original fields verbatim, and guarantees fidelity through MCP round-trip tests.

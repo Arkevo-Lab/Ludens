@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createPetFollowResource } from "../components/pet-follow-resource";
+import { createPetFollowResource } from "../features/pet/pet-follow-resource";
 import type { PetState, PetTarget, PetTargetReceipt } from "../lib/pet";
 
 const target = (project: string): PetTarget => ({ project, workspace: "/" + project, revision: project, updatedAt: "2026-10-30T00:00:00Z" });

@@ -6,11 +6,11 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
-import { createRsaExtension } from "../src/harness/omp/extension.ts";
-import { createOmpSession } from "../src/harness/omp/session.ts";
-import { PerceptionRuntime } from "../src/harness/perception.ts";
-import { listen } from "../src/harness/transport.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createOmpSession } from "../src/core/agent-omp/session.ts";
+import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
+import { listen } from "../src/daemon/transport.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("OMP can disable automatic perception while recording video and explicitly reading cold history", async () => {
@@ -33,8 +33,8 @@ class Perception:
 `);
   const events: { type: string; data: any; trace: any }[] = [];
   const runtime = createTestRuntime({ controllers: [] }, (type, data, trace) => events.push({ type, data, trace }));
-  runtime.perception = new PerceptionRuntime({ workspace, runDir, record: runtime.record,
-    env: { RSA_PERCEPTION_HOT_SECONDS: "0.1", RSA_VIDEO_SEGMENT_SECONDS: "1" } });
+  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: runtime.record,
+    env: { RSA_PERCEPTION_HOT_SECONDS: "0.1", RSA_VIDEO_SEGMENT_SECONDS: "1" } }) });
   const socket = `/tmp/rsa-omp-injection-${crypto.randomUUID()}.sock`;
   const closeServer = await listen(socket, runtime);
   const abort = new AbortController();
@@ -56,9 +56,9 @@ class Perception:
     expect(await ready()).toBe(true);
   };
   try {
-    await runtime.perception.reload();
+    await runtime.perception!.reload();
     await until(async () => runtime.perception!.status().state === "ready");
-    const generation = runtime.perception.status().generation;
+    const generation = runtime.perception!.status().generation;
     const { epoch } = await runtime.start();
     const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")), runDir,
       basewareSocket: "/tmp/unused.sock", rsaSocket: socket, binDir: resolve(import.meta.dir, "../bin"),
@@ -116,7 +116,7 @@ class Perception:
         .then(value => JSON.parse(value).status).catch(() => "pending")));
       return states.every(state => state === "ready") && Date.now() - Date.parse(history.at(-1)!.recordedAt) > 150;
     });
-    expect(runtime.perception.status()).toMatchObject({ state: "ready", generation });
+    expect(runtime.perception!.status()).toMatchObject({ state: "ready", generation });
     expect(events.filter(event => event.type === "perception_observe_end")).toHaveLength(readsWhenOff);
     expect(history).toHaveLength(6);
     expect(await Bun.file(join(timeline, history[0].media[0].timeline.asset)).exists()).toBe(true);
@@ -149,7 +149,7 @@ class Perception:
     expect(snapshots[7]!.images).toHaveLength(0); // re-enabling injection speaks at the next prompt, not on the batch
     expect(snapshots[7]!.json.some(value => value.control || value.skills)).toBe(false);
     expect(runtime.perceptionInjectionEnabled()).toBe(true);
-    expect(runtime.perception.status()).toMatchObject({ state: "ready", generation });
+    expect(runtime.perception!.status()).toMatchObject({ state: "ready", generation });
 
     const explicit = session.sessionManager.getEntries().flatMap(entry => entry.type === "message" && entry.message.role === "toolResult"
       && entry.message.toolName === "observe" ? [entry.message] : []);

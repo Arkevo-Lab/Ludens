@@ -6,9 +6,9 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings, type CustomTool }
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import * as z from "@oh-my-pi/omptype/zod";
-import { createRsaExtension, type Cycle } from "../src/harness/omp/extension.ts";
-import { createOmpSession } from "../src/harness/omp/session.ts";
-import { Workspace } from "../src/harness/workspace.ts";
+import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createOmpSession } from "../src/core/agent-omp/session.ts";
+import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("native OMP handback aborts the active tool and skips queued tool side effects", async () => {
@@ -87,7 +87,7 @@ test("native OMP handback aborts the active tool and skips queued tool side effe
       stream.push({ type: "done", reason: "toolUse", message });
       return stream;
     };
-    runtime.agent = {
+    runtime.attach({ agent: {
       async run(context) {
         cycle = context;
         try { await session.prompt("Run both tools in order."); }
@@ -96,7 +96,7 @@ test("native OMP handback aborts the active tool and skips queued tool side effe
       async consolidate() {},
       abort: () => session.abort(),
       async close() { removeGate(); await session.dispose(); },
-    };
+    } });
     await runtime.start();
     await started.promise;
     await runtime.stop("human");

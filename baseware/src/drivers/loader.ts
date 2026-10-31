@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative } from "node:path";
 import { createHash } from "node:crypto";
-import { ludensHome } from "../../../shared/ludens.ts";
+import { ludensHome } from "@ludens/protocol/ludens";
 import { getDriver, type DriverRegistration, type DriverSource } from "./registry.ts";
 import { asRegistration, driverCacheDir, parseDriverSpec, type DriverSpec } from "./spec.ts";
 

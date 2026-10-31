@@ -3,7 +3,7 @@ import { chmod, mkdtemp, mkdir, realpath, rm, stat, utimes, writeFile } from "no
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PythonCapabilities } from "../src/harness/python-capabilities.ts";
+import { PythonCapabilities } from "../src/core/subsystems/python-capabilities.ts";
 import { BasewareCore } from "@ludens/baseware/core";
 import { BasewareClient } from "@ludens/baseware/client";
 import { listen } from "@ludens/baseware/server";

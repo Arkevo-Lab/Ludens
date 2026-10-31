@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
-import { childTrace, EventLog } from "../src/harness/events.ts";
+import { childTrace, EventLog } from "../src/core/storage/events.ts";
 
 test("run events have ordered identities and immutable, lossless payload references", async () => {
   const directory = await mkdtemp(join(tmpdir(), "rsa-events-"));
