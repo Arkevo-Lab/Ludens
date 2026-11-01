@@ -91,9 +91,8 @@ def main():
                 if remaining > 0.002:
                     time.sleep(remaining - 0.001)
     finally:
-        loop_done = time.monotonic()
         history.close()
-    encode_seconds = loop_done - started
+    encode_seconds = time.monotonic() - started
     encoded = sum(path.stat().st_size for path in arguments.output.rglob("*.mp4"))
     frames, maximum_error = 0, 0
     cold_started = time.monotonic()

@@ -1,5 +1,5 @@
 /** Rebuild disposable directories and query real archives, without touching sources.
- * npm run perf                                                            (synthetic run, asserts budgets)
+ * npm run perf                                      (synthetic run, asserts budgets + call/operation coverage)
  * node --expose-gc --import tsx perf/index-memory.ts \
  *   --run /absolute/run --cache-root /absolute/isolated --output /absolute/report.json [--epoch UUID]
  */
@@ -17,20 +17,40 @@ const option = (name: string) => { const at = args.indexOf(name); return at < 0 
 
 /** Perf budgets for the synthetic `npm run perf` mode; violations exit non-zero. */
 const budgets = { peakRssMiB: 2048, peakHeapUsedMiB: 1024, retainedAfterReleaseMiB: 256, coldBuildMs: 180_000, pagedQueryMs: 2_000 };
+/** Synthetic workload: paired model/tool identities with capability/shiori spans per call. */
+const SYNTHETIC_EPOCH = "cycle", SYNTHETIC_CALLS = 3000, SYNTHETIC_STEP_MS = 50;
+const SYNTHETIC_BASE_MS = Date.UTC(2026, 9, 24);
 const generated = !option("--run") && !process.env.LUDENS_BENCH_ARTIFACTS ? realpathSync(mkdtempSync(join(tmpdir(), "ludens-perf-index-"))) : undefined;
 if (generated) {
   const directory = join(generated, "logs", "synthetic-run");
   mkdirSync(directory, { recursive: true });
-  const eventCount = 24_000, at = (i: number) => new Date(Date.UTC(2026, 9, 24) + i * 1000).toISOString();
   const rows: string[] = [];
-  const kinds = ["control", "model_start", "model_end", "tool_start", "tool_end", "observation"] as const;
-  for (let i = 0; i < eventCount; i++) {
-    const type = kinds[i % kinds.length]!;
-    const payload = { text: `synthetic frame ${i} ` + "x".repeat(180) };
-    rows.push(JSON.stringify({ schemaVersion: 2, runId: "synthetic-run", seq: i + 1, at: at(i), atMs: i,
-      source: { component: "ludens" }, origin: { eventId: `synthetic-${i}`, clockId: "synthetic", seq: i + 1, at: at(i), atMs: i },
-      type, trace: { epoch: "cycle", traceId: "trace", spanId: `span-${i}` }, data: payload }));
+  const stamp = (i: number) => { const atMs = SYNTHETIC_BASE_MS + i * SYNTHETIC_STEP_MS; return { at: new Date(atMs).toISOString(), atMs }; };
+  let i = 0;
+  const push = (type: string, trace: Record<string, string>, data: Record<string, any>) => {
+    const { at, atMs } = stamp(i);
+    rows.push(JSON.stringify({ schemaVersion: 2, runId: "synthetic-run", seq: i + 1, at, atMs,
+      source: { component: "ludens" }, origin: { eventId: `synthetic-${i}`, clockId: "synthetic", seq: i + 1, at, atMs },
+      type, trace, data: { ...data, note: `synthetic frame ${i} ` + "x".repeat(160) } }));
+    i++;
+  };
+  // One auto period brackets the whole run; every call below carries paired identities on one shared span,
+  // with the native shiori span opening before ModelTrace assigns the modelCallId (late-relation path).
+  push("control", { epoch: SYNTHETIC_EPOCH }, { mode: "auto", epoch: SYNTHETIC_EPOCH });
+  for (let c = 0; c < SYNTHETIC_CALLS; c++) {
+    const traceId = `trace-${c}`, spanId = `span-${c}`, modelCallId = `model-${c}`, toolCallId = `tool-${c}`;
+    const span = { epoch: SYNTHETIC_EPOCH, traceId, spanId };
+    push("shiori_span_start", { ...span }, { operation: "invoke_agent", name: `agent-${c}` });
+    push("model_start", { ...span, modelCallId }, {});
+    push("capability_start", { ...span, modelCallId }, { action: "call", id: "python/macros.py:step" });
+    push("tool_start", { ...span, modelCallId, toolCallId },
+      { toolName: "read", args: { path: `skills/demo-${c}/SKILL.md` }, intent: `Review demo ${c}` });
+    push("tool_end", { ...span, modelCallId, toolCallId }, { toolName: "read", isError: false });
+    push("capability_end", { ...span, modelCallId }, { outcome: "success", durationMs: 12 });
+    push("model_end", { ...span, modelCallId }, { durationMs: 120, stopReason: "stop", usage: { input: 100, cacheRead: 10 } });
+    push("shiori_span_end", { ...span, modelCallId }, { outcome: "success", durationMs: 200 });
   }
+  push("control", { epoch: SYNTHETIC_EPOCH }, { mode: "manual" });
   writeFileSync(join(directory, "events.jsonl"), rows.join("\n") + "\n");
   writeFileSync(join(directory, "manifest.json"), JSON.stringify({ kind: "benchmark", runId: "synthetic-run",
     workspace: generated, benchmark: { name: "ludens/index-memory", digest: `sha256:${"0".repeat(64)}` } }) + "\n");
@@ -126,7 +146,21 @@ async function main() {
       const page = await readRunProjection(index, epoch, {}, epoch === null);
       report.calls = page.paging.totalCalls; report.summary = page.summary;
       report.history = { total: history.total, firstVisible: history.blocks[0].id, lastVisible: history.blocks.at(-1)?.id };
-      if (page.calls[0]) {
+      if (generated) {
+        // The synthetic workload must exercise the real projections: every call paired,
+        // every call completed, and every call covered by a model operation window.
+        assert.equal(page.paging.totalCalls, SYNTHETIC_CALLS, "synthetic model calls missing");
+        assert.equal(page.summary.completed, SYNTHETIC_CALLS, "synthetic model completions missing");
+        assert.equal(page.telemetry.capabilities.stats.started, SYNTHETIC_CALLS, "synthetic capability spans missing");
+        assert.equal(page.telemetry.shiori.stats.started, SYNTHETIC_CALLS, "synthetic shiori spans missing");
+        const at = Date.parse(page.calls.at(-1)!.at);
+        const operations = await queryOperationRefs(index, { epoch: SYNTHETIC_EPOCH,
+          start: at, end: at + 5 * SYNTHETIC_STEP_MS, limit: 20 });
+        assert.deepEqual(operations.map(({ track, status }) => ({ track, status })), [
+          { track: "model", status: "completed" }, { track: "tool", status: "completed" },
+        ], "synthetic model/tool operation pairing missing");
+        report.overlappingOperations = operations.length;
+      } else if (page.calls[0]) {
         const at = Date.parse(page.calls[0].at);
         report.overlappingOperations = (await queryOperationRefs(index, { epoch, start: at, end: at + 10_000, limit: 20 })).length;
       }

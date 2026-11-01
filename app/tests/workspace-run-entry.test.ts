@@ -44,7 +44,7 @@ test("empty-state actions have clean destinations and explicit benchmark context
   assert.deepEqual(params(links.workspaces), { view: "workspaces" });
   assert.deepEqual(params(links.capabilities!), { view: "caps", project: "my workspace" });
   assert.deepEqual(params(links.quickstart), { view: "docs", doc: "tutorials/quickstart", docLang: "zh" });
-  assert.deepEqual(params(links.benchmark!), { view: "benchmark", project: "my workspace", run: "benchmark/one" });
+  assert.deepEqual(params(links.benchmark!), { view: "perf", project: "my workspace", run: "benchmark/one" });
   assert.equal(workspaceRunLinks(undefined, "en").capabilities, undefined);
   assert.equal(workspaceRunLinks(undefined, "en").benchmark, undefined);
 });

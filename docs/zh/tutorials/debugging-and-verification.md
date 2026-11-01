@@ -107,7 +107,7 @@ python3 baseware/scripts/sync-cua-contract.py --check
 (cd app && npm run desktop:typecheck && npm run desktop:test)
 ```
 
-`index-memory` 性能基线已迁移到 [perf/index-memory.ts](../../../app/perf/index-memory.ts)。`npm run perf` 会生成一个数 MB 的合成运行，在 `--max-old-space-size=1024 --expose-gc` 下驱动冷索引构建，校验 RSS / 堆内存 / 释放后留存 / 冷构建 / 分页查询预算，任一超限即以非零码退出：
+`index-memory` 性能基线已迁移到 [perf/index-memory.ts](../../../app/perf/index-memory.ts)。`npm run perf` 会生成一个数 MB 的合成运行，在 `--max-old-space-size=1024 --expose-gc` 下驱动冷索引构建，校验 RSS / 堆内存 / 释放后留存 / 冷构建 / 分页查询预算，任一超限即以非零码退出。合成负载为每次 `model_start`/`model_end` 与 `tool_start`/`tool_end` 配对同一 span 上的有效 `modelCallId`/`toolCallId`（另含 capability 与 shiori span），测量同时断言精确的预期模型调用与操作覆盖——空投影会失败，不会悄悄通过：
 
 ```sh
 cd app && npm run perf
@@ -122,6 +122,7 @@ node --expose-gc --max-old-space-size=1024 --import tsx perf/index-memory.ts \
   --cache-root /absolute/path/to/temporary-index \
   --output /absolute/path/to/report.json --epoch epoch-id
 ```
+核心 `video-storage` 基线经 `history.close` 时的队列排空与分段落盘计量录制吞吐，不含之后的冷解码；预算不变，与硬件或负载相关的未达标必须如实报告，不得压制。
 
 ### 2. 桌宠交互冒烟与姿态规则
 

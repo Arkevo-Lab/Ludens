@@ -16,7 +16,7 @@ import { initializeWorkspaceState } from "../core/storage/workspace-state.ts";
 import type { RecordEvent } from "../core/storage/events.ts";
 import type { BenchmarkContext } from "./types.ts";
 import { ReuseEnvironment } from "./reuse-environment.ts";
-import perceptionTemplate from "../../../templates/perception.py" with { type: "text" };
+import perceptionTemplate from "../../templates/perception.py" with { type: "text" };
 
 async function workspaceBaseline(workspace: string) {
   const files: string[] = [];

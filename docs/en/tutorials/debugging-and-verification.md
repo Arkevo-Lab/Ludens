@@ -107,7 +107,7 @@ The `app` package also covers the desktop companion; run its checks too:
 (cd app && npm run desktop:typecheck && npm run desktop:test)
 ```
 
-The `index-memory` perf baseline moved to [perf/index-memory.ts](../../../app/perf/index-memory.ts). `npm run perf` generates a synthetic multi-megabyte run, drives the cold index builder under `--max-old-space-size=1024 --expose-gc`, asserts the RSS / heap / retained-after-release / cold-build / paged-query budgets, and exits non-zero on violation:
+The `index-memory` perf baseline moved to [perf/index-memory.ts](../../../app/perf/index-memory.ts). `npm run perf` generates a synthetic multi-megabyte run, drives the cold index builder under `--max-old-space-size=1024 --expose-gc`, asserts the RSS / heap / retained-after-release / cold-build / paged-query budgets, and exits non-zero on violation. The synthetic workload pairs every `model_start`/`model_end` and `tool_start`/`tool_end` on one shared span with valid `modelCallId`/`toolCallId` identities (plus capability and shiori spans), so the measurement also asserts the exact expected model-call and operation coverage — an empty projection fails instead of passing silently:
 
 ```sh
 cd app && npm run perf
@@ -122,6 +122,7 @@ node --expose-gc --max-old-space-size=1024 --import tsx perf/index-memory.ts \
   --cache-root /absolute/path/to/temporary-index \
   --output /absolute/path/to/report.json --epoch epoch-id
 ```
+The core `video-storage` baseline measures recording throughput through the queue drain and segment finalization on `history.close`, excluding later cold decode; budgets are unchanged, and hardware- or load-dependent shortfalls must be reported, not suppressed.
 
 ### 2. Pet Interaction Smoke and Pose Rules
 
