@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { docGroups, readDoc, renderDocument, renderMarkdown } from "../lib/docs";
 import { dashboardWorker } from "../lib/dashboard-worker";
 import { GET } from "../app/api/docs/route";
 
+const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const repositoryDocs = fileURLToPath(new URL("../../docs/", import.meta.url));
 
 test("relative document links retain their group, fragment and a keyboard-accessible URL", () => {
@@ -129,6 +131,36 @@ test("current repository documents and their internal section links all resolve"
     assert.ok(links > 20);
     assert.ok(anchoredLinks >= 3);
   }
+});
+
+test("all relative Markdown file links across repository documentation resolve on disk", () => {
+  const files = [
+    ...globSync("docs/en/**/*.md", { cwd: repositoryRoot }),
+    ...globSync("docs/zh/**/*.md", { cwd: repositoryRoot }),
+    "README.md",
+    "protocol/README.md",
+    "baseware/README.md",
+    "core/README.md",
+    "app/README.md",
+    "app/AGENTS.md",
+  ];
+  const linkRe = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  const dead: string[] = [];
+  let checked = 0;
+  for (const relativeFile of files) {
+    const file = join(repositoryRoot, relativeFile);
+    const text = readFileSync(file, "utf8");
+    for (const match of text.matchAll(linkRe)) {
+      const raw = match[1] ?? match[2];
+      if (!raw || /^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("#") || raw.startsWith("mailto:")) continue;
+      const target = raw.split("#")[0];
+      if (!target) continue;
+      checked++;
+      if (!existsSync(resolve(dirname(file), target))) dead.push(`${relativeFile} -> ${raw}`);
+    }
+  }
+  assert.ok(checked > 200);
+  assert.deepEqual(dead, []);
 });
 
 test("localized catalogs use translated titles and disclose missing languages symmetrically", async () => {
