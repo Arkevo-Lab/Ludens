@@ -9,9 +9,10 @@
 | **系统拓扑与控制循环** | 五组件边界、Shiori 执行内核、OMP 会话装配、控制权 `epoch` 与跨进程存储归属 | [架构与边界](architecture.md) | `core/src/core/shiori/runtime.ts` · `core/src/core/agent-omp/session.ts` |
 | **设备服务与能力目录** | CUA 原生工具结构、`ExecutionResult` 信封、`requiresControl` 仲裁、外部驱动包发现与加载 | [Baseware 设计理念与能力契约](baseware.md) | `baseware/src/contracts.ts` · `baseware/src/catalog.ts` |
 | **模拟器底层通信** | TCP 单客户端行协议、`HELLO / OWN / APPLY / CAPTURE / TOUCH` 指令集与错误码 | [Driver Bridge 协议](driver-bridge-protocol.md) | `baseware/src/drivers/bridge.ts` · 各模拟器卫星仓的 Provider |
+| **子系统性能基线** | `test` / `perf` / `bench` 分层边界，以及 `control-handoff`、`perception-lifecycle`、`video-storage`（core）与 `index-memory`（app）预算 | [控制台调试与验证](../tutorials/debugging-and-verification.md) | `core/src/perf/` · `app/perf/` |
 | **可观测性与控制台消费** | `normal / full` 记录模式、`.ludens/timeline/` 与 `.ludens/archive/` 存储、Trace 配对、Dashboard 冷热索引与回放 | [日志与调用链](logging.md) | `core/src/core/storage/events.ts` · `protocol/src/log-archive.ts` · `core/src/core/query/` |
 | **控制台界面** | shadcn/ui 组件、Tailwind 主题与样式层级、表单交互约定 | [Dashboard UI](dashboard-ui.md) | `app/components/ui/` · `app/app/globals.css` |
-| **评测与独立评分** | Harbor 1.4 Native Profile、`task.toml / dataset.toml`、`current_trial()`、`reward.json` 与 8 个内置任务 | [Benchmark](benchmark.md) | `core/src/bench/` · `core/benchmarks/` |
+| **评测与独立评分** | Harbor 1.4 Native Profile、`task.toml / dataset.toml`、`current_trial()`、`reward.json` 与内置任务 `ludens/capability-reuse` | [Benchmark](benchmark.md) | `core/src/bench/` · `core/benchmarks/` |
 
 ## 阅读建议
 

@@ -2,6 +2,16 @@
 
 The Ludens evaluation system follows the [Harbor Framework](https://github.com/harbor-framework/harbor/tree/f3a5a923f6d722472c9e797af836ae4425fb215f) (pinned reference `f3a5a9`, Schema `1.4`) Task, Verifier, Reward, and Dataset file conventions, and implements a `ludens-native` Profile for the local experiment environment.
 
+Evaluation is one of three orthogonal quality tiers; do not mix their semantics:
+
+| Tier | Location | Question answered | Command |
+| --- | --- | --- | --- |
+| `test` | `core/tests/` (`ws-recovery.test.ts`, `background-compaction.test.ts`, …) | Did a framework behavior or fault regression break? (`Pass` / `Fail`) | `cd core && bun run test` |
+| `perf` | `core/src/perf/` and `app/perf/` | Do subsystem latency, throughput, and memory budgets still hold? | `cd core && bun run perf` / `cd app && npm run perf` |
+| `bench` | `core/benchmarks/`, `core/src/bench/`, `app/features/benchmark/` | Harbor Agent/Task evaluation with independent scoring | `ludens bench ...` |
+
+This document covers `bench` only; subsystem performance baselines live in [Console debugging & verification](../tutorials/debugging-and-verification.md).
+
 The core architectural principle is **a single execution kernel with decoupled judging**: every evaluation task is uniformly scheduled, budgeted, and cancelled/cleaned up by **Shiori**; the program under test only produces objective facts (Artifacts) at runtime, and an independent `tests/test.sh` Verifier computes the numeric Reward from the already-persisted artifacts. Regrading (`verify`) only runs the Verifier and never re-runs the program or model under test.
 
 ## Entry points and run ownership
@@ -13,14 +23,14 @@ Run `ludens bench --help` under the target workspace to see all subcommands:
 ```sh
 # Discovery, help, and static contract checks
 ludens bench list
-ludens bench help ludens/ws-recovery
+ludens bench help ludens/capability-reuse
 ludens bench schema [task|reward|dataset]
 ludens bench validate task /path/to/task
 ludens bench validate reward /path/to/verifier-or-reward.json
 ludens bench validate dataset /path/to/dataset.toml
 
 # Run evaluations and independent regrades
-ludens bench run ludens/ws-recovery [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
+ludens bench run ludens/capability-reuse [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
 ludens bench verify <run-id> --reason "Regrade fixed measurements"
 ludens bench verify <run-id> --task /path/to/updated-task --reason "Updated grading criteria"
 
@@ -185,17 +195,12 @@ Task filters, the selected run, and the comparison baseline are independent. Cha
 
 ## Built-in tasks and evidence boundaries
 
-The repo ships 8 standard evaluation tasks (defined in `core/benchmarks/tasks/` and `core/src/bench/cases/`):
+The repo ships a single built-in Harbor evaluation task (defined in `core/benchmarks/tasks/`, case implementation in `core/src/bench/capability-reuse.ts`):
 
 | Task name | Mode and object under test | Core metrics and evidence boundary |
 | --- | --- | --- |
-| `ludens/perception-lifecycle` | Offline · real Python + synthetic media | Resident sampling, `reload` hot update, history queries, fault recovery, and archive immutability (no real emulator or GPU model). |
-| `ludens/control-handoff` | Offline · real Runtime / Baseware + mock driver | Human-takeover interrupt latency, input-zeroing release, and strict rejection of stale `epoch`. |
-| `ludens/ws-recovery` | Offline · real Codex Provider + mock transport and virtual clock | Connection-limit expiry, `1012` disconnect backoff, SSE recovery, full-history WS reconnect, and no replay of submitted tools. |
-| `ludens/background-compaction` | Offline · native OMP Maintenance + controlled stream | Background candidate summaries retained and reused after context growth, lossless tail-message replay, Span ownership, and cancel interruption (pinned 256k threshold fixture). |
 | `ludens/capability-reuse` | **Online model** · shared Host assembly + isolated synthetic workbench | Agent autonomously writes functions from empty-skills/empty-perception initial state, with genuinely effective reuse across order batches and across model rounds. |
-| `ludens/clamp` | Offline · plain Python program | Output and per-call latency of an already-loaded Python `@capability` function over sample computations. |
-| `ludens/video-storage` | Offline · dual-stream synthetic images + PyAV encoder | MP4 video segment encode throughput, cold-frame decode accuracy from history, and process RSS memory. |
-| `ludens/index-memory` | Offline · isolated cache dir + Dashboard Builder | Cold-history index-builder subprocess peak memory, query pagination accuracy, and cache release after exit (not a substitute for production Next.js load tests). |
+
+The former offline framework subsystem tasks now live in the other two tiers: `ws-recovery` and `background-compaction` as regression tests in `core/tests/`, `perception-lifecycle`, `control-handoff` and `video-storage` as perf baselines in `core/src/perf/` (`bun run perf`), and `index-memory` as the app-side perf baseline in `app/perf/` (`npm run perf`).
 
 **`ludens/capability-reuse` reuse-evidence rule**: its independent scorer [evaluate.ts](../../../core/benchmarks/tasks/capability-reuse/tests/evaluate.ts) judges only from recorded runtime event streams and audit facts, never by re-running workspace code. Valid reuse requires the same self-authored Python function to be genuinely called in **two independent order batches** across **different model-inference rounds**, producing environment-accepted successful device terminal states; merely creating files, merely `import`ing without calling, or only doing an AST static inventory after the task ends does not count toward the reuse score.

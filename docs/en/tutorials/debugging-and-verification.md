@@ -18,8 +18,8 @@ Catalog scripts run in their component directory. Bun packages use `bun run <com
 | Component directory | Package-level commands | Special commands and entries |
 | --- | --- | --- |
 | `baseware` | `typecheck`, `test` | `baseware`: run the device-service CLI. |
-| `core` | `typecheck`: check TypeScript and Python; `test`: run the default test suites of both languages. | `typescript:typecheck`, `python:typecheck`: check one language only; `typescript:test`, `python:test`: run one language's tests only; `omp:test:transport`: run the OMP WebSocket transport-recovery tests; `ludens`: run the Host CLI. |
-| `app` | `dev`, `build`, `start`, `test`, `typecheck` | `build:check`: verify the existing production build matches the current source fingerprint. |
+| `core` | `typecheck`: check TypeScript and Python; `test`: run the default test suites of both languages. | `typescript:typecheck`, `python:typecheck`: check one language only; `typescript:test`, `python:test`: run one language's tests only; `omp:test:transport`: run the OMP WebSocket transport-recovery tests; `perf`: run the subsystem performance baselines (`control-handoff`, `perception-lifecycle`, `video-storage`); `ludens`: run the Host CLI. |
+| `app` | `dev`, `build`, `start`, `test`, `typecheck` | `build:check`: verify the existing production build matches the current source fingerprint; `perf`: run the `index-memory` baseline on a synthetic run (cold-build and query memory/latency budgets). |
 | `app` (desktop) | `desktop:build`: produce Electron artifacts with esbuild; `desktop:start`, `desktop:test`, `desktop:typecheck` | `pet:preview`: interactive pet preview; `pet:smoke`: interactive pet smoke test. Both run `desktop:build` first. |
 
 ## Standalone Components and Consoles
@@ -96,7 +96,7 @@ The following core component checks are fully offline — no external model or r
 ```sh
 (cd baseware && bun run typecheck && bun test)
 python3 baseware/scripts/sync-cua-contract.py --check
-(cd ludens && bun run typecheck && bun run test)
+(cd core && bun run typecheck && bun run test)
 (cd app && npm test && npm run typecheck && npm run build)
 ```
 
@@ -106,11 +106,17 @@ The `app` package also covers the desktop companion; run its checks too:
 (cd app && npm run desktop:typecheck && npm run desktop:test)
 ```
 
-To stress Dashboard cold-index builds and memory reclamation against real large run logs in isolation, run the offline check script with an isolated cache directory:
+The `index-memory` perf baseline moved to [perf/index-memory.ts](../../../app/perf/index-memory.ts). `npm run perf` generates a synthetic multi-megabyte run, drives the cold index builder under `--max-old-space-size=1024 --expose-gc`, asserts the RSS / heap / retained-after-release / cold-build / paged-query budgets, and exits non-zero on violation:
+
+```sh
+cd app && npm run perf
+```
+
+To inspect a real large run instead, keep `--run` (and optionally `--out`) pointing at it:
 
 ```sh
 cd app
-node --expose-gc --max-old-space-size=1024 --import tsx scripts/check-index-memory.ts \
+node --expose-gc --max-old-space-size=1024 --import tsx perf/index-memory.ts \
   --run /absolute/path/to/workspace/logs/run-id \
   --cache-root /absolute/path/to/temporary-index \
   --output /absolute/path/to/report.json --epoch epoch-id

@@ -18,8 +18,8 @@
 | 组件目录 | 包级命令 | 专用命令与入口 |
 | --- | --- | --- |
 | `baseware` | `typecheck`、`test` | `baseware`：运行设备服务 CLI。 |
-| `core` | `typecheck`：检查 TypeScript 与 Python；`test`：运行两种语言的默认测试集。 | `typescript:typecheck`、`python:typecheck`：单独检查对应语言；`typescript:test`、`python:test`：单独运行对应语言测试；`omp:test:transport`：运行 OMP WebSocket 传输恢复测试；`ludens`：运行 Host CLI。 |
-| `app` | `dev`、`build`、`start`、`test`、`typecheck` | `build:check`：校验现有生产构建与当前源码指纹是否一致。 |
+| `core` | `typecheck`：检查 TypeScript 与 Python；`test`：运行两种语言的默认测试集。 | `typescript:typecheck`、`python:typecheck`：单独检查对应语言；`typescript:test`、`python:test`：单独运行对应语言测试；`omp:test:transport`：运行 OMP WebSocket 传输恢复测试；`perf`：运行子系统性能基线（`control-handoff`、`perception-lifecycle`、`video-storage`）；`ludens`：运行 Host CLI。 |
+| `app` | `dev`、`build`、`start`、`test`、`typecheck` | `build:check`：校验现有生产构建与当前源码指纹是否一致；`perf`：在合成运行上执行 `index-memory` 基线（冷构建与查询的内存/延迟预算）。 |
 | `app` | `build`：使用 esbuild 生成 Electron 产物；`start`、`test`、`typecheck` | `pet:preview`：桌宠交互预览；`pet:smoke`：桌宠交互冒烟测试。两者都会先执行 `build`。 |
 
 ## 独立组件与控制台
@@ -96,7 +96,7 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 ```sh
 (cd baseware && bun run typecheck && bun test)
 python3 baseware/scripts/sync-cua-contract.py --check
-(cd ludens && bun run typecheck && bun run test)
+(cd core && bun run typecheck && bun run test)
 (cd app && npm test && npm run typecheck && npm run build)
 ```
 
@@ -106,11 +106,17 @@ python3 baseware/scripts/sync-cua-contract.py --check
 (cd app && npm run desktop:typecheck && npm run desktop:test)
 ```
 
-需要针对真实大型运行日志单独压测 Dashboard 冷索引构建与内存回收时，可使用隔离缓存目录运行离线检查脚本：
+`index-memory` 性能基线已迁移到 [perf/index-memory.ts](../../../app/perf/index-memory.ts)。`npm run perf` 会生成一个数 MB 的合成运行，在 `--max-old-space-size=1024 --expose-gc` 下驱动冷索引构建，校验 RSS / 堆内存 / 释放后留存 / 冷构建 / 分页查询预算，任一超限即以非零码退出：
+
+```sh
+cd app && npm run perf
+```
+
+如需检查真实大型运行日志，改用 `--run`（可另加 `--out`）指向该运行：
 
 ```sh
 cd app
-node --expose-gc --max-old-space-size=1024 --import tsx scripts/check-index-memory.ts \
+node --expose-gc --max-old-space-size=1024 --import tsx perf/index-memory.ts \
   --run /absolute/path/to/workspace/logs/run-id \
   --cache-root /absolute/path/to/temporary-index \
   --output /absolute/path/to/report.json --epoch epoch-id

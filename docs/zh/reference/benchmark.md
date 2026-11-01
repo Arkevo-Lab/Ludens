@@ -2,6 +2,16 @@
 
 Ludens 评测系统遵循 [Harbor Framework](https://github.com/harbor-framework/harbor/tree/f3a5a923f6d722472c9e797af836ae4425fb215f)（固定参考版本 `f3a5a9`，Schema `1.4`）的 Task、Verifier、Reward 与 Dataset 文件约定，并针对本机实验环境实现 `ludens-native` Profile。
 
+评测是三个正交质量分层之一，不要混用语义：
+
+| 分层 | 位置 | 回答的问题 | 命令 |
+| --- | --- | --- | --- |
+| `test` | `core/tests/`（`ws-recovery.test.ts`、`background-compaction.test.ts` 等） | 框架行为或故障回归是否被破坏？（`Pass` / `Fail`） | `cd core && bun run test` |
+| `perf` | `core/src/perf/` 与 `app/perf/` | 子系统延迟、吞吐与内存预算是否仍然成立？ | `cd core && bun run perf` / `cd app && npm run perf` |
+| `bench` | `core/benchmarks/`、`core/src/bench/`、`app/features/benchmark/` | Harbor Agent/任务评测与独立评分 | `ludens bench ...` |
+
+本文只覆盖 `bench`；子系统性能基线见 [控制台调试与验证](../tutorials/debugging-and-verification.md)。
+
 核心架构原则是**执行内核唯一与评判解耦**：所有评测任务统一由 **Shiori** 调度执行、管理预算与取消清理；被测程序只负责在运行期产出客观事实（Artifacts），独立的 `tests/test.sh` Verifier 则从已落盘产物计算数值 Reward。重新评分（`verify`）只运行 Verifier，绝不重跑被测程序或模型。
 
 ## 入口与运行所有权
@@ -13,14 +23,14 @@ Ludens 评测系统遵循 [Harbor Framework](https://github.com/harbor-framework
 ```sh
 # 发现、帮助与静态契约校验
 ludens bench list
-ludens bench help ludens/ws-recovery
+ludens bench help ludens/capability-reuse
 ludens bench schema [task|reward|dataset]
 ludens bench validate task /path/to/task
 ludens bench validate reward /path/to/verifier-or-reward.json
 ludens bench validate dataset /path/to/dataset.toml
 
 # 执行评测与独立重评
-ludens bench run ludens/ws-recovery [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
+ludens bench run ludens/capability-reuse [--config run.json] [--args '{"k":"v"}'] [--seconds 60] [--repeat 3] [--no-verify]
 ludens bench verify <run-id> --reason "Regrade fixed measurements"
 ludens bench verify <run-id> --task /path/to/updated-task --reason "Updated grading criteria"
 
@@ -185,17 +195,12 @@ CLI 与 Dashboard 的 Benchmark 视图直接读取 `Trial + Verification + Rewar
 
 ## 内置任务与证据边界
 
-仓库内置 8 个标准评测任务（定义于 `core/benchmarks/tasks/` 与 `core/src/bench/cases/`）：
+仓库当前只内置一个 Harbor 评测任务（定义于 `core/benchmarks/tasks/`，用例实现在 `core/src/bench/capability-reuse.ts`）：
 
-| Task 名称 | 运行模式与被测对象 | 核心验证指标与证据边界 |
+| 任务名 | 模式与被测对象 | 核心指标与证据边界 |
 | --- | --- | --- |
-| `ludens/perception-lifecycle` | 离线 · 真实 Python + 合成媒体 | 验证常驻采样、`reload` 热更新、历史查询、故障恢复与归档不可变性（不测真实模拟器与 GPU 模型）。 |
-| `ludens/control-handoff` | 离线 · 真实 Runtime / Baseware + 模拟驱动 | 验证人工交还中断延迟、输入归零释放与旧 `epoch` 严格拒绝。 |
-| `ludens/ws-recovery` | 离线 · 真实 Codex Provider + 模拟传输与虚拟时钟 | 验证连接制限到期、`1012` 断连退避、SSE 恢复、全量历史重连 WS 及已提交工具不重放。 |
-| `ludens/background-compaction` | 离线 · 原生 OMP Maintenance + 受控流 | 验证后台候选摘要在上下文增长后保留复用、尾部消息无损重放、Span 归属与取消打断（固定 256k 阈值夹具）。 |
-| `ludens/capability-reuse` | **在线模型** · 公共 Host 装配 + 隔离合成装配台 | 验证 Agent 在空技能/空感知初始状态下自主编写函数，并在跨批次订单与不同模型轮次间实现真实有效复用。 |
-| `ludens/clamp` | 离线 · 普通 Python 程序 | 测量已加载 Python `@capability` 函数的样本计算输出与单次调用耗时。 |
-| `ludens/video-storage` | 离线 · 双流合成图像 + PyAV 编码器 | 测量 MP4 视频分段编码吞吐、历史冷帧解码精度与进程 RSS 内存占用。 |
-| `ludens/index-memory` | 离线 · 隔离缓存目录 + Dashboard Builder | 测量冷历史索引构建子进程峰值内存、查询分页准确性与退出后缓存释放（不替代线上 Next.js 压测）。 |
+| `ludens/capability-reuse` | **在线模型** · 共享 Host 装配 + 隔离合成工作台 | Agent 从空技能/空感知初始状态自主编写函数，并在顺序批次间与模型轮次间产生真实有效的复用。 |
+
+原先的离线框架子系统任务已拆分到另外两个分层：`ws-recovery` 与 `background-compaction` 成为 `core/tests/` 中的回归测试；`perception-lifecycle`、`control-handoff`、`video-storage` 成为 `core/src/perf/` 的性能基线（`bun run perf`）；`index-memory` 成为 `app/perf/` 的应用侧性能基线（`npm run perf`）。
 
 **`ludens/capability-reuse` 复用证据判定规则**：其独立评分器 [evaluate.ts](../../../core/benchmarks/tasks/capability-reuse/tests/evaluate.ts) 仅从执行期已记录的事件流与审计事实判定，绝不重跑工作区代码。有效复用要求同一自主创建的 Python 函数在**两个独立订单批次**、**不同模型推理轮次**中被真实调用并产生被环境接受的成功设备终态；仅创建文件、仅 `import` 而未调用、或仅在任务结束后做 AST 静态盘点，均不计入有效复用得分。
