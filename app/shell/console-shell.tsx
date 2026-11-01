@@ -24,7 +24,7 @@ import { Metric, ObservationPanel, seconds, percent, bytes, clockTime } from "@/
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
 export default function ConsoleShell() {
-  const {t, dt, lt, search, query, view, benchmarkCases, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshCatalog} = useDashboardController();
+  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshCatalog} = useDashboardController();
   const waitSummary = [
     s?.medianHttpHeadersMs != null ? dt("waitHttp") + " " + seconds(s.medianHttpHeadersMs) : "",
     s?.medianWsWaitMs != null ? dt("waitWs") + " " + seconds(s.medianWsWaitMs) : "",
@@ -42,7 +42,7 @@ export default function ConsoleShell() {
     <div className="console-shell">
       <DesktopBridge onNavigate={navigateUrl} />
       <ConsoleSidebar projects={projects} view={view} viewLink={viewLink} onNavigate={navigateUrl} pet={pet}
-        petProject={benchmarkCases || view === "docs" || view === "settings" || view === "workspaces" ? undefined : project}
+        petProject={view === "benchmark" || view === "docs" || view === "settings" || view === "workspaces" ? undefined : project}
         onPetSettings={() => navigate({ view: "settings" })} />
       <div className="console-main">
         <header className={"context-bar" + (view === "live" ? " live-context-bar" : "")}>
@@ -107,7 +107,7 @@ export default function ConsoleShell() {
                 </NativeSelect>
               </>
             )}
-            {(run || benchmarkCases) && (view === "live" || view === "benchmark") && <Button
+            {(run || view === "benchmark") && (view === "live" || view === "perf" || view === "benchmark") && <Button
               type="button"
               size="sm"
               variant="outline"
@@ -126,12 +126,10 @@ export default function ConsoleShell() {
           className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : "")}>
           {view !== "workspaces" && view !== "docs" && view !== "perception" && view !== "caps" && (view !== "replay" || entry !== "ready") && <div className={"page-heading" + (view === "live" ? " live-page-heading" : view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
             <div>
-              <h1>{benchmarkCases ? t("benchmark.casesTitle") : t(`views.${view}.title`)}</h1>
-              <p>
-                {benchmarkCases ? t("benchmark.casesDescription") : t(`views.${view}.description`)}
-              </p>
+              <h1>{t(`views.${view}.title`)}</h1>
+              <p>{t(`views.${view}.description`)}</p>
             </div>
-            {data && (view === "live" || (view === "benchmark" && !benchmarkCases)) && (
+            {data && (view === "live" || view === "perf") && (
               <Button
                 type="button"
                 variant="outline"
@@ -143,27 +141,6 @@ export default function ConsoleShell() {
               </Button>
             )}
           </div>}
-          {view === "benchmark" && (
-            <nav className="mb-5 flex gap-2 border-b pb-3" aria-label={dt("benchNavLabel")}>
-              {[
-                ["analysis", dt("benchAnalysis")],
-                ["cases", dt("benchCases")],
-              ].map(([tab, title]) => (
-                <Button
-                  type="button"
-                  size="sm"
-                  key={tab}
-                  aria-pressed={benchmarkCases === (tab === "cases")}
-                  variant={benchmarkCases === (tab === "cases") ? "secondary" : "ghost"}
-                  onClick={() =>
-                    navigate({ bench: tab === "cases" ? "cases" : null })
-                  }
-                >
-                  {title}
-                </Button>
-              ))}
-            </nav>
-          )}
           {runControls && run && <ArchiveBuild key={selection.project + "/" + run}
             project={selection.project} run={run} onReady={archiveReady} />}
           {runControls && entry !== "catalog-error" && (catalogError || (view !== "replay" && error && !(analysingRun && data))) && (
@@ -233,7 +210,7 @@ export default function ConsoleShell() {
               position={query.get("at")} evidence={replayEvidenceFromSearch(search)}
               onPosition={(at, evidence = null) => navigate({ project: selection.project, run, at: String(at), ...replayEvidencePatch(evidence) })}
               onEvidence={evidence => navigate(replayEvidencePatch(evidence))} />
-          ) : benchmarkCases ? (
+          ) : view === "benchmark" ? (
             <BenchmarkCases
               workspace={selection.project}
               workspacePath={project?.workspace ?? null}
@@ -315,7 +292,7 @@ export default function ConsoleShell() {
                     {metrics}
                     <Button type="button" variant="ghost" size="xs"
                       className="h-auto justify-start whitespace-normal text-left text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => navigate({ view: "benchmark" })}>
+                      onClick={() => navigate({ view: "perf" })}>
                       {dt("checkPerf")} ↗
                     </Button>
                   </div>

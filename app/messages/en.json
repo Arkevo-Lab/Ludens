@@ -2,6 +2,7 @@
   "nav": {
     "live": "Live",
     "replay": "Replay",
+    "perf": "Performance",
     "benchmark": "Benchmark",
     "caps": "Capabilities",
     "perception": "Perception",
@@ -22,9 +23,13 @@
       "title": "Replay",
       "description": "Align perception frames, device actions and model calls on one timeline."
     },
+    "perf": {
+      "title": "Run performance",
+      "description": "Track per-request transport wait, cache hit rate, and explicit call chains."
+    },
     "benchmark": {
-      "title": "Run Performance",
-      "description": "Trace per-request transport latency, cache hits and explicit call chains."
+      "title": "Eval catalog",
+      "description": "Evaluate capabilities repeatedly and inspect metrics, conditions, and raw evidence."
     },
     "caps": {
       "title": "Capabilities & Evals",
@@ -50,10 +55,6 @@
       "title": "Loop Lab",
       "description": "Explore how delivery strategies change context usage. Local estimates; real runs stay untouched."
     }
-  },
-  "benchmark": {
-    "casesTitle": "Eval Catalog",
-    "casesDescription": "Repeatable eval capabilities: metrics, conditions and raw evidence."
   },
   "settings": {
     "language": "Language",
@@ -976,9 +977,6 @@
     "refreshHint": "Only toggles UI refresh, never affects the agent",
     "live": "Live",
     "paused": "Refresh paused",
-    "benchNavLabel": "Benchmark view",
-    "benchAnalysis": "Run analysis",
-    "benchCases": "Eval catalog",
     "empty": {
       "discovering": "Discovering workspaces",
       "noRuns": "No runs yet",

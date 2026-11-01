@@ -42,7 +42,7 @@ export function parseResultKey(value: string | null): { project: string; run: st
   return project && run && !extra && [project, run].every(id => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) ? { project, run } : null;
 }
 export function benchmarkRunUrl(trial: Pick<TrialSummary, "project" | "runId">, event?: Event, reference?: EvidenceReference) {
-  const params = new URLSearchParams({ view: "benchmark", project: trial.project,
+  const params = new URLSearchParams({ view: "perf", project: trial.project,
     run: reference?.kind === "event" ? reference.runId : trial.runId });
   if (event?.trace?.epoch) params.set("epoch", event.trace.epoch);
   if (event?.trace?.modelCallId) params.set("call", event.trace.modelCallId);

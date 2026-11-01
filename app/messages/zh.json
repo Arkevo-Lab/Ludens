@@ -2,6 +2,7 @@
   "nav": {
     "live": "运行",
     "replay": "回放",
+    "perf": "性能",
     "benchmark": "Benchmark",
     "caps": "能力",
     "perception": "感知",
@@ -22,9 +23,13 @@
       "title": "经历回放",
       "description": "在同一条时间轴上对齐感知画面、设备动作与模型调用。"
     },
-    "benchmark": {
+    "perf": {
       "title": "运行性能",
       "description": "追踪单次请求的传输等待、缓存命中与显式调用链。"
+    },
+    "benchmark": {
+      "title": "评测目录",
+      "description": "重复评测能力，查看指标、条件与原始证据。"
     },
     "caps": {
       "title": "能力与评测",
@@ -50,10 +55,6 @@
       "title": "Loop 实验室",
       "description": "比较交付策略对上下文用量的影响。本地估算，不影响真实运行。"
     }
-  },
-  "benchmark": {
-    "casesTitle": "评测目录",
-    "casesDescription": "重复评测能力，查看指标、条件与原始证据。"
   },
   "settings": {
     "language": "语言",
@@ -976,9 +977,6 @@
     "refreshHint": "只控制界面刷新，不影响 Agent",
     "live": "实时",
     "paused": "已暂停刷新",
-    "benchNavLabel": "Benchmark 视图",
-    "benchAnalysis": "运行剖析",
-    "benchCases": "评测目录",
     "empty": {
       "discovering": "正在发现工作区",
       "noRuns": "还没有运行记录",

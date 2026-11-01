@@ -36,9 +36,7 @@ export function useDashboardController() {
   const query = new URLSearchParams(search);
   const requestedView = query.get("view");
   const view: View = requestedView && (viewIds as readonly string[]).includes(requestedView) ? requestedView as View : "live";
-  const benchmarkCases = view === "benchmark" && query.get("bench") === "cases";
-  // Views needing run/epoch context: live, replay and benchmark profiling; other views skip run data.
-  const runControls = view === "live" || view === "replay" || (view === "benchmark" && !benchmarkCases);
+  const runControls = view === "live" || view === "replay" || view === "perf";
   const [catalogRevision, setCatalogRevision] = useState(0);
   const refreshCatalog = useCallback(() => setCatalogRevision(value => value + 1), []);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -105,7 +103,7 @@ export function useDashboardController() {
   const key = JSON.stringify([scopeKey, readScope.workspace, beforeCall, requestedCall, selectedImage]);
   const error = runFailure?.key === key ? runFailure.message : "";
   const analysis = runAnalysisSnapshot(loaded, key, readScope);
-  const analysingRun = view === "benchmark" && !benchmarkCases;
+  const analysingRun = view === "perf";
   const data = analysingRun ? analysis.overview : loaded?.key === key ? loaded.data : null;
   const cycles = view === "replay"
     ? replayCycles?.key === JSON.stringify([selection.project, run]) ? replayCycles.cycles : []
@@ -196,7 +194,7 @@ export function useDashboardController() {
     };
   }, [catalogRevision]);
   useEffect(() => {
-    if (view === "workspaces" || view === "settings" || view === "dev" || benchmarkCases || view === "replay" || view === "docs" || view === "caps" || view === "perception" || !selection.project || !run) return;
+    if (view === "workspaces" || view === "settings" || view === "dev" || view === "benchmark" || view === "replay" || view === "docs" || view === "caps" || view === "perception" || !selection.project || !run) return;
     const params = new URLSearchParams({
       project: selection.project,
       run,
@@ -239,7 +237,6 @@ export function useDashboardController() {
     selectedImage,
     key,
     view,
-    benchmarkCases,
     followed.archiveRevision,
     snapshotRevision,
   ]);
@@ -385,7 +382,6 @@ export function useDashboardController() {
     search,
     query,
     view,
-    benchmarkCases,
     runControls,
     projects,
     catalogReady,

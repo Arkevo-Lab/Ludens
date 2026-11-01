@@ -276,6 +276,7 @@ test("evidence keeps source event identity distinct from a colliding run-local s
     const proof = await benchmarkEvidence("ws-bench", trial.id, {}, f.root);
     assert.deepEqual(proof.evidence.items.map(item => [item.available, item.event?.type]), [[true, "model_end"], [true, "action_end"], [false, undefined]]);
     assert.match(benchmarkRunUrl(trial, proof.evidence.items[0].event), /call=call/);
+    assert.equal(new URL(benchmarkRunUrl(trial), "http://localhost").searchParams.get("view"), "perf");
   } finally { await f.cleanup(); }
 });
 
