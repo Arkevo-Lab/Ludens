@@ -41,9 +41,7 @@ export default function ConsoleShell() {
   return (
     <div className="console-shell">
       <DesktopBridge onNavigate={navigateUrl} />
-      <ConsoleSidebar projects={projects} view={view} viewLink={viewLink} onNavigate={navigateUrl} pet={pet}
-        petProject={view === "benchmark" || view === "docs" || view === "settings" || view === "workspaces" ? undefined : project}
-        onPetSettings={() => navigate({ view: "settings" })} />
+      <ConsoleSidebar view={view} viewLink={viewLink} onNavigate={navigateUrl} />
       <div className="console-main">
         <header className={"context-bar" + (view === "live" ? " live-context-bar" : "")}>
           <div className="context-workspace">

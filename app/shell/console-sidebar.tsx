@@ -5,8 +5,6 @@ import { MenuIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
-import type { Project } from "@/lib/types";
-import { PetFollowCard, type PetFollow } from "@/features/pet/pet-follow";
 
 export const consoleViewIds = ["live", "replay", "perf", "benchmark", "caps", "perception", "workspaces", "docs", "settings", "dev"] as const;
 export type ConsoleView = typeof consoleViewIds[number];
@@ -68,14 +66,10 @@ function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
 }
 
 
-export function ConsoleSidebar({ view, viewLink, onNavigate, pet, petProject, projects, onPetSettings }: {
+export function ConsoleSidebar({ view, viewLink, onNavigate }: {
   view: ConsoleView;
   viewLink(view: ConsoleView): string;
   onNavigate(url: string): void;
-  pet: PetFollow;
-  petProject?: Project;
-  projects: Project[];
-  onPetSettings(): void;
 }) {
   const { t } = useLocale();
   const dt = useTranslations("dashboard");
@@ -172,7 +166,6 @@ export function ConsoleSidebar({ view, viewLink, onNavigate, pet, petProject, pr
           <small>{t(section.label)}</small>{section.ids.map(renderLink)}
         </div>)}
       </nav>
-      <PetFollowCard follow={pet} project={petProject} projects={projects} onSettings={() => { closeMenu(); onPetSettings(); }} />
     </div>
     <footer ref={footer} id={`${id}-footer`} className="sidebar-footer">
       <nav className="sidebar-settings" aria-label={t("nav.settings")}>{renderLink("settings")}</nav>

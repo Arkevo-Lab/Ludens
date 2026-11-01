@@ -33,39 +33,6 @@ function TechnicalDetails({ error }: { error: string }) {
   return <details className="pet-follow-technical"><summary>{t("technicalDetails")}</summary><p>{error}</p></details>;
 }
 
-export function PetFollowCard({
-  follow, project, projects = [], onSettings,
-}: { follow: PetFollow; project?: Project; projects?: Project[]; onSettings(): void }) {
-  const t = useTranslations("petFollow");
-  const target = follow.state?.target;
-  const known = project && !projects.some(item => item.id === project.id) ? [...projects, project] : projects;
-  const selected = !!project?.workspace && target?.project === project.id && target.workspace === project.workspace;
-  const stale = !!follow.writeError || (!!follow.readError && follow.lastSaved === undefined);
-  const observationUnconfirmed = follow.pending || !!follow.readError || !!follow.writeError;
-  const status = follow.pending ? t("updating") : observationUnconfirmed ? t("statusUnavailable") : petStatus(follow.state, t);
-  const locked = !follow.canWrite || selected || project?.available === false;
-  return <div className="pet-follow-card" data-pet-follow="sidebar">
-    <Button type="button" variant="ghost" className="pet-follow-heading h-auto w-full justify-start rounded-none border-0 bg-transparent p-0 text-left whitespace-normal hover:bg-transparent" onClick={onSettings} aria-label={t("manageFollow")}>
-      <span className="pet-follow-avatar" aria-hidden="true">L</span>
-      <span className="pet-follow-heading-copy"><strong>Ludens Pet</strong><small>{t("manageInSettings")} <span aria-hidden="true">↗</span></small></span>
-    </Button>
-    <p className="pet-follow-saved" title={target?.workspace}>
-      {(stale || follow.state?.targetConfigured) && <><span>{t(stale ? "lastKnownPrefix" : "savedPrefix")}</span>{" "}</>}
-      <strong>{target ? targetName(target, known, t) : follow.state ? t(follow.state.targetConfigured ? "noSavedTarget" : "noSavedChoice") : t("targetUnknown")}</strong>
-    </p>
-    <p className="pet-follow-consumer" data-pet-desktop-status>
-      <i aria-hidden="true" className={"status-dot " + (!observationUnconfirmed && follow.state?.connected === true ? "online" : "")} />{status}
-    </p>
-    {project?.workspace && <Button type="button" variant="outline" size="sm" className="pet-follow-action h-auto whitespace-normal aria-disabled:opacity-60"
-      aria-disabled={locked} onClick={() => { if (!locked) void follow.follow(project.id); }}>
-      {follow.pending ? t("updating") : selected ? t("savedForThis") : t("setFollowTarget")}
-    </Button>}
-    {follow.pending && follow.requested !== undefined && <p className="pet-follow-feedback" role="status">{t("savingTarget")} {requestedName(follow.requested, known, target, t)}</p>}
-    {follow.writeError ? <p className="pet-follow-feedback is-error" role="alert">{t("saveUnconfirmed")}</p>
-      : follow.readError && <p className="pet-follow-feedback is-error" role="alert">{t(follow.state ? "showingLastTarget" : "readUnavailable")}</p>}
-  </div>;
-}
-
 export function PetFollowSettings({ follow, projects }: { follow: PetFollow; projects: Project[] }) {
   const { state, pending, reading, readError, writeError, requested, lastReadAt, lastSaved, canWrite } = follow;
   const t = useTranslations("petFollow");
