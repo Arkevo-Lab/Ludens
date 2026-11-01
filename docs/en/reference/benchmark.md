@@ -52,7 +52,7 @@ Placeholders and execution semantics supported by run configurations:
 
 | Placeholder / field | Resolved value and bounds |
 | --- | --- |
-| `{ludens}` / `{python}` / `{bun}` | Ludens package root (`core/` in the repo), the selected framework Python interpreter (`LUDENS_PYTHON`), and the Bun executable path. |
+| `{core}` / `{python}` / `{bun}` | Ludens package root (`core/` in the repo), the selected framework Python interpreter (`LUDENS_PYTHON`), and the Bun executable path. |
 | `{workspace}` | Absolute path of the author's own workspace. |
 | `{workdir}` | The trial's actual execution directory (a freshly created isolated directory per trial when `workspace: "isolated"`). |
 | `{artifacts}` | The trial's exclusive artifact output directory (`logs/<run-id>/artifacts`). |

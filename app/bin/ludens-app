@@ -1,4 +1,10 @@
 #!/bin/sh
 set -eu
-PET_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+SCRIPT=$0
+while [ -L "$SCRIPT" ]; do
+  DIRECTORY=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")" && pwd)
+  SCRIPT=$(readlink "$SCRIPT")
+  case "$SCRIPT" in /*) ;; *) SCRIPT=$DIRECTORY/$SCRIPT ;; esac
+done
+PET_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")/.." && pwd)
 exec "$PET_ROOT/node_modules/.bin/electron" "$PET_ROOT/dist/electron/main.js" "$@"

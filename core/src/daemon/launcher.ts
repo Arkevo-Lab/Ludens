@@ -112,7 +112,7 @@ export async function launchPlan(config: LaunchConfig, workspace: string, repo =
         "--diagnostics", config.logging.diagnostics,
       ],
       ...(config.dashboard ? { dashboard: ["npm", "--prefix", join(repo, "app"), "run", "start"] } : {}),
-      ...(config.pet ? { pet: [join(repo, "app/bin/ludens-companion"), "--workspace", workspace, "--show-window"] } : {}),
+      ...(config.pet ? { pet: [join(repo, "app/bin/ludens-app"), "--workspace", workspace, "--show-window"] } : {}),
     },
   };
 }

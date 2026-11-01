@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { chmod, cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { launchPlan, parseConfig, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
@@ -676,4 +676,24 @@ test("down preserves Baseware and its emulator while an unmanaged host or lease 
     await expect(new WorkspaceLauncher(value, io).down(false)).rejects.toThrow(owner === "host" ? "unmanaged host" : "active owner");
     expect(io.calls.some(argv => argv[1] === "bootout")).toBe(false);
   }
+});
+
+test("a package-linked CLI initializes a workspace through mixed symlink chains", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ludens linked cli "));
+  try {
+    const home = join(directory, "home"), workspace = join(directory, "workspace with spaces");
+    await symlink(resolve(import.meta.dir, "../bin/ludens"), join(directory, "absolute-cli"));
+    await symlink("absolute-cli", join(directory, "ludens"));
+    const child = Bun.spawn([join(directory, "ludens"), "init", "--workspace", workspace, "--driver", "cua"], {
+      cwd: directory, env: { ...process.env, LUDENS_HOME: home }, stdout: "pipe", stderr: "pipe",
+    });
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
+    ]);
+    expect(code, stderr).toBe(0);
+    const created = JSON.parse(stdout);
+    expect(created.workspace).toBe(await realpath(workspace));
+    expect(JSON.parse(await readFile(created.configPath, "utf8")).driver).toBe("cua");
+    expect(JSON.parse(await readFile(join(workspace, ".ludens/workspace.json"), "utf8")).id).toBe(created.id);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

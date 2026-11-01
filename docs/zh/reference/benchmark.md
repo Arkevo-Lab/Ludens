@@ -52,7 +52,7 @@ Harbor 任务包只描述“测什么与怎么判分”，而“运行什么程�
 
 | 占位符 / 字段 | 解析值与边界 |
 | --- | --- |
-| `{ludens}` / `{python}` / `{bun}` | Ludens 包根目录（仓库中的 `core/`）、选定框架 Python 解释器（`LUDENS_PYTHON`）与 Bun 可执行文件路径。 |
+| `{core}` / `{python}` / `{bun}` | Ludens 包根目录（仓库中的 `core/`）、选定框架 Python 解释器（`LUDENS_PYTHON`）与 Bun 可执行文件路径。 |
 | `{workspace}` | 作者所在的原工作区绝对路径。 |
 | `{workdir}` | 本次试验的实际执行目录（`workspace: "isolated"` 时为每次试验独立创建的隔离目录）。 |
 | `{artifacts}` | 本次试验独占的产物输出目录（`logs/<run-id>/artifacts`）。 |
