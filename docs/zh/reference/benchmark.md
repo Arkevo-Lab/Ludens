@@ -110,7 +110,7 @@ digest = "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde
 
 ## Python 辅助登记是可选的
 
-被测 Python 程序只需直接读取环境变量 `LUDENS_BENCH_ARTIFACTS` 并写入测量文件（如 `measurements.json`）即可完成试验，无需强制导入任何框架包。若需结构化登记实验条件、被测模型版本或自动收集进程内 `@capability` 调用统计，可选用 `ludens_tools.current_trial()`（完整示例见 [clamp.py](../../../core/benchmarks/examples/clamp.py)）：
+被测 Python 程序只需直接读取环境变量 `LUDENS_BENCH_ARTIFACTS` 并写入测量文件（如 `measurements.json`）即可完成试验，无需强制导入任何框架包。若需结构化登记实验条件、被测模型版本或自动收集进程内 `@capability` 调用统计，可选用 `ludens_tools.current_trial()`（完整示例见 [clamp.py](../../../core/tests/fixtures/clamp.py)）：
 
 ```python
 from ludens_tools import current_trial

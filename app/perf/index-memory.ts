@@ -1,5 +1,6 @@
 /** Rebuild disposable directories and query real archives, without touching sources.
- * node --expose-gc --import tsx scripts/check-index-memory.ts \
+ * npm run perf                                                            (synthetic run, asserts budgets)
+ * node --expose-gc --import tsx perf/index-memory.ts \
  *   --run /absolute/run --cache-root /absolute/isolated --output /absolute/report.json [--epoch UUID]
  */
 import assert from "node:assert/strict";
@@ -7,14 +8,37 @@ import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { mkdirSync, statSync, writeFileSync, readdirSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 const args = process.argv.slice(2);
 const option = (name: string) => { const at = args.indexOf(name); return at < 0 ? undefined : args[at + 1]; };
-assert.ok(option("--run"), "--run is required");
+
+/** Perf budgets for the synthetic `npm run perf` mode; violations exit non-zero. */
+const budgets = { peakRssMiB: 2048, peakHeapUsedMiB: 1024, retainedAfterReleaseMiB: 256, coldBuildMs: 180_000, pagedQueryMs: 2_000 };
+const generated = !option("--run") && !process.env.LUDENS_BENCH_ARTIFACTS ? realpathSync(mkdtempSync(join(tmpdir(), "ludens-perf-index-"))) : undefined;
+if (generated) {
+  const directory = join(generated, "logs", "synthetic-run");
+  mkdirSync(directory, { recursive: true });
+  const eventCount = 24_000, at = (i: number) => new Date(Date.UTC(2026, 9, 24) + i * 1000).toISOString();
+  const rows: string[] = [];
+  const kinds = ["control", "model_start", "model_end", "tool_start", "tool_end", "observation"] as const;
+  for (let i = 0; i < eventCount; i++) {
+    const type = kinds[i % kinds.length]!;
+    const payload = { text: `synthetic frame ${i} ` + "x".repeat(180) };
+    rows.push(JSON.stringify({ schemaVersion: 2, runId: "synthetic-run", seq: i + 1, at: at(i), atMs: i,
+      source: { component: "ludens" }, origin: { eventId: `synthetic-${i}`, clockId: "synthetic", seq: i + 1, at: at(i), atMs: i },
+      type, trace: { epoch: "cycle", traceId: "trace", spanId: `span-${i}` }, data: payload }));
+  }
+  writeFileSync(join(directory, "events.jsonl"), rows.join("\n") + "\n");
+  writeFileSync(join(directory, "manifest.json"), JSON.stringify({ kind: "benchmark", runId: "synthetic-run",
+    workspace: generated, benchmark: { name: "ludens/index-memory", digest: `sha256:${"0".repeat(64)}` } }) + "\n");
+  args.push("--run", directory);
+}
 const artifacts = process.env.LUDENS_BENCH_ARTIFACTS;
-const cachePath = option("--cache-root") ?? (artifacts ? join(artifacts, "index-cache") : undefined);
-const outputPath = option("--output") ?? (artifacts ? join(artifacts, "measurements.json") : undefined);
+const cachePath = option("--cache-root") ?? (artifacts ? join(artifacts, "index-cache") : undefined) ?? (generated ? join(generated, "index-cache") : undefined);
+const outputPath = option("--output") ?? (artifacts ? join(artifacts, "measurements.json") : undefined) ?? (generated ? join(generated, "measurements.json") : undefined);
 assert.ok(cachePath && outputPath, "--cache-root and --output are required outside a Shiori trial");
 const run = resolve(option("--run")!), cacheRoot = resolve(cachePath), output = resolve(outputPath);
 assert.ok(!cacheRoot.startsWith(run + "/"), "Use an isolated disposable directory");
@@ -93,6 +117,7 @@ async function main() {
     } finally { lines.close(); stream.destroy(); }
     assert.equal(position, index.eventRevision);
     report.sourceSamplesVerified = true;
+    const queryStarted = performance.now();
     for (let i = 0; i < 5; i++) {
       const history = await queryActivity(index, scope, { mode: "history", limit: 20 });
       assert.ok(history.blocks.length);
@@ -106,6 +131,7 @@ async function main() {
         report.overlappingOperations = (await queryOperationRefs(index, { epoch, start: at, end: at + 10_000, limit: 20 })).length;
       }
     }
+    report.pagedQueryMs = performance.now() - queryStarted;
   });
   report.queryMetrics = { ...storageMetrics };
   if (option("--compare")) {
@@ -124,6 +150,26 @@ async function main() {
   report.buildersExited = [...childPids].every(pid => { try { process.kill(pid, 0); return false; } catch { return true; } });
   assert.ok(report.buildersExited, "Builder process did not exit");
   report.completedAt = new Date().toISOString(); save(); clearInterval(timer);
+  if (generated) {
+    const mib = (value: number) => value / 1024 / 1024;
+    const checks = {
+      "peak-rss-mib": mib(report.peakRssSampled) <= budgets.peakRssMiB,
+      "peak-heap-used-mib": mib(report.peakHeapSampled) <= budgets.peakHeapUsedMiB,
+      "retained-after-release-mib": mib(report.afterClose.rss - report.before.rss) <= budgets.retainedAfterReleaseMiB,
+      "cold-build-ms": report.phases.find((phase: any) => phase.name === "cold-build")!.ms <= budgets.coldBuildMs,
+      "paged-query-ms": report.pagedQueryMs <= budgets.pagedQueryMs,
+    };
+    report.budgetChecks = checks;
+    process.stderr.write(JSON.stringify({ budgets, checks, measurements: {
+      peakRssMiB: mib(report.peakRssSampled), peakHeapUsedMiB: mib(report.peakHeapSampled),
+      retainedAfterReleaseMiB: mib(report.afterClose.rss - report.before.rss),
+      coldBuildMs: report.phases.find((phase: any) => phase.name === "cold-build")!.ms, pagedQueryMs: report.pagedQueryMs } }) + "\n");
+    rmSync(generated, { recursive: true, force: true });
+    if (Object.values(checks).some(passed => !passed)) {
+      process.stderr.write(`index-memory budget violations: ${Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name).join(", ")}\n`);
+      process.exitCode = 1;
+    }
+  }
   if (artifacts && process.env.LUDENS_BENCH_TRIAL_ID) writeFileSync(join(artifacts, "context.json"), JSON.stringify({
     trialId: process.env.LUDENS_BENCH_TRIAL_ID, workspace: process.env.LUDENS_WORKSPACE,
     conditions: { sourceRun: run, sourceBytes: sourceBefore.size, budget: report.budget },

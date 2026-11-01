@@ -3,7 +3,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ArrowRight, History } from "lucide-react";
-import { RunAnalysis } from "@/features/benchmark/run-analysis";
+import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ActivityFeed } from "@/features/live/activity-feed";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";

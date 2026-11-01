@@ -13,10 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Slider } from "@/components/ui/slider";
-import { LoopChart } from "@/features/benchmark/loop-chart";
+import { LoopChart } from "./loop-chart";
 import { OMP_LAYER_DEFS, PRESETS, LUDENS_LAYER_DEFS, defaultParams, simulate, type LoopConfig, type LoopEvent, type LoopParams } from "@/lib/loop-lab";
 import { LOOP_PARAM_KEYS, PARAM_GROUPS, createLoopDraft, validateLoopDraft, validateLoopParams, type LoopDraft, type LoopParamError } from "@/lib/loop-params";
-import "@/features/benchmark/loop-lab.css";
+import "./loop-lab.css";
 
 const fmt = (n: number) => n >= 10000 ? `${Number((n / 1000).toFixed(1))}k` : String(Math.round(n));
 const fill = (text: string, values: Record<string, string | number>) => Object.entries(values).reduce((result, [key, value]) => result.replaceAll(`{${key}}`, String(value)), text);

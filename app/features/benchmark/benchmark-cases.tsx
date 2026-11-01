@@ -365,7 +365,7 @@ export function BenchmarkCases({ search, workspace, workspacePath, ready, refres
             {selected.trial.parentRunId && <p><a href={benchmarkRunUrl({ project: selected.trial.project, runId: selected.trial.parentRunId })} onClick={event => link(event, benchmarkRunUrl({ project: selected.trial.project, runId: selected.trial.parentRunId! }))}>{t("viewParentRun")}</a></p>}
             {!!selected.trial.limitations?.length && <div className="bench-limitations"><h3>{t("limitationsTitle")}</h3><ul>{selected.trial.limitations.map((item, index) => <li key={index}>{item}</li>)}</ul></div>}
             <details className="bench-provenance"><summary>{t("provenanceTitle")}</summary><pre>{JSON.stringify({ task: selected.trial.task, parameters: selected.trial.parameters,
-              conditions: selected.trial.conditions, subjects: selected.trial.subjects, trace: selected.trial.trace, legacy: selected.trial.legacy,
+              conditions: selected.trial.conditions, subjects: selected.trial.subjects, trace: selected.trial.trace,
               verification: selected.verification }, null, 2)}</pre>{baseline && <><h3>{t("baselineTitle")}</h3><pre>{JSON.stringify({ task: baseline.trial.task, parameters: baseline.trial.parameters,
                 conditions: baseline.trial.conditions, subjects: baseline.trial.subjects, verification: baseline.verification }, null, 2)}</pre></>}</details>
           </>}

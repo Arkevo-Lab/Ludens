@@ -110,7 +110,7 @@ After modifying any built-in task file, the corresponding `digest` in `dataset.t
 
 ## Python helper registration is optional
 
-A Python program under test only needs to read the `LUDENS_BENCH_ARTIFACTS` environment variable and write measurement files (e.g. `measurements.json`) to complete a trial — importing any framework package is not required. For structured registration of experiment conditions, tested model versions, or automatic collection of in-process `@capability` call statistics, `ludens_tools.current_trial()` is available (full example in [clamp.py](../../../core/benchmarks/examples/clamp.py)):
+A Python program under test only needs to read the `LUDENS_BENCH_ARTIFACTS` environment variable and write measurement files (e.g. `measurements.json`) to complete a trial — importing any framework package is not required. For structured registration of experiment conditions, tested model versions, or automatic collection of in-process `@capability` call statistics, `ludens_tools.current_trial()` is available (full example in [clamp.py](../../../core/tests/fixtures/clamp.py)):
 
 ```python
 from ludens_tools import current_trial
