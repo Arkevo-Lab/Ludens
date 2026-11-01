@@ -126,7 +126,7 @@ function EvalTasks({ tasks, project, onNavigate }: {
   const t = useTranslations("capabilitiesView");
   return <ul className="capability-tasks" role="list" aria-label={t("groupTitles.tasks")}>
     {tasks.map(task => {
-      const href = "/?" + new URLSearchParams({ view: "benchmark", bench: "cases", project, case: task.name, caseDigest: task.digest });
+      const href = "/?" + new URLSearchParams({ view: "benchmark", project, case: task.name, caseDigest: task.digest });
       return <li key={`${task.name}@${task.digest}`} className="capability-task" data-capability-task={`${task.name}@${task.digest}`}>
         <h4 className="capability-task-name"><code>{task.name}</code></h4>
         <p className="capability-task-description">{task.title !== task.name ? task.title : <span className="text-muted-foreground">{t("noDescription")}</span>}</p>
@@ -203,7 +203,7 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
           {source.status === "error" ? <p className="text-sm text-destructive">{t("sourceFailure")}</p> : count === 0 ? <p className="text-sm text-muted-foreground">{t(`sourceEmpty.${id}`)}</p>
             : id !== "tasks" ? <CapabilityDeclarations items={items} title={t(`groupTitles.${id}`)} /> : <EvalTasks tasks={caps.tasks} project={project} onNavigate={onNavigate} />}
           {source.issueCount > 0 && <p className="text-xs text-muted-foreground">{t("diagnosticsTitle")}: {source.issueCount}</p>}
-          {id === "tasks" && <NavigationLink href={"/?" + new URLSearchParams({ view: "benchmark", bench: "cases", project })} onNavigate={onNavigate}>{t("viewBenchmark")}<ArrowUpRight /></NavigationLink>}
+          {id === "tasks" && <NavigationLink href={"/?" + new URLSearchParams({ view: "benchmark", project })} onNavigate={onNavigate}>{t("viewBenchmark")}<ArrowUpRight /></NavigationLink>}
         </CardContent></Card>;
       })}
       {caps.issues.length > 0 && <details className="rounded-lg border p-4 text-xs"><summary className="cursor-pointer">{t("diagnosticsTitle")} ({caps.issues.length})</summary><div className="mt-3 space-y-2">{caps.issues.map((issue, index) => <p key={index} className="break-all">{issue.error}</p>)}</div></details>}

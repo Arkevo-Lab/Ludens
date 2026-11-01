@@ -1,8 +1,8 @@
 import type { Event } from "./types";
-import type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, TrialPage, VerificationPage, VerificationStatus, TrialStatus } from "@ludens/core/core/storage/contract";
+import type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, TrialPage, VerificationPage, VerificationStatus, TrialStatus } from "@ludens/core/bench/contract";
 import type { TaskWithBindings } from "@ludens/core/bench/bindings";
-export { compareResults, comparisonChanges } from "@ludens/core/core/storage/contract";
-export type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, Trial, Verification, VerificationSummary } from "@ludens/core/core/storage/contract";
+export { compareResults, comparisonChanges } from "@ludens/core/bench/contract";
+export type { BenchmarkResult, EvidenceReference, TaskDefinition, TrialSummary, Trial, Verification, VerificationSummary } from "@ludens/core/bench/contract";
 
 export interface BenchmarkQuery { project?: string; taskName?: string; cursor?: string; limit?: number }
 export interface BenchmarkDetailQuery { verification?: string; verificationCursor?: string; evidenceCursor?: string }
@@ -42,7 +42,7 @@ export function parseResultKey(value: string | null): { project: string; run: st
   return project && run && !extra && [project, run].every(id => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) ? { project, run } : null;
 }
 export function benchmarkRunUrl(trial: Pick<TrialSummary, "project" | "runId">, event?: Event, reference?: EvidenceReference) {
-  const params = new URLSearchParams({ view: "benchmark", project: trial.project,
+  const params = new URLSearchParams({ view: "perf", project: trial.project,
     run: reference?.kind === "event" ? reference.runId : trial.runId });
   if (event?.trace?.epoch) params.set("epoch", event.trace.epoch);
   if (event?.trace?.modelCallId) params.set("call", event.trace.modelCallId);

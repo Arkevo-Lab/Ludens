@@ -15,6 +15,7 @@ describe('shared Dashboard window', () => {
       expect(isDashboardUrl(url, origin)).toBe(false)
     }
     expect(isDashboardUrl(origin + '/?view=benchmark', origin)).toBe(true)
+    expect(isDashboardUrl(origin + '/?view=perf', origin)).toBe(true)
   })
   it('links the source run and epoch to the exact encoded activity block', () => {
     const url = new URL(blockUrl(origin + '/?project=ws-a&run=run-a&epoch=epoch-a', 'model:7/tool:abc|def'))

@@ -5,13 +5,11 @@ import { MenuIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
-import type { Project } from "@/lib/types";
-import { PetFollowCard, type PetFollow } from "@/features/pet/pet-follow";
 
-export const consoleViewIds = ["live", "replay", "benchmark", "caps", "perception", "workspaces", "docs", "settings", "dev"] as const;
+export const consoleViewIds = ["live", "replay", "perf", "benchmark", "caps", "perception", "workspaces", "docs", "settings", "dev"] as const;
 export type ConsoleView = typeof consoleViewIds[number];
 const navSections: Array<{ label: string; ids: ConsoleView[] }> = [
-  { label: "navSectionWorkspace", ids: ["live", "replay", "benchmark", "caps", "perception"] },
+  { label: "navSectionWorkspace", ids: ["live", "replay", "perf", "benchmark", "caps", "perception"] },
   { label: "navSectionGlobal", ids: ["workspaces", "docs"] },
   { label: "navSectionDev", ids: ["dev"] },
 ];
@@ -50,10 +48,10 @@ function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
         <>
           <circle cx="12" cy="12" r="3.4" /><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
         </>
+      ) : kind === "perf" ? (
+        <path d="M4 19V11M10 19V5M16 19V8M22 19V2" strokeWidth="3" />
       ) : kind === "benchmark" ? (
-        <>
-          <path d="M4 19V11M10 19V5M16 19V8M22 19V2" strokeWidth="3" />
-        </>
+        <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22" /></>
       ) : kind === "dev" ? (
         <>
           <path d="m4 17 5-5-5-5" /><path d="M12 19h8" />
@@ -68,14 +66,10 @@ function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
 }
 
 
-export function ConsoleSidebar({ view, viewLink, onNavigate, pet, petProject, projects, onPetSettings }: {
+export function ConsoleSidebar({ view, viewLink, onNavigate }: {
   view: ConsoleView;
   viewLink(view: ConsoleView): string;
   onNavigate(url: string): void;
-  pet: PetFollow;
-  petProject?: Project;
-  projects: Project[];
-  onPetSettings(): void;
 }) {
   const { t } = useLocale();
   const dt = useTranslations("dashboard");
@@ -172,7 +166,6 @@ export function ConsoleSidebar({ view, viewLink, onNavigate, pet, petProject, pr
           <small>{t(section.label)}</small>{section.ids.map(renderLink)}
         </div>)}
       </nav>
-      <PetFollowCard follow={pet} project={petProject} projects={projects} onSettings={() => { closeMenu(); onPetSettings(); }} />
     </div>
     <footer ref={footer} id={`${id}-footer`} className="sidebar-footer">
       <nav className="sidebar-settings" aria-label={t("nav.settings")}>{renderLink("settings")}</nav>

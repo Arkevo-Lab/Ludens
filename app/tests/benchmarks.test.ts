@@ -4,9 +4,8 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm, symlink, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { trialSummary, type Trial, type Verification, type EvidenceReference, type BenchmarkResult } from "@ludens/core/core/storage/contract";
+import { trialSummary, type Trial, type Verification, type EvidenceReference, type BenchmarkResult } from "@ludens/core/bench/contract";
 import { readTask } from "@ludens/core/bench/task";
-import { importLegacyTrial } from "@ludens/core/bench/legacy-import";
 import { catalog, clearCatalogCache } from "../lib/data";
 import { initialSelection, latestGameRun } from "../lib/initial-selection";
 import { benchmarkAttachment, benchmarkCatalog, benchmarkEvidence } from "../lib/benchmark-data";
@@ -277,6 +276,7 @@ test("evidence keeps source event identity distinct from a colliding run-local s
     const proof = await benchmarkEvidence("ws-bench", trial.id, {}, f.root);
     assert.deepEqual(proof.evidence.items.map(item => [item.available, item.event?.type]), [[true, "model_end"], [true, "action_end"], [false, undefined]]);
     assert.match(benchmarkRunUrl(trial, proof.evidence.items[0].event), /call=call/);
+    assert.equal(new URL(benchmarkRunUrl(trial), "http://localhost").searchParams.get("view"), "perf");
   } finally { await f.cleanup(); }
 });
 
@@ -312,32 +312,6 @@ test("comparison retains verifier and conditions identity and labels a re-score 
   } finally { await f.cleanup(); }
 });
 
-test("one-time legacy import preserves a fixed report link without a query-time legacy adapter", async () => {
-  const f = await fixture();
-  try {
-    const runId = "legacy-run", directory = join(f.workspace, "logs", runId);
-    await mkdir(join(directory, "reports"), { recursive: true });
-    await json(join(directory, "manifest.json"), { kind: "benchmark", benchmark: { id: "legacy", revision: "1", protocolVersion: "1" }, drivers: [] });
-    await json(join(directory, "benchmark.json"), { schemaVersion: 3, runId, project: "ws-bench", workspace: f.workspace, status: "completed", startedAt: at, endedAt: at,
-      definition: { id: "legacy", revision: "1", protocolVersion: "1" } });
-    const report = { schemaVersion: 1, id: "report-1", runId, createdAt: at, reason: "manual revision", previousReportId: null, protocolVersion: "1",
-      outcome: { metrics: [{ id: "latency", value: 12 }], checks: [{ id: "goal", passed: false }] } };
-    await json(join(directory, "reports/report-1.json"), report);
-    const source = await readFile(join(directory, "reports/report-1.json"), "utf8");
-    await importLegacyTrial(f.workspace, runId);
-    clearCatalogCache();
-    const request = parseBenchmarkRequest(new URLSearchParams(`project=ws-bench&run=${runId}&report=report-1`));
-    assert.equal(request.kind, "detail"); if (request.kind !== "detail") return;
-    const proof = await benchmarkEvidence(request.project, request.run, request.query, f.root);
-    assert.equal(proof.result.verification?.id, "report-1");
-    assert.deepEqual(proof.result.verifier_result.rewards, { latency: 12 });
-    assert.equal(proof.result.trial.legacy?.originalId, "legacy");
-    assert.ok(proof.evidence.items.some(item => item.reference.kind === "file" && item.reference.path === "reports/report-1.json" && item.available));
-    assert.equal(await readFile(join(directory, "reports/report-1.json"), "utf8"), source);
-    const list = await benchmarkCatalog({}, f.root, f.repository);
-    assert.equal(list.history.trials[0].id, runId);
-  } finally { await f.cleanup(); }
-});
 
 test("request and link helpers preserve explicit verification selections and reject ambiguous requests", async () => {
   const f = await fixture();

@@ -1,7 +1,7 @@
 import { readdir, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
-import type { TaskDefinition } from "../core/storage/contract.ts";
+import type { TaskDefinition } from "../bench/contract.ts";
 import { readTask } from "./task.ts";
 import { discoverBindings, type TaskWithBindings } from "./bindings.ts";
 export const repositoryTasksRoot = fileURLToPath(new URL("../../benchmarks/tasks/", import.meta.url));

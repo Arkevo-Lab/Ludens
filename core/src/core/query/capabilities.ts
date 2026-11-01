@@ -4,7 +4,7 @@ import { delimiter, join } from "node:path";
 import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { discoverTasks } from "@ludens/core/bench/catalog";
-import { isObject } from "@ludens/core/core/storage/contract";
+import { isObject } from "@ludens/core/bench/contract";
 import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
 
 export interface CapabilityEntry {

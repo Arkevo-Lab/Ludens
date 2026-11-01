@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { EventLog } from "../storage/events.ts";
-import { atomicJson } from "../storage/store.ts";
+import { atomicJson } from "../../bench/store.ts";
 import type { BenchmarkContext } from "../../bench/types.ts";
 import type { ProgramMessage } from "./program.ts";
 

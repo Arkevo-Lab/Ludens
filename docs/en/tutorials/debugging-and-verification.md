@@ -18,8 +18,8 @@ Catalog scripts run in their component directory. Bun packages use `bun run <com
 | Component directory | Package-level commands | Special commands and entries |
 | --- | --- | --- |
 | `baseware` | `typecheck`, `test` | `baseware`: run the device-service CLI. |
-| `core` | `typecheck`: check TypeScript and Python; `test`: run the default test suites of both languages. | `typescript:typecheck`, `python:typecheck`: check one language only; `typescript:test`, `python:test`: run one language's tests only; `omp:test:transport`: run the OMP WebSocket transport-recovery tests; `ludens`: run the Host CLI. |
-| `app` | `dev`, `build`, `start`, `test`, `typecheck` | `build:check`: verify the existing production build matches the current source fingerprint. |
+| `core` | `typecheck`: check TypeScript and Python; `test`: run the default test suites of both languages. | `typescript:typecheck`, `python:typecheck`: check one language only; `typescript:test`, `python:test`: run one language's tests only; `omp:test:transport`: run the OMP WebSocket transport-recovery tests; `perf`: run the subsystem performance baselines (`control-handoff`, `perception-lifecycle`, `video-storage`); `ludens`: run the Host CLI. |
+| `app` | `dev`, `build`, `start`, `test`, `typecheck` | `build:check`: verify the existing production build matches the current source fingerprint; `perf`: run the `index-memory` baseline on a synthetic run (cold-build and query memory/latency budgets). |
 | `app` (desktop) | `desktop:build`: produce Electron artifacts with esbuild; `desktop:start`, `desktop:test`, `desktop:typecheck` | `pet:preview`: interactive pet preview; `pet:smoke`: interactive pet smoke test. Both run `desktop:build` first. |
 
 ## Standalone Components and Consoles
@@ -61,7 +61,8 @@ When `ludens up` needs to start Dashboard fresh, it calls `npm run build:check` 
 Open `http://127.0.0.1:3015` in a browser to use the console. The sidebar is grouped by scope: **Workspace** pages show the active workspace's run data, **Global** pages hold settings and catalogs independent of any single run, and **Developer** pages host mechanism workbenches; the run/cycle selector and live-refresh toggle appear only in headers that use run context.
 
 - **Run & replay (`?view=live` / `?view=replay`)**: watch model reasoning streams, tool calls, device inputs, and perception frames live, or replay sampled frames and events synchronously on the history timeline. Archive worker, cold-index builder subprocess, and memory budgets: see [Consumption and Metrics](../reference/logging.md#consumption-and-metric-interpretation).
-- **Performance & benchmarks (`?view=benchmark`)**: inspect per-request latency, caches, and call-chain profiling, or browse cross-workspace Harbor task runs and score comparisons in the "benchmark catalog" (`?view=benchmark&bench=cases`).
+- **Run performance (`?view=perf`)**: inspect per-request transport latency, cache hit rate, and explicit call-chain profiling (`RunAnalysis`) for the selected run.
+- **Benchmark catalog (`?view=benchmark`)**: browse Harbor evaluation tasks, trial execution history, and baseline score comparisons (`BenchmarkCases`).
 - **Capability catalog & driver validation (`?view=caps`)**: statically display the selected workspace's device catalog snapshot (`baseware.json`), Python `@capability` declarations, and Harbor eval tasks, plus online validation of external driver packages and `ludens init` command generation.
 - **Perception settings (`?view=perception`)**: configure the selected workspace's hot-window seconds, video segment duration, and idle-stop finalization seconds (written to `.ludens/settings.json`, effective after `ludens perception reload`).
 - **Workspaces (`?view=workspaces`)**: search and open registered folders, create a new workspace, add an existing directory, or change the default parent directory in the same `LUDENS_HOME`.
@@ -96,7 +97,7 @@ The following core component checks are fully offline — no external model or r
 ```sh
 (cd baseware && bun run typecheck && bun test)
 python3 baseware/scripts/sync-cua-contract.py --check
-(cd ludens && bun run typecheck && bun run test)
+(cd core && bun run typecheck && bun run test)
 (cd app && npm test && npm run typecheck && npm run build)
 ```
 
@@ -106,15 +107,22 @@ The `app` package also covers the desktop companion; run its checks too:
 (cd app && npm run desktop:typecheck && npm run desktop:test)
 ```
 
-To stress Dashboard cold-index builds and memory reclamation against real large run logs in isolation, run the offline check script with an isolated cache directory:
+The `index-memory` perf baseline moved to [perf/index-memory.ts](../../../app/perf/index-memory.ts). `npm run perf` generates a synthetic multi-megabyte run, drives the cold index builder under `--max-old-space-size=1024 --expose-gc`, asserts the RSS / heap / retained-after-release / cold-build / paged-query budgets, and exits non-zero on violation. The synthetic workload pairs every `model_start`/`model_end` and `tool_start`/`tool_end` on one shared span with valid `modelCallId`/`toolCallId` identities (plus capability and shiori spans), so the measurement also asserts the exact expected model-call and operation coverage — an empty projection fails instead of passing silently:
+
+```sh
+cd app && npm run perf
+```
+
+To inspect a real large run instead, keep `--run` (and optionally `--out`) pointing at it:
 
 ```sh
 cd app
-node --expose-gc --max-old-space-size=1024 --import tsx scripts/check-index-memory.ts \
+node --expose-gc --max-old-space-size=1024 --import tsx perf/index-memory.ts \
   --run /absolute/path/to/workspace/logs/run-id \
   --cache-root /absolute/path/to/temporary-index \
   --output /absolute/path/to/report.json --epoch epoch-id
 ```
+The core `video-storage` baseline measures recording throughput through the queue drain and segment finalization on `history.close`, excluding later cold decode; budgets are unchanged, and hardware- or load-dependent shortfalls must be reported, not suppressed.
 
 ### 2. Pet Interaction Smoke and Pose Rules
 

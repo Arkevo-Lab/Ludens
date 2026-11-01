@@ -185,7 +185,7 @@ h3 {
 .sidebar .brand { flex-shrink: 0; }
 .sidebar-menu-control { display: none; }
 .sidebar-scroll-area { display: flex; flex: 1; flex-direction: column; gap: 22px; min-width: 0; min-height: 0; padding: 6px; margin: -6px; overflow-y: auto; overscroll-behavior: contain; scroll-padding-block: 6px; }
-.sidebar-scroll-area > .sidebar-navigation, .sidebar-scroll-area > .pet-follow-card { flex-shrink: 0; }
+.sidebar-scroll-area > .sidebar-navigation { flex-shrink: 0; }
 .sidebar-footer { grid-column: 1 / -1; display: flex; min-width: 0; flex-direction: column; flex-shrink: 0; }
 .sidebar-settings { border-top: 1px solid var(--line); padding-top: 10px; }
 .sidebar nav {

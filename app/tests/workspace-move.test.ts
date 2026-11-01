@@ -9,7 +9,7 @@ import { catalog, clearCatalogCache, controlState, openRun } from "../lib/data";
 import { eventFiles } from "../lib/event-files";
 import { LogIndex, closeLogIndexes } from "../lib/log-index";
 import { petState, setPetTarget } from "../lib/pet-state";
-import { trialSummary, type Trial } from "@ludens/core/core/storage/contract";
+import { trialSummary, type Trial } from "@ludens/core/bench/contract";
 import { benchmarkCatalog, benchmarkEvidence } from "../lib/benchmark-data";
 import { benchmarkRunUrl, resultKey } from "../lib/benchmarks";
 

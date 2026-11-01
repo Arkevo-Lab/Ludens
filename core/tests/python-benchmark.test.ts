@@ -167,3 +167,16 @@ assert not list(trial.artifacts.glob('*.bin'))`);
     expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
   } finally { await rm(f.root, { recursive: true, force: true }); }
 });
+
+test("clamp fixture example records seeded measurements through current_trial", async () => {
+  const f = await fixture();
+  try {
+    await writeFile(join(f.workspace, "clamp.py"), await readFile(resolve(import.meta.dir, "fixtures/clamp.py")));
+    const result = await f.run(`from clamp import evaluate
+facts = evaluate(samples=50)
+assert len(facts["inputs"]) == 50 and facts["elapsedMs"] >= 0`);
+    expect(result).toEqual({ code: 0, stdout: "", stderr: "" });
+    const measurements = JSON.parse(await readFile(join(f.artifacts, "measurements.json"), "utf8"));
+    expect(measurements.inputs).toHaveLength(50);
+  } finally { await rm(f.root, { recursive: true, force: true }); }
+});

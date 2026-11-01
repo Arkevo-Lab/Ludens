@@ -1,5 +1,5 @@
 "use client";
-import { LoopLab } from "@/features/benchmark/loop-lab";
+import { LoopLab } from "@/shell/loop-lab";
 
 /** Local mechanics explainer. Navigation never applies a real workspace setting. */
 export function DevPanel({ navigate }: { navigate: (patch: Record<string, string | null>) => void }) {

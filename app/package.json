@@ -15,7 +15,8 @@
     "desktop:test": "vitest run",
     "desktop:start": "electron dist/electron/main.js",
     "pet:preview": "npm run desktop:build && electron dist/electron/companion-preview.js",
-    "pet:smoke": "npm run desktop:build && electron dist/electron/companion-preview.js --smoke"
+    "pet:smoke": "npm run desktop:build && electron dist/electron/companion-preview.js --smoke",
+    "perf": "node --expose-gc --max-old-space-size=1024 --import tsx perf/index-memory.ts"
   },
   "dependencies": {
     "@ludens/protocol": "file:../protocol",

@@ -22,6 +22,6 @@ export function workspaceRunLinks(project: string | undefined, locale: "en" | "z
     workspaces: link({ view: "workspaces" }),
     capabilities: project ? link({ view: "caps", project }) : undefined,
     quickstart: link({ view: "docs", doc: "tutorials/quickstart", docLang: locale }),
-    benchmark: project && benchmarkRun ? link({ view: "benchmark", project, run: benchmarkRun }) : undefined,
+    benchmark: project && benchmarkRun ? link({ view: "perf", project, run: benchmarkRun }) : undefined,
   };
 }

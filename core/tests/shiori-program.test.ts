@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Runtime } from "../src/core/shiori/runtime.ts";
 import { runTask, verifyTask } from "../src/bench/shiori-benchmark.ts";
+import { createLocalTask } from "./fixtures/local-task.ts";
 
 test("a completed program cannot leave a background process holding output pipes and consuming the remaining budget", async () => {
   const root = await mkdtemp(join(tmpdir(), "shiori-pipes-"));
@@ -32,12 +33,10 @@ test("invalid verifier budget is rejected before a pending verification can be c
   const root = await mkdtemp(join(tmpdir(), "shiori-verify-budget-")), workspace = join(root, "workspace");
   await mkdir(workspace);
   try {
-    const result = await runTask("ludens/clamp", { workspace, globalHome: join(root, "index"), parameters: { samples: 10 }, verify: false });
+    const { taskPath: task } = await createLocalTask(workspace);
+    const result = await runTask("ludens/smoke", { workspace, globalHome: join(root, "index"), verify: false });
     expect(result.trial.status).toBe("completed");
-    const task = join(workspace, "benchmarks/tasks/clamp");
-    await mkdir(join(task, "tests"), { recursive: true }); await mkdir(join(task, "environment"));
-    await writeFile(join(task, "task.toml"), 'schema_version="1.4"\n[task]\nname="ludens/clamp"\n[verifier]\ntimeout_sec=2147483647\n');
-    await writeFile(join(task, "instruction.md"), "Score fixed evidence"); await writeFile(join(task, "tests/test.sh"), "exit 0\n");
+    await writeFile(join(task, "task.toml"), 'schema_version="1.4"\n[task]\nname="ludens/smoke"\n[verifier]\ntimeout_sec=2147483647\n');
     await expect(verifyTask(workspace, result.trial.id, { taskPath: task })).rejects.toThrow("budget");
     expect(await readdir(join(workspace, "logs", result.trial.id, "verifier")).catch(() => [])).toEqual([]);
   } finally { await rm(root, { recursive: true, force: true }); }

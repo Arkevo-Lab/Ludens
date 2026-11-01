@@ -18,8 +18,8 @@
 | 组件目录 | 包级命令 | 专用命令与入口 |
 | --- | --- | --- |
 | `baseware` | `typecheck`、`test` | `baseware`：运行设备服务 CLI。 |
-| `core` | `typecheck`：检查 TypeScript 与 Python；`test`：运行两种语言的默认测试集。 | `typescript:typecheck`、`python:typecheck`：单独检查对应语言；`typescript:test`、`python:test`：单独运行对应语言测试；`omp:test:transport`：运行 OMP WebSocket 传输恢复测试；`ludens`：运行 Host CLI。 |
-| `app` | `dev`、`build`、`start`、`test`、`typecheck` | `build:check`：校验现有生产构建与当前源码指纹是否一致。 |
+| `core` | `typecheck`：检查 TypeScript 与 Python；`test`：运行两种语言的默认测试集。 | `typescript:typecheck`、`python:typecheck`：单独检查对应语言；`typescript:test`、`python:test`：单独运行对应语言测试；`omp:test:transport`：运行 OMP WebSocket 传输恢复测试；`perf`：运行子系统性能基线（`control-handoff`、`perception-lifecycle`、`video-storage`）；`ludens`：运行 Host CLI。 |
+| `app` | `dev`、`build`、`start`、`test`、`typecheck` | `build:check`：校验现有生产构建与当前源码指纹是否一致；`perf`：在合成运行上执行 `index-memory` 基线（冷构建与查询的内存/延迟预算）。 |
 | `app` | `build`：使用 esbuild 生成 Electron 产物；`start`、`test`、`typecheck` | `pet:preview`：桌宠交互预览；`pet:smoke`：桌宠交互冒烟测试。两者都会先执行 `build`。 |
 
 ## 独立组件与控制台
@@ -61,7 +61,8 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 打开浏览器访问 `http://127.0.0.1:3015` 即可使用控制台。侧栏按作用域分段：**工作区**段展示当前工作区的运行信息，**全局**段放不依赖具体运行的页面，**开发者**段放原理展示工具；运行/周期选择器与实时刷新开关只出现在需要运行上下文的页面头部。
 
 - **运行与回放（`?view=live` / `?view=replay`）**：实时查看模型推理流、工具调用、设备输入与感知画面，或在历史时间轴上同步回放采样帧与事件。归档 worker、冷索引构建子进程与内存预算详见 [消费与指标解释](../reference/logging.md#消费与指标解释)。
-- **性能与评测（`?view=benchmark`）**：查看单次请求的耗时、缓存与调用链剖析，或在“评测目录”（`?view=benchmark&bench=cases`）中查看跨工作区的 Harbor 任务执行历史与评分对比。
+- **运行性能（`?view=perf`）**：查看当前所选运行的单次请求传输等待、缓存命中率与显式调用链剖析（`RunAnalysis`）。
+- **评测目录（`?view=benchmark`）**：查看 Harbor 评测任务、试验执行历史与基线评分对比（`BenchmarkCases`）。
 - **能力目录与驱动校验（`?view=caps`）**：静态展示当前选中工作区的设备目录快照（`baseware.json`）、Python `@capability` 声明及 Harbor 评测任务，并提供外部驱动包的在线校验与 `ludens init` 命令生成。
 - **感知配置（`?view=perception`）**：配置所选工作区的热窗口秒数、视频分段时长与停采空闲收尾秒数（写入 `.ludens/settings.json`，执行 `ludens perception reload` 后生效）。
 - **工作区管理（`?view=workspaces`）**：创建新工作区（名称与可选目录）、登记已有目录、只移除索引，以及设置默认父目录；读取同一 `LUDENS_HOME` 下的配置与 `registry/<id>.json`。
@@ -96,7 +97,7 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 ```sh
 (cd baseware && bun run typecheck && bun test)
 python3 baseware/scripts/sync-cua-contract.py --check
-(cd ludens && bun run typecheck && bun run test)
+(cd core && bun run typecheck && bun run test)
 (cd app && npm test && npm run typecheck && npm run build)
 ```
 
@@ -106,15 +107,22 @@ python3 baseware/scripts/sync-cua-contract.py --check
 (cd app && npm run desktop:typecheck && npm run desktop:test)
 ```
 
-需要针对真实大型运行日志单独压测 Dashboard 冷索引构建与内存回收时，可使用隔离缓存目录运行离线检查脚本：
+`index-memory` 性能基线已迁移到 [perf/index-memory.ts](../../../app/perf/index-memory.ts)。`npm run perf` 会生成一个数 MB 的合成运行，在 `--max-old-space-size=1024 --expose-gc` 下驱动冷索引构建，校验 RSS / 堆内存 / 释放后留存 / 冷构建 / 分页查询预算，任一超限即以非零码退出。合成负载为每次 `model_start`/`model_end` 与 `tool_start`/`tool_end` 配对同一 span 上的有效 `modelCallId`/`toolCallId`（另含 capability 与 shiori span），测量同时断言精确的预期模型调用与操作覆盖——空投影会失败，不会悄悄通过：
+
+```sh
+cd app && npm run perf
+```
+
+如需检查真实大型运行日志，改用 `--run`（可另加 `--out`）指向该运行：
 
 ```sh
 cd app
-node --expose-gc --max-old-space-size=1024 --import tsx scripts/check-index-memory.ts \
+node --expose-gc --max-old-space-size=1024 --import tsx perf/index-memory.ts \
   --run /absolute/path/to/workspace/logs/run-id \
   --cache-root /absolute/path/to/temporary-index \
   --output /absolute/path/to/report.json --epoch epoch-id
 ```
+核心 `video-storage` 基线经 `history.close` 时的队列排空与分段落盘计量录制吞吐，不含之后的冷解码；预算不变，与硬件或负载相关的未达标必须如实报告，不得压制。
 
 ### 2. 桌宠交互冒烟与姿态规则
 

@@ -1,7 +1,7 @@
 import { readFile, readdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isObject, type TaskDefinition } from "../core/storage/contract.ts";
+import { isObject, type TaskDefinition } from "../bench/contract.ts";
 
 export interface RunConfiguration {
   task: string; argv: string[]; cwd?: string; workspace?: "current" | "isolated";

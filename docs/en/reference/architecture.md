@@ -46,8 +46,8 @@ The repository is organized as a Bun workspace with `@ludens/protocol` as the ze
 | `core/src/core/subsystems/` | **Workspace resident and device subsystems**: Python perception/action workers, `@capability` discovery, Baseware device sessions. |
 | `core/src/core/agent-omp/` | **OMP AgentRunner implementation**: OMP session assembly, the Ludens extension, and model-trace recording behind a narrow `ExtensionHost` interface. |
 | `core/src/core/query/` | **Query and projection engine**: log/run/operation indexes, cold builds, activity/replay/telemetry projections consumed by the Dashboard and Ludens Pet. |
-| `core/src/daemon/`, `core/src/bench/`, `core/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, Harbor benchmark runner, and the pure CLI front end. |
-| `app/shell/` + `app/features/` | **Console views**: the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `benchmark`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `app/components/ui/`. |
+| `core/src/daemon/`, `core/src/bench/`, `core/src/perf/`, `core/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, Harbor evaluation runner (`bench`), subsystem performance baselines (`perf`), and the pure CLI front end. |
+| `app/shell/` + `app/features/` + `app/perf/` | **Console views and app perf** (loop workbench in `shell/`, `index-memory` baseline in `perf/`): the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `benchmark`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `app/components/ui/`. |
 
 
 ## Devices and Unified Capabilities

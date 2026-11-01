@@ -43,14 +43,14 @@ To ensure reliable recovery, we decoupled the connection-recovery state machine 
 
 Network edge cases that take five or six hours to trigger cannot be debugged by running an eight-hour live session after every code change.
 
-During implementation we built an offline transport-layer test suite ([core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)) and a companion benchmark ([ws-recovery.ts](../../../core/src/bench/cases/ws-recovery.ts)): in-process fixtures stub the WebSocket and HTTP layers beneath `streamOpenAICodexResponses`, and a virtual clock advances the 60 s cooldown without live model calls:
+During implementation we built an offline transport-layer test suite ([core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)) and a companion benchmark ([ws-recovery.ts](../../../core/tests/ws-recovery.test.ts)): in-process fixtures stub the WebSocket and HTTP layers beneath `streamOpenAICodexResponses`, and a virtual clock advances the 60 s cooldown without live model calls:
 
 ```sh
-(cd ludens && bun run omp:test:transport)
-(cd ludens && bun run typecheck)
+(cd core && bun run omp:test:transport)
+(cd core && bun run typecheck)
 
 # Generate benchmark records viewable with event and scoring evidence in the Dashboard:
-core/bin/ludens --workspace /absolute/path/to/workspace bench run ludens/ws-recovery
+cd core && bun test tests/ws-recovery.test.ts
 ```
 
 The suite covers **13 scenario classes** (including the R3 `Agent.prompt` end-to-end single-execution tool-callback regression):
@@ -71,4 +71,4 @@ The suite covers **13 scenario classes** (including the R3 `Agent.prompt` end-to
 | `1009` after a tool was delivered | Size over-limit hit after tool submission | Current request does not replay the tool, and records the size block; SSE continues until compaction completes, then WS recovers. |
 | Human handoff or budget-expiry cancellation | `AbortSignal` fires mid-handshake / mid-output / mid-error | Exit immediately as `aborted` — no extra SSE requests, no pollution of the next round's transport state machine. |
 
-Before every planned OMP upgrade, run `bun run omp:test:transport` and `ludens bench run ludens/ws-recovery` first, and check whether upstream changes broke any of these controlled recovery behaviors. The virtual clock and transport fixtures do not measure real reconnect latency and do not prove production never drops; for long runs, scheduling, and throughput, consult actual run logs.
+Before every planned OMP upgrade, run `bun run omp:test:transport` and `cd core && bun test tests/ws-recovery.test.ts` first, and check whether upstream changes broke any of these controlled recovery behaviors. The virtual clock and transport fixtures do not measure real reconnect latency and do not prove production never drops; for long runs, scheduling, and throughput, consult actual run logs.

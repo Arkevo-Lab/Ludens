@@ -46,8 +46,8 @@ flowchart LR
 | `core/src/core/subsystems/` | **工作区常驻与设备子系统**：Python 感知/动作 Worker、`@capability` 发现、Baseware 设备会话。 |
 | `core/src/core/agent-omp/` | **OMP AgentRunner 实现**：OMP 会话组装、Ludens 扩展与模型 Trace 记录，通过窄接口 `ExtensionHost` 暴露宿主能力。 |
 | `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、冷构建、活动/回放/遥测投影，供 Dashboard 与 Ludens Pet 消费。 |
-| `core/src/daemon/`、`core/src/bench/`、`core/src/cli/` | **外壳层**：Unix Socket RPC 守护进程与服务编排、Harbor 评测执行器、纯 CLI 前端。 |
-| `app/shell/` + `app/features/` | **控制台视图**：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`benchmark`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
+| `core/src/daemon/`、`core/src/bench/`、`core/src/perf/`、`core/src/cli/` | **外壳层**：Unix Socket RPC 守护进程与服务编排、Harbor 评测执行器（`bench`）、子系统性能基线（`perf`）、纯 CLI 前端。 |
+| `app/shell/` + `app/features/` + `app/perf/` | **控制台视图与应用性能基线**（循环工作台位于 `shell/`，`index-memory` 基线位于 `perf/`）：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`benchmark`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
 
 
 ## 设备与统一能力
