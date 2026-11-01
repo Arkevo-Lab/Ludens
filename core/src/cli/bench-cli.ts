@@ -3,8 +3,8 @@ import { resolve } from "node:path";
 import { readFile, stat } from "node:fs/promises";
 import { parseArgs } from "node:util";
 import { discoverTasks, resolveTask } from "../bench/catalog.ts";
-import { compareResults, isObject, validateRewards } from "../core/storage/contract.ts";
-import { get, history, verifications, rebuildHistoryIndex } from "../core/storage/store.ts";
+import { compareResults, isObject, validateRewards } from "../bench/contract.ts";
+import { get, history, verifications, rebuildHistoryIndex } from "../bench/store.ts";
 import { readTask, HARBOR_CONTRACT_REVISION } from "../bench/task.ts";
 import { readDataset } from "../bench/dataset.ts";
 import { readReward } from "../bench/reward.ts";
@@ -19,7 +19,6 @@ ludens bench history [namespace/task] [--cursor id] [--limit n]
 ludens bench verifications <run-id> [--cursor id] [--limit n]
 ludens bench compare <run-id[@verification-id]> <run-id[@verification-id]>
 ludens bench aggregate <dataset.toml> <run-id[@verification-id]>... [--policy all|graded]
-ludens bench import-legacy [run-id]
 ludens bench rebuild-index
 ludens bench schema [task|reward|dataset]
 ludens bench validate task <task-directory>
@@ -105,10 +104,6 @@ export async function benchmarkCommand(args: string[], globalHome: string, works
       if (positionals.length < 2) throw new Error("aggregate requires explicitly selected trials");
       if (values.policy && values.policy !== "all" && values.policy !== "graded") throw new Error("--policy must be all|graded");
       output = await aggregateTasks(workspace, resolve(requireValue()), positionals.slice(1), { policy: values.policy as "all" | "graded" | undefined, globalHome }); break;
-    }
-    case "import-legacy": {
-      const { importLegacyTrial, importLegacyHistory } = await import("../bench/legacy-import.ts");
-      output = positionals[0] ? await importLegacyTrial(workspace, positionals[0]) : await importLegacyHistory(workspace); break;
     }
     case "rebuild-index": output = await rebuildHistoryIndex(workspace); break;
     default: throw new Error(`Unknown benchmark command: ${command}`);

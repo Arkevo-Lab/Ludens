@@ -12,8 +12,8 @@ import { resolveTask } from "./catalog.ts";
 import { readRunConfiguration, type RunConfiguration } from "./bindings.ts";
 import { readDataset, prepareMetricInput, meanRewards } from "./dataset.ts";
 import { pinTask, readTask } from "./task.ts";
-import { benchmarkEventSummary, isObject, validateRewards, type Trial, type EvidenceReference, type TaskDefinition, type Verification } from "../core/storage/contract.ts";
-import { atomicJson, createTrial, finishTrial, createVerification, finishVerification, get, readTrial, indexWorkspace } from "../core/storage/store.ts";
+import { benchmarkEventSummary, isObject, validateRewards, type Trial, type EvidenceReference, type TaskDefinition, type Verification } from "../bench/contract.ts";
+import { atomicJson, createTrial, finishTrial, createVerification, finishVerification, get, readTrial, indexWorkspace } from "../bench/store.ts";
 
 const ludens = resolve(import.meta.dir, "../..");
 const identity = (task: TaskDefinition) => ({ name: task.name, digest: task.digest, ...(task.version ? { version: task.version } : {}) });

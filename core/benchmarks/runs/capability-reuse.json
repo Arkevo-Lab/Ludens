@@ -3,7 +3,7 @@
   "argv": [
     "{bun}",
     "{core}/src/core/shiori/module-program.ts",
-    "{core}/src/bench/cases/capability-reuse.ts"
+    "{core}/src/bench/capability-reuse.ts"
   ],
   "workspace": "isolated",
   "seconds": 180,

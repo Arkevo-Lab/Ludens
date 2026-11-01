@@ -3,12 +3,11 @@ import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { compareResults, validateRewards, type Trial, type Verification } from "../src/core/storage/contract.ts";
+import { compareResults, validateRewards, type Trial, type Verification } from "../src/bench/contract.ts";
 import { discoverTasks } from "../src/bench/catalog.ts";
 import { datasetDigest, meanRewards, prepareMetricInput, readDataset } from "../src/bench/dataset.ts";
-import { importLegacyTrial } from "../src/bench/legacy-import.ts";
 import { readReward } from "../src/bench/reward.ts";
-import { createTrial, createVerification, finishTrial, finishVerification, get, history, inspectEvidence, readTrial, verifications } from "../src/core/storage/store.ts";
+import { createTrial, createVerification, finishTrial, finishVerification, get, history, inspectEvidence, readTrial, verifications } from "../src/bench/store.ts";
 import { pinTask, readTask, taskDigest } from "../src/bench/task.ts";
 
 const roots: string[] = [];
@@ -214,21 +213,6 @@ test("comparison reports differing settings and scoring without suppressing nume
   baseline.verifier_result.rewards = null;
   expect(compareResults(result, baseline).rewards.every(row => row.baseline === null && row.delta === null)).toBe(true);
 });
-
-test("legacy is explicit one-time import, fixed report links and diagnostic unknown checks survive", async () => {
-  const root = await temporary(), id = "legacy-run", run = join(root, "logs", id);
-  const old = { schemaVersion: 3, runId: id, workspace: root, project: "ws-old", status: "completed", startedAt: "2026-10-27T00:00:00Z", endedAt: "2026-10-27T00:01:00Z", durationMs: 60_000, definition: { id: "old-check", protocolVersion: "1" }, parameters: {}, conditions: {}, subjects: [] };
-  await file(join(run, "benchmark.json"), JSON.stringify(old));
-  await file(join(run, "reports/r1.json"), JSON.stringify({ schemaVersion: 1, id: "r1", runId: id, createdAt: old.endedAt, protocolVersion: "1", previousReportId: null, reason: "initial", outcome: { checks: [{ id: "unknown", passed: null }], metrics: [{ id: "latency", value: 2 }, { id: "missing", value: null }] } }));
-  expect((await history(root)).trials).toEqual([]);
-  expect((await importLegacyTrial(root, id)).imported).toBe(true);
-  const result = await get(root, id, "r1");
-  expect(result.verifier_result.rewards).toEqual({ latency: 2 });
-  expect(result.verification?.legacy?.originalId).toBe("r1");
-  expect(JSON.parse(await readFile(join(run, "reports/r1.json"), "utf8")).outcome.checks[0].passed).toBeNull();
-  expect((await importLegacyTrial(root, id)).imported).toBe(false);
-});
-
 
 test("publisher root negation semantics and case-sensitive paths match Harbor", async () => {
   const root = await temporary(), path = await task(join(root, "task"));

@@ -12,10 +12,10 @@ import { PythonCapabilities, pythonModulePaths } from "../src/core/subsystems/py
 import { EventLog, type RecordEvent } from "../src/core/storage/events.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
 import { listen as listenLudens } from "../src/daemon/transport.ts";
-import { renderBoard } from "../src/bench/fixtures/reuse-board.ts";
-import { ReuseEnvironment } from "../src/bench/fixtures/reuse-environment.ts";
+import { renderBoard } from "../src/bench/reuse-board.ts";
+import { ReuseEnvironment } from "../src/bench/reuse-environment.ts";
 import { evaluateReuse, type ReuseEvent } from "../benchmarks/tasks/capability-reuse/tests/evaluate.ts";
-import { freezeReuseEvents } from "../src/bench/fixtures/reuse-facts.ts";
+import { freezeReuseEvents } from "../src/bench/reuse-facts.ts";
 import { readArtifactSync } from "@ludens/protocol/log-archive";
 
 const passed = (events: ReuseEvent[], epoch: string, id: string, runDir?: string) =>

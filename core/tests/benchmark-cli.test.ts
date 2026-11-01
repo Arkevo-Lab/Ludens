@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promise
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { runTask, verifyTask, aggregateTasks } from "../src/bench/shiori-benchmark.ts";
-import { get, history, inspectEvidence } from "../src/core/storage/store.ts";
-import { compareResults, type BenchmarkResult } from "../src/core/storage/contract.ts";
+import { get, history, inspectEvidence } from "../src/bench/store.ts";
+import { compareResults, type BenchmarkResult } from "../src/bench/contract.ts";
 import { readTask } from "../src/bench/task.ts";
 import { discoverTasks, resolveTask } from "../src/bench/catalog.ts";
 import { readRunConfiguration } from "../src/bench/bindings.ts";

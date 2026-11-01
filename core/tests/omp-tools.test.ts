@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { afterEach, expect, test } from "bun:test";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,6 +8,19 @@ import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extensi
 import { PerceptionRuntime, perceptionInput, type PerceptionRead, type PerceptionStatus } from "../src/core/subsystems/perception.ts";
 import { captureResult, createTestRuntime } from "./runtime-fixture.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
+
+// The production extension injects LUDENS_*/BASEWARE_* into process.env for native
+// shells and restores them on session_shutdown; tests that skip shutdown must not
+// leak those keys into later suites (e.g. workspace-launch's spawned CLI).
+const injected = ["LUDENS_SOCKET", "LUDENS_WORKSPACE", "LUDENS_RUN_ID", "LUDENS_LOG_DIAGNOSTICS",
+  "LUDENS_ARTIFACT_ROOT", "BASEWARE_SOCKET", "BASEWARE_EPOCH", "BASEWARE_TRACE", "LUDENS_EPOCH", "LUDENS_TRACE"];
+const priorEnvironment = Object.fromEntries(injected.map(key => [key, process.env[key]]));
+afterEach(() => {
+  for (const [key, value] of Object.entries(priorEnvironment)) {
+    if (value === undefined) Reflect.deleteProperty(process.env, key);
+    else process.env[key] = value;
+  }
+});
 
 test("request budgets reset on a new takeover while repeated prompts share the same epoch budget", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ludens-epoch-budget-"));

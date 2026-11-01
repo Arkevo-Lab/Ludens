@@ -3,36 +3,8 @@ schema_version = "1.0"
 [dataset]
 name = "ludens/native"
 version = "1"
-description = "Ludens native harness, capability and storage tasks; execution bindings are separate."
-
-[[tasks]]
-name = "ludens/background-compaction"
-digest = "sha256:476d1631d70660ed5d7e7bebde1e68f4a33058d3fe218407f62427c411114e7d"
+description = "Ludens native agent evaluation tasks; subsystem performance baselines live in core/src/perf/ and app/perf/."
 
 [[tasks]]
 name = "ludens/capability-reuse"
 digest = "sha256:c72daf04950c293c75dd4213c40dacfeb4472f6ff2ff059a1950f4671b110e5f"
-
-[[tasks]]
-name = "ludens/clamp"
-digest = "sha256:475cd8eb8379e11edc5d6ef71d84d347ee1db7886be6133927dca79746021181"
-
-[[tasks]]
-name = "ludens/control-handoff"
-digest = "sha256:e2c007ea76af17b06ed0bda6df0aa27f221cb53d46299e5ba6d1962ee38b2e48"
-
-[[tasks]]
-name = "ludens/index-memory"
-digest = "sha256:381f46925ffc7cad3e2f4385aaa9f4dc9baf9ef05673dbc988c6017a21194c45"
-
-[[tasks]]
-name = "ludens/perception-lifecycle"
-digest = "sha256:b6928c2c04a463c77ba211e6ff57ad12f2b255164ce6a755a4365daa80582135"
-
-[[tasks]]
-name = "ludens/video-storage"
-digest = "sha256:561b09d7822e61451626033afa9eac57664aedc60a4cb30ce06e9a9f490b1497"
-
-[[tasks]]
-name = "ludens/ws-recovery"
-digest = "sha256:028996821090ed10434f598c7191a3aa7a540f5de3cf8c8daf8291dbaf54054c"

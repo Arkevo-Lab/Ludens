@@ -14,6 +14,7 @@
     "./core/agent-omp/*": "./src/core/agent-omp/*.ts",
     "./daemon/*": "./src/daemon/*.ts",
     "./bench/*": "./src/bench/*.ts",
+    "./perf/*": "./src/perf/*.ts",
     "./cli/*": "./src/cli/*.ts",
     "./package.json": "./package.json"
   },
@@ -25,7 +26,8 @@
     "typescript:typecheck": "tsc --noEmit",
     "python:test": "uv run --project python --frozen python scripts/test-python.py",
     "python:typecheck": "uv run --project python --frozen mypy --config-file python/pyproject.toml python/ludens_tools",
-    "omp:test:transport": "bun test tests/omp-websocket.test.ts"
+    "omp:test:transport": "bun test tests/omp-websocket.test.ts",
+    "perf": "bun src/perf/runner.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",

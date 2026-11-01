@@ -1,7 +1,7 @@
 import { open, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { discoverTasks } from "@ludens/core/bench/catalog";
-import { get, history, inspectEvidence, verifications } from "@ludens/core/core/storage/store";
+import { get, history, inspectEvidence, verifications } from "@ludens/core/bench/store";
 import { readWorkspaceIdentity } from "@ludens/protocol/ludens";
 import { globalHome, catalog, resolveRun } from "./data";
 import type { Event, Manifest } from "./types";
@@ -27,7 +27,7 @@ export async function benchmarkCatalog(query: BenchmarkQuery = {}, root = global
     const manifest = runs.get(trial.runId);
     const identity = manifest?.benchmark;
     const matches = owner.id === project.id && historyOwners.has(trial.project) && manifest?.kind === "benchmark" &&
-      (trial.legacy || identity && "name" in identity && identity.name === trial.task.name && identity.digest === trial.task.digest);
+      (identity && "name" in identity && identity.name === trial.task.name && identity.digest === trial.task.digest);
     if (!matches) page.issues.push({ runId: trial.runId, error: "评测摘要与工作区或 manifest 身份不一致" });
     return !!matches;
   }).map(trial => ({ ...trial, project: project.id }));
@@ -52,7 +52,7 @@ async function selectedResult(project: string, run: string, verification: string
   const historyOwners = new Set([owner.id, ...(owner.historyIds ?? [])]);
   if (owner.id !== project || !historyOwners.has(result.trial.project) ||
     (manifest.workspaceId !== undefined && !historyOwners.has(manifest.workspaceId)) || result.trial.runId !== run || manifest.kind !== "benchmark" ||
-    !(result.trial.legacy || identity && "name" in identity && identity.name === result.trial.task.name && identity.digest === result.trial.task.digest))
+    !(identity && "name" in identity && identity.name === result.trial.task.name && identity.digest === result.trial.task.digest))
     throw new Error("评测结果与工作区或 manifest 身份不一致");
   // Links address the currently registered copy; stored execution identity stays untouched.
   return { workspace, result: { ...result, trial: { ...result.trial, project } } };

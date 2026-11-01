@@ -1,6 +1,6 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { validateRewards, type Rewards } from "../core/storage/contract.ts";
+import { validateRewards, type Rewards } from "../bench/contract.ts";
 import { containedPath } from "./task.ts";
 
 /** Harbor JSON has precedence. Invalid JSON never falls back to a stale reward.txt. */

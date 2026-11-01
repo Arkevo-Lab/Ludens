@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { parse } from "smol-toml";
-import { isObject, validateIdentity, validateRewards, type BenchmarkResult, type DatasetDefinition, type DatasetTask, type Rewards } from "../core/storage/contract.ts";
+import { isObject, validateIdentity, validateRewards, type BenchmarkResult, type DatasetDefinition, type DatasetTask, type Rewards } from "../bench/contract.ts";
 import { resolveTask } from "./catalog.ts";
 import { containedPath, hashFile } from "./task.ts";
 

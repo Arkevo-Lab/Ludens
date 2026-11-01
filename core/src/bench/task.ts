@@ -4,7 +4,7 @@ import { copyFile, mkdir, readFile, readdir, realpath, rename, rm, stat } from "
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import { parse } from "smol-toml";
-import { isObject, validateIdentity, type TaskConfig, type TaskDefinition } from "../core/storage/contract.ts";
+import { isObject, validateIdentity, type TaskConfig, type TaskDefinition } from "../bench/contract.ts";
 
 export const HARBOR_CONTRACT_REVISION = "f3a5a923f6d722472c9e797af836ae4425fb215f";
 const defaults = ["__pycache__/", "*.pyc", ".DS_Store", "*.swp", "*.swo", "*~"];
