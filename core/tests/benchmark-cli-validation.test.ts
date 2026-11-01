@@ -6,7 +6,7 @@ import { benchmarkCommand } from "../src/cli/bench-cli.ts";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))); });
-async function temporary() { const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-bench-static-"))); roots.push(root); return root; }
+async function temporary() { const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-bench-static-"))); roots.push(root); return root; }
 async function invoke(args: string[], workspace: string) {
   const output: string[] = [], previous = process.exitCode;
   const log = spyOn(console, "log").mockImplementation(value => { output.push(String(value)); });

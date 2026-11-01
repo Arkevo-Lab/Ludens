@@ -383,7 +383,7 @@
     "deviceGuide": "设备准备指南",
     "capabilityGuide": "能力编写指南",
     "benchmarkGuide": "评测任务指南",
-    "existingWorkspaceHint": "已有工作区？请按照设备指南配置其 rsa.json；新建工作区不会改变原有配置。",
+    "existingWorkspaceHint": "已有工作区？请按照设备指南配置其 ludens.json；新建工作区不会改变原有配置。",
     "creationRechecks": "创建时会再次检查驱动包，可能下载或导入代码，但不会启动服务。",
     "sourcesTitle": "工作区来源",
     "sourcesDescription": "各来源独立读取；数量表示已记录或已声明的条目，不代表执行成功。",
@@ -606,7 +606,7 @@
     "registerDir": "登记目录",
     "identityHint": "目录需要包含 Ludens 工作区身份；搬动后登记新位置即可。旧版目录请先通过 CLI 的 import 命令导入。",
     "createTitle": "新建工作区",
-    "createdNotice": "工作区已创建并登记。准备好设备后，可在该目录执行 rsa up。",
+    "createdNotice": "工作区已创建并登记。准备好设备后，可在该目录执行 ludens up。",
     "nameLabel": "名称",
     "experimentPlaceholder": "我的实验",
     "driverIdLabel": "驱动 ID",
@@ -685,7 +685,7 @@
     },
     "anatomy": {
       "inner": "OMP 内层(单次 prompt · 每次模型请求)",
-      "outer": "RSA 外层(仅接管时存在)",
+      "outer": "Ludens 外层(仅接管时存在)",
       "promptPrep": "prompt 准备",
       "transform": "消息转换+装饰",
       "none": "无",
@@ -722,7 +722,7 @@
       "legacyTag": "已移除 · 仅供对照"
     },
     "cards": {
-      "rsa": "RSA 注入层 ①②",
+      "ludens": "Ludens 注入层 ①②",
       "omp": "OMP 原生层",
       "imgCap": "原生图片上限",
       "anatomy": "循环结构",
@@ -759,7 +759,7 @@
       "histLayer": "持久历史层(累积)",
       "convo": "对话 user/assistant",
       "tools": "工具结果",
-      "ptext": "感知 JSON(RSA)",
+      "ptext": "感知 JSON(Ludens)",
       "pimg": "感知图片",
       "ofTotal": "/ 共",
       "trimmed": "张,原生裁掉旧图",
@@ -804,10 +804,10 @@
       },
       "bare": {
         "name": "原生 OMP",
-        "desc": "仅运行一轮，关闭 RSA 自动交付与 continuation。"
+        "desc": "仅运行一轮，关闭 Ludens 自动交付与 continuation。"
       }
     },
-    "rsaLayers": {
+    "ludensLayers": {
       "ch1": {
         "name": "轮首帧交付",
         "desc": "在 before_agent_start 交付最新帧。"
@@ -852,7 +852,7 @@
       },
       "imgInf": {
         "name": "不限图片预算",
-        "desc": "RSA 覆盖项；关闭后模拟原生图片上限。"
+        "desc": "Ludens 覆盖项；关闭后模拟原生图片上限。"
       }
     },
     "localOnly": "本地模拟",
@@ -870,7 +870,7 @@
     "resultsTitle": "结果概览",
     "estimate": "估算",
     "layersImmediate": "层配置修改会立即更新结果，使用已应用的参数。",
-    "rsaTitle": "RSA 注入层",
+    "ludensTitle": "Ludens 注入层",
     "ompTitle": "OMP 原生层",
     "rangeHint": "{min}–{max} · 步长 {step}",
     "validation": {
@@ -988,7 +988,7 @@
     },
     "emptyHint": {
       "connecting": "正在连接本地日志服务…",
-      "startRsa": "在工作区启动 RSA 后，实时画面、活动日志与性能统计会显示在这里。",
+      "startRsa": "在工作区启动 Ludens 后，实时画面、活动日志与性能统计会显示在这里。",
       "checkService": "请检查本地日志服务，恢复连接后会自动更新。",
       "loadingObs": "正在加载当前工作区的观察与行动记录…"
     },
@@ -1585,7 +1585,7 @@
     "addTitle": "添加已有工作区",
     "addDescription": "连接这台电脑上已经存在的工作区。",
     "pathLabel": "工作区完整目录",
-    "addHint": "请选择包含 .rsa/workspace.json 的目录。如果移动过工作区，请填写它的新位置。",
+    "addHint": "请选择包含 .ludens/workspace.json 的目录。如果移动过工作区，请填写它的新位置。",
     "adding": "正在添加…",
     "created": "工作区已创建",
     "registered": "工作区已添加",

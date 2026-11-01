@@ -15,7 +15,7 @@ import { pinTask, readTask } from "./task.ts";
 import { benchmarkEventSummary, isObject, validateRewards, type Trial, type EvidenceReference, type TaskDefinition, type Verification } from "../core/storage/contract.ts";
 import { atomicJson, createTrial, finishTrial, createVerification, finishVerification, get, readTrial, indexWorkspace } from "../core/storage/store.ts";
 
-const rsa = resolve(import.meta.dir, "../..");
+const ludens = resolve(import.meta.dir, "../..");
 const identity = (task: TaskDefinition) => ({ name: task.name, digest: task.digest, ...(task.version ? { version: task.version } : {}) });
 const errorInfo = (code: string, error: unknown) => ({ code, message: error instanceof Error ? error.message : String(error) });
 export interface RunOptions {
@@ -34,14 +34,14 @@ function checkNative(task: TaskDefinition) {
 export function benchmarkEnvironment(onlineModel = false): NodeJS.ProcessEnv {
   const env = pythonEnvironment();
   for (const key of Object.keys(env)) {
-    if (/^(RSA_|BASEWARE_)/.test(key) || !onlineModel && /(?:TOKEN|SECRET|API_KEY|PASSWORD|AUTHORIZATION|CREDENTIAL)/i.test(key)) delete env[key];
+    if (/^(LUDENS_|BASEWARE_)/.test(key) || !onlineModel && /(?:TOKEN|SECRET|API_KEY|PASSWORD|AUTHORIZATION|CREDENTIAL)/i.test(key)) delete env[key];
   }
   env.PATH = [resolve(process.execPath, ".."), env.PATH ?? ""].join(":");
   return env;
 }
 function declaredEnv(task: TaskDefinition, section: "environment" | "verifier") {
   const env = task.config[section]?.env as Record<string, string> | undefined ?? {};
-  if (Object.keys(env).some(key => /^(RSA_|BASEWARE_)/.test(key))) throw new Error("Task env cannot grant or override Shiori identity/control fields");
+  if (Object.keys(env).some(key => /^(LUDENS_|BASEWARE_)/.test(key))) throw new Error("Task env cannot grant or override Shiori identity/control fields");
   if (Object.values(env).some(value => /\$\{/.test(value))) throw new Error("Native Task env does not interpolate shell templates; supply explicit values");
   return env;
 }
@@ -125,7 +125,7 @@ export async function runTask(name: string, options: RunOptions) {
     await Promise.all([mkdir(join(executionWorkspace, "skills"), { recursive: true }), mkdir(join(executionWorkspace, "memory"), { recursive: true })]);
     await writeFile(join(executionWorkspace, "AGENTS.md"), workspaceGuide);
   }
-  const variables = { rsa, bun: process.execPath, python: pythonExecutable(), workspace: state.workspace, workdir: executionWorkspace,
+  const variables = { core: ludens, bun: process.execPath, python: pythonExecutable(), workspace: state.workspace, workdir: executionWorkspace,
     artifacts, task: pinned.path, ...Object.fromEntries(Object.entries(parameters).map(([key, value]) => [`param.${key}`, value])) };
   const argv = configuration.argv.map(value => render(value, variables));
   const cwd = configuration.cwd ? resolve(state.workspace, render(configuration.cwd, variables)) : executionWorkspace;
@@ -146,15 +146,15 @@ export async function runTask(name: string, options: RunOptions) {
   await atomicJson(input, { trialId: runId, task: identity(task), parameters, budgetSeconds: seconds, argv, cwd });
   const env = { ...benchmarkEnvironment(configuration.onlineModel), ...environment,
     LUDENS_HOME: state.globalHome,
-    RSA_WORKSPACE: executionWorkspace, RSA_BENCH_WORKSPACE: state.workspace, RSA_BENCH_TRIAL_ID: runId,
-    RSA_BENCH_RUN_DIR: runDir, RSA_BENCH_ARTIFACTS: artifacts, RSA_BENCH_TASK_DIR: pinned.path, RSA_BENCH_INPUT: input };
+    LUDENS_WORKSPACE: executionWorkspace, LUDENS_BENCH_WORKSPACE: state.workspace, LUDENS_BENCH_TRIAL_ID: runId,
+    LUDENS_BENCH_RUN_DIR: runDir, LUDENS_BENCH_ARTIFACTS: artifacts, LUDENS_BENCH_TASK_DIR: pinned.path, LUDENS_BENCH_INPUT: input };
   const runtime = new Shiori(undefined, log.record, seconds, runId), cancellation = signals(options.signal);
   const started = performance.now();
   try {
     let failure: Trial["error"], status: Trial["status"] = "completed", facts: ProgramFacts | undefined;
     try {
       await runtime.runProgram({ argv, cwd, env, stdout: join(runDir, "stdout.log"), stderr: join(runDir, "stderr.log"),
-        events: argv[1] === join(rsa, "src/core/shiori/module-program.ts") }, cancellation.signal);
+        events: argv[1] === join(ludens, "src/core/shiori/module-program.ts") }, cancellation.signal);
     } catch (error) { status = cancellation.signal.aborted ? "cancelled" : "error"; failure = errorInfo("EXECUTION_ERROR", error); }
     finally {
       await runtime.close();
@@ -175,7 +175,7 @@ export async function runTask(name: string, options: RunOptions) {
 export async function verifyTask(workspace: string, runId: string, options: { taskPath?: string; reason?: string; signal?: AbortSignal; log?: EventLog; globalHome?: string } = {}) {
   const trial = await readTrial(workspace, runId), runDir = join(trial.workspace, "logs", runId);
   if (trial.status === "running") throw new Error("Trial is still running");
-  const original = join(trial.workspace, ".rsa/benchmarks/tasks", trial.task.digest.slice(7));
+  const original = join(trial.workspace, ".ludens/benchmarks/tasks", trial.task.digest.slice(7));
   const task = await readTask(options.taskPath ?? original);
   if (task.name !== trial.task.name || !options.taskPath && task.digest !== trial.task.digest) throw new Error("Verifier task identity mismatch");
   checkNative(task);
@@ -197,9 +197,9 @@ export async function verifyTask(workspace: string, runId: string, options: { ta
     await runtime.runProgram({ argv: ["/bin/sh", join(pinned.path, "tests/test.sh")], cwd: pinned.path,
       env: { ...benchmarkEnvironment(), ...verifierEnv,
         LUDENS_HOME: state.globalHome,
-        RSA_BENCH_WORKSPACE: trial.workspace, RSA_BENCH_TRIAL_ID: runId, RSA_BENCH_RUN_DIR: runDir,
-        RSA_BENCH_ARTIFACTS: join(runDir, "artifacts"), RSA_BENCH_TASK_DIR: pinned.path, RSA_BENCH_INPUT: input,
-        RSA_BENCH_VERIFIER_DIR: directory }, stdout: join(directory, "stdout.log"), stderr: join(directory, "stderr.log") }, cancellation.signal);
+        LUDENS_BENCH_WORKSPACE: trial.workspace, LUDENS_BENCH_TRIAL_ID: runId, LUDENS_BENCH_RUN_DIR: runDir,
+        LUDENS_BENCH_ARTIFACTS: join(runDir, "artifacts"), LUDENS_BENCH_TASK_DIR: pinned.path, LUDENS_BENCH_INPUT: input,
+        LUDENS_BENCH_VERIFIER_DIR: directory }, stdout: join(directory, "stdout.log"), stderr: join(directory, "stderr.log") }, cancellation.signal);
     const done = await finishVerification(trial.workspace, runId, id, { status: "completed", endedAt: new Date().toISOString(),
       evidence: await outputEvidence(runDir, `verifier/${id}`) });
     if (done.changed) log.record("benchmark_verification", benchmarkEventSummary(trial, done.verification));
@@ -221,7 +221,7 @@ export async function aggregateTasks(workspace: string, datasetPath: string, ref
   const prepared = prepareMetricInput(dataset, results, options.policy);
   const state = await indexWorkspace(workspace, options.globalHome);
   const id = `${new Date().toISOString().replaceAll(":", "-")}-${randomUUID().slice(0, 8)}`;
-  const directory = join(workspace, ".rsa/benchmarks/aggregates", id);
+  const directory = join(workspace, ".ludens/benchmarks/aggregates", id);
   await mkdir(directory, { recursive: true });
   const input = join(directory, "rewards.jsonl"), output = join(directory, "metrics.json");
   await writeFile(input, prepared.input);

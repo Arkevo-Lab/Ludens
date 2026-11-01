@@ -19,7 +19,7 @@ async function fixture() {
     { name: "pad/press", description: "Press a button.", inputSchema: { type: "object" }, requiresControl: true, annotations: { readOnlyHint: false } },
     { name: "screen/read", description: "Read the screen.", inputSchema: { type: "object" }, requiresControl: false, annotations: { readOnlyHint: true } },
   ] });
-  await writeFile(join(workspace, "actions.py"), `from rsa_tools import capability
+  await writeFile(join(workspace, "actions.py"), `from ludens_tools import capability
 from pathlib import Path
 Path(${JSON.stringify(join(base, "MUST_NOT_EXECUTE"))}).touch()
 @capability
@@ -44,8 +44,8 @@ test("capability catalog reads the selected run-free workspace and real static P
     await registerFixture(f.root, "other", other);
     // Both stdlib and package shadowing used to execute before source discovery.
     await writeFile(join(f.workspace, "json.py"), `open(${JSON.stringify(join(f.base, "SHADOW_EXECUTED"))}, "w").close()\nraise RuntimeError("workspace json imported")\n`);
-    await mkdir(join(f.workspace, "rsa_tools"));
-    await writeFile(join(f.workspace, "rsa_tools/__init__.py"), `open(${JSON.stringify(join(f.base, "SHADOW_EXECUTED"))}, "w").close()\nraise RuntimeError("workspace package imported")\n`);
+    await mkdir(join(f.workspace, "ludens_tools"));
+    await writeFile(join(f.workspace, "ludens_tools/__init__.py"), `open(${JSON.stringify(join(f.base, "SHADOW_EXECUTED"))}, "w").close()\nraise RuntimeError("workspace package imported")\n`);
     const task = join(f.workspace, "benchmarks/tasks/custom");
     await mkdir(join(task, "tests"), { recursive: true }); await mkdir(join(task, "environment"));
     await writeFile(join(task, "task.toml"), 'schema_version = "1.4"\n[task]\nname = "workspace/custom"\ndescription = "Static task"\n');
@@ -74,7 +74,7 @@ test("broken snapshot and Python declarations remain visible as issues without h
   const f = await fixture();
   try {
     await json(join(f.workspace, "baseware.json"), { controllers: [{ name: "invalid", requiresControl: "yes" }] });
-    await writeFile(join(f.workspace, "broken.py"), 'from rsa_tools import capability\n@capability\ndef broken(value: int):\n    return value\n');
+    await writeFile(join(f.workspace, "broken.py"), 'from ludens_tools import capability\n@capability\ndef broken(value: int):\n    return value\n');
     const page = await capabilities("ws-capabilities", f.workspace, f.root);
     assert.deepEqual(page.groups[0].items, []);
     assert.equal(page.sources.device.status, "error");
@@ -122,7 +122,7 @@ test("the configured Python interpreter can fail without losing the device snaps
   const f = await fixture(), interpreter = join(f.base, "python-failure");
   await writeFile(interpreter, `#!${process.execPath}\nprocess.stderr.write("fixture interpreter failed"); process.exit(3);\n`);
   await chmod(interpreter, 0o755);
-  const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: f.root, RSA_PYTHON: interpreter } });
+  const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: f.root, LUDENS_PYTHON: interpreter } });
   try {
     const page = await worker.call("capabilities", ["ws-capabilities", f.workspace]);
     assert.equal(page.groups[0].items.length, 2);
@@ -135,7 +135,7 @@ test("slow Python discovery leaves the shared worker responsive and request canc
   const f = await fixture(), interpreter = join(f.base, "python-slow"), started = join(f.base, "started");
   await writeFile(interpreter, `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(started)}, String(process.pid)); setInterval(() => {}, 1000);\n`);
   await chmod(interpreter, 0o755);
-  const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: f.root, RSA_PYTHON: interpreter } });
+  const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: f.root, LUDENS_PYTHON: interpreter } });
   const abort = new AbortController();
   try {
     assert.deepEqual(await worker.call("catalog", []), []);

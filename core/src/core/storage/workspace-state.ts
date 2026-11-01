@@ -18,18 +18,18 @@ export interface WorkspaceState {
 export async function resolveWorkspaceAddress(workspacePath: string) {
   const workspace = await realpath(workspacePath);
   const hash = createHash("sha256").update(workspace).digest("hex").slice(0, 16);
-  return { workspace, socket: `/tmp/ludens-rsa-${process.getuid!()}-${hash}.sock` };
+  return { workspace, socket: `/tmp/ludens-core-${process.getuid!()}-${hash}.sock` };
 }
 
-const initializationRequired = () => new Error("Workspace has no Ludens identity. Use rsa init for a new workspace, or rsa workspace import <directory> for existing history.");
+const initializationRequired = () => new Error("Workspace has no Ludens identity. Use ludens init for a new workspace, or ludens workspace import <directory> for existing history.");
 
 /** Resolve an existing workspace without creating directories, identity, or registration. */
 export async function resolveWorkspaceState(workspacePath: string, globalHome = ludensHome()): Promise<WorkspaceState> {
   const address = await resolveWorkspaceAddress(workspacePath).catch(error => { if (error.code === "ENOENT") throw initializationRequired(); throw error; });
   const { workspace, socket } = address;
   const { id } = await readWorkspaceIdentity(workspace).catch(error => { if (error.code === "ENOENT") throw initializationRequired(); throw error; });
-  const dir = join(workspace, ".rsa");
-  const shioriDir = join(workspace, ".rsa", "shiori");
+  const dir = join(workspace, ".ludens");
+  const shioriDir = join(workspace, ".ludens", "shiori");
   const sessionsDir = join(shioriDir, "sessions");
   return { workspace, globalHome: resolve(globalHome), id, dir, shioriDir, sessionsDir, versionsDir: join(dir, "skill-versions"), socket };
 }
@@ -40,7 +40,7 @@ export async function initializeWorkspaceState(workspacePath: string, globalHome
   const workspace = await realpath(workspacePath);
   const identity = await readWorkspaceIdentity(workspace).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
   if (!identity && !options.importLegacy) {
-    const state = await lstat(join(workspace, ".rsa")).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
+    const state = await lstat(join(workspace, ".ludens")).catch(error => { if (error.code !== "ENOENT") throw error; return undefined; });
     const logs = await readdir(join(workspace, "logs")).catch(error => { if (error.code !== "ENOENT") throw error; return []; });
     if (state || logs.length) throw initializationRequired();
   }

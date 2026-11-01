@@ -24,7 +24,7 @@ export class WorkspaceController {
   private readonly python: PythonCapabilities;
 
   constructor(private readonly options: ControllerOptions) {
-    this.python = new PythonCapabilities(options.workspace, options.env.RSA_PYTHON, options.record, options.env.RSA_LOG_DIAGNOSTICS === "full" ? "full" : "normal");
+    this.python = new PythonCapabilities(options.workspace, options.env.LUDENS_PYTHON, options.record, options.env.LUDENS_LOG_DIAGNOSTICS === "full" ? "full" : "normal");
   }
 
   async list(signal: AbortSignal, trace: EventTrace = {}) {
@@ -44,10 +44,10 @@ export class WorkspaceController {
     signal.throwIfAborted();
     const device = this.device(id);
     if (device) {
-      return JSON.stringify({ ...device, id, usage: `rsa controller ${id} [--args '<JSON object>' | --file <arguments.json>]` }, null, 2);
+      return JSON.stringify({ ...device, id, usage: `ludens controller ${id} [--args '<JSON object>' | --file <arguments.json>]` }, null, 2);
     }
     const capability = await this.pythonCapability(id, signal, trace);
-    return JSON.stringify({ id, usage: `rsa controller ${id} --args '<JSON object>'`,
+    return JSON.stringify({ id, usage: `ludens controller ${id} --args '<JSON object>'`,
       description: capability.description, parameters: capability.parameters,
       recorded: capability.recorded ?? false,
     }, null, 2);
@@ -88,6 +88,6 @@ export class WorkspaceController {
       const diagnostic = discovered.diagnostics.find(item => id.startsWith(`python/${item.path}:`));
       if (diagnostic) throw new Error(`Invalid capability ${id}: ${diagnostic.message}`);
     }
-    throw new Error(`Unknown capability: ${id}; use rsa controller list`);
+    throw new Error(`Unknown capability: ${id}; use ludens controller list`);
   }
 }

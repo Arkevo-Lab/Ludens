@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { DEFAULT_ACTIVITY_PREFERENCES } from './activity-policy.js'
-import { RsaActivityController, type ActivityDisplay } from './rsa-activity-controller.js'
-import type { ActivityBlock, LogBlock, RsaActivitySnapshot } from './rsa-source.js'
+import { LudensActivityController, type ActivityDisplay } from './ludens-activity-controller.js'
+import type { ActivityBlock, LogBlock, LudensActivitySnapshot } from './ludens-source.js'
 
 let revision = 0
 const versions = new Map<string, { text: string; block: ActivityBlock }>()
@@ -9,7 +9,7 @@ const versions = new Map<string, { text: string; block: ActivityBlock }>()
 function block(id: string, kind: LogBlock['kind'] = 'tool', status: LogBlock['status'] = 'complete', text = id): LogBlock {
   return { id, kind, status, text, title: kind, at: '2026-10-17T13:40:00Z' }
 }
-function state(blocks: LogBlock[] = [], overrides: Partial<RsaActivitySnapshot> = {}): RsaActivitySnapshot {
+function state(blocks: LogBlock[] = [], overrides: Partial<LudensActivitySnapshot> = {}): LudensActivitySnapshot {
   const changes = blocks.map(block => {
     const old = versions.get(block.id), text = JSON.stringify(block)
     if (old?.text === text) return old.block
@@ -27,7 +27,7 @@ function setup() {
   const sent: { surface: string; event: ActivityDisplay }[] = []
   const open = vi.fn()
   const record = vi.fn()
-  const controller = new RsaActivityController({ identity: () => identity, read }, {
+  const controller = new LudensActivityController({ identity: () => identity, read }, {
     foreground: () => foreground, petVisible: () => petVisible, open,
     send: (surface, event) => sent.push({ surface, event }),
   }, structuredClone(DEFAULT_ACTIVITY_PREFERENCES), record)
@@ -43,7 +43,7 @@ function setup() {
 beforeEach(() => { revision = 0; versions.clear(); vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-17T13:40:00Z')) })
 afterEach(() => vi.useRealTimers())
 
-describe('RSA block speech', () => {
+describe('Ludens block speech', () => {
   it('records queue pressure and dispatch with provenance without claiming renderer paint', async () => {
     const s = setup(); await s.poll(); s.hidePet()
     const item = { ...block('first'), source: { component: 'shiori', implementation: 'omp' },
@@ -253,14 +253,14 @@ describe('RSA block speech', () => {
     s.controller.stop()
   })
   it('serializes each source but immediately reads a new source and ignores late old workspace results', async () => {
-    const s = setup(); let resolve!: (value: RsaActivitySnapshot) => void, resolveNew!: (value: RsaActivitySnapshot) => void
+    const s = setup(); let resolve!: (value: LudensActivitySnapshot) => void, resolveNew!: (value: LudensActivitySnapshot) => void
     const staleAccepted = vi.fn()
     s.read.mockImplementationOnce((signal: AbortSignal) => {
       expect(signal).toBeInstanceOf(AbortSignal)
-      return new Promise<RsaActivitySnapshot>(r => { resolve = r })
+      return new Promise<LudensActivitySnapshot>(r => { resolve = r })
     })
     const pending = s.controller.poll(); await s.controller.poll(); expect(s.read).toHaveBeenCalledTimes(1)
-    s.read.mockImplementationOnce(() => new Promise<RsaActivitySnapshot>(r => { resolveNew = r }))
+    s.read.mockImplementationOnce(() => new Promise<LudensActivitySnapshot>(r => { resolveNew = r }))
     s.switchSource(); const next = s.controller.poll()
     expect(s.read).toHaveBeenCalledTimes(2)
     resolve(state([block('stale', 'text', 'running')], { acknowledge: staleAccepted, hasMore: true })); await pending

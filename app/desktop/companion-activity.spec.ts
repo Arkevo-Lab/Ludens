@@ -7,12 +7,12 @@ const handlers = vi.hoisted(()=>new Map<string, (event:unknown,input?:unknown)=>
 const state = vi.hoisted(()=>({home:''}))
 vi.mock('electron',()=>({app:{getPath:()=>state.home},ipcMain:{handle:(name:string,fn:(event:unknown,input?:unknown)=>unknown)=>handlers.set(name,fn),removeHandler:(name:string)=>handlers.delete(name)}}))
 import { installCompanionActivity } from './companion-activity.js'
-import type { LogBlock } from './rsa-source.js'
+import type { LogBlock } from './ludens-source.js'
 function windowStub(){const frame={};const contents=Object.assign(new EventEmitter(),{mainFrame:frame,send:vi.fn()});return Object.assign(new EventEmitter(),{webContents:contents,isDestroyed:()=>false,isVisible:()=>true,isMinimized:()=>false,restore:vi.fn(),show:vi.fn(),focus:vi.fn()})}
 afterEach(()=>{vi.useRealTimers();handlers.clear();if(state.home)rmSync(state.home,{recursive:true,force:true})})
 describe('companion notification IPC',()=>{
   it('allows new speech after hiding and showing the pet with the owner hidden',async()=>{
-    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'rsa-ipc-'))
+    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'ludens-ipc-'))
     const owner=windowStub(),pet=windowStub();owner.isVisible=()=>false
     const activity=installCompanionActivity(owner as never,pet as never)
     let blocks:LogBlock[]=[{id:'tool:1',at:'1',kind:'tool',title:'工具',text:'Inspect the current screen',status:'running'}]
@@ -36,7 +36,7 @@ describe('companion notification IPC',()=>{
     pet.emit('closed')
   })
   it('accepts only owning main frame settings and rejects subframes/other windows; no URL/code actions',async()=>{
-    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'rsa-ipc-'));const owner=windowStub(),pet=windowStub();installCompanionActivity(owner as never,pet as never)
+    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'ludens-ipc-'));const owner=windowStub(),pet=windowStub();installCompanionActivity(owner as never,pet as never)
     const event={sender:owner.webContents,senderFrame:owner.webContents.mainFrame}
     const get=handlers.get('ludens:activity:preferences')!;expect(get(event)).toMatchObject({blocks:{thinking:true,tool:true,diagnostic:false},brief:false})
     expect(()=>get({...event,senderFrame:{}})).toThrow('Unauthorized')
@@ -48,7 +48,7 @@ describe('companion notification IPC',()=>{
     pet.emit('closed');expect(handlers.size).toBe(0)
   })
   it('ignores destroyed owner state during transitions and pet retirement',()=>{
-    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'rsa-ipc-'))
+    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'ludens-ipc-'))
     const owner=windowStub(),pet=windowStub()
     installCompanionActivity(owner as never,pet as never)
     owner.isDestroyed=()=>true
@@ -61,7 +61,7 @@ describe('companion notification IPC',()=>{
     expect(vi.getTimerCount()).toBe(0)
   })
   it('applies the Dashboard origin guard to owner settings IPC',()=>{
-    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'rsa-origin-'))
+    vi.useFakeTimers();state.home=mkdtempSync(join(tmpdir(),'ludens-origin-'))
     const owner=windowStub(),pet=windowStub()
     let trustedOrigin = true
     installCompanionActivity(owner as never,pet as never,{trustedOwner:()=>trustedOrigin})

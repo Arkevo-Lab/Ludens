@@ -24,9 +24,9 @@ async function until(check: () => boolean | Promise<boolean>, label = "condition
 
 async function fixture(hz = 30, diagnostics: "normal" | "full" = "normal", seconds = 30,
   grant?: (install: () => Promise<void>) => Promise<void>) {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-action-")));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-action-")));
   const runDir = join(workspace, "logs", "run-action");
-  const socket = `/tmp/rsa-action-${crypto.randomUUID()}.sock`, deviceSocket = `/tmp/bw-action-${crypto.randomUUID()}.sock`;
+  const socket = `/tmp/ludens-action-${crypto.randomUUID()}.sock`, deviceSocket = `/tmp/bw-action-${crypto.randomUUID()}.sock`;
   const events: { type: string; data: any; trace: any; channel?: string }[] = [];
   const record = (type: string, data: unknown, trace = {}, metadata?: any) => events.push({ type, data, trace, ...metadata });
   const held = new Set<string>(), states: string[][] = [];
@@ -57,7 +57,7 @@ async function fixture(hz = 30, diagnostics: "normal" | "full" = "normal", secon
   ] }});
   const closeDevice = await listenDevice(deviceSocket, core);
   const devices = await connectBaseware({ socket: deviceSocket, seconds, runDir, record });
-  const env = pythonEnvironment({ RSA_SOCKET: socket, RSA_WORKSPACE: workspace, RSA_RUN_ID: "run-action", RSA_LOG_DIAGNOSTICS: diagnostics });
+  const env = pythonEnvironment({ LUDENS_SOCKET: socket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "run-action", LUDENS_LOG_DIAGNOSTICS: diagnostics });
   const runtime = new Runtime(devices, record, seconds, "run-action", diagnostics);
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, record, env }) });
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record, env, diagnostics }) });
@@ -67,7 +67,7 @@ async function fixture(hz = 30, diagnostics: "normal" | "full" = "normal", secon
       ? grant(() => devices.setInputGeneration!(epoch, generation)) : devices.setInputGeneration!(epoch, generation),
     onCleanupError: error => { void runtime.stop(error.message); } }) });
   const closeHost = await listen(socket, runtime);
-  await writeFile(join(workspace, "perception.py"), `from rsa_tools import capability, record
+  await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
     sample_hz = 30
     def start(self, context): self.n = 0
@@ -78,7 +78,7 @@ class Perception:
         return {"data": {"sample": self.n}}
     def close(self): pass
 `);
-  const source = (body?: string) => `from rsa_tools import Client, capability, record
+  const source = (body?: string) => `from ludens_tools import Client, capability, record
 import os
 class Action:
     step_hz = ${hz}
@@ -171,7 +171,7 @@ test("reload replaces only Action, rejects stale generation and handback release
     await expect(send(f.socket, { kind: "controller", argv: [], action: "call", id: "controller/sensor", epoch,
       trace: { inputGeneration: old.generation! } })).rejects.toThrow("STALE_INPUT_GENERATION");
     const staleCli = Bun.spawn([process.execPath, join(import.meta.dir, "../src/cli/main.ts"), "action", "stop"], {
-      cwd: f.workspace, env: { ...process.env, RSA_SOCKET: f.socket, BASEWARE_EPOCH: epoch,
+      cwd: f.workspace, env: { ...process.env, LUDENS_SOCKET: f.socket, BASEWARE_EPOCH: epoch,
         BASEWARE_TRACE: JSON.stringify({ inputGeneration: old.generation! }) }, stdout: "pipe", stderr: "pipe",
     });
     const [staleCode, staleError] = await Promise.all([staleCli.exited, new Response(staleCli.stderr).text()]);

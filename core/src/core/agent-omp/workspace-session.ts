@@ -49,7 +49,7 @@ export async function validateSessionWorkspace(sessionFile: string, workspace: s
   const ownership = await sessionOwnership(file);
   if (!ownership.workspaceId) throw new Error("Legacy session requires explicit workspace import before resuming");
   if (!identity || ownership.workspaceId !== identity.id) throw new Error("The resumed session belongs to a different workspace");
-  if (!within(join(current, ".rsa", "shiori", "sessions"), file)) {
+  if (!within(join(current, ".ludens", "shiori", "sessions"), file)) {
     throw new Error("Session is outside this workspace; explicitly import it before resuming");
   }
 }
@@ -66,7 +66,7 @@ export async function openWorkspaceSession(state: WorkspaceState, resume?: strin
     manager.setCwdWithoutRelocation(state.workspace);
     if (!resume) {
       manager.appendCustomEntry(ownershipType, { version: 1, workspaceId: state.id });
-      await manager.setSessionName("RSA exploration", "user");
+      await manager.setSessionName("Ludens exploration", "user");
     }
     return manager;
   } catch (error) { await manager.close(); throw error; }
@@ -111,7 +111,7 @@ export async function importLegacyWorkspaceState(workspace: string, options: {
   if ((await lstat(oldSessions).catch(missing))?.isSymbolicLink()) {
     const target = resolve(oldSessions, "..", await readlink(oldSessions));
     const canonical = await realpath(oldSessions).catch(missing);
-    if (canonical !== state.sessionsDir && target !== join(previous, ".rsa", "shiori", "sessions")) {
+    if (canonical !== state.sessionsDir && target !== join(previous, ".ludens", "shiori", "sessions")) {
       throw new Error("Legacy session alias points outside the imported workspace");
     }
     oldSessions = state.sessionsDir;
@@ -164,7 +164,7 @@ export async function importLegacyWorkspaceState(workspace: string, options: {
     if (typeof index.sessionFile !== "string") throw new Error("Invalid legacy session selection");
     const recorded = resolve(index.version === 1 ? previous : resolve(path, ".."), index.sessionFile);
     const absolute = await realpath(recorded).catch(missing) ?? recorded;
-    const suffix = within(oldSessions, absolute) ?? within(join(previous, ".rsa", "shiori", "sessions"), absolute);
+    const suffix = within(oldSessions, absolute) ?? within(join(previous, ".ludens", "shiori", "sessions"), absolute);
     if (!suffix) throw new Error("Legacy selection points outside the imported sessions");
     selected = join(state.sessionsDir, suffix);
     if (!sessions.some(session => session.target === selected)) throw new Error("Legacy selection points to a missing session; recover it explicitly before importing");

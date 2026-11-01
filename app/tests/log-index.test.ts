@@ -7,7 +7,7 @@ import { LogIndex, closeLogIndexes, FileRecords, getLogIndex, indexCacheStats, i
 import { refreshActivity } from "../lib/activity";
 
 test("latest-only records discard old pointers and reopen the last data segment after deletion", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-file-records-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-file-records-")));
   let store = new FileRecords(path);
   try {
     await store.put("large", "x".repeat(8 * 1024 * 1024));
@@ -33,7 +33,7 @@ test("latest-only records discard old pointers and reopen the last data segment 
 });
 
 test("cache format changes rebuild stale phase state without changing source logs", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-index-upgrade-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-index-upgrade-")));
   const source = JSON.stringify({ seq: 1, at: "2026-10-23T00:00:00Z", atMs: 0,
     type: "control", trace: {}, data: { mode: "manual" } }) + "\n";
   try {
@@ -56,10 +56,10 @@ test("cache format changes rebuild stale phase state without changing source log
 });
 
 test("run leases protect active readers while idle indexes and pages can be evicted and reopened", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-run-cache-")));
-  const oldMax = process.env.RSA_DASHBOARD_INDEX_MAX_RUNS, oldIdle = process.env.RSA_DASHBOARD_INDEX_IDLE_MS;
-  process.env.RSA_DASHBOARD_INDEX_MAX_RUNS = "1";
-  process.env.RSA_DASHBOARD_INDEX_IDLE_MS = "1000";
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-run-cache-")));
+  const oldMax = process.env.LUDENS_APP_INDEX_MAX_RUNS, oldIdle = process.env.LUDENS_APP_INDEX_IDLE_MS;
+  process.env.LUDENS_APP_INDEX_MAX_RUNS = "1";
+  process.env.LUDENS_APP_INDEX_IDLE_MS = "1000";
   let release: (() => void) | undefined;
   const source = JSON.stringify({ seq: 1, at: "2026-10-24T00:00:00Z", atMs: 0,
     type: "control", trace: {}, data: { mode: "manual" } }) + "\n";
@@ -94,14 +94,14 @@ test("run leases protect active readers while idle indexes and pages can be evic
     assert.equal(await readFile(join(root, "first", "events.jsonl"), "utf8"), source);
   } finally {
     release?.(); await closeLogIndexes();
-    if (oldMax === undefined) delete process.env.RSA_DASHBOARD_INDEX_MAX_RUNS; else process.env.RSA_DASHBOARD_INDEX_MAX_RUNS = oldMax;
-    if (oldIdle === undefined) delete process.env.RSA_DASHBOARD_INDEX_IDLE_MS; else process.env.RSA_DASHBOARD_INDEX_IDLE_MS = oldIdle;
+    if (oldMax === undefined) delete process.env.LUDENS_APP_INDEX_MAX_RUNS; else process.env.LUDENS_APP_INDEX_MAX_RUNS = oldMax;
+    if (oldIdle === undefined) delete process.env.LUDENS_APP_INDEX_IDLE_MS; else process.env.LUDENS_APP_INDEX_IDLE_MS = oldIdle;
     await rm(root, { recursive: true, force: true });
   }
 });
 
 test("canonical event addresses and small relations preserve late source time, paging and cancelled subscribers", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-event-directory-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-event-directory-")));
   try {
     const values = Array.from({ length: 1200 }, (_, i) => ({ seq: i + 1, at: "2026-10-24T01:00:00Z", atMs: i,
       origin: { at: new Date(Date.UTC(2026, 9, 24) + (1200 - i) * 1000).toISOString() },
@@ -146,9 +146,9 @@ test("canonical event addresses and small relations preserve late source time, p
 });
 
 test("parallel run loads acquire leases before any other load can evict their indexes", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-parallel-run-leases-")));
-  const oldMax = process.env.RSA_DASHBOARD_INDEX_MAX_RUNS;
-  process.env.RSA_DASHBOARD_INDEX_MAX_RUNS = "1";
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-parallel-run-leases-")));
+  const oldMax = process.env.LUDENS_APP_INDEX_MAX_RUNS;
+  process.env.LUDENS_APP_INDEX_MAX_RUNS = "1";
   let loaded: Awaited<ReturnType<typeof loadIndexedEvents>>[] = [];
   try {
     await closeLogIndexes();
@@ -173,14 +173,14 @@ test("parallel run loads acquire leases before any other load can evict their in
     // Also close orphaned instances if a regression makes an assertion fail.
     for (const item of loaded) { item.release(); item.index.close(); }
     await closeLogIndexes();
-    if (oldMax === undefined) delete process.env.RSA_DASHBOARD_INDEX_MAX_RUNS; else process.env.RSA_DASHBOARD_INDEX_MAX_RUNS = oldMax;
+    if (oldMax === undefined) delete process.env.LUDENS_APP_INDEX_MAX_RUNS; else process.env.LUDENS_APP_INDEX_MAX_RUNS = oldMax;
     await rm(root, { recursive: true, force: true });
   }
 });
 
 
 test("shutdown drains queued preparation continuations before closing the index", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-index-drain-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-index-drain-")));
   const index = new LogIndex(path, join(path, "index"));
   const order: string[] = [];
   try {
@@ -195,7 +195,7 @@ test("shutdown drains queued preparation continuations before closing the index"
 });
 
 test("cold scan feeds each event once at a fixed cutoff, then appends without loss", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-cold-scan-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-cold-scan-")));
   let index = new LogIndex(path, join(path, "index"));
   const events = Array.from({ length: 3500 }, (_, i) => ({ seq: i + 1, at: "2026-10-27T00:00:00Z", atMs: i,
     type: "tick", trace: { modelCallId: "model" }, data: { value: i } }));
@@ -222,7 +222,7 @@ test("cold scan feeds each event once at a fixed cutoff, then appends without lo
 });
 
 test("generation switching keeps leased readers alive and reclaims retired directories afterwards", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-generation-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-generation-")));
   let release: (() => void) | undefined;
   try {
     await writeFile(join(path, "events.jsonl"), JSON.stringify({ seq: 1, at: "2026-10-27T00:00:00Z", type: "tick", trace: {}, data: {} }) + "\n");
@@ -243,7 +243,7 @@ test("generation switching keeps leased readers alive and reclaims retired direc
 });
 
 test("invalidating a published generation cannot reuse a still-leased placeholder directory", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-placeholder-generation-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-placeholder-generation-")));
   let release: (() => void) | undefined;
   try {
     await writeFile(join(path, "events.jsonl"), JSON.stringify({ seq: 1, at: "2026-10-27T00:00:00Z", type: "tick", trace: {}, data: {} }) + "\n");
@@ -265,7 +265,7 @@ test("invalidating a published generation cannot reuse a still-leased placeholde
 });
 
 test("an unfinished JSONL tail does not block readable history and is ingested after completion", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-partial-tail-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-partial-tail-")));
   let index = new LogIndex(path, join(path, "index"));
   const first = JSON.stringify({ seq: 1, at: "2026-10-27T00:00:00Z", type: "tick", trace: {}, data: {} }) + "\n";
   const second = JSON.stringify({ seq: 2, at: "2026-10-27T00:00:01Z", type: "tick", trace: {}, data: {} }) + "\n";

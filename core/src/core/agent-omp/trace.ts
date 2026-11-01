@@ -395,7 +395,7 @@ export class ModelTrace {
           },
         });
         // result() observes completion independently; the caller keeps the original stream.
-        void stream.result().then(finish, fail).catch((error) => console.error("RSA event log failed:", error));
+        void stream.result().then(finish, fail).catch((error) => console.error("Ludens event log failed:", error));
         return stream;
       } catch (error) { fail(error); throw error; }
     };

@@ -29,7 +29,7 @@ export function validWorkspaceId(id: unknown): id is string {
   return typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
 }
 function identity(value: unknown): WorkspaceIdentity {
-  if (!object(value) || value.version !== 1 || !validWorkspaceId(value.id)) throw new Error("Invalid .rsa/workspace.json identity");
+  if (!object(value) || value.version !== 1 || !validWorkspaceId(value.id)) throw new Error("Invalid .ludens/workspace.json identity");
   if (value.historyIds !== undefined && (!Array.isArray(value.historyIds) || !value.historyIds.every(validWorkspaceId))) throw new Error("Invalid workspace history IDs");
   return { version: 1, id: value.id, ...(Array.isArray(value.historyIds) ? { historyIds: [...new Set(value.historyIds as string[])].filter(id => id !== value.id) } : {}) };
 }
@@ -81,13 +81,13 @@ export async function updateGlobalConfig(
   });
 }
 export function readWorkspaceIdentitySync(workspace: string): WorkspaceIdentity {
-  return identity(JSON.parse(readFileSync(join(workspace, ".rsa", "workspace.json"), "utf8")));
+  return identity(JSON.parse(readFileSync(join(workspace, ".ludens", "workspace.json"), "utf8")));
 }
 export async function readWorkspaceIdentity(workspace: string): Promise<WorkspaceIdentity> {
-  return identity(JSON.parse(await readFile(join(workspace, ".rsa", "workspace.json"), "utf8")));
+  return identity(JSON.parse(await readFile(join(workspace, ".ludens", "workspace.json"), "utf8")));
 }
 export async function ensureWorkspaceIdentity(workspace: string): Promise<WorkspaceIdentity> {
-  const directory = join(workspace, ".rsa"), path = join(directory, "workspace.json");
+  const directory = join(workspace, ".ludens"), path = join(directory, "workspace.json");
   try { return await readWorkspaceIdentity(workspace); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   await mkdir(directory, { recursive: true });
@@ -176,7 +176,7 @@ export async function validateWorkspaceRegistration(workspacePath: string, home 
     try {
       const priorPath = await realpath(previous.workspace);
       if (priorPath !== workspace && (await readWorkspaceIdentity(priorPath)).id === id) {
-        throw new Error(`Workspace ${id} is already registered at ${previous.workspace}. For an independent copy use rsa workspace open <path> --new-id.`);
+        throw new Error(`Workspace ${id} is already registered at ${previous.workspace}. For an independent copy use ludens workspace open <path> --new-id.`);
       }
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
@@ -247,8 +247,8 @@ export async function renewWorkspaceIdentity(workspacePath: string, home = luden
     const ownsRegistration = existing?.workspace === workspace;
     if (ownsRegistration) await clearRegisteredPetTarget(previous.id, home);
     const value: WorkspaceIdentity = { version: 1, id: `ws-${randomUUID()}`, historyIds: [...new Set([previous.id, ...previous.historyIds ?? []])] };
-    await atomicJson(join(workspace, ".rsa", "workspace.json"), value);
-    await unlink(join(workspace, ".rsa", "shiori", "current-session.json")).catch(error => { if (error.code !== "ENOENT") throw error; });
+    await atomicJson(join(workspace, ".ludens", "workspace.json"), value);
+    await unlink(join(workspace, ".ludens", "shiori", "current-session.json")).catch(error => { if (error.code !== "ENOENT") throw error; });
     if (ownsRegistration) await unlink(registrationPath(previous.id, home));
     return value;
   });

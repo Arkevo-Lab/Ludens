@@ -278,7 +278,7 @@ export async function mediaFile(project: string, run: string, id: string, root =
       throw new Error("无效的时空轴媒体引用");
     if (!archiveWorkspace) throw new Error("运行记录与工作区身份不一致");
     const workspace = archiveWorkspace;
-    const timeline = join(workspace, ".rsa", "timeline");
+    const timeline = join(workspace, ".ludens", "timeline");
     if (reference.video) return {
       bytes: await decodeTimelineFrame(timeline, { asset: reference.asset, video: reference.video }, { signal }),
       mediaType: "image/png", cacheControl: "no-store",
@@ -325,7 +325,7 @@ export async function timelineRecord(project: string, run: string, recordId: str
     if (!await hasTimelineReference(index, recordId, sequence, source, signal)) throw new Error("此运行没有引用指定观测");
     if (!archiveWorkspace) throw new Error("运行记录与工作区身份不一致");
     const workspace = archiveWorkspace;
-    const stored = await readTimelineRecord(join(workspace, ".rsa", "timeline"), recordId, sequence, signal)
+    const stored = await readTimelineRecord(join(workspace, ".ludens", "timeline"), recordId, sequence, signal)
       .catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
     if (stored) return stored;
 

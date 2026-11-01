@@ -40,11 +40,11 @@ async function deviceCapabilities(workspace: string, signal?: AbortSignal) {
 
 async function workspaceCapabilities(workspace: string, signal?: AbortSignal) {
   const paths = pythonModulePaths();
-  const env = pythonEnvironment({ RSA_WORKSPACE: workspace, PYTHONPATH: paths.join(delimiter), PYTHONDONTWRITEBYTECODE: "1" });
+  const env = pythonEnvironment({ LUDENS_WORKSPACE: workspace, PYTHONPATH: paths.join(delimiter), PYTHONDONTWRITEBYTECODE: "1" });
   // The bridge only parses source. Keep workspace modules out of Python's startup
   // search path so names such as json.py cannot execute while importing the bridge.
   const stdout = await new Promise<string>((resolve, reject) => {
-    const child = execFile(pythonExecutable(), ["-B", "-m", "rsa_tools._bridge"], {
+    const child = execFile(pythonExecutable(), ["-B", "-m", "ludens_tools._bridge"], {
       cwd: paths[0], env, signal, timeout: 15_000, maxBuffer: 16 * 1024 * 1024, encoding: "utf8",
     }, (error, output, stderr) => {
       if (error) reject(new Error(`Python capability discovery failed: ${stderr || output || error.message}`, { cause: error }));

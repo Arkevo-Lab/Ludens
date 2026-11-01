@@ -121,5 +121,5 @@ test("storage failure degrades to memory without losing live edits, and corrupt 
 });
 
 test("reload command removes inherited socket override and quotes the exact workspace path", () => {
-  assert.equal(perceptionReloadCommand("/tmp/a'b $(touch unsafe)"), "env -u RSA_SOCKET rsa --workspace '/tmp/a'\\''b $(touch unsafe)' perception reload");
+  assert.equal(perceptionReloadCommand("/tmp/a'b $(touch unsafe)"), "env -u LUDENS_SOCKET ludens --workspace '/tmp/a'\\''b $(touch unsafe)' perception reload");
 });

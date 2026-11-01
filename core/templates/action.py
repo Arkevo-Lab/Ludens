@@ -1,6 +1,6 @@
-"""Workspace-owned action program. Implement it, then run rsa action reload."""
+"""Workspace-owned action program. Implement it, then run ludens action reload."""
 
-from rsa_tools import Client, capability
+from ludens_tools import Client, capability
 
 
 class Action:
@@ -15,7 +15,7 @@ class Action:
     def step(self):
         """Compose capabilities using current or historical observations as needed.
 
-        self.device.observe() reads the same timeline envelope as rsa observe.
+        self.device.observe() reads the same timeline envelope as ludens observe.
         Discover device contracts in baseware.json. Async play can run while later
         steps observe or compute; it need not be immediately waited on.
         State and models survive Shiori rounds. Add @record only to results worth

@@ -50,13 +50,13 @@ async function budgetFixture(mode: "cooperative" | "blocked" | "failed" | "initi
   const workspace = join(root, "workspace"), task = join(workspace, "benchmarks/tasks/budget");
   await mkdir(join(task, "tests"), { recursive: true }); await mkdir(join(task, "environment"));
   await writeFile(join(task, "instruction.md"), "Collect the final saved measurement after control ends.");
-  await writeFile(join(task, "tests/test.sh"), '"$BUN" "$RSA_BENCH_TASK_DIR/tests/verify.ts"\n');
+  await writeFile(join(task, "tests/test.sh"), '"$BUN" "$LUDENS_BENCH_TASK_DIR/tests/verify.ts"\n');
   await writeFile(join(task, "tests/verify.ts"), `
     import { readFile, writeFile } from "node:fs/promises";
     import { join } from "node:path";
-    const facts = JSON.parse(await readFile(join(process.env.RSA_BENCH_ARTIFACTS!, "measurements.json"), "utf8"));
+    const facts = JSON.parse(await readFile(join(process.env.LUDENS_BENCH_ARTIFACTS!, "measurements.json"), "utf8"));
     if (!facts.budgetEnded || facts.cancelled || facts.releases !== 1 || facts.saved !== "final measurement") throw new Error("Incomplete measurements");
-    await writeFile(join(process.env.RSA_BENCH_VERIFIER_DIR!, "reward.json"), JSON.stringify({ saved: 1 }));
+    await writeFile(join(process.env.LUDENS_BENCH_VERIFIER_DIR!, "reward.json"), JSON.stringify({ saved: 1 }));
   `);
   // The Task controls its verifier environment; the module remains an ordinary bound program.
   await writeFile(join(task, "task.toml"), 'schema_version="1.4"\n[task]\nname="local/budget"\n[verifier]\ntimeout_sec=5\n[verifier.env]\nBUN=' + JSON.stringify(process.execPath) + '\n');
@@ -87,7 +87,7 @@ async function budgetFixture(mode: "cooperative" | "blocked" | "failed" | "initi
       devices.release = async epoch => { releases++; await release(epoch); };
       const state = await initializeWorkspaceState(ctx.workspace);
       const runtime = await createHostRuntime({ devices, workspace: ctx.workspace, runDir: ctx.runDir, state,
-        log: ctx.log, rsaSocket: "", basewareSocket: "", seconds: ctx.seconds / 10, budget: ctx.budget,
+        log: ctx.log, ludensSocket: "", basewareSocket: "", seconds: ctx.seconds / 10, budget: ctx.budget,
         maxRequests: 1, action: false });
       const finished = Promise.withResolvers<void>();
       runtime.attach({ agent: {

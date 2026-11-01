@@ -8,7 +8,7 @@ import { listen as listenBaseware } from "@ludens/baseware/server";
 import { connectBaseware } from "../src/core/subsystems/baseware.ts";
 import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
-import { listen as listenRsa, send, type Request } from "../src/daemon/transport.ts";
+import { listen as listenLudens, send, type Request } from "../src/daemon/transport.ts";
 import type { RecordEvent } from "../src/core/storage/events.ts";
 import { captureResult } from "./runtime-fixture.ts";
 
@@ -21,10 +21,10 @@ async function until(check: () => boolean | Promise<boolean>) {
 }
 
 async function fixture() {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-controller-")));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-controller-")));
   const runDir = join(workspace, "logs/run");
-  const prefix = `/tmp/rsa-ci-${crypto.randomUUID()}`;
-  const basewareSocket = `${prefix}-b.sock`, rsaSocket = `${prefix}-r.sock`;
+  const prefix = `/tmp/ludens-ci-${crypto.randomUUID()}`;
+  const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
   const source = join(workspace, "frame.json");
   await writeFile(source, '{"visible":true}');
   const events: { type: string; data: any; trace: any; metadata: any }[] = [];
@@ -57,13 +57,13 @@ async function fixture() {
   const closeBaseware = await listenBaseware(basewareSocket, core);
   const devices = await connectBaseware({socket: basewareSocket, seconds: 60, runDir, record});
   const runtime = new Runtime(devices, record, 60, "integration-run");
-  const env = { ...process.env, RSA_SOCKET: rsaSocket, RSA_WORKSPACE: workspace, RSA_RUN_ID: "integration-run", BASEWARE_SOCKET: basewareSocket,
+  const env = { ...process.env, LUDENS_SOCKET: ludensSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "integration-run", BASEWARE_SOCKET: basewareSocket,
     PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(":"),
     PYTHONPATH: join(import.meta.dir, "../python") };
   runtime.attach({ controller: new WorkspaceController({workspace, devices, env, record}) });
   devices.onHandback(reason => { void runtime.stop(reason); });
   devices.onDisconnect(error => { void runtime.disconnected(error); });
-  const closeRsa = await listenRsa(rsaSocket, runtime);
+  const closeLudens = await listenLudens(ludensSocket, runtime);
   const parentTrace = { traceId: "1234567890abcdef1234567890abcdef", spanId: "1234567890abcdef", toolCallId: "integration-call" };
   async function run(command: string[], epoch?: string) {
     const child = Bun.spawn(command, {cwd: workspace,
@@ -72,14 +72,14 @@ async function fixture() {
     const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     return {stdout, stderr, exitCode};
   }
-  return {workspace, runDir, source, rsaSocket, runtime, core, actions, events, parentTrace,
+  return {workspace, runDir, source, ludensSocket, runtime, core, actions, events, parentTrace,
     held: () => held, cancelled: () => cancelled, released: () => released,
-    cli: (argv: string[], epoch?: string) => run([join(import.meta.dir, "../bin/rsa"), "controller", ...argv], epoch),
+    cli: (argv: string[], epoch?: string) => run([join(import.meta.dir, "../bin/ludens"), "controller", ...argv], epoch),
     python: (source: string, epoch: string) => run(["python3", "-B", "-c", source], epoch),
     async close() {
-      await runtime.close(); devices.close(); await closeRsa(); await closeBaseware();
+      await runtime.close(); devices.close(); await closeLudens(); await closeBaseware();
       await rm(workspace, {recursive: true, force: true});
-      await rm(rsaSocket, {force: true});
+      await rm(ludensSocket, {force: true});
     },
   };
 }
@@ -89,7 +89,7 @@ test("CLI and Python compose the unified driver/workspace catalog, preserving ob
   try {
     await mkdir(join(f.workspace, "scripts"));
     const path = join(f.workspace, "scripts/actions.py");
-    const source = `from rsa_tools import Client, capability
+    const source = `from ludens_tools import Client, capability
 from pathlib import Path
 Path("imported").touch()
 @capability
@@ -139,7 +139,7 @@ def combined(label: str) -> dict:
     expect(literal.exitCode).toBe(0);
     expect(JSON.parse(literal.stdout).stdout).toBe('{"label":"--args literal --help"}');
     const combined = await f.python(`import json
-from rsa_tools import Client
+from ludens_tools import Client
 print(json.dumps(Client().call("python/scripts/actions.py:combined", {"label": "前进"})))`, epoch);
     expect(combined.stderr).toBe("");
     expect(combined.exitCode).toBe(0);
@@ -176,7 +176,7 @@ print(json.dumps(Client().call("python/scripts/actions.py:combined", {"label": "
     const captureDisplay = JSON.parse(captured.stdout);
     const [observation] = captureDisplay.observations;
     expect(captureDisplay.result.content[0].resource).toMatchObject({uri: "fixture:///frame", blob: Buffer.from('{"visible":true}').toString("base64")});
-    const apiCapture = await f.python('import json; from rsa_tools import Client; print(json.dumps(Client().call("controller/screen.capture")))', epoch);
+    const apiCapture = await f.python('import json; from ludens_tools import Client; print(json.dumps(Client().call("controller/screen.capture")))', epoch);
     expect(JSON.parse(apiCapture.stdout).result).toMatchObject({ _meta: { original: true }, content: [{type: "resource", resource: {
       uri: "fixture:///frame", blob: Buffer.from('{"visible":true}').toString("base64") }}] });
     expect(observation.path).toBe(f.source);
@@ -195,9 +195,9 @@ print(json.dumps(Client().call("python/scripts/actions.py:combined", {"label": "
     expect(removed.exitCode).toBe(1);
     expect(removed.stderr).toContain("Unknown capability");
     expect((await f.cli(["controller/pad.echo", "--args", '{"label":"fail"}'], epoch)).exitCode).toBe(17);
-    await expect(send(f.rsaSocket, {kind: "controller", argv: [], action: "call", id: "controller/pad.echo", arguments: [], epoch})).rejects.toThrow("JSON object");
+    await expect(send(f.ludensSocket, {kind: "controller", argv: [], action: "call", id: "controller/pad.echo", arguments: [], epoch})).rejects.toThrow("JSON object");
     const actionsBeforeInvalid = f.actions.length;
-    await expect(send(f.rsaSocket, {kind: "controller", argv: [], action: "call", id: "controller/pad.echo", arguments: {label: 3}, epoch})).rejects.toThrow("Invalid arguments");
+    await expect(send(f.ludensSocket, {kind: "controller", argv: [], action: "call", id: "controller/pad.echo", arguments: {label: 3}, epoch})).rejects.toThrow("Invalid arguments");
     expect(f.actions).toHaveLength(actionsBeforeInvalid);
     const completed = f.events.filter(event => event.type === "capability_end");
     expect(completed.filter(event => event.data.outcome === "error")).toHaveLength(7);
@@ -218,7 +218,7 @@ test("caller disconnect and human handback cancel long calls, and a new epoch re
   const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
   const call = (epoch: string, id: string, args?: unknown) => ({kind: "controller", argv: [], action: "call", id, arguments: args, epoch} satisfies Request);
   async function disconnectable(request: Request) {
-    const socket = connect(f.rsaSocket);
+    const socket = connect(f.ludensSocket);
     clients.push(socket);
     socket.on("error", () => {});
     await new Promise<void>((resolve, reject) => { socket.once("connect", resolve); socket.once("error", reject); });
@@ -226,7 +226,7 @@ test("caller disconnect and human handback cancel long calls, and a new epoch re
     return socket;
   }
   try {
-    await writeFile(join(f.workspace, "actions.py"), `from rsa_tools import Client, capability
+    await writeFile(join(f.workspace, "actions.py"), `from ludens_tools import Client, capability
 from pathlib import Path
 import os, time
 @capability
@@ -255,7 +255,7 @@ def wait(nested: bool = False):
     expect(await Bun.file(join(f.workspace, "unexpected-completion")).exists()).toBe(false);
     expect(f.runtime.status().mode).toBe("auto");
 
-    const pending = send(f.rsaSocket, call(epoch, "python/actions.py:wait", {nested: true}));
+    const pending = send(f.ludensSocket, call(epoch, "python/actions.py:wait", {nested: true}));
     const outcome = pending.then(value => ({value, error: ""}), error => ({value: undefined, error: String(error)}));
     await until(() => f.actions.length === 2);
     const nestedPid = Number(await readFile(join(f.workspace, "nested.pid"), "utf8"));
@@ -274,7 +274,7 @@ def wait(nested: bool = False):
     expect(stale.stderr).toContain("STALE_EPOCH");
     expect(f.events.find(event => event.type === "capability_end" && event.data.error?.includes("STALE_EPOCH"))?.data).toMatchObject({outcome: "error"});
     expect(f.actions).toHaveLength(2);
-    expect(await send(f.rsaSocket, call(nextEpoch, "controller/pad.echo", {label: "current"}))).toMatchObject({status: "completed"});
+    expect(await send(f.ludensSocket, call(nextEpoch, "controller/pad.echo", {label: "current"}))).toMatchObject({status: "completed"});
     expect(f.actions[2]).toEqual({args: {label: "current"}, epoch: nextEpoch});
     const completed = f.events.filter(event => event.type === "capability_end");
     expect(completed.filter(event => event.data.outcome === "cancelled")).toHaveLength(4);

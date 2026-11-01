@@ -63,4 +63,4 @@
 为了防止以后升级把这套行为改坏，我们配了两条回归验证：
 
 - **集成测试**：[core/tests/omp-speculation.test.ts](../../../core/tests/omp-speculation.test.ts) 直接跑真实的 OMP preparation / validation / commit / 尾部重放，验证“涨超 20k 仍存活”、“到线等待在途候选”、“分支/余量不足仍正常作废”以及“取消打断不晚提交”。
-- **内置 Benchmark**：`rsa bench run ludens/background-compaction`（见 [Benchmark](../reference/benchmark.md)），用受控流离线复刻整套后台压缩生命周期。
+- **内置 Benchmark**：`ludens bench run ludens/background-compaction`（见 [Benchmark](../reference/benchmark.md)），用受控流离线复刻整套后台压缩生命周期。

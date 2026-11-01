@@ -9,10 +9,10 @@ Only the `cua` desktop adapter is built into the main repository. Emulator and c
 The desktop environment uses the stock upstream [Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver):
 
 1. Install Cua Driver, and in macOS **System Settings → Privacy & Security** grant `CuaDriver.app` **Accessibility** and **Screen Recording** permissions.
-2. Baseware attaches the driver through a persistent `cua-driver mcp` child process (stdio transport); no `game` or bridge port is needed. If `cua-driver` is not on `PATH`, specify the absolute path via `rsa init --cua-command` or the `rsa.json` `cuaCommand` field.
-3. All tools keep their upstream names and JSON parameter shapes (e.g. `rsa controller controller/get_desktop_state --args '{}'`); for contract boundaries see [Baseware design & capability contracts](../reference/baseware.md).
+2. Baseware attaches the driver through a persistent `cua-driver mcp` child process (stdio transport); no `game` or bridge port is needed. If `cua-driver` is not on `PATH`, specify the absolute path via `ludens init --cua-command` or the `ludens.json` `cuaCommand` field.
+3. All tools keep their upstream names and JSON parameter shapes (e.g. `ludens controller controller/get_desktop_state --args '{}'`); for contract boundaries see [Baseware design & capability contracts](../reference/baseware.md).
 
-**Desktop environment boundaries**: multiple Cua workspaces share the same host's real desktop; use a separate OS session or VM for an isolated desktop. Handing control back to a human immediately rejects new inputs and requests cancellation, but a single native call already inside the OS may still finish; `rsa down` does not close the shared `CuaDriver.app` or the user's desktop apps.
+**Desktop environment boundaries**: multiple Cua workspaces share the same host's real desktop; use a separate OS session or VM for an isolated desktop. Handing control back to a human immediately rejects new inputs and requests cancellation, but a single native call already inside the OS may still finish; `ludens down` does not close the shared `CuaDriver.app` or the user's desktop apps.
 
 ## Discovering & connecting external driver packages
 
@@ -26,11 +26,11 @@ Non-built-in drivers must select an external package explicitly via `--driver-pa
 
 ```sh
 baseware driver discover --package 'github:org/repo#rev'
-rsa init --name my-task --driver <id> --driver-package 'github:org/repo#rev'
+ludens init --name my-task --driver <id> --driver-package 'github:org/repo#rev'
 ```
 
-- **Path resolution**: relative `file:` paths in `rsa init` and `rsa up` resolve against the target workspace directory and are normalized; relative `file:` in `baseware driver discover` resolves against the current shell directory; external-driver validation in the Dashboard web UI requires absolute `file:` paths.
-- **Actual source**: the catalog's `drivers[].source`, Baseware `service_start.driverSource`, and RSA `manifest.drivers[].source` record the source the loader actually resolved: GitHub `resolvedCommit`, npm `resolvedVersion`, or local entry `entrySha256`. The entry hash does not cover dependencies, and `provider.version` still denotes the device or protocol version; see [Package addresses & caching](../reference/baseware.md#1-package-addresses-and-caching) for the fields.
+- **Path resolution**: relative `file:` paths in `ludens init` and `ludens up` resolve against the target workspace directory and are normalized; relative `file:` in `baseware driver discover` resolves against the current shell directory; external-driver validation in the Dashboard web UI requires absolute `file:` paths.
+- **Actual source**: the catalog's `drivers[].source`, Baseware `service_start.driverSource`, and Ludens `manifest.drivers[].source` record the source the loader actually resolved: GitHub `resolvedCommit`, npm `resolvedVersion`, or local entry `entrySha256`. The entry hash does not cover dependencies, and `provider.version` still denotes the device or protocol version; see [Package addresses & caching](../reference/baseware.md#1-package-addresses-and-caching) for the fields.
 - **Trust boundary**: discovery does not call the driver's `load()`, but it downloads and installs dependencies and imports the package entry code; only run discovery and init against trusted sources. For the driver package spec see [Driver packages & launch descriptions](../reference/baseware.md#driver-packages-and-launch-description) and [Driver Bridge protocol](../reference/driver-bridge-protocol.md).
 
-**Migrating an existing external-driver workspace**: run `rsa auto off`, then `rsa down --keep-emulator`; add or update the matching `driverPackage` in `rsa.json` (pinning the target revision or commit SHA), then run `rsa up --dry-run` / `rsa up`. Do not re-run `rsa init`; the original workspace files and saves are kept. Already-running services do not switch packages just because sources were updated. To attach to an already manually prepared emulator without auto-launching a game file, omit `game`.
+**Migrating an existing external-driver workspace**: run `ludens auto off`, then `ludens down --keep-emulator`; add or update the matching `driverPackage` in `ludens.json` (pinning the target revision or commit SHA), then run `ludens up --dry-run` / `ludens up`. Do not re-run `ludens init`; the original workspace files and saves are kept. Already-running services do not switch packages just because sources were updated. To attach to an already manually prepared emulator without auto-launching a game file, omit `game`.

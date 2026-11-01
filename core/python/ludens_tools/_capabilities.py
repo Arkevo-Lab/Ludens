@@ -12,7 +12,7 @@ import re
 import sys
 
 
-EXCLUDED = {"logs", ".rsa", ".git", "node_modules", ".venv", "venv", "__pycache__"}
+EXCLUDED = {"logs", ".ludens", ".git", "node_modules", ".venv", "venv", "__pycache__"}
 
 
 def annotation_schema(node):
@@ -114,10 +114,10 @@ def function_schema(node):
 def marked_functions(tree, marker_name="capability"):
     decorators, modules = set(), set()
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom) and node.module == "rsa_tools":
+        if isinstance(node, ast.ImportFrom) and node.module == "ludens_tools":
             decorators.update(alias.asname or alias.name for alias in node.names if alias.name == marker_name)
         if isinstance(node, ast.Import):
-            modules.update(alias.asname or alias.name for alias in node.names if alias.name == "rsa_tools")
+            modules.update(alias.asname or alias.name for alias in node.names if alias.name == "ludens_tools")
     def is_marker(node):
         if isinstance(node, ast.Call):
             node = node.func
@@ -145,7 +145,7 @@ def workspace_sources(workspace, diagnostics):
                 tree = ast.parse(raw, filename=relative)
             except (OSError, SyntaxError, ValueError) as error:
                 # A broken ordinary helper is not itself an exposed capability.
-                if raw is None or b"rsa_tools" in raw:
+                if raw is None or b"ludens_tools" in raw:
                     diagnostics.append({"path": relative, "line": getattr(error, "lineno", None), "message": str(error)})
                 continue
             yield relative, raw, tree
@@ -210,7 +210,7 @@ def load_function(workspace, relative_path, function_name, *, raw=None):
         parts = source.relative_to(workspace).with_suffix("").parts
         module_name = ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
         if not module_name or not all(part.isidentifier() for part in module_name.split(".")) or module_name in sys.modules:
-            module_name = "_rsa_workspace_" + hashlib.sha256(str(source).encode()).hexdigest()[:16]
+            module_name = "_ludens_workspace_" + hashlib.sha256(str(source).encode()).hexdigest()[:16]
         parent_name, _, child_name = module_name.rpartition(".")
         parent = importlib.import_module(parent_name) if parent_name else None
         # A package's __init__ may itself import the selected module.
@@ -219,8 +219,8 @@ def load_function(workspace, relative_path, function_name, *, raw=None):
             raw = source.read_bytes() if raw is None else raw
             spec = importlib.util.spec_from_file_location(module_name, source)
             module = importlib.util.module_from_spec(spec)
-            module.__rsa_source_sha__ = hashlib.sha256(raw).hexdigest()
-            module.__rsa_source_bytes__ = raw
+            module.__ludens_source_sha__ = hashlib.sha256(raw).hexdigest()
+            module.__ludens_source_bytes__ = raw
             sys.modules[module_name] = module
             try:
                 exec(compile(raw, str(source), "exec"), module.__dict__)
@@ -230,7 +230,7 @@ def load_function(workspace, relative_path, function_name, *, raw=None):
             if parent is not None:
                 setattr(parent, child_name, module)
     function = getattr(module, function_name)
-    if not callable(function) or not getattr(function, "__rsa_capability__", False):
+    if not callable(function) or not getattr(function, "__ludens_capability__", False):
         raise ValueError("The selected function is not marked @capability")
     return function
 

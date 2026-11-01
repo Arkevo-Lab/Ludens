@@ -11,7 +11,7 @@ import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { PythonCapabilities, pythonModulePaths } from "../src/core/subsystems/python-capabilities.ts";
 import { EventLog, type RecordEvent } from "../src/core/storage/events.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
-import { listen as listenRsa } from "../src/daemon/transport.ts";
+import { listen as listenLudens } from "../src/daemon/transport.ts";
 import { renderBoard } from "../src/bench/fixtures/reuse-board.ts";
 import { ReuseEnvironment } from "../src/bench/fixtures/reuse-environment.ts";
 import { evaluateReuse, type ReuseEvent } from "../benchmarks/tasks/capability-reuse/tests/evaluate.ts";
@@ -31,7 +31,7 @@ test("the benchmark sensor emits an actual readable, deterministic PNG", async (
 });
 
 test("the environment rejects wrong values and holds the next batch until the current operation returns", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-bench-board-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-bench-board-"));
   const events: { type: string; data: any }[] = [];
   const environment = new ReuseEnvironment(11, directory, (type, data) => events.push({ type, data }));
   const [set, submit] = environment.capabilities.controllers;
@@ -54,7 +54,7 @@ test("the environment rejects wrong values and holds the next batch until the cu
 });
 
 for (const route of ["controller", "local", "import"] as const) test(`evaluator proves productive ${route} reuse across batches, and rejects look-alikes`, async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "rsa-bench-eval-"));
+  const workspace = await mkdtemp(join(tmpdir(), "ludens-bench-eval-"));
   const runDir = join(workspace, "logs", "fixture");
   const log = new EventLog(runDir, { id: "reuse-fixture", now: () => performance.now() });
   const recordBenchmark = log.recorder({ component: "benchmark" });
@@ -67,20 +67,20 @@ for (const route of ["controller", "local", "import"] as const) test(`evaluator 
     }
     if (type === "tool_end") environment.afterExec(trace!);
   };
-  const prefix = `/tmp/rsa-bench-test-${crypto.randomUUID()}`;
-  const basewareSocket = `${prefix}-b.sock`, rsaSocket = `${prefix}-r.sock`;
+  const prefix = `/tmp/ludens-bench-test-${crypto.randomUUID()}`;
+  const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
   const deviceLog = new DeviceEventLog(join(runDir, "device-sources"), crypto.randomUUID());
   const core = new BasewareCore({ serviceId: deviceLog.source.sourceId, source: deviceLog.source, record: deviceLog.record, capabilities: environment.capabilities, drivers: [{ id: "fixture", version: "1" }] });
   const closeBaseware = await listenBaseware(basewareSocket, core);
   const devices = await connectBaseware({ socket: basewareSocket, runDir, seconds: 60, record });
   await writeFile(join(runDir, "manifest.json"), JSON.stringify({workspace, eventSources: devices.eventSources}));
   const runtime = new Runtime(devices, record, 60, "reuse-fixture");
-  const env = { ...process.env, RSA_SOCKET: rsaSocket, BASEWARE_SOCKET: basewareSocket,
-    RSA_WORKSPACE: workspace, RSA_RUN_ID: runtime.status().runId,
+  const env = { ...process.env, LUDENS_SOCKET: ludensSocket, BASEWARE_SOCKET: basewareSocket,
+    LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: runtime.status().runId,
     PYTHONPATH: pythonModulePaths().join(":"),
     PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH ?? ""].join(":") };
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, env, record }) });
-  const closeRsa = await listenRsa(rsaSocket, runtime);
+  const closeLudens = await listenLudens(ludensSocket, runtime);
   const epoch = (await runtime.start()).epoch!;
   let round = 0;
   const exec = async (command: string[]) => {
@@ -98,13 +98,13 @@ for (const route of ["controller", "local", "import"] as const) test(`evaluator 
     expect({ stderr, exitCode }).toEqual({ stderr: "", exitCode: 0 });
     return stdout;
   };
-  const cli = (...args: string[]) => exec([join(import.meta.dir, "../bin/rsa"), "controller", ...args]);
+  const cli = (...args: string[]) => exec([join(import.meta.dir, "../bin/ludens"), "controller", ...args]);
   try {
     const initial = JSON.parse(await cli("list"));
     expect(initial.capabilities.map((item: any) => item.id)).toEqual(["controller/bench.set", "controller/bench.submit", "controller/screen.capture"]);
     // Test-only agent fixture. The live case never supplies this code or solves orders.
     await mkdir(join(workspace, "scripts"));
-    const source = `from rsa_tools import Client, capability
+    const source = `from ludens_tools import Client, capability
 ${route !== "import" ? "@capability\n" : ""}
 def configure(values: list[int]) -> dict:
     """Set all three dials and submit the assembled order."""
@@ -125,7 +125,7 @@ def configure(values: list[int]) -> dict:
     for (let order = 0; order < 6; order++) {
       const values = [digit(), digit(), digit()];
       if (route === "controller") await cli("python/scripts/bench.py:configure", "--args", JSON.stringify({ values }));
-      else if (route === "local") await exec(["python3", "-c", `from rsa_tools import Client\nprint(Client().call("python/scripts/bench.py:configure", {"values": ${JSON.stringify(values)}}))`]);
+      else if (route === "local") await exec(["python3", "-c", `from ludens_tools import Client\nprint(Client().call("python/scripts/bench.py:configure", {"values": ${JSON.stringify(values)}}))`]);
       else await exec(["python3", "-c", `from scripts.bench import configure as build\nprint(build(${JSON.stringify(values)}))`]);
     }
     recordBenchmark("benchmark_reuse_finished", environment.summary(), { epoch });
@@ -161,7 +161,7 @@ def configure(values: list[int]) -> dict:
           ? { ...event, data: { ...event.data, result: indexed.artifact({ content: [], details }) } } : event);
         expect(check(incomplete, "capability-reused")).toBeNull();
       }
-      const missing = { encoding: "rsa-json-v1", path: `objects/${"0".repeat(64)}.json.gz`, sha256: "0".repeat(64), bytes: 0 };
+      const missing = { encoding: "ludens-json-v1", path: `objects/${"0".repeat(64)}.json.gz`, sha256: "0".repeat(64), bytes: 0 };
       for (const field of ["argsRef", "result"]) {
         const absent = referenced.map(event => event.data.toolName === "bash" && field in event.data
           ? { ...event, data: { ...event.data, [field]: missing } } : event);
@@ -224,7 +224,7 @@ def configure(values: list[int]) -> dict:
     expect(check(inventoryOnly, "capability-reused")).toBeNull();
     expect(judge(inventoryOnly).checks!["capability-created"]?.evidenceSeq).toEqual([inventory.seq]);
     const untrustedInventory = structuredClone(inventoryOnly);
-    untrustedInventory.at(-1)!.source = { component: "rsa" };
+    untrustedInventory.at(-1)!.source = { component: "ludens" };
     expect(check(untrustedInventory, "capability-created")).toBe(false);
     const wrongStage = structuredClone(inventoryOnly);
     wrongStage.at(-1)!.data.stage = "agent-turn";
@@ -258,7 +258,7 @@ def configure(values: list[int]) -> dict:
     expect(check(prefilled, "capability-created")).toBe(false);
     expect(check(prefilled, "capability-reused")).toBeNull();
   } finally {
-    await runtime.close(); devices.close(); await closeRsa(); await closeBaseware();
+    await runtime.close(); devices.close(); await closeLudens(); await closeBaseware();
     await rm(workspace, { recursive: true, force: true });
   }
 }, 30000);

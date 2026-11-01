@@ -12,7 +12,7 @@ function facts() {
   let seq = 0;
   return (type: string, data: Record<string, any> = {}, trace: Record<string, string> = {}): Event => ({
     seq: ++seq, type, data, trace: { epoch: "cycle", ...trace },
-    at: new Date(seq * 1000).toISOString(), atMs: seq * 1000, source: { component: "rsa" },
+    at: new Date(seq * 1000).toISOString(), atMs: seq * 1000, source: { component: "ludens" },
   });
 }
 import type { Event } from "../lib/types";
@@ -20,7 +20,7 @@ const wire = (delta: string) => JSON.stringify({ atMs: 1, event: { type: "respon
   item_id: "answer", delta } }) + "\n";
 
 test("one source feed builds latest cold Activity recipes at fixed cutoffs, then appends preserve delivered versions", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-reducers-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-reducers-")));
   const index = new LogIndex(path, join(path, "index"));
   try {
     const e = facts(), model = { modelCallId: "model" }, python = { traceId: "python", spanId: "root" };
@@ -78,7 +78,7 @@ test("one source feed builds latest cold Activity recipes at fixed cutoffs, then
 });
 
 test("run reducer restores only explicit endpoints when a completed span gains a late model identity", async () => {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-reducer-late-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-reducer-late-")));
   const index = new LogIndex(path, join(path, "index"));
   try {
     const e = facts(), trace = { traceId: "t", spanId: "s" };

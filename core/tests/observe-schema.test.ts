@@ -6,22 +6,22 @@ import Ajv from "ajv";
 import { customToolToDefinition, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { convertOpenAICodexResponsesTools } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
-import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("observe wire schema accepts unused fields and real OMP calls deliver requested historical pixels", async () => {
-  const workspace = await mkdtemp(join(tmpdir(), "rsa-observe-schema-")), runDir = join(workspace, "logs", "run");
+  const workspace = await mkdtemp(join(tmpdir(), "ludens-observe-schema-")), runDir = join(workspace, "logs", "run");
   const path = join(workspace, "historical.png");
   await writeFile(path, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==", "base64"));
   const seed = Bun.spawn(["python3", "-B", "-c", `import json, sys
 from unittest.mock import patch
-from rsa_tools._observation_history import ObservationHistory, timestamp
+from ludens_tools._observation_history import ObservationHistory, timestamp
 history = ObservationHistory(sys.argv[1])
 records = []
 for second in (50, 51):
-    with patch("rsa_tools._observation_history.time.time", return_value=timestamp(f"2026-10-22T06:45:{second}Z", "at")):
+    with patch("ludens_tools._observation_history.time.time", return_value=timestamp(f"2026-10-22T06:45:{second}Z", "at")):
         records.append(history.append({"text": "historical", "media": [{"path": "historical.png", "mediaType": "image/png"}]},
                        "previous", {"clock": "previous", "startedAtMs": second, "finishedAtMs": second}))
 history.close()
@@ -29,13 +29,13 @@ print(json.dumps(records))`, workspace], {env: {...process.env, PYTHONPATH: join
   const [seeded, seedError, code] = await Promise.all([new Response(seed.stdout).text(), new Response(seed.stderr).text(), seed.exited]);
   expect({code, seedError}).toEqual({code: 0, seedError: ""});
   const records = JSON.parse(seeded) as {id: string}[];
-  await writeFile(join(workspace, "perception.py"), 'from rsa_tools import capability, record\nclass Perception:\n    def start(self, context): pass\n    @record\n    @capability\n    def sample(self): return {"text": "live"}\n    def close(self): pass\n');
+  await writeFile(join(workspace, "perception.py"), 'from ludens_tools import capability, record\nclass Perception:\n    def start(self, context): pass\n    @record\n    @capability\n    def sample(self): return {"text": "live"}\n    def close(self): pass\n');
   const runtime = createTestRuntime({ controllers: [] });
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: runtime.record }) });
   const signal = new AbortController().signal;
   try {
     await runtime.perception!.reload();
-    const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(workspace, "versions")),
+    const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(workspace, "versions")),
       runDir, basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 1,
       cycle: () => ({ epoch: "offline", signal }),
     });

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { briefNotification, type SerializedNotification } from './activity-policy.js'
-import type { LogBlock } from './rsa-source.js'
+import type { LogBlock } from './ludens-source.js'
 
 // Exercise the exact classic script loaded by the native pet window.
 const source = readFileSync(resolve('public/companion/log-content.js'), 'utf8')

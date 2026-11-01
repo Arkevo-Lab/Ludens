@@ -182,7 +182,7 @@ export function WorkspacesView({ onChanged, onOpen, catalogError, catalogLoading
     void mutate("create", () => request<WorkspaceRegistration>(t("operationFailed"), "POST", { action: "create", workspace: input }),
       entry => acceptEntry(entry, "created"));
   };
-  const command = completion ? `rsa --workspace '${completion.entry.workspace.replace(/'/g, "'\\''")}' up` : "";
+  const command = completion ? `ludens --workspace '${completion.entry.workspace.replace(/'/g, "'\\''")}' up` : "";
   const copyCommand = async () => {
     try { await navigator.clipboard.writeText(command); setCopied("done"); }
     catch { setCopied("error"); }

@@ -9,10 +9,10 @@ import sys
 import threading
 import traceback
 
-from rsa_tools._context import current, scope
-from rsa_tools._observation_history import ObservationHistory, observation_result
-from rsa_tools._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
-from rsa_tools._resident import load_instance, run_continuously
+from ludens_tools._context import current, scope
+from ludens_tools._observation_history import ObservationHistory, observation_result
+from ludens_tools._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
+from ludens_tools._resident import load_instance, run_continuously
 
 
 def main():
@@ -74,7 +74,7 @@ def main():
                     history = ObservationHistory(workspace)
                     context = {**current(), "workspace": str(workspace), "run_id": Path(message["runDir"]).name,
                                "epoch": None, "generation": message["generation"], "trace": dict(message.get("trace", {})),
-                               "diagnostics": message.get("diagnostics", os.environ.get("RSA_LOG_DIAGNOSTICS", "normal")),
+                               "diagnostics": message.get("diagnostics", os.environ.get("LUDENS_LOG_DIAGNOSTICS", "normal")),
                                "timeline_append": append}
                     if context["diagnostics"] not in ("normal", "full"):
                         raise ValueError("diagnostics must be normal or full")

@@ -11,8 +11,8 @@ import type { PerceptionRead, PerceptionRecord } from "../src/core/subsystems/pe
 // deliver the requested old pixels through OMP's real terminal decoder.
 // The fake socket has visibly different old/current frames; no agent or device.
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), "rsa-observe-cli-"));
-  const socket = `/tmp/rsa-observe-${crypto.randomUUID()}.sock`;
+  const root = await mkdtemp(join(tmpdir(), "ludens-observe-cli-"));
+  const socket = `/tmp/ludens-observe-${crypto.randomUUID()}.sock`;
   const records: PerceptionRecord[] = [];
   for (const [index, color] of [[255, 0, 0], [0, 0, 255]].entries()) {
     const path = join(root, `${index}.png`);

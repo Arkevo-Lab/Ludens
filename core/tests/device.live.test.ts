@@ -11,11 +11,11 @@ async function control(socket: string, value: "on" | "off") {
   const status = await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null };
   return send(socket, { kind: "auto", argv: [value], runId: status.runId, expectedEpoch: status.epoch });
 }
-test.skipIf(process.env.RSA_LIVE_DEVICE !== "1")("real device captures PNG, completes sequences, interrupts and rejects the old owner", async () => {
-  const workspace = process.env.RSA_WORKSPACE ?? process.cwd();
-  const socket = process.env.RSA_SOCKET ?? (await resolveWorkspaceAddress(workspace)).socket;
+test.skipIf(process.env.LUDENS_LIVE_DEVICE !== "1")("real device captures PNG, completes sequences, interrupts and rejects the old owner", async () => {
+  const workspace = process.env.LUDENS_WORKSPACE ?? process.cwd();
+  const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(workspace)).socket;
   const baseware = await BasewareClient.connect(process.env.BASEWARE_SOCKET ?? await defaultSocket(workspace));
-  const sequenceFile = `/tmp/rsa-sequence-${crypto.randomUUID()}.json`;
+  const sequenceFile = `/tmp/ludens-sequence-${crypto.randomUUID()}.json`;
   try {
     await control(socket, "off");
     const { epoch } = await control(socket, "on") as { epoch: string };

@@ -7,15 +7,15 @@ import { dispatch, listen } from "../src/daemon/transport.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("perception injection CLI changes only context policy and rejects stale epochs", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-injection-")));
-  const socket = `/tmp/rsa-injection-${crypto.randomUUID()}.sock`;
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-injection-")));
+  const socket = `/tmp/ludens-injection-${crypto.randomUUID()}.sock`;
   const events: { type: string; data: any; trace: any }[] = [];
   const runtime = createTestRuntime({ controllers: [] }, (type, data, trace) => events.push({ type, data, trace }));
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir: join(workspace, "logs", "test"), record: runtime.record }) });
   const close = await listen(socket, runtime);
   const run = async (args: string[], epoch?: string) => {
     const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), ...args], {
-      cwd: workspace, env: { ...process.env, RSA_SOCKET: socket, BASEWARE_EPOCH: epoch,
+      cwd: workspace, env: { ...process.env, LUDENS_SOCKET: socket, BASEWARE_EPOCH: epoch,
         BASEWARE_TRACE: JSON.stringify({ modelCallId: "context-change" }) }, stdout: "pipe", stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
@@ -29,7 +29,7 @@ test("perception injection CLI changes only context policy and rejects stale epo
     expect(runtime.perception!.status().state).toBe("ready");
   };
   try {
-    await writeFile(join(workspace, "perception.py"), `from rsa_tools import capability, record
+    await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
     sample_hz = 20
     def start(self, context): self.count = 0
@@ -85,7 +85,7 @@ test("context policy works before perception exists and help distinguishes stop 
     expect(runtime.perception).toBeUndefined();
     expect(freshHost.perceptionInjectionEnabled()).toBe(true);
     const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "perception", "inject", "--help"],
-      { env: { ...process.env, RSA_SOCKET: "/tmp/unused-context-help.sock" }, stdout: "pipe", stderr: "pipe" });
+      { env: { ...process.env, LUDENS_SOCKET: "/tmp/unused-context-help.sock" }, stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect({ code, stderr }).toEqual({ code: 0, stderr: "" });
     expect(stdout).toContain("inject off disables automatic observation attachment");

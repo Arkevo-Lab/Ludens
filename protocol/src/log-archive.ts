@@ -8,7 +8,7 @@ import type { TimelineAssetReference, VideoFrameReference } from "./timeline-typ
 import { validateVideoReference } from "./timeline-media";
 
 export interface JsonArchiveRef {
-  encoding: "rsa-json-v1";
+  encoding: "ludens-json-v1";
   path: string;
   sha256: string;
   /** Size of the original JSON value, not the encoded object or wire body. */
@@ -89,7 +89,7 @@ function escapeJson(value: string, ranges: Escapes) {
   return text + value.slice(after);
 }
 
-/** Canonical directories only; do not follow a workspace's .rsa/archive symlink when writing. */
+/** Canonical directories only; do not follow a workspace's .ludens/archive symlink when writing. */
 function ensureDirectory(root: string, parts: string[]) {
   let path = root;
   for (const part of parts) {
@@ -107,7 +107,7 @@ export class JsonArchive {
   private media = new Map<string, TimelineAssetReference & { indexed?: boolean }>();
   constructor(workspace: string) {
     this.workspace = realpathSync(workspace);
-    this.root = ensureDirectory(this.workspace, [".rsa", "archive"]);
+    this.root = ensureDirectory(this.workspace, [".ludens", "archive"]);
     ensureDirectory(this.root, ["objects"]);
     ensureDirectory(this.root, ["media"]);
   }
@@ -133,7 +133,7 @@ export class JsonArchive {
   private videoReference(sha256: string) {
     let reference = this.media.get(sha256);
     if (reference?.indexed) return reference;
-    const directory = ensureDirectory(this.workspace, [".rsa", "archive", "media"]);
+    const directory = ensureDirectory(this.workspace, [".ludens", "archive", "media"]);
     const path = join(directory, `${sha256}.json`);
     let indexed = false;
     try {
@@ -146,7 +146,7 @@ export class JsonArchive {
       if (reference?.video && reference.video.status !== "gap" && reference.asset !== stored.asset) {
         replace = stored.asset.startsWith("window-");
         if (!replace) {
-          const statePath = join(this.workspace, ".rsa", "timeline", stored.asset + ".json");
+          const statePath = join(this.workspace, ".ludens", "timeline", stored.asset + ".json");
           try {
             if (realpathSync(statePath) !== statePath || statSync(statePath).size > 64 * 1024)
               throw new Error("Invalid timeline video status file");
@@ -192,7 +192,7 @@ export class JsonArchive {
         ...(gap ? { reason: registered.video.reason ?? "recording-gap" } : {}) }];
     }
     const asset = registered?.asset ?? `objects/${sha256}.bin`;
-    const root = join(this.workspace, ".rsa", "timeline"), path = join(root, mediaPath(asset));
+    const root = join(this.workspace, ".ludens", "timeline"), path = join(root, mediaPath(asset));
     let available = false;
     try { available = realpathSync(root) === root && realpathSync(path) === path && statSync(path).size === bytes.length; }
     catch { /* An unrecorded/expired image is metadata, never a second permanent archive. */ }
@@ -253,7 +253,7 @@ export class JsonArchive {
   private store(node: Node): string {
     const bytes = Buffer.from(JSON.stringify({ version: 1, node }));
     const sha = hash(bytes), path = join(this.root, objectPath(sha));
-    ensureDirectory(this.workspace, [".rsa", "archive", "objects"]);
+    ensureDirectory(this.workspace, [".ludens", "archive", "objects"]);
     if (existsSync(path)) {
       if (realpathSync(path) !== path) throw new Error("Archive object must not be a symlink");
       if (hash(gunzipSync(readFileSync(path))) !== sha) throw new Error("Archive object checksum mismatch");
@@ -284,14 +284,14 @@ export class JsonArchive {
     const node = encode(JSON.parse(json));
     const encoded = JSON.stringify({ version: 1, node });
     if (options.inline && Buffer.byteLength(encoded) <= 2048)
-      return { encoding: "rsa-json-v1", inline: node, sha256: hash(encoded), bytes: Buffer.byteLength(json) };
+      return { encoding: "ludens-json-v1", inline: node, sha256: hash(encoded), bytes: Buffer.byteLength(json) };
     const sha256 = this.store(node);
-    return { encoding: "rsa-json-v1", path: objectPath(sha256), sha256, bytes: Buffer.byteLength(json) };
+    return { encoding: "ludens-json-v1", path: objectPath(sha256), sha256, bytes: Buffer.byteLength(json) };
   }
 }
 
 function verifyRef(ref: any) {
-  if (ref?.encoding !== "rsa-json-v1" || !HASH.test(ref.sha256)) throw new Error("Invalid archive reference");
+  if (ref?.encoding !== "ludens-json-v1" || !HASH.test(ref.sha256)) throw new Error("Invalid archive reference");
   if (ref.inline !== undefined) {
     if (ref.path !== undefined || hash(JSON.stringify({ version: 1, node: ref.inline })) !== ref.sha256)
       throw new Error("Inline archive checksum mismatch");
@@ -348,7 +348,7 @@ export async function readArtifact(runDir: string, ref: any, options: ReadOption
   runDir = await realpath(runDir);
   if (ref?.encoding === "gzip") return JSON.parse(gunzipSync(await readUnder(runDir, legacyPath(ref))).toString("utf8"));
   verifyRef(ref);
-  const workspace = await workspaceRoot(runDir, options.workspace), root = join(workspace, ".rsa", "archive");
+  const workspace = await workspaceRoot(runDir, options.workspace), root = join(workspace, ".ludens", "archive");
   const mode = options.media ?? "reference";
   const decode = async (node: Node, chain: Set<string>, depth = 0): Promise<any> => {
     if (depth > 256 || !Array.isArray(node)) throw new Error("Invalid archive tree");
@@ -367,7 +367,7 @@ export async function readArtifact(runDir: string, ref: any, options: ReadOption
         if (mode !== "full") return { $media: node[1] };
         if (node[1].video) return missingMedia({ ...node[1], reason: "lossy-video-source; use the timeline frame for a visual reconstruction" });
         if (!node[1].asset) return missingMedia(node[1]);
-        try { return fullMedia(await readUnder(join(workspace, ".rsa", "timeline"), mediaPath(node[1].asset)), node[1]); }
+        try { return fullMedia(await readUnder(join(workspace, ".ludens", "timeline"), mediaPath(node[1].asset)), node[1]); }
         catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return missingMedia(node[1]); throw error; }
       }
       default: throw new Error("Unknown archive node");
@@ -381,7 +381,7 @@ export function readArtifactSync(runDir: string, ref: any, options: ReadOptions 
   runDir = realpathSync(runDir);
   if (ref?.encoding === "gzip") return JSON.parse(gunzipSync(readUnderSync(runDir, legacyPath(ref))).toString("utf8"));
   verifyRef(ref);
-  const workspace = workspaceRootSync(runDir, options.workspace), root = join(workspace, ".rsa", "archive");
+  const workspace = workspaceRootSync(runDir, options.workspace), root = join(workspace, ".ludens", "archive");
   const mode = options.media ?? "reference";
   const decode = (node: Node, chain: Set<string>, depth = 0): any => {
     if (depth > 256 || !Array.isArray(node)) throw new Error("Invalid archive tree");
@@ -400,7 +400,7 @@ export function readArtifactSync(runDir: string, ref: any, options: ReadOptions 
         if (mode !== "full") return { $media: node[1] };
         if (node[1].video) return missingMedia({ ...node[1], reason: "lossy-video-source; use the timeline frame for a visual reconstruction" });
         if (!node[1].asset) return missingMedia(node[1]);
-        try { return fullMedia(readUnderSync(join(workspace, ".rsa", "timeline"), mediaPath(node[1].asset)), node[1]); }
+        try { return fullMedia(readUnderSync(join(workspace, ".ludens", "timeline"), mediaPath(node[1].asset)), node[1]); }
         catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return missingMedia(node[1]); throw error; }
       }
       default: throw new Error("Unknown archive node");

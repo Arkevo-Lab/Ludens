@@ -9,14 +9,14 @@ import { JsonArchive, readArtifact, readArtifactSync } from "@ludens/protocol/lo
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function setup() {
-  const workspace = mkdtempSync(join(tmpdir(), "rsa-log-archive-")); roots.push(workspace);
+  const workspace = mkdtempSync(join(tmpdir(), "ludens-log-archive-")); roots.push(workspace);
   const run = join(workspace, "logs", "one"); mkdirSync(run, { recursive: true });
   writeFileSync(join(run, "manifest.json"), JSON.stringify({ workspace }));
   return { workspace, run, store: new JsonArchive(workspace) };
 }
 function retained(workspace: string, bytes: Buffer, window = "objects") {
   const sha256 = createHash("sha256").update(bytes).digest("hex"), asset = `${window}/${sha256}.bin`;
-  const path = join(workspace, ".rsa", "timeline", asset);
+  const path = join(workspace, ".ludens", "timeline", asset);
   mkdirSync(join(path, ".."), { recursive: true }); writeFileSync(path, bytes);
   return { sha256, asset, path, bytes: bytes.length };
 }
@@ -94,7 +94,7 @@ test("window media remains temporary and unrecorded media is never archived by l
   const unknown = store.write({ type: "audio", mimeType: "audio/wav", data: Buffer.from("not retained").toString("base64") });
   expect((await readArtifact(run, unknown)).data.$media.status).toBe("unrecorded");
   await expect(readArtifact(run, unknown, { media: "full" })).rejects.toThrow("Media unavailable");
-  expect(readdirSync(join(workspace, ".rsa", "timeline"))).toEqual(["window-42-test"]);
+  expect(readdirSync(join(workspace, ".ludens", "timeline"))).toEqual(["window-42-test"]);
 });
 
 test("nested native audio and base64 source blocks use the same media contract", async () => {
@@ -225,7 +225,7 @@ test("video lookup renews temporary or failed sources while keeping a healthy du
   expect(await use("window-1/video/aaaa.mp4")).toBe("window-1/video/aaaa.mp4");
   expect(await use("window-2/video/bbbb.mp4")).toBe("window-2/video/bbbb.mp4");
   expect(await use("video/cccc.mp4")).toBe("video/cccc.mp4");
-  const state = join(workspace, ".rsa/timeline/video/cccc.mp4.json");
+  const state = join(workspace, ".ludens/timeline/video/cccc.mp4.json");
   mkdirSync(join(state, ".."), { recursive: true });
   writeFileSync(state, JSON.stringify({ status: "ready" }));
   expect(await use("video/dddd.mp4")).toBe("video/cccc.mp4");

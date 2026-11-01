@@ -8,11 +8,11 @@ For a first run, complete the [core installation](quickstart.md#install) in **1.
 
 | Stage | Topic | What it solves | Key commands / entry points |
 | --- | --- | --- | --- |
-| **1. Install & lifecycle** | [**Install & workspace lifecycle**](quickstart.md) | Install components, configure the global default directory, then create/register/import workspaces and manage their lifecycle once devices are ready | `rsa config` · `rsa init --name` · `rsa workspace` · `rsa up` · `rsa auto on` · `rsa down` |
+| **1. Install & lifecycle** | [**Install & workspace lifecycle**](quickstart.md) | Install components, configure the global default directory, then create/register/import workspaces and manage their lifecycle once devices are ready | `ludens config` · `ludens init --name` · `ludens workspace` · `ludens up` · `ludens auto on` · `ludens down` |
 | **2. Device preparation** | [**Devices & driver setup**](devices.md) | Set up the built-in Cua desktop driver or discover and connect external emulator driver packages | `--driver-package` · `baseware driver discover` · `cua-driver` |
-| **3. Capabilities & recording** | [**Workspaces & capability programming**](workspace.md) | Understand the workspace file layout, declare `@capability` and `@record`, call device and local Python capabilities | `rsa controller` · `rsa_tools.Client` · `.rsa/timeline/` |
-| **4. Perception & action** | [**Resident perception & action loop**](perception-and-action.md) | Write a 30Hz resident `perception.py` and `action.py`, query the historical timeline, and manage auto-injection and recording parameters | `rsa perception reload` · `rsa observe` · `rsa action reload` |
-| **5. Debugging & verification** | [**Console debugging & verification**](debugging-and-verification.md) | Debug a single component in the foreground, use the Dashboard and the Ludens Pet companion, follow script naming conventions, run offline and on-device tests | `baseware serve` · `rsa run` · `http://127.0.0.1:3015` |
+| **3. Capabilities & recording** | [**Workspaces & capability programming**](workspace.md) | Understand the workspace file layout, declare `@capability` and `@record`, call device and local Python capabilities | `ludens controller` · `ludens_tools.Client` · `.ludens/timeline/` |
+| **4. Perception & action** | [**Resident perception & action loop**](perception-and-action.md) | Write a 30Hz resident `perception.py` and `action.py`, query the historical timeline, and manage auto-injection and recording parameters | `ludens perception reload` · `ludens observe` · `ludens action reload` |
+| **5. Debugging & verification** | [**Console debugging & verification**](debugging-and-verification.md) | Debug a single component in the foreground, use the Dashboard and the Ludens Pet companion, follow script naming conventions, run offline and on-device tests | `baseware serve` · `ludens run` · `http://127.0.0.1:3015` |
 
 ## Related reference
 

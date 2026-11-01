@@ -1,8 +1,8 @@
 import { app, ipcMain, type BrowserWindow } from 'electron'
 import { join } from 'node:path'
 import { createActivityPreferenceStore } from './activity-preferences.js'
-import { RsaActivityController } from './rsa-activity-controller.js'
-import type { RsaActivitySource } from './rsa-source.js'
+import { LudensActivityController } from './ludens-activity-controller.js'
+import type { LudensActivitySource } from './ludens-source.js'
 import { DEFAULT_ACTIVITY_PREFERENCES } from './activity-policy.js'
 
 export interface OwnerAccess {
@@ -12,9 +12,9 @@ export interface OwnerAccess {
 
 export function installCompanionActivity(owner: BrowserWindow, pet: BrowserWindow, access: OwnerAccess = {}) {
   const store = createActivityPreferenceStore(join(app.getPath('userData'), 'activity-notifications.json'), DEFAULT_ACTIVITY_PREFERENCES)
-  let source: RsaActivitySource | undefined
+  let source: LudensActivitySource | undefined
   const foreground = () => !owner.isDestroyed() && owner.isVisible() && !owner.isMinimized()
-  const controller = new RsaActivityController({ identity: () => source?.identity() ?? null, read: signal => {
+  const controller = new LudensActivityController({ identity: () => source?.identity() ?? null, read: signal => {
     if (!source) throw new Error('No activity source')
     return source.read(signal)
   }, stop: () => source?.stop?.(), record: (...args) => source?.record?.(...args) }, {
@@ -64,5 +64,5 @@ export function installCompanionActivity(owner: BrowserWindow, pet: BrowserWindo
     owner.removeListener('show', transition); owner.removeListener('hide', transition); owner.removeListener('minimize', transition); owner.removeListener('restore', transition)
     pet.removeListener('hide', transition); pet.removeListener('show', transition)
   })
-  return { configure(value: RsaActivitySource) { source = value; void controller.poll() } }
+  return { configure(value: LudensActivitySource) { source = value; void controller.poll() } }
 }

@@ -1,4 +1,4 @@
-import type { LogBlock } from './rsa-source.js'
+import type { LogBlock } from './ludens-source.js'
 export const BLOCK_KINDS = ['thinking', 'text', 'tool', 'system', 'diagnostic'] as const
 export type BlockKind = typeof BLOCK_KINDS[number]
 export const DEFAULT_BLOCK_VISIBILITY: Record<BlockKind, boolean> = {

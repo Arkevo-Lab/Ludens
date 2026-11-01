@@ -65,7 +65,7 @@ test("partial tool arguments stay source text until they form JSON", () => {
 });
 
 test("activity blocks retain fact provenance and stream blocks link to their model anchor", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-provenance-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-provenance-")));
   try {
     await mkdir(join(root, "streams"));
     const source = { component: "shiori", implementation: "omp", implementationVersion: "18.9.1" };
@@ -103,7 +103,7 @@ test("DeepSeek chat chunks retain readable thinking, assistant text and function
 });
 
 test("cached growing streams and native bash artifact results join the same provider call without exec events", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "rsa-activity-"));
+  const temporary = await mkdtemp(join(tmpdir(), "ludens-activity-"));
   const root = await realpath(temporary);
   try {
     await mkdir(join(root, "streams")); await mkdir(join(root, "payloads"));
@@ -142,7 +142,7 @@ test("cached growing streams and native bash artifact results join the same prov
 });
 
 test("system and diagnostic blocks preserve structured event data with the existing redactions", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "rsa-activity-data-"));
+  const temporary = await mkdtemp(join(tmpdir(), "ludens-activity-data-"));
   const root = await realpath(temporary);
   try {
     const blocks = await activityBlocks(root, [
@@ -162,7 +162,7 @@ test("system and diagnostic blocks preserve structured event data with the exist
 });
 
 test("action worker lifecycle reports failure once while fault detail and continuous statistics remain diagnostic", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-action-activity-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-action-activity-")));
   try {
     const blocks = await activityBlocks(root, [
       event("action_status", 1, { state: "ready", generation: "first" }),
@@ -182,7 +182,7 @@ test("action worker lifecycle reports failure once while fault detail and contin
 });
 
 test("cycle selection keeps other epochs' blocks out and rejects unknown epochs", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "rsa-activity-epoch-"));
+  const temporary = await mkdtemp(join(tmpdir(), "ludens-activity-epoch-"));
   const root = await realpath(temporary);
   try {
     const events = [event("control", 1, { mode: "auto" }, "old"), event("observation", 2, { id: "old-image" }, "old"),
@@ -194,7 +194,7 @@ test("cycle selection keeps other epochs' blocks out and rejects unknown epochs"
 });
 
 test("explicit failed outcomes are visible system blocks while cancellations remain non-errors", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-activity-outcome-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-activity-outcome-")));
   try {
     const events = ["capability_end", "shiori_span_end", "python_capabilities"]
       .map((type, index) => event(type, index + 1, { outcome: "error", error: "fixture failed" }));
@@ -209,7 +209,7 @@ test("explicit failed outcomes are visible system blocks while cancellations rem
 });
 
 test("Python raises are diagnostics grouped only by explicit parents, while command failures remain visible", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-raised-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-raised-")));
   try {
     const local = (type: string, seq: number, spanId: string, parentSpanId?: string, outcome?: string): Event => ({
       ...event(type, seq, { id: `python/actions.py:${spanId}`, ...(outcome ? { outcome, error: outcome === "error" ? "Pause did not stabilize" : undefined } : {}) }),
@@ -235,7 +235,7 @@ test("Python raises are diagnostics grouped only by explicit parents, while comm
 });
 
 test("assessment failure is distinct from execution/report errors and missing verdict stays unknown", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-assessment-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-assessment-")));
   try {
     const blocks = await activityBlocks(root, [
       event("benchmark_report", 1, { executionStatus: "completed", reportStatus: "valid", verdict: "failed" }),
@@ -250,7 +250,7 @@ test("assessment failure is distinct from execution/report errors and missing ve
 });
 
 test("Shiori benchmark lifecycle distinguishes execution and verification without scoring rewards", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-verification-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-verification-")));
   try {
     const blocks = await activityBlocks(root, [
       event("benchmark_start", 1, { executionStatus: "running", verificationStatus: "missing" }),
@@ -269,7 +269,7 @@ test("Shiori benchmark lifecycle distinguishes execution and verification withou
 });
 
 test("model cancellation closes partial output without inventing a failure or completing an executing tool", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "rsa-activity-abort-"));
+  const temporary = await mkdtemp(join(tmpdir(), "ludens-activity-abort-"));
   const root = await realpath(temporary);
   try {
     await mkdir(join(root, "streams"));
@@ -292,7 +292,7 @@ test("model cancellation closes partial output without inventing a failure or co
 });
 
 test("mixed WS/SSE runs merge tools and readable summaries without inventing assistant text", async () => {
-  const temporary = await mkdtemp(join(tmpdir(), "rsa-activity-mixed-"));
+  const temporary = await mkdtemp(join(tmpdir(), "ludens-activity-mixed-"));
   const root = await realpath(temporary);
   try {
     await mkdir(join(root, "streams"));

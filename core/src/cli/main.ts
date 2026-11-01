@@ -22,20 +22,20 @@ import { GLOBAL_HELP, globalCommand } from "./global.ts";
 
 const globalHome = ludensHome();
 let exit: (code: number) => void | Promise<void> = code => process.exit(code);
-const RUN_HELP = `rsa [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--seconds <n>] [--requests <n>] [--compaction-threshold <tokens>]
-Each workspace keeps its sessions in .rsa/shiori/; --new-session starts fresh without deleting workspace files.
+const RUN_HELP = `ludens [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--seconds <n>] [--requests <n>] [--compaction-threshold <tokens>]
+Each workspace keeps its sessions in .ludens/shiori/; --new-session starts fresh without deleting workspace files.
 The current directory is the default workspace. Run logs go to <workspace>/logs/<run-id>/.
 --resume selects an existing session from the same workspace, then remembers it for future starts.
 --compaction-threshold configures OMP's native compaction trigger; default follows the selected model's native OMP setting.
 --diagnostics normal|full selects recording detail at startup (default normal).
-Perception starts empty. Implement workspace/perception.py and use rsa perception reload.
-rsa perception inject off disables automatic context attachment while sampling and recording continue.
+Perception starts empty. Implement workspace/perception.py and use ludens perception reload.
+ludens perception inject off disables automatic context attachment while sampling and recording continue.
 Hardware is provided by an independent Baseware service. Its default socket is derived from the workspace.`;
 
 async function main() {
   const args = process.argv.slice(2);
-  let selectedWorkspace = process.env.RSA_WORKSPACE ?? process.cwd();
-  let explicitWorkspace = !!process.env.RSA_WORKSPACE;
+  let selectedWorkspace = process.env.LUDENS_WORKSPACE ?? process.cwd();
+  let explicitWorkspace = !!process.env.LUDENS_WORKSPACE;
   if (args[0] === "--workspace") {
     if (!args[1] || args[1].startsWith("--")) throw new Error("--workspace requires a path");
     selectedWorkspace = args[1];
@@ -43,7 +43,7 @@ async function main() {
     args.splice(0, 2);
   }
   if (!args.length || args[0] === "--help" || (args[0] === "run" && args.includes("--help"))) {
-    console.log(`${GLOBAL_HELP}\n\n${WORKSPACE_HELP}\n\n${RUN_HELP}\n${HELP}\nrsa bench <list|help|run|history|compare> — unified benchmarks; rsa bench --help\n${LOG_HELP}`);
+    console.log(`${GLOBAL_HELP}\n\n${WORKSPACE_HELP}\n\n${RUN_HELP}\n${HELP}\nrsa bench <list|help|run|history|compare> — unified benchmarks; ludens bench --help\n${LOG_HELP}`);
     return;
   }
   if (args[0] === "config" || args[0] === "workspace") return globalCommand(args[0], args.slice(1), globalHome);
@@ -51,7 +51,7 @@ async function main() {
   if (args[0] === "logs") return logCommand(args.slice(1));
   if (["init", "up", "services", "down"].includes(args[0]!)) return workspaceCommand(args[0]!, args.slice(1), selectedWorkspace, explicitWorkspace);
   if (args[0] !== "run") {
-    const socket = process.env.RSA_SOCKET ?? (await resolveWorkspaceAddress(selectedWorkspace)).socket;
+    const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(selectedWorkspace)).socket;
     return cli(args, socket);
   }
   const { values } = parseArgs({ args: args.slice(1), options: {
@@ -81,7 +81,7 @@ async function main() {
   const state = await resolveWorkspaceState(values.workspace!, globalHome);
   const workspace = state.workspace;
   await registerWorkspace(workspace, globalHome);
-  const socket = process.env.RSA_SOCKET ?? state.socket;
+  const socket = process.env.LUDENS_SOCKET ?? state.socket;
   const runId = new Date().toISOString().replaceAll(":", "-");
   const runDir = join(workspace, "logs", runId);
   const basewareSocket = values["baseware-socket"] ?? process.env.BASEWARE_SOCKET ?? await defaultSocket(workspace);
@@ -131,11 +131,11 @@ async function main() {
       const postmortem = await import("@oh-my-pi/pi-utils/postmortem");
       // OMP's signal handler exits after its registered callbacks, so it must
       // await this host's cleanup too. The signal and finally share one promise.
-      unregisterCleanup = postmortem.register("rsa-run", close, { exitOnly: true });
+      unregisterCleanup = postmortem.register("ludens-run", close, { exitOnly: true });
       exit = postmortem.quit;
     }
     runtime = await createHostRuntime({ devices, workspace, state, runDir, log, resume,
-      rsaSocket: socket, basewareSocket, seconds, model: values["device-only"] ? undefined : model,
+      ludensSocket: socket, basewareSocket, seconds, model: values["device-only"] ? undefined : model,
       maxRequests, compactionThreshold });
     devices.onHandback(reason => { void runtime!.stop(reason); });
     devices.onDisconnect(error => { void runtime!.disconnected(error); });

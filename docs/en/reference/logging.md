@@ -6,11 +6,11 @@ Offline analyzers, the Dashboard web console, the Ludens Pet desktop companion, 
 
 ### 1. `normal` vs `full` comparison
 
-Set the log mode in `rsa.json`'s `logging.diagnostics` (or CLI `--diagnostics`); it is written to `manifest.json` at startup, and Python child processes inherit it via the `RSA_LOG_DIAGNOSTICS` environment variable (`rsa status` shows the effective modes of the Host and Baseware in `logging.diagnostics` and `basewareDiagnostics` respectively):
+Set the log mode in `ludens.json`'s `logging.diagnostics` (or CLI `--diagnostics`); it is written to `manifest.json` at startup, and Python child processes inherit it via the `LUDENS_LOG_DIAGNOSTICS` environment variable (`ludens status` shows the effective modes of the Host and Baseware in `logging.diagnostics` and `basewareDiagnostics` respectively):
 
 | Mode | Recorded scope | Written to |
 | --- | --- | --- |
-| `normal` (default) | Fully keeps model calls, tool executions, active capability calls, device input and terminal states (`action_start / action_end`), control transitions, resident-process lifecycles, and fault spans; for resident-loop internal read-only call chains carrying `trace.recordingPurpose = "continuous-perception"` or `"continuous-action"`, per-call events and log RPC are omitted (results annotated `@record` are still written to `.rsa/timeline/` normally). | `logs/<run-id>/events.jsonl` and Baseware `events/` |
+| `normal` (default) | Fully keeps model calls, tool executions, active capability calls, device input and terminal states (`action_start / action_end`), control transitions, resident-process lifecycles, and fault spans; for resident-loop internal read-only call chains carrying `trace.recordingPurpose = "continuous-perception"` or `"continuous-action"`, per-call events and log RPC are omitted (results annotated `@record` are still written to `.ludens/timeline/` normally). | `logs/<run-id>/events.jsonl` and Baseware `events/` |
 | `full` | On top of `normal`, additionally records every nested Python call inside resident perception/action loops and every Baseware read-only query detail (without duplicating media or experience events). | Separately written to `logs/<run-id>/diagnostics.jsonl` and Baseware `diagnostics/` segments |
 
 ### 2. Periodic aggregate statistics and fault-span merging
@@ -29,22 +29,22 @@ Files in a single run directory `workspace/logs/<run-id>/`:
 | File / directory | Content and owner |
 | --- | --- |
 | `manifest.json` | Workspace paths, models, Driver list, budgets, effective log modes, Shiori implementation version, Git/prompt hashes, and `eventSources` external fact-source declarations. |
-| `events.jsonl` | RSA-written Schema v2 main event stream (call identities, statistics, and content references). |
+| `events.jsonl` | Ludens-written Schema v2 main event stream (call identities, statistics, and content references). |
 | `diagnostics.jsonl` | High-frequency internal-call diagnostics stream in `full` mode, read with on-demand pagination. |
-| `streams/` | Model streaming-response shards (`rsa-stream-v1` format; small leaf nodes inline, large nodes referencing `.rsa/archive/`). |
+| `streams/` | Model streaming-response shards (`ludens-stream-v1` format; small leaf nodes inline, large nodes referencing `.ludens/archive/`). |
 | `perception/<gen>/` · `action/<gen>/` | Entry info of the corresponding generation, the actually imported workspace source list `sources.json`, and process `stderr`. |
 
 Three underlying stores shared across runs:
 
-1. **Baseware device fact sources (`logs/baseware/`)**: each Baseware instance independently maintains `source.json`, `events/`, and `diagnostics/` (segmented by 1 hour or 256 MiB); events are uniquely identified by `origin.eventId = "<serviceId>:<seq>"`. RSA records `{sourceId, root, format, recordingId, windows}` in `manifest.json`'s `eventSources`; readers merge on demand via [protocol/src/event-sources.ts](../../../protocol/src/event-sources.ts). The `recordingId` is frozen at action start, so even actions that end late after the window closes are still attributed exactly to the original run.
-2. **Workspace spacetime axis (`.rsa/timeline/`)**: cross-run shared perception and capability archives — `video/<id>.mp4` with companion state files `.mp4.json` (distinguishing `pending / ready / error`), deduplicated non-video media `objects/<sha256>.bin`, and segmented records `segments/` (with JSONL, fixed-length `.idx` index, and `.meta.json`). With persistence off (`RSA_PERCEPTION_PERSIST=0`), only `window-<pid>-.../` temporary windows are used.
-3. **Content-addressed structured archive (`.rsa/archive/`)**: uniformly read/written by [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts). Model messages, tool definitions, and large parameters/results are stored as `objects/<sha256>.json.gz` (using `encoding: "rsa-json-v1"` with tagged JSON to distinguish internal references from user `$ref` fields). Image/audio data in logs is not stored twice; instead it references `.rsa/timeline/` assets, with a lightweight hash-to-video-frame mapping index kept in `.rsa/archive/media/<sha256>.json` (in-memory LRU capped at 4096 entries).
+1. **Baseware device fact sources (`logs/baseware/`)**: each Baseware instance independently maintains `source.json`, `events/`, and `diagnostics/` (segmented by 1 hour or 256 MiB); events are uniquely identified by `origin.eventId = "<serviceId>:<seq>"`. Ludens records `{sourceId, root, format, recordingId, windows}` in `manifest.json`'s `eventSources`; readers merge on demand via [protocol/src/event-sources.ts](../../../protocol/src/event-sources.ts). The `recordingId` is frozen at action start, so even actions that end late after the window closes are still attributed exactly to the original run.
+2. **Workspace spacetime axis (`.ludens/timeline/`)**: cross-run shared perception and capability archives — `video/<id>.mp4` with companion state files `.mp4.json` (distinguishing `pending / ready / error`), deduplicated non-video media `objects/<sha256>.bin`, and segmented records `segments/` (with JSONL, fixed-length `.idx` index, and `.meta.json`). With persistence off (`LUDENS_PERCEPTION_PERSIST=0`), only `window-<pid>-.../` temporary windows are used.
+3. **Content-addressed structured archive (`.ludens/archive/`)**: uniformly read/written by [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts). Model messages, tool definitions, and large parameters/results are stored as `objects/<sha256>.json.gz` (using `encoding: "ludens-json-v1"` with tagged JSON to distinguish internal references from user `$ref` fields). Image/audio data in logs is not stored twice; instead it references `.ludens/timeline/` assets, with a lightweight hash-to-video-frame mapping index kept in `.ludens/archive/media/<sha256>.json` (in-memory LRU capped at 4096 entries).
 
 ### 2. Common event envelope
 
 Every JSONL event carries a top-level writer identity (`runId` or `serviceId`, incrementing `seq`, wall-clock `at`, monotonic `atMs`) plus four core blocks (defined in [core/src/core/storage/events.ts](../../../core/src/core/storage/events.ts)):
 
-- **`source`**: the responsible component that produced the semantics (`shiori`, `rsa`, `workspace`, `baseware`, `benchmark`, `dashboard`, `pet`) and its concrete implementation and version.
+- **`source`**: the responsible component that produced the semantics (`shiori`, `ludens`, `workspace`, `baseware`, `benchmark`, `dashboard`, `pet`) and its concrete implementation and version.
 - **`origin`**: `{eventId, clockId, seq, at, atMs}` of the source process that first generated the fact; unchanged across forwarding and persistence (`atMs` may only be subtracted within the same `clockId`).
 - **`trace`**: call-chain and business-ownership context, with `traceId / spanId / parentSpanId` (call-tree relations), `epoch / modelCallId / requestId / httpId / toolCallId / operationId` (business entity IDs), `recordingId / recordingPurpose` (run ownership and resident purpose), and `inputGeneration` (action-worker reload generation within an epoch).
 - **`type` / `data`**: the concrete event type and payload.
@@ -60,7 +60,7 @@ Quick reference of core event contracts:
 
 | Event type | Semantics and lifecycle boundary |
 | --- | --- |
-| `capability_start / capability_end` | `rsa controller` `list / help / call` boundaries; records parameters, capability ID, epoch check result, terminal state (`success / error / cancelled`), and latency. |
+| `capability_start / capability_end` | `ludens controller` `list / help / call` boundaries; records parameters, capability ID, epoch check result, terminal state (`success / error / cancelled`), and latency. |
 | `python_capabilities_start / python_capabilities` | Independent child Span of the workspace `@capability` AST static-scan discovery. |
 | `python_capability / python_capability_result` | Function location, source hash, inputs, and return value of one CLI Python-capability runner invocation. |
 | `python_call_start / python_call_end` | Actual execution Span of a workspace `@capability`-decorated function; records PID, source hash, terminal state, and latency (native Python input/return objects are not force-serialized). Resident parents omitted under `normal` are flagged `parentOmitted: true` on child events. |
@@ -77,12 +77,12 @@ Quick reference of core event contracts:
 
 - **Query events**: each `observe` execution records `perception_observe_start / perception_observe_end`, using that call's `spanId` as the returned envelope's `queryId`.
 - **Delivery receipts**: automatic delivery happens only at prompt start (`before_agent_start`); explicit `observe` calls and native tool images open their own receipts (`origin` of `explicit` and `tool_result`, respectively). Each context delivery to the model writes one `observation_context` event recording `{id, origin, queries, observations, purpose?}`. A subsequent `model_start` references the newly added receipt IDs via `deliveryIds` (note: `deliveryIds` only identifies newly appended observation sources for that round; the model's full history context is defined by the request archive payload).
-- **Auto-delivery dedup cursor**: with auto-injection on (the `context_policy` event records `rsa perception inject on/off` changes), the extension deduplicates by spacetime-axis `recordId` so the same record is never re-appended on later turns; a new sample with identical pixels but a different `recordId` is still delivered as independent time evidence. The sampler state cursor advances only when auto-delivery actually completes; suppressed or cancelled reads never swallow state-change notifications.
+- **Auto-delivery dedup cursor**: with auto-injection on (the `context_policy` event records `ludens perception inject on/off` changes), the extension deduplicates by spacetime-axis `recordId` so the same record is never re-appended on later turns; a new sample with identical pixels but a different `recordId` is still delivered as independent time evidence. The sampler state cursor advances only when auto-delivery actually completes; suppressed or cancelled reads never swallow state-change notifications.
 
 ### 2. Model input re-encoding and tool-image tracking
 
 - **Derived images (`modelMedia`)**: perception images pass through one `resizeImage` encoding before reaching OMP; encoding latency and dimensions go into the `observation_media` event, and the re-encoded image is stored by the perception writer as a derived asset (recording derived hash, source `asset / recordId / sequence`, and converter name `omp.resizeImage` in `observation_media.modelMedia`).
-- **Native tool images**: images delivered to the model via native `read` or `bash --images` are recorded as `observation(origin = "tool_result")` tied to the matching `toolCallId`. If the CLI output carries an explicit spacetime-axis record tag and the bytes match, it is linked exactly to that `recordId`; if only the byte hash matches `.rsa/timeline/objects/<sha256>.bin`, the underlying asset is reused without guessing the sampling moment.
+- **Native tool images**: images delivered to the model via native `read` or `bash --images` are recorded as `observation(origin = "tool_result")` tied to the matching `toolCallId`. If the CLI output carries an explicit spacetime-axis record tag and the bytes match, it is linked exactly to that `recordId`; if only the byte hash matches `.ludens/timeline/objects/<sha256>.bin`, the underlying asset is reused without guessing the sampling moment.
 
 ## Shiori, compaction, and transport
 
@@ -96,7 +96,7 @@ Quick reference of core event contracts:
 
 ### 1. Dashboard Worker and three-layer rebuildable index (`.dashboard-index/`)
 
-The Dashboard isolates log parsing and index building in a dedicated Node Worker fully outside the Next.js request context. Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.rsa/archive/`, or `.rsa/timeline/`), with three parts:
+The Dashboard isolates log parsing and index building in a dedicated Node Worker fully outside the Next.js request context. Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.ludens/archive/`, or `.ludens/timeline/`), with three parts:
 
 1. **Source-event location and relation catalog**: each event keeps only its file byte offset, timestamp (taken as `origin.at ?? at`), type, and call identity; model, Span, action, and observation relation tables all point at source-event byte offsets.
 2. **Activity on-demand display recipes**: each display block (Thinking / Text / Tool / System / Diagnostic) keeps only the source-event offsets or `streams/` cutoff byte counts; text is assembled from originals on recipe only when the frontend or pet requests it, never redundantly stored in the index.
@@ -104,8 +104,8 @@ The Dashboard isolates log parsing and index building in a dedicated Node Worker
 
 ### 2. Page cache and cold-history builder subprocess
 
-- **Page cache and lease eviction**: the index pages to disk at most 1024 entries or 256 KiB per page. The query Worker keeps a shared page cache of **256 MiB** by default (tunable via `RSA_DASHBOARD_INDEX_CACHE_BYTES`), retains at most **3** idle runs (`RSA_DASHBOARD_INDEX_MAX_RUNS`), and releases memory after **5 minutes** idle (`RSA_DASHBOARD_INDEX_IDLE_MS`) with no in-flight read leases.
-- **Single-instance cold builder**: on first opening a historical large run with no index yet, the query Worker spawns a globally unique temporary Builder subprocess (target working set **2 GiB** by default, controlled by `RSA_DASHBOARD_BUILD_BYTES`), which single-pass scans the event stream at a fixed cutoff and batch-generates `generations/<id>/`, then publishes via atomic replacement of `.dashboard-index/active.json` and exits to return memory to the OS. During the build, endpoints return HTTP `202 ARCHIVE_PREPARING` with live progress; closing the browser tab only cancels the current HTTP query and never interrupts the bounded background build.
+- **Page cache and lease eviction**: the index pages to disk at most 1024 entries or 256 KiB per page. The query Worker keeps a shared page cache of **256 MiB** by default (tunable via `LUDENS_APP_INDEX_CACHE_BYTES`), retains at most **3** idle runs (`LUDENS_APP_INDEX_MAX_RUNS`), and releases memory after **5 minutes** idle (`LUDENS_APP_INDEX_IDLE_MS`) with no in-flight read leases.
+- **Single-instance cold builder**: on first opening a historical large run with no index yet, the query Worker spawns a globally unique temporary Builder subprocess (target working set **2 GiB** by default, controlled by `LUDENS_APP_BUILD_BYTES`), which single-pass scans the event stream at a fixed cutoff and batch-generates `generations/<id>/`, then publishes via atomic replacement of `.dashboard-index/active.json` and exits to return memory to the OS. During the build, endpoints return HTTP `202 ARCHIVE_PREPARING` with live progress; closing the browser tab only cancels the current HTTP query and never interrupts the bounded background build.
 
 ### 3. Console HTTP API and Ludens Pet incremental follow
 
@@ -116,7 +116,7 @@ The Dashboard isolates log parsing and index building in a dedicated Node Worker
 
 ### 1. Spacetime player and frame read-ahead buffer
 
-The Dashboard replay view (`/api/replay`) aligns `.rsa/timeline/` continuous-sample frames, device-action spans (`action_start / action_end`), model reasoning, and tool calls on one workspace wall-clock timeline:
+The Dashboard replay view (`/api/replay`) aligns `.ludens/timeline/` continuous-sample frames, device-action spans (`action_start / action_end`), model reasoning, and tool calls on one workspace wall-clock timeline:
 
 - **Time windows and dual-frame read-ahead**: events page by at most 60-second windows with 500-entry cursors; frames use a decode-buffer Hook — atomically switching only once all screen frames for the target moment are loaded, while reading ahead at most 2 frames (max 8 images / 32 MiB read-ahead cache), releasing image memory immediately on workspace switch or page leave.
 - **Sampled frames vs actual model input**: the player's main view shows perception-layer archived consecutive frames (including frames sampled during model thinking but never fed into context); the model-call detail locates observations by that request's input references. Video frames are lossy reconstructions and must not be treated as the model's original input bytes; unarchived, encoding-gap, or expired media shows as missing per actual state.
@@ -131,11 +131,11 @@ python3 core/scripts/analyze-run.py /path/to/workspace/logs/run-id \
   --epoch epoch-id --output /path/to/analysis.json
 
 # Expand one event's archived reference body (media shows reference summary by default; --full restores only media bytes whose originals still exist; video sources keep the lossy-origin mark)
-core/bin/rsa logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
+core/bin/ludens logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
 
 # Stream all fact-source events declared by the run in order (add --diagnostics to read the full diagnostic stream)
-core/bin/rsa logs events --run /path/to/workspace/logs/run-id
-core/bin/rsa logs events --run /path/to/workspace/logs/run-id --diagnostics
+core/bin/ludens logs events --run /path/to/workspace/logs/run-id
+core/bin/ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
 ```
 
 Core metric semantics of [analyze-run.py](../../../core/scripts/analyze-run.py):

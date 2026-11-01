@@ -2,8 +2,8 @@
   "task": "ludens/control-handoff",
   "argv": [
     "{bun}",
-    "{rsa}/src/core/shiori/module-program.ts",
-    "{rsa}/src/bench/cases/control-handoff.ts"
+    "{core}/src/core/shiori/module-program.ts",
+    "{core}/src/bench/cases/control-handoff.ts"
   ],
   "workspace": "isolated",
   "seconds": 180,

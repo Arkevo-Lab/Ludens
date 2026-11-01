@@ -6,13 +6,13 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings, type CustomTool }
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import * as z from "@oh-my-pi/omptype/zod";
-import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("native OMP handback aborts the active tool and skips queued tool side effects", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-omp-handback-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-omp-handback-"));
   const workspace = join(directory, "workspace");
   await mkdir(workspace);
   const network = spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected network request in offline handback test"));
@@ -24,7 +24,7 @@ test("native OMP handback aborts the active tool and skips queued tool side effe
   const registry = new ModelRegistry(auth, undefined, { settings });
   const model = registry.find("openai-codex", "gpt-6.1-sol")!;
   let cycle: Cycle | undefined;
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 10,
     cycle: () => { if (!cycle) throw new Error("No active control cycle"); return cycle; },
   });
@@ -63,13 +63,13 @@ test("native OMP handback aborts the active tool and skips queued tool side effe
       enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
       disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
       toolNames: ["hold", "queued_write"], customTools: [heldTool, queuedTool],
-      preloadedPreparedExtensions: [{ path: "rsa-handback-test", resolvedPath: "rsa-handback-test", factory: extension.factory, error: null }],
+      preloadedPreparedExtensions: [{ path: "ludens-handback-test", resolvedPath: "ludens-handback-test", factory: extension.factory, error: null }],
     });
     // The SDK adapter does not expose concurrency. The first tool owns the
     // exclusive slot, so the second is prepared but cannot start before it ends.
     for (const tool of session.agent.state.tools) tool.concurrency = "exclusive";
     const removeGate = session.agent.addBeforeModelCall(() =>
-      cycle && !cycle.signal.aborted ? undefined : { stop: true, reason: "RSA control cycle is inactive" });
+      cycle && !cycle.signal.aborted ? undefined : { stop: true, reason: "Ludens control cycle is inactive" });
     let requests = 0;
     session.agent.streamFn = async () => {
       requests++;

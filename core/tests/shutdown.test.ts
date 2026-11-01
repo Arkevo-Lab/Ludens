@@ -9,7 +9,7 @@ import { send } from "../src/daemon/transport.ts";
 import { initializeWorkspaceState } from "../src/core/storage/workspace-state.ts";
 
 test("SIGTERM waits for runtime cleanup before recording run_end with OMP's real signal handler", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-shutdown-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-shutdown-"));
   const state = await initializeWorkspaceState(join(directory, "workspace"), join(directory, "global"));
   const socketPath = join(directory, "host.sock");
   const basewareSocket = join(directory, "baseware.sock");
@@ -33,7 +33,7 @@ test("SIGTERM waits for runtime cleanup before recording run_end with OMP's real
   });
   await new Promise<void>(resolve => bridge.listen(0, "127.0.0.1", resolve));
   const preload = join(directory, "agent.ts");
-  // Mock only the agent. The real OMP signal handler shuts down the RSA host,
+  // Mock only the agent. The real OMP signal handler shuts down the Ludens host,
   // which must release its lease through an independently running Baseware.
   await writeFile(preload, `import { mock } from "bun:test";
 mock.module(${JSON.stringify(resolve(import.meta.dir, "../src/core/agent-omp/session.ts"))}, () => ({
@@ -73,7 +73,7 @@ mock.module(${JSON.stringify(resolve(import.meta.dir, "../src/core/agent-omp/ses
     const host = Bun.spawn([process.execPath, "--preload", preload, resolve(import.meta.dir, "../src/cli/main.ts"),
       "run", "--baseware-socket", basewareSocket, "--workspace", join(directory, "workspace")], {
       cwd: resolve(import.meta.dir, ".."),
-      env: { ...process.env, LUDENS_HOME: state.globalHome, RSA_SOCKET: socketPath, PI_CODING_AGENT_DIR: join(directory, "omp") },
+      env: { ...process.env, LUDENS_HOME: state.globalHome, LUDENS_SOCKET: socketPath, PI_CODING_AGENT_DIR: join(directory, "omp") },
       stdout: "pipe", stderr: "pipe",
     });
     child = host;

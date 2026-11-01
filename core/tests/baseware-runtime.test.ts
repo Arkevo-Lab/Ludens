@@ -21,7 +21,7 @@ async function until(check: () => boolean) {
 }
 
 async function fixture(seconds = 60, acquisition?: Promise<void>, releaseFailure = false, controllerCount = 1, controlTimeoutMs?: number) {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-baseware-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-baseware-"));
   const socket = join(directory, "baseware.sock");
   const runDir = join(directory, "logs/run-1");
   const sources = [join(directory, "device/one/frame.png"), join(directory, "device/two/frame.png")];
@@ -91,7 +91,7 @@ async function fixture(seconds = 60, acquisition?: Promise<void>, releaseFailure
   };
 }
 
-test("human revoke during remote acquisition never starts the RSA agent", async () => {
+test("human revoke during remote acquisition never starts the Ludens agent", async () => {
   const gate = Promise.withResolvers<void>();
   const f = await fixture(60, gate.promise);
   try {
@@ -109,7 +109,7 @@ test("human revoke during remote acquisition never starts the RSA agent", async 
   } finally { gate.resolve(); await f.close(); }
 });
 
-test("RSA off cancels a pending acquire RPC and waits for bounded remote cleanup", async () => {
+test("Ludens off cancels a pending acquire RPC and waits for bounded remote cleanup", async () => {
   const gate = Promise.withResolvers<void>();
   const f = await fixture(60, gate.promise, false, 1, 20);
   const release = spyOn(f.core, "release");
@@ -146,7 +146,7 @@ test("remote lease matches the configured budget and human revoke cancels a sepa
   } finally { await f.close(); }
 });
 
-test("RSA stop cancels a direct Baseware client operation and releases the service owner", async () => {
+test("Ludens stop cancels a direct Baseware client operation and releases the service owner", async () => {
   const f = await fixture();
   try {
     const { epoch } = await f.runtime.start();
@@ -161,7 +161,7 @@ test("RSA stop cancels a direct Baseware client operation and releases the servi
   } finally { await f.close(); }
 });
 
-test("owner connection loss revokes a separate caller and disconnects RSA", async () => {
+test("owner connection loss revokes a separate caller and disconnects Ludens", async () => {
   const f = await fixture();
   try {
     const { epoch } = await f.runtime.start();
@@ -175,7 +175,7 @@ test("owner connection loss revokes a separate caller and disconnects RSA", asyn
   } finally { await f.close(); }
 });
 
-test("remote observations preserve references and never copy files into the RSA run", async () => {
+test("remote observations preserve references and never copy files into the Ludens run", async () => {
   const f = await fixture();
   try {
     const result = await readTestController(f.runtime, "screen", {}, new AbortController().signal,
@@ -184,7 +184,7 @@ test("remote observations preserve references and never copy files into the RSA 
     expect(result.result).toMatchObject({ structuredContent: { screens: 2 }, _meta: { provenance: "native" },
       content: f.pixels.map(data => ({ type: "image", mimeType: "image/png", data: data.toString("base64") })) });
     expect(new Set(observations.map(observation => observation.path)).size).toBe(2);
-    expect(f.events).toHaveLength(0); // No forwarded duplicate body in RSA.
+    expect(f.events).toHaveLength(0); // No forwarded duplicate body in Ludens.
     const original = f.deviceEvents.find(event => event.type === "execution")!;
     const execution = original.data;
     expect(execution.observations).toMatchObject(observations);
@@ -201,7 +201,7 @@ test("remote observations preserve references and never copy files into the RSA 
   } finally { await f.close(); }
 });
 
-test("an already disconnected Baseware service cannot appear as a connected RSA device", async () => {
+test("an already disconnected Baseware service cannot appear as a connected Ludens device", async () => {
   const f = await fixture();
   try {
     await f.core.disconnected(new Error("fixture disconnected"));
@@ -209,7 +209,7 @@ test("an already disconnected Baseware service cannot appear as a connected RSA 
   } finally { await f.close(); }
 });
 
-test("a failed physical release disconnects RSA even when handback itself succeeds", async () => {
+test("a failed physical release disconnects Ludens even when handback itself succeeds", async () => {
   const f = await fixture(60, undefined, true);
   try {
     await f.runtime.start();
@@ -220,7 +220,7 @@ test("a failed physical release disconnects RSA even when handback itself succee
 });
 
 
-test.each([0, 2])("RSA acquires one service lease for a catalog with %i controllers", async (count) => {
+test.each([0, 2])("Ludens acquires one service lease for a catalog with %i controllers", async (count) => {
   const f = await fixture(60, undefined, false, count);
   const acquire = spyOn(f.core, "acquire"), release = spyOn(f.core, "release");
   try {
@@ -237,7 +237,7 @@ test.each([0, 2])("RSA acquires one service lease for a catalog with %i controll
 });
 
 test("both journals failing preserves input results, human handback and socket cleanup", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-baseware-journal-failure-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-baseware-journal-failure-"));
   const socket = join(directory, "baseware.sock");
   let inputs = 0, released = 0, disconnected = 0;
   const handbacks: string[] = [];
@@ -257,7 +257,7 @@ test("both journals failing preserves input results, human handback and socket c
   let adapter: Awaited<ReturnType<typeof connectBaseware>> | undefined;
   try {
     adapter = await connectBaseware({ socket, seconds: 60, runDir: join(directory, "run"),
-      record() { throw new Error("RSA journal disk full"); } });
+      record() { throw new Error("Ludens journal disk full"); } });
     adapter.onHandback(reason => handbacks.push(reason));
     adapter.onDisconnect(() => { disconnected++; });
     await adapter.acquire("journal-failure");

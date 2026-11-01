@@ -113,7 +113,7 @@ async function frame(record: StoredTimelineRecord, scope: Scope, states: Map<str
       if (video.status === "gap") state = { status: "error", durationSeconds: 0, error: video.reason ?? "此帧未被录制" };
       else {
         let pending = states.get(reference.asset);
-        if (!pending) { pending = videoState(join(scope.index.archiveWorkspace, ".rsa/timeline"), reference.asset, scope.signal); states.set(reference.asset, pending); }
+        if (!pending) { pending = videoState(join(scope.index.archiveWorkspace, ".ludens/timeline"), reference.asset, scope.signal); states.set(reference.asset, pending); }
         state = await pending;
       }
       const originAt = time - video.pts * video.timeBase[0] / video.timeBase[1] * 1000;
@@ -155,7 +155,7 @@ async function framesWindow(scope: Scope, query: ReplayQuery): Promise<ReplayWin
   const cursor = cursorFor(scope, query), startAt = query.start!, endAt = query.end!;
   if (!scope.index.archiveWorkspace || startAt > scope.endAt || endAt < scope.startAt)
     return { startAt, endAt, frames: [], items: [], coverage: scope.coverage };
-  const selected = await timelineWindow(join(scope.index.archiveWorkspace, ".rsa/timeline"), { run: scope.run,
+  const selected = await timelineWindow(join(scope.index.archiveWorkspace, ".ludens/timeline"), { run: scope.run,
     start: startAt, end: endAt, scopeStart: scope.startAt, scopeEnd: Math.min(scope.endAt, cursor.verifiedEnd), limit: PAGE,
     maxSequence: cursor.frames, ...(query.cursor ? { after: cursor.after as TimelineCursor } : {}), signal: scope.signal });
   const states = new Map<string, Promise<VideoState>>();
@@ -165,7 +165,7 @@ async function framesWindow(scope: Scope, query: ReplayQuery): Promise<ReplayWin
 const label = (event: Event, track: ReplayItem["track"]) => {
   const d = event.data;
   return String(track === "model" ? `${d.provider ?? "模型"}/${d.model ?? "调用"}` : track === "tool" ? `${d.toolName ?? "工具"}${d.intent ? ` · ${d.intent}` : ""}`
-    : track === "action" ? d.controllerId ?? "play" : `${event.source?.component ?? "RSA"} · ${event.type}${typeof d.error === "string" ? ` · ${d.error}` : ""}`).slice(0, 240);
+    : track === "action" ? d.controllerId ?? "play" : `${event.source?.component ?? "Ludens"} · ${event.type}${typeof d.error === "string" ? ` · ${d.error}` : ""}`).slice(0, 240);
 };
 const outcome = (event: Event) => event.type === "model_error" || event.data.isError || event.data.error || event.data.outcome === "error" ? "error"
   : event.data.status === "interrupted" || event.data.aborted || event.data.stopReason === "aborted" ? "cancelled"
@@ -287,7 +287,7 @@ async function prepareOperations(scope: Scope, through = scope.index.eventRevisi
 async function storedRecord(scope: Scope, id: string | undefined, sequence: number | undefined) {
   if (!id || !Number.isSafeInteger(sequence) || sequence! < 1) fail("无效的时空轴记录引用");
   if (!scope.index.archiveWorkspace) fail("工作区没有有效注册", 404);
-  const root = join(scope.index.archiveWorkspace, ".rsa/timeline"), record = await timelineRecord(root, id, sequence!, scope.signal);
+  const root = join(scope.index.archiveWorkspace, ".ludens/timeline"), record = await timelineRecord(root, id, sequence!, scope.signal);
   if (!record || record.id !== id || record.runId !== scope.run) fail("记录不属于所选运行或周期", 404);
   const time = Date.parse(record.recordedAt);
   if (time < scope.startAt || time > scope.endAt) {
@@ -374,7 +374,7 @@ async function modelMedia(scope: Scope, id: string) {
   if (!event || event.type !== "observation_media" || !scope.index.archiveWorkspace || !scoped(event, scope.epoch)) fail("媒体不属于所选运行或周期", 404);
   const media = event.data.modelMedia;
   if (!media?.asset || !media?.mediaType) expired();
-  return assetMedia(join(scope.index.archiveWorkspace, ".rsa/timeline"), media.asset, media.mediaType, media.video, scope.signal);
+  return assetMedia(join(scope.index.archiveWorkspace, ".ludens/timeline"), media.asset, media.mediaType, media.video, scope.signal);
 }
 async function segmentMedia(scope: Scope, query: ReplayQuery): Promise<FileMedia> {
   if (query.asset !== undefined && !/^video\/[a-zA-Z0-9_-]+\.mp4$/.test(query.asset)) fail("无效的视频片段引用");

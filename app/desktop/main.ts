@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { ludensHome } from '@ludens/protocol/ludens'
 import { createCompanion } from './companion.js'
-import type { RsaPetSnapshot } from './rsa-source.js'
+import type { LudensPetSnapshot } from './ludens-source.js'
 import { PetSessionCoordinator } from './pet-session.js'
 import { dashboardSender, isDashboardUrl } from './dashboard-window.js'
 
@@ -14,17 +14,17 @@ const { values } = parseArgs({ args: process.argv.slice(2), options: {
   'show-window': { type: 'boolean' }, help: { type: 'boolean' },
 } })
 if (values.help) {
-  console.log('Ludens Pet — RSA log viewer\n\n--workspace PATH   Initial workspace, only when no follow target has been saved\n--dashboard URL    Local RSA dashboard (default: http://127.0.0.1:3015)\n--profile PATH     Separate local pet preferences\n--show-window      Open the run/settings window on launch\n\nChoose the workspace to follow in the Dashboard. The pet reads existing logs; it never starts or stops the game agent.')
+  console.log('Ludens Pet — Ludens log viewer\n\n--workspace PATH   Initial workspace, only when no follow target has been saved\n--dashboard URL    Local Ludens dashboard (default: http://127.0.0.1:3015)\n--profile PATH     Separate local pet preferences\n--show-window      Open the run/settings window on launch\n\nChoose the workspace to follow in the Dashboard. The pet reads existing logs; it never starts or stops the game agent.')
   app.exit(0)
 } else {
-  const initialWorkspace = values.workspace ?? process.env.RSA_WORKSPACE
+  const initialWorkspace = values.workspace ?? process.env.LUDENS_WORKSPACE
   const workspace = initialWorkspace ? realpathSync(resolve(initialWorkspace)) : undefined
   const dashboard = new URL(values.dashboard ?? 'http://127.0.0.1:3015')
   if (dashboard.protocol !== 'http:' || !['127.0.0.1', 'localhost', '[::1]'].includes(dashboard.hostname) || dashboard.username || dashboard.password) {
     throw new Error('--dashboard must be a local HTTP URL')
   }
   const here = dirname(fileURLToPath(import.meta.url))
-  app.setName('RSA Ludens Pet')
+  app.setName('Ludens Pet')
   app.setPath('userData', resolve(values.profile ?? join(ludensHome(), 'pet', 'profile')))
   mkdirSync(app.getPath('userData'), { recursive: true })
   if (!app.requestSingleInstanceLock()) {
@@ -36,7 +36,7 @@ if (values.help) {
     let source: PetSessionCoordinator | undefined
     let retryDashboard: (() => void) | undefined
     let dashboardTimer: ReturnType<typeof setInterval> | undefined
-    let snapshot: RsaPetSnapshot = {
+    let snapshot: LudensPetSnapshot = {
       workspace: null, runId: null, epoch: null, phase: '请选择要跟随的工作区', intent: null,
       observationUrl: null, updatedAt: null, error: null, dashboardUrl: dashboard.href,
     }
@@ -94,27 +94,27 @@ if (values.help) {
       const pet = createCompanion(owner, { trustedOwner: trusted, openDetails }, () => updateApplicationMenu())
       if (!pet) throw new Error('Ludens Pet is disabled by LUDENS_DISABLE_COMPANION')
       const companion = pet
-      ipcMain.handle('rsa-pet:snapshot', event => {
+      ipcMain.handle('ludens-pet:snapshot', event => {
         if (!trusted(event)) throw new Error('Unauthorized pet access')
         return snapshot
       })
-      ipcMain.handle('rsa-pet:open-dashboard', async event => {
+      ipcMain.handle('ludens-pet:open-dashboard', async event => {
         if (!trusted(event)) throw new Error('Unauthorized pet access')
         openDetails(snapshot.dashboardUrl)
         showOwner()
       })
-      owner.webContents.on('did-finish-load', () => owner?.webContents.send('rsa-pet:snapshot', snapshot))
+      owner.webContents.on('did-finish-load', () => owner?.webContents.send('ludens-pet:snapshot', snapshot))
       source = new PetSessionCoordinator({ dashboardUrl: dashboard.href, onTargetChanged: () => {
         if (source) pet.configureActivity(source)
       }, onSnapshot: value => {
         snapshot = value
-        if (owner && !owner.isDestroyed()) owner.webContents.send('rsa-pet:snapshot', value)
+        if (owner && !owner.isDestroyed()) owner.webContents.send('ludens-pet:snapshot', value)
       } })
       pet.configureActivity(source)
       void source.start(workspace)
       const icon = nativeImage.createFromPath(resolve(here, '../public/companion/ludens/icons/icon-tray.png')).resize({ width: 20, height: 20 })
       tray = new Tray(icon)
-      tray.setToolTip('Ludens Pet · RSA')
+      tray.setToolTip('Ludens Pet · Ludens')
       tray.on('click', showOwner)
       tray.on('right-click', () => Menu.buildFromTemplate([
         { label: pet.copy().open, click: showOwner },

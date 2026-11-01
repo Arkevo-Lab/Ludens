@@ -80,7 +80,7 @@
 .loop-arow { display:flex; flex-wrap:wrap; align-items:center; gap:7px; min-width:0; }
 .loop-gname { width:100%; margin-bottom:4px; font-size:12px; color:var(--muted-foreground); }
 .loop-node { min-width:0; max-width:100%; padding:4px 8px; border:1px solid var(--border); border-radius:6px; font-size:11px; line-height:1.6; overflow-wrap:anywhere; }
-.loop-node.rsa-on { border-color:var(--loop-ptext); background:color-mix(in srgb,var(--loop-ptext) 9%,var(--background)); }
+.loop-node.ludens-on { border-color:var(--loop-ptext); background:color-mix(in srgb,var(--loop-ptext) 9%,var(--background)); }
 .loop-node.nat-on { border-color:var(--loop-native); background:color-mix(in srgb,var(--loop-native) 9%,var(--background)); }
 .loop-node.off { color:var(--muted-foreground); text-decoration:line-through; }
 .loop-arrow { color:var(--muted-foreground); }
@@ -90,7 +90,7 @@
 .loop-msg.pbatch { border-left-color:var(--loop-danger); }
 .loop-src { font-size:10px; padding:1px 4px; border-radius:3px; }
 .loop-src.omp { background:color-mix(in srgb,var(--loop-native) 12%,var(--card)); color:var(--loop-native); }
-.loop-src.rsa { background:color-mix(in srgb,var(--loop-ptext) 12%,var(--card)); color:var(--loop-ptext); }
+.loop-src.ludens { background:color-mix(in srgb,var(--loop-ptext) 12%,var(--card)); color:var(--loop-ptext); }
 .loop-role { min-width:0; overflow-wrap:anywhere; }
 .loop-role i { display:inline-block; margin-left:6px; color:var(--muted-foreground); font-size:10px; font-style:normal; }
 .loop-tok { font-size:10px; font-family:ui-monospace,monospace; color:var(--muted-foreground); white-space:nowrap; }

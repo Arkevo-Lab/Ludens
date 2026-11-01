@@ -2,7 +2,7 @@
 
 from pathlib import Path
 from typing import Any
-from ._context import RSAError, continuous, current, request, scope
+from ._context import LudensError, continuous, current, request, scope
 
 
 class Client:
@@ -56,7 +56,7 @@ class Client:
         return self._request("help", id=capability_id)
 
     def observe(self, query: dict[str, Any] | None = None) -> Any:
-        """Read timeline history without sampling; returns the same envelope as rsa observe."""
+        """Read timeline history without sampling; returns the same envelope as ludens observe."""
         context = self._context()
         return request(context["socket_path"], {
             "kind": "perception", "argv": ["observe"], "query": query or {},

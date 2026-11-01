@@ -19,7 +19,7 @@ if not args.command:
     parser.error("a command is required")
 workspace = Path.cwd().resolve()
 identity = hashlib.sha256(str(workspace).encode()).hexdigest()[:16]
-label = args.label or f"dev.ludens.rsa.{identity}.{args.name}"
+label = args.label or f"dev.ludens.core.{identity}.{args.name}"
 domain = f"gui/{os.getuid()}"
 target = f"{domain}/{label}"
 if subprocess.run(["launchctl", "print", target], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
@@ -37,9 +37,9 @@ job = {
     "WorkingDirectory": str(workspace),
     "EnvironmentVariables": {"PATH": os.environ.get("PATH", os.defpath), **{
         key: os.environ[key] for key in (
-            "XDG_STATE_HOME", "RSA_PYTHON", "LUDENS_HOME", "SSH_AUTH_SOCK",
-            "RSA_PERCEPTION_HOT_SECONDS", "RSA_PERCEPTION_PERSIST", "RSA_PERCEPTION_SEGMENT_SECONDS",
-            "RSA_PERCEPTION_HOT_BYTES", "RSA_PERCEPTION_SEGMENT_BYTES",
+            "XDG_STATE_HOME", "LUDENS_PYTHON", "LUDENS_HOME", "SSH_AUTH_SOCK",
+            "LUDENS_PERCEPTION_HOT_SECONDS", "LUDENS_PERCEPTION_PERSIST", "LUDENS_PERCEPTION_SEGMENT_SECONDS",
+            "LUDENS_PERCEPTION_HOT_BYTES", "LUDENS_PERCEPTION_SEGMENT_BYTES",
         ) if key in os.environ
     }},
     "StandardOutPath": str(output),

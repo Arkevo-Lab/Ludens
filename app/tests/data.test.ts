@@ -90,8 +90,8 @@ test("run summary retains controller, cache, compaction and skill evidence", () 
 test("HTTP request sizes use wire bytes rather than archived semantic JSON size", () => {
   const bodies = [
     { encoding: "gzip", bytes: 321 },
-    { encoding: "rsa-json-v1", bytes: 5000, wire: { bytes: 456, encoding: "gzip" } },
-    { encoding: "rsa-json-v1", bytes: 9000 },
+    { encoding: "ludens-json-v1", bytes: 5000, wire: { bytes: 456, encoding: "gzip" } },
+    { encoding: "ludens-json-v1", bytes: 9000 },
   ];
   const events: Event[] = bodies.flatMap((body, index) => ["model_start", "model_http_start"].map((type, step) => ({
     seq: index * 2 + step + 1, at: new Date(index * 1000).toISOString(), atMs: index * 1000,
@@ -298,7 +298,7 @@ test("empty/in-flight log has no fabricated completed requests", () => {
 });
 
 test("run resolution rejects traversal and symlink escape", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-dashboard-test-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-dashboard-test-")));
   const workspace = join(root, "workspace");
   try {
     await registerFixture(root, "game", workspace);
@@ -319,7 +319,7 @@ test("run resolution rejects traversal and symlink escape", async () => {
 });
 
 test("workspace registry reads only local logs and never falls back to old artifact state", async () => {
-  const temp = await mkdtemp(join(tmpdir(), "rsa-dashboard-workspace-"));
+  const temp = await mkdtemp(join(tmpdir(), "ludens-dashboard-workspace-"));
   const base = await realpath(temp);
   const root = join(base, "home");
   const workspace = join(base, "workspace-a");
@@ -387,7 +387,7 @@ test("HTTP controls reject cross-origin and nonlocal callers", () => {
 });
 
 test("IPC communicates exact guarded control fields over local socket", async () => {
-  const socket = join(tmpdir(), `rsa-dashboard-${process.pid}.sock`);
+  const socket = join(tmpdir(), `ludens-app-${process.pid}.sock`);
   let received: unknown;
   const server = createServer((client) =>
     client.once("data", (data) => {
@@ -417,7 +417,7 @@ test("IPC communicates exact guarded control fields over local socket", async ()
 });
 
 test("catalog is empty before the first run but does not hide invalid roots", async () => {
-  const root = await mkdtemp(join(tmpdir(), "rsa-dashboard-catalog-"));
+  const root = await mkdtemp(join(tmpdir(), "ludens-dashboard-catalog-"));
   try {
     assert.deepEqual(await catalog(join(root, "not-created")), []);
     assert.deepEqual(await catalog(root), []);
@@ -713,7 +713,7 @@ test("WS frame metadata stays separate from HTTP body, attempts and header timin
 
 
 test("control identity reads never create or migrate a cold archive index", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "rsa-control-index-")));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-control-index-")));
   try {
     const workspace = join(root, "workspace"), run = join(workspace, "logs", "run"), index = join(run, ".dashboard-index");
     await registerFixture(root, "game", workspace);

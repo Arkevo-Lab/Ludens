@@ -19,11 +19,11 @@ const event = (seq: number, type: string, data: Record<string, unknown> = {}, to
 const row = (value: any, atMs = 1000) => JSON.stringify({ atMs, event: {
   event: value.type, data: JSON.stringify(value), raw: [": fixture", `data: ${JSON.stringify(value)}`],
 } }) + "\n";
-const referenced = (archive: JsonArchive, value: any, atMs = 1000) => JSON.stringify({ format: "rsa-stream-v1", atMs,
+const referenced = (archive: JsonArchive, value: any, atMs = 1000) => JSON.stringify({ format: "ludens-stream-v1", atMs,
   event: { event: value.type, dataRef: archive.write(value, { inline: true }), dataFormat: "json", raw: [": fixture", { data: true, prefix: "data: " }] },
 }) + "\n";
 async function fixture(work: (workspace: string, run: string, archive: JsonArchive) => Promise<void>) {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-log-ref-")));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-log-ref-")));
   const run = join(workspace, "logs", "run");
   try {
     await mkdir(join(run, "streams"), { recursive: true });
@@ -33,8 +33,8 @@ async function fixture(work: (workspace: string, run: string, archive: JsonArchi
 }
 
 // A nonexistent outgoing object proves that request history is never hydrated.
-const outgoing = JSON.stringify({ format: "rsa-stream-v1", atMs: 0, event: { event: "response.create",
-  dataRef: { encoding: "rsa-json-v1", path: `objects/${"f".repeat(64)}.json.gz`, sha256: "f".repeat(64), bytes: 100000000 },
+const outgoing = JSON.stringify({ format: "ludens-stream-v1", atMs: 0, event: { event: "response.create",
+  dataRef: { encoding: "ludens-json-v1", path: `objects/${"f".repeat(64)}.json.gz`, sha256: "f".repeat(64), bytes: 100000000 },
 } }) + "\n";
 
 test("reference streams and tool payloads preserve legacy activity, including arguments and late completion", async () => fixture(async (workspace, run, archive) => {
@@ -70,8 +70,8 @@ test("reference streams and tool payloads preserve legacy activity, including ar
 test("activity keeps media references without reading media bytes or caching base64", async () => fixture(async (workspace, run, archive) => {
   const bytes = Buffer.from("recorded fixture pixels ".repeat(1000));
   const sha = createHash("sha256").update(bytes).digest("hex");
-  const object = join(workspace, ".rsa", "timeline", "objects", `${sha}.bin`);
-  await mkdir(join(workspace, ".rsa", "timeline", "objects"), { recursive: true });
+  const object = join(workspace, ".ludens", "timeline", "objects", `${sha}.bin`);
+  await mkdir(join(workspace, ".ludens", "timeline", "objects"), { recursive: true });
   await writeFile(object, bytes);
   const result = archive.write({ content: [
     { type: "text", text: "Look at this recorded frame." },
@@ -94,7 +94,7 @@ test("activity keeps media references without reading media bytes or caching bas
 }));
 
 test("missing inbound objects fail explicitly; non-JSON and DONE stream frames remain consumable", async () => fixture(async (workspace, run, archive) => {
-  const nonJson = (value: string) => JSON.stringify({ format: "rsa-stream-v1", event: {
+  const nonJson = (value: string) => JSON.stringify({ format: "ludens-stream-v1", event: {
     event: "transport.note", dataRef: archive.write(value, { inline: true }), dataFormat: "text", raw: [{ data: true, prefix: "data: " }],
   } }) + "\n";
   await writeFile(join(run, "streams/model.jsonl"), nonJson("plain provider notice") + nonJson("[DONE]"));
@@ -133,7 +133,7 @@ test("run projection indexes skill paths but keeps referenced arguments out of c
   assert.ok(cached);
   assert.equal(cached.file, undefined);
   assert.equal(JSON.stringify(cached).includes(source), false);
-  await rm(join(workspace, ".rsa", "archive", oldArgs.path));
+  await rm(join(workspace, ".ludens", "archive", oldArgs.path));
   const page = await readRunProjection(index, "cycle");
   assert.equal(page.summary.completed, 1);
   assert.equal(page.selectedCall?.id, "next");

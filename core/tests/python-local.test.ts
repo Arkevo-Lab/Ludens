@@ -6,7 +6,7 @@ import { pythonModulePaths } from "../src/core/subsystems/python-capabilities.ts
 
 async function runPython(workspace: string, source: string) {
   const child = Bun.spawn(["python3", "-B", "-c", source], {cwd: workspace, stdout: "pipe", stderr: "pipe",
-    env: {...process.env, RSA_SOCKET: "", RSA_WORKSPACE: workspace, PYTHONPATH: pythonModulePaths().join(delimiter)}});
+    env: {...process.env, LUDENS_SOCKET: "", LUDENS_WORKSPACE: workspace, PYTHONPATH: pythonModulePaths().join(delimiter)}});
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
   ]);
@@ -14,7 +14,7 @@ async function runPython(workspace: string, source: string) {
   return JSON.parse(stdout);
 }
 
-const statefulModule = `from rsa_tools import capability
+const statefulModule = `from ludens_tools import capability
 MODEL = object()
 calls = 0
 @capability
@@ -29,13 +29,13 @@ def plain():
 `;
 
 test("local capabilities share ordinary imports and preserve model and argument identity", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-python-local-")));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-python-local-")));
   try {
     await writeFile(join(workspace, "actions.py"), statefulModule);
     for (const importFirst of [true, false]) {
       const result = await runPython(workspace, `import json, sys
 from pathlib import Path
-from rsa_tools._capabilities import call_local
+from ludens_tools._capabilities import call_local
 workspace = Path.cwd()
 ${importFirst ? "import actions" : ""}
 value = object()
@@ -61,7 +61,7 @@ print(json.dumps({"calls": actions.calls, "modules": len([m for m in sys.modules
       expect(result).toEqual({calls: 4, modules: 1});
       expect(await runPython(workspace, `import json
 from pathlib import Path
-from rsa_tools._capabilities import call_local
+from ludens_tools._capabilities import call_local
 result = call_local(Path.cwd(), "python/actions.py:step", {"value": object()})
 print(json.dumps({"calls": result[2]}))
 `)).toEqual({calls: 2});
@@ -71,12 +71,12 @@ print(json.dumps({"calls": result[2]}))
 });
 
 test("local capability loading supports package-relative imports and reports the loaded source hash", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-python-package-")));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-python-package-")));
   try {
     await mkdir(join(workspace, "skills"));
     await writeFile(join(workspace, "skills", "__init__.py"), "");
     await writeFile(join(workspace, "skills", "model.py"), "MODEL = object()\n");
-    await writeFile(join(workspace, "skills", "actions.py"), `from rsa_tools import capability
+    await writeFile(join(workspace, "skills", "actions.py"), `from ludens_tools import capability
 from .model import MODEL
 @capability
 def model():
@@ -85,12 +85,12 @@ def model():
 `);
     expect(await runPython(workspace, `import hashlib, json
 from pathlib import Path
-from rsa_tools._capabilities import call_local
+from ludens_tools._capabilities import call_local
 first = call_local(Path.cwd(), "python/skills/actions.py:model", {})
 import skills.actions
 from skills.model import MODEL
 assert first is MODEL is skills.actions.model()
-print(json.dumps({"hash": skills.actions.__rsa_source_sha__ == hashlib.sha256(Path("skills/actions.py").read_bytes()).hexdigest()}))
+print(json.dumps({"hash": skills.actions.__ludens_source_sha__ == hashlib.sha256(Path("skills/actions.py").read_bytes()).hexdigest()}))
 `)).toEqual({hash: true});
   } finally { await rm(workspace, {recursive: true, force: true}); }
 });

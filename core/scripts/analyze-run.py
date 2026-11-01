@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize saved RSA events only; never contacts a model or device."""
+"""Summarize saved Ludens events only; never contacts a model or device."""
 import argparse
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -67,7 +67,7 @@ def read_events(run, epoch):
                 events.append(event)
 
     if multiple_sources:
-        command = [str(Path(__file__).resolve().parents[1] / "bin" / "rsa"), "logs", "events", "--run", str(run)]
+        command = [str(Path(__file__).resolve().parents[1] / "bin" / "ludens"), "logs", "events", "--run", str(run)]
         # stderr is bounded on disk; pipe backpressure keeps the producer bounded.
         with tempfile.TemporaryFile(mode="w+") as errors:
             with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors, text=True) as process:
@@ -99,7 +99,7 @@ def archived_skill_paths(run):
     @lru_cache(maxsize=64)
     def read(reference):
         try:
-            result = subprocess.run([str(Path(__file__).resolve().parents[1] / "bin" / "rsa"),
+            result = subprocess.run([str(Path(__file__).resolve().parents[1] / "bin" / "ludens"),
                 "logs", "read", "--run", str(run), "--ref", reference],
                 capture_output=True, text=True, check=True, timeout=30)
             return skill_paths(json.loads(result.stdout)), None
@@ -112,7 +112,7 @@ def archived_skill_paths(run):
 
 def wire_bytes(body):
     # Indexed ref.bytes measures decoded JSON structure, not the prepared body.
-    return body.get("wire", {}).get("bytes") if body.get("encoding") == "rsa-json-v1" else body.get("bytes")
+    return body.get("wire", {}).get("bytes") if body.get("encoding") == "ludens-json-v1" else body.get("bytes")
 
 
 def trace_key(event, *fields):
@@ -902,7 +902,7 @@ def analyze(run, epoch=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("run_dir", type=Path, help="RSA run directory containing events.jsonl")
+    parser.add_argument("run_dir", type=Path, help="Ludens run directory containing events.jsonl")
     parser.add_argument("--epoch", help="Takeover epoch UUID; required when the run contains multiple takeovers")
     parser.add_argument("--output", type=Path, help="Output JSON path (default: RUN_DIR/analysis.json)")
     args = parser.parse_args()

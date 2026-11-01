@@ -48,7 +48,7 @@ export async function connectBaseware(options: { socket: string; seconds: number
   const disconnect = (error: Error) => { if (disconnected) return; disconnected = error; onDisconnect?.(error); };
   const client = await BasewareClient.connect(options.socket, {
     onEvent(event) {
-      // The device service owns its facts. RSA only keeps source dependencies
+      // The device service owns its facts. Ludens only keeps source dependencies
       // and consumes control notifications; it never appends a second body.
       const dependency = eventSources.find(source => source.sourceId === event.origin.clockId);
       if (dependency) {

@@ -15,10 +15,10 @@ const preset = (id: string) => {
 test("presets distinguish the deleted batch channel from the current prompt-start-only delivery", () => {
   const legacy = PRESETS.find(p => p.legacy);
   assert.equal(legacy?.id, "legacy");
-  assert.equal(preset("now").rsa.ch2, false);
-  assert.equal(preset("legacy").rsa.ch2, true);
+  assert.equal(preset("now").ludens.ch2, false);
+  assert.equal(preset("legacy").ludens.ch2, true);
   // 每个预设都是完整的层配置,手动开关可回到任一预设。
-  for (const p of PRESETS) assert.deepEqual(Object.keys(p.cfg.rsa).sort(), ["ch1", "ch2", "cont", "gate", "state"]);
+  for (const p of PRESETS) assert.deepEqual(Object.keys(p.cfg.ludens).sort(), ["ch1", "ch2", "cont", "gate", "state"]);
 });
 
 test("current behavior injects at most one frame per round; legacy injected per tool batch", () => {

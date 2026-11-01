@@ -2,8 +2,8 @@
   "task": "ludens/perception-lifecycle",
   "argv": [
     "{bun}",
-    "{rsa}/src/core/shiori/module-program.ts",
-    "{rsa}/src/bench/cases/perception-lifecycle.ts"
+    "{core}/src/core/shiori/module-program.ts",
+    "{core}/src/bench/cases/perception-lifecycle.ts"
   ],
   "workspace": "isolated",
   "seconds": 180,

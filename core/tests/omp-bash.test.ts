@@ -12,11 +12,11 @@ import { listen as listenBaseware } from "@ludens/baseware/server";
 import { connectBaseware } from "../src/core/subsystems/baseware.ts";
 import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { EventLog } from "../src/core/storage/events.ts";
-import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { ModelTrace } from "../src/core/agent-omp/trace.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
-import { listen as listenRsa } from "../src/daemon/transport.ts";
+import { listen as listenLudens } from "../src/daemon/transport.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { pythonExecutable } from "@ludens/protocol/python";
@@ -42,20 +42,20 @@ const tool = (id: string, name: string, args: Record<string, unknown>): Assistan
   [{ type: "toolCall", id, name, arguments: args }];
 
 /**
- * Offline contract for replacing RSA exec: real OMP tools/process supervisor,
- * real RSA/Baseware sockets, synthetic model responses and a fake input device.
+ * Offline contract for replacing Ludens exec: real OMP tools/process supervisor,
+ * real Ludens/Baseware sockets, synthetic model responses and a fake input device.
  * No provider request, local credentials, emulator or existing workspace.
  */
 async function fixture() {
   const originalEnvironment = new Map([
-    "PATH", "PYTHONPATH", "RSA_PYTHON", "LUDENS_HOME", "RSA_SOCKET", "RSA_WORKSPACE", "RSA_RUN_ID", "BASEWARE_SOCKET",
-    "BASEWARE_EPOCH", "BASEWARE_TRACE", "RSA_EPOCH", "RSA_TRACE",
+    "PATH", "PYTHONPATH", "LUDENS_PYTHON", "LUDENS_HOME", "LUDENS_SOCKET", "LUDENS_WORKSPACE", "LUDENS_RUN_ID", "BASEWARE_SOCKET",
+    "BASEWARE_EPOCH", "BASEWARE_TRACE", "LUDENS_EPOCH", "LUDENS_TRACE",
   ].map(key => [key, process.env[key]]));
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "rsa-native-bash-")));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "ludens-native-bash-")));
   const workspace = join(directory, "workspace"), runDir = join(directory, "run");
   await mkdir(join(workspace, "skills"), { recursive: true });
-  const prefix = `/tmp/rsa-bash-${crypto.randomUUID()}`;
-  const basewareSocket = `${prefix}-b.sock`, rsaSocket = `${prefix}-r.sock`;
+  const prefix = `/tmp/ludens-bash-${crypto.randomUUID()}`;
+  const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
   const log = new EventLog(runDir, { id: "native-bash-run", now: () => performance.now() });
   const actions: { args: Record<string, unknown>; epoch?: string }[] = [];
   let held = false, cancelled = 0, released = 0;
@@ -78,12 +78,12 @@ async function fixture() {
   const devices = await connectBaseware({ socket: basewareSocket, seconds: 60, runDir, record: log.record });
   const runtime = new Runtime(devices, log.record, 60, log.clock.id);
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, env: {}, record: log.record }) });
-  const closeRsa = await listenRsa(rsaSocket, runtime);
+  const closeLudens = await listenLudens(ludensSocket, runtime);
   const control = new AbortController();
   let cycle: Cycle | undefined = { epoch: (await runtime.start()).epoch!, signal: control.signal };
   const trace = new ModelTrace(log, () => ({ epoch: cycle?.epoch }));
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
-    runDir, basewareSocket, rsaSocket, binDir: resolve(import.meta.dir, "../bin"), maxRequests: 50, trace: trace.current,
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
+    runDir, basewareSocket, ludensSocket, binDir: resolve(import.meta.dir, "../bin"), maxRequests: 50, trace: trace.current,
     cycle: () => { if (!cycle) throw new Error("No active control cycle"); return cycle; } });
   const settings = Settings.isolated({ "memory.backend": "off", "autolearn.enabled": false, "retry.enabled": false,
     "retry.modelFallback": false, "title.refreshOnReplan": false, "async.enabled": true, "launch.enabled": true });
@@ -99,10 +99,10 @@ async function fixture() {
     enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
     disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
     toolNames: baseTools, customTools: extension.tools,
-    preloadedPreparedExtensions: [{ path: "rsa-bash-test", resolvedPath: "rsa-bash-test", factory: extension.factory, error: null }],
+    preloadedPreparedExtensions: [{ path: "ludens-bash-test", resolvedPath: "ludens-bash-test", factory: extension.factory, error: null }],
   });
   const removeControlGate = session.agent.addBeforeModelCall(() =>
-    cycle && !cycle.signal.aborted ? undefined : { stop: true, reason: "No active RSA control cycle" });
+    cycle && !cycle.signal.aborted ? undefined : { stop: true, reason: "No active Ludens control cycle" });
   let scripted: AssistantMessage["content"][] = [];
   const toolsSeen: string[][] = [];
   const deliveriesSeen: string[][] = [];
@@ -123,7 +123,7 @@ async function fixture() {
     return stream;
   };
   const detachTrace = trace.attach(session);
-  return { workspace, runDir, rsaSocket, basewareSocket, runtime, core, session, extension, results, actions, toolsSeen, deliveriesSeen, baseTools,
+  return { workspace, runDir, ludensSocket, basewareSocket, runtime, core, session, extension, results, actions, toolsSeen, deliveriesSeen, baseTools,
     epoch: () => cycle!.epoch, held: () => held, cancelled: () => cancelled, released: () => released,
     clearCycle() { cycle = undefined; },
     async prompt(...calls: AssistantMessage["content"][]) {
@@ -158,10 +158,10 @@ async function fixture() {
         const broker = await daemonClientForProject(workspace);
         try { await broker.request({ op: "shutdown" }); } finally { broker.close(); }
         devices.close();
-        await closeRsa();
+        await closeLudens();
         await closeBaseware();
         await rm(directory, { recursive: true, force: true });
-        await rm(rsaSocket, { force: true });
+        await rm(ludensSocket, { force: true });
       } finally {
         for (const [key, value] of originalEnvironment) {
           if (value === undefined) delete process.env[key];
@@ -175,7 +175,7 @@ async function fixture() {
 
 const worker = `import json, os, subprocess, sys, time
 from pathlib import Path
-from rsa_tools import Client, capability
+from ludens_tools import Client, capability
 from baseware import Client as Device
 
 @capability
@@ -187,21 +187,21 @@ def attempt(call):
     except Exception as error: return {"error": str(error)}
 
 Path("worker-context.json").write_text(json.dumps({
-    "pid": os.getpid(), "cwd": os.getcwd(), "workspace": os.environ["RSA_WORKSPACE"],
-    "pythonExecutable": sys.executable, "configuredPython": os.environ["RSA_PYTHON"],
-    "runId": os.environ["RSA_RUN_ID"], "epoch": os.environ["BASEWARE_EPOCH"],
-    "rsaSocket": os.environ["RSA_SOCKET"], "basewareSocket": os.environ["BASEWARE_SOCKET"],
+    "pid": os.getpid(), "cwd": os.getcwd(), "workspace": os.environ["LUDENS_WORKSPACE"],
+    "pythonExecutable": sys.executable, "configuredPython": os.environ["LUDENS_PYTHON"],
+    "runId": os.environ["LUDENS_RUN_ID"], "epoch": os.environ["BASEWARE_EPOCH"],
+    "ludensSocket": os.environ["LUDENS_SOCKET"], "basewareSocket": os.environ["BASEWARE_SOCKET"],
     "trace": json.loads(os.environ["BASEWARE_TRACE"]),
-    "staleRsaEpoch": os.environ.get("RSA_EPOCH"), "staleRsaTrace": os.environ.get("RSA_TRACE")
+    "staleRsaEpoch": os.environ.get("LUDENS_EPOCH"), "staleRsaTrace": os.environ.get("LUDENS_TRACE")
 }))
 print("WORKER_READY", flush=True)
 previous = None
 while True:
     phase = Path("phase").read_text().strip()
     if phase != previous:
-        result = {"phase": phase, "pid": os.getpid(), "rsa": attempt(lambda: act(phase))}
+        result = {"phase": phase, "pid": os.getpid(), "ludens": attempt(lambda: act(phase))}
         result["baseware"] = attempt(lambda: Device().controller("pad.echo", {"label": phase}))
-        cli = subprocess.run(["rsa", "controller", "controller/pad.echo", "--args", json.dumps({"label": phase})], text=True, capture_output=True)
+        cli = subprocess.run(["ludens", "controller", "controller/pad.echo", "--args", json.dumps({"label": phase})], text=True, capture_output=True)
         result["cli"] = {"exitCode": cli.returncode, "stdout": cli.stdout, "stderr": cli.stderr}
         Path("result-" + phase + ".json").write_text(json.dumps(result))
         print("PHASE " + phase, flush=True)
@@ -209,14 +209,14 @@ while True:
     time.sleep(0.02)
 `;
 
-test("native service survives OMP turns while human handback revokes its original RSA/Baseware epoch", async () => {
+test("native service survives OMP turns while human handback revokes its original Ludens/Baseware epoch", async () => {
   const f = await fixture();
   let pid: number | undefined;
   try {
     await writeFile(join(f.workspace, "worker.py"), worker);
     await writeFile(join(f.workspace, "phase"), "first");
     const firstEpoch = f.epoch();
-    await f.prompt(tool("launch-service", "bash", { command: '"$RSA_PYTHON" -u worker.py', name: "offline-controller",
+    await f.prompt(tool("launch-service", "bash", { command: '"$LUDENS_PYTHON" -u worker.py', name: "offline-controller",
       pty: false, ready: { log: "WORKER_READY", timeout: 10 } }));
     const injectedPaths = { path: process.env.PATH, python: process.env.PYTHONPATH };
     expect(f.results.get("launch-service")?.details.service).toMatchObject({ name: "offline-controller", ready: true });
@@ -226,10 +226,10 @@ test("native service survives OMP turns while human handback revokes its origina
     expect(context.configuredPython).toBe(pythonExecutable());
     if (isAbsolute(pythonExecutable())) expect(dirname(context.pythonExecutable)).toBe(dirname(pythonExecutable()));
     expect(context).toMatchObject({ cwd: f.workspace, workspace: f.workspace, runId: "native-bash-run",
-      epoch: firstEpoch, rsaSocket: f.rsaSocket, basewareSocket: f.basewareSocket,
+      epoch: firstEpoch, ludensSocket: f.ludensSocket, basewareSocket: f.basewareSocket,
       staleRsaEpoch: "", staleRsaTrace: "" });
     expect(await Bun.file(join(f.workspace, "result-first.json")).json()).toMatchObject({
-      rsa: { value: { exitCode: 0 } }, baseware: { value: { exitCode: 0 } }, cli: { exitCode: 0 },
+      ludens: { value: { exitCode: 0 } }, baseware: { value: { exitCode: 0 } }, cli: { exitCode: 0 },
     });
 
     // A second native agent loop sees the same process and starts a long device action.
@@ -255,18 +255,18 @@ test("native service survives OMP turns while human handback revokes its origina
       baseware: { error: expect.stringContaining("STALE_EPOCH") },
       cli: { exitCode: 1, stderr: expect.stringContaining("STALE_EPOCH") },
     });
-    expect(heldResult.rsa).toHaveProperty("error");
-    expect(heldResult.rsa).not.toHaveProperty("value");
+    expect(heldResult.ludens).toHaveProperty("error");
+    expect(heldResult.ludens).not.toHaveProperty("value");
     expect(alive(pid!)).toBe(true);
 
     // Fresh foreground work gets the new lease; the resident process cannot inherit it.
     await f.nextEpoch();
     await f.prompt(tool("old-service-next-epoch", "write", { path: "phase", content: "next" }),
-      tool("new-foreground", "bash", { command: 'python3 -c \'from rsa_tools import Client; print(Client().call("controller/pad.echo", {"label": "fresh"})["exitCode"])\'' }));
+      tool("new-foreground", "bash", { command: 'python3 -c \'from ludens_tools import Client; print(Client().call("controller/pad.echo", {"label": "fresh"})["exitCode"])\'' }));
     expect({ path: process.env.PATH, python: process.env.PYTHONPATH }).toEqual(injectedPaths);
     await until(() => Bun.file(join(f.workspace, "result-next.json")).exists());
     expect(await Bun.file(join(f.workspace, "result-next.json")).json()).toMatchObject({
-      pid, rsa: { error: expect.stringContaining("STALE_EPOCH") }, baseware: { error: expect.stringContaining("STALE_EPOCH") },
+      pid, ludens: { error: expect.stringContaining("STALE_EPOCH") }, baseware: { error: expect.stringContaining("STALE_EPOCH") },
       cli: { exitCode: 1, stderr: expect.stringContaining("STALE_EPOCH") },
     });
     expect(f.actions).toEqual([
@@ -372,7 +372,7 @@ test("historical CLI images survive native bash, sibling tools and persistence w
     await writeFile(join(f.workspace, "latest.png"), latestPng);
     await writeFile(join(f.workspace, "frame"), "old");
     await writeFile(join(f.workspace, "perception.py"), `from pathlib import Path
-from rsa_tools import capability, record
+from ludens_tools import capability, record
 class Perception:
     sample_hz = 20
     def start(self, context): pass
@@ -393,7 +393,7 @@ class Perception:
     decoder.push(await encodeTerminalImage({ type: "image", data: Buffer.from(oldPng).toString("base64"), mimeType: "image/png" }));
     decoder.finish();
     const expectedImage = (await decoder.images())[0]!;
-    const command = `rsa observe --at '${old.records[0]!.recordedAt}' --images`;
+    const command = `ludens observe --at '${old.records[0]!.recordedAt}' --images`;
     // Test both sibling orders: the final plain-text result must not add a live screenshot.
     for (const reverse of [false, true]) {
       const id = `history-${reverse}`;
@@ -428,7 +428,7 @@ class Perception:
     }
     // Without --images the JSON remains machine-readable and the normal live
     // context continues. A CLI lookup alone is never logged as pixel delivery.
-    await f.prompt(tool("json-only", "bash", { command: `rsa observe --at '${old.records[0]!.recordedAt}'` }));
+    await f.prompt(tool("json-only", "bash", { command: `ludens observe --at '${old.records[0]!.recordedAt}'` }));
     const events = await f.events();
     expect(events.some(event => event.type === "observation" && event.trace.toolCallId === "json-only")).toBe(false);
     const jsonOnlyReceipts = events.filter(event => event.type === "observation_context"

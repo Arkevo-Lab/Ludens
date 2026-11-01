@@ -11,7 +11,7 @@ test("offline packaged programs, verifiers and storage bindings share Shiori", a
   const at = Date.now();
   const lines = Array.from({ length: 40 }, (_, index) => {
     const seq = index + 1, time = new Date(at + index * 100).toISOString();
-    return JSON.stringify({ schemaVersion: 2, runId: "recorded-run", seq, at: time, atMs: index * 100, source: { component: "rsa" },
+    return JSON.stringify({ schemaVersion: 2, runId: "recorded-run", seq, at: time, atMs: index * 100, source: { component: "ludens" },
       origin: { eventId: `recorded-run:${seq}`, clockId: "recorded-run", seq, at: time, atMs: index * 100 },
       trace: { epoch: "recorded-epoch" }, type: "control", data: { mode: index % 2 ? "manual" : "auto", reason: "fixture" } });
   }).join("\n") + "\n";

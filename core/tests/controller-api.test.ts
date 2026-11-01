@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 test("Python API calls drivers with the caller's epoch, without retrying failures", async () => {
-  const socketPath = `/tmp/rsa-api-${crypto.randomUUID()}.sock`;
+  const socketPath = `/tmp/ludens-api-${crypto.randomUUID()}.sock`;
   const requests: any[] = [];
   let connections = 0;
   const server = createServer(socket => {
@@ -31,7 +31,7 @@ test("Python API calls drivers with the caller's epoch, without retrying failure
   try {
     const child = Bun.spawn(["python3", "-B", "-c", `
 import json
-from rsa_tools import Client, RSAError, capability
+from ludens_tools import Client, LudensError, capability
 @capability
 def probe():
     return "registered"
@@ -43,12 +43,12 @@ errors = []
 for capability_id in ["rejected", "disconnect"]:
     try:
         client.call(capability_id)
-    except (RSAError, ConnectionError) as error:
+    except (LudensError, ConnectionError) as error:
         errors.append({"type": type(error).__name__, "message": str(error)})
 explicit = Client(${JSON.stringify(socketPath)}, epoch="explicit-epoch", trace={"source": "explicit"}, timeout=1)
 values.append(explicit.help("controller/screen.capture"))
-print(json.dumps({"values": values, "errors": errors, "marked": probe.__rsa_capability__}))
-`], { env: { ...process.env, PYTHONPATH: join(import.meta.dir, "../python"), RSA_SOCKET: socketPath,
+print(json.dumps({"values": values, "errors": errors, "marked": probe.__ludens_capability__}))
+`], { env: { ...process.env, PYTHONPATH: join(import.meta.dir, "../python"), LUDENS_SOCKET: socketPath,
       BASEWARE_EPOCH: "active-epoch", BASEWARE_TRACE: JSON.stringify({toolCallId: "parent-call"}) }, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
     expect(stderr).toBe("");
@@ -61,8 +61,8 @@ print(json.dumps({"values": values, "errors": errors, "marked": probe.__rsa_capa
       {action: "call", arguments: {}}, {action: "help", arguments: null},
     ]);
     expect(result.errors).toEqual([
-      {type: "RSAError", message: "STALE_EPOCH: caller no longer owns control"},
-      {type: "ConnectionError", message: "RSA disconnected before replying; the request was not retried"},
+      {type: "LudensError", message: "STALE_EPOCH: caller no longer owns control"},
+      {type: "ConnectionError", message: "Ludens disconnected before replying; the request was not retried"},
     ]);
     expect(connections).toBe(7);
     expect(requests).toHaveLength(7);
@@ -77,8 +77,8 @@ print(json.dumps({"values": values, "errors": errors, "marked": probe.__rsa_capa
 });
 
 test("Python API and direct imports share local objects, while device calls retain the nested trace", async () => {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-local-api-")));
-  const socketPath = `/tmp/rsa-api-${crypto.randomUUID()}.sock`;
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-local-api-")));
+  const socketPath = `/tmp/ludens-api-${crypto.randomUUID()}.sock`;
   const requests: any[] = [];
   const server = createServer(socket => {
     let buffer = "";
@@ -93,7 +93,7 @@ test("Python API and direct imports share local objects, while device calls reta
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
   try {
     await mkdir(join(workspace, "scripts"));
-    await writeFile(join(workspace, "scripts/model.py"), `from rsa_tools import Client, capability
+    await writeFile(join(workspace, "scripts/model.py"), `from ludens_tools import Client, capability
 client = Client()
 class Model:
     def __init__(self):
@@ -117,7 +117,7 @@ def peek():
 `);
     const parentTrace = {traceId: "1234567890abcdef1234567890abcdef", spanId: "1234567890abcdef", toolCallId: "outer-exec"};
     const child = Bun.spawn(["python3", "-B", "-c", `import json, os
-from rsa_tools import Client
+from ludens_tools import Client
 from scripts.model import model, step, fault
 first = Client().call("python/scripts/model.py:loop", {"value": model})
 second = step(model)
@@ -125,14 +125,14 @@ try:
     Client().call("python/scripts/model.py:fail")
 except ValueError as error:
     original_error = error is fault
-offline = Client(os.environ["RSA_SOCKET"] + "-missing").call("python/scripts/model.py:peek")
+offline = Client(os.environ["LUDENS_SOCKET"] + "-missing").call("python/scripts/model.py:peek")
 print(json.dumps({"shared": first is model and second is model, "calls": model.calls,
                   "originalError": original_error, "loggingIndependent": offline is model, "pid": os.getpid()}))
 `], {cwd: workspace, env: {...process.env, PYTHONPATH: join(import.meta.dir, "../python"),
-      RSA_SOCKET: socketPath, RSA_WORKSPACE: workspace, RSA_RUN_ID: "local-api-run",
+      LUDENS_SOCKET: socketPath, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "local-api-run",
       BASEWARE_EPOCH: "active-epoch", BASEWARE_TRACE: JSON.stringify(parentTrace)}, stdout: "pipe", stderr: "pipe"});
     const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-    expect(stderr.trim()).toMatch(/^RSA Python logging unavailable: [^\n]+$/);
+    expect(stderr.trim()).toMatch(/^Ludens Python logging unavailable: [^\n]+$/);
     expect(exitCode).toBe(0);
     const result = JSON.parse(stdout);
     expect(result).toMatchObject({shared: true, calls: 2, originalError: true, loggingIndependent: true});

@@ -11,7 +11,7 @@ type Cached = { owner: FileRecords; page: Page; rows: RecordPointer[]; dirty: bo
 const cacheKey = Symbol.for("ludens.dashboard.index-pages");
 const cacheState = ((globalThis as any)[cacheKey] ??= { entries: new Map<string, Cached>(), bytes: 0 }) as { entries: Map<string, Cached>; bytes: number };
 const cache = cacheState.entries;
-const cacheLimit = () => Math.max(CHUNK, Number(process.env.RSA_DASHBOARD_INDEX_CACHE_BYTES) || 256 * CHUNK);
+const cacheLimit = () => Math.max(CHUNK, Number(process.env.LUDENS_APP_INDEX_CACHE_BYTES) || 256 * CHUNK);
 export const storageMetrics = { sourceReadCalls: 0, sourceReadBytes: 0, eventParses: 0,
   bodyReadCalls: 0, bodyReadBytes: 0, bodyParses: 0, pageLoads: 0, pageHits: 0,
   pageWrites: 0, pageWriteBytes: 0, bulkSpills: 0 };
@@ -20,7 +20,7 @@ export function resetStorageMetrics() { for (const key of Object.keys(storageMet
 export class BulkBudget {
   bytes = 0;
   readonly stores = new Set<FileRecords>();
-  constructor(readonly limit = Math.max(CHUNK, Number(process.env.RSA_DASHBOARD_BUILD_BYTES) || 2 * 1024 * CHUNK)) {}
+  constructor(readonly limit = Math.max(CHUNK, Number(process.env.LUDENS_APP_BUILD_BYTES) || 2 * 1024 * CHUNK)) {}
   trim() {
     while (this.bytes > this.limit) {
       let largest: FileRecords | undefined;

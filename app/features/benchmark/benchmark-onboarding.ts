@@ -58,9 +58,9 @@ export function benchmarkDetailUrl(key: string | null, verification?: string | n
   return "/api/benchmarks?" + params;
 }
 const quote = (value: string) => "'" + value.replaceAll("'", "'\\''") + "'";
-export function benchmarkListCommand(workspace: string) { return `rsa --workspace ${quote(workspace)} bench list`; }
+export function benchmarkListCommand(workspace: string) { return `ludens --workspace ${quote(workspace)} bench list`; }
 export function benchmarkTaskHelpCommand(workspace: string, name: string, digest: string) {
-  return `rsa --workspace ${quote(workspace)} bench help ${quote(name)} --digest ${quote(digest)}`;
+  return `ludens --workspace ${quote(workspace)} bench help ${quote(name)} --digest ${quote(digest)}`;
 }
 export function benchmarkGuidanceLinks(workspace: string, locale: "en" | "zh") {
   const url = (params: Record<string, string>) => "/?" + new URLSearchParams(params);

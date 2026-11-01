@@ -20,10 +20,10 @@ process.on("message", (message: ProgramMessage) => {
   if (message?.kind === "stop") budgetEnd.abort(new DOMException(message.reason, "AbortError"));
 });
 const flush = () => new Promise<void>(resolve => { const id = crypto.randomUUID(); pending.set(id, resolve); process.send!({ kind: "flush", id }); });
-const log = new EventLog(process.env.RSA_BENCH_RUN_DIR!, { id: process.env.RSA_BENCH_TRIAL_ID!, now: () => performance.now() },
-  process.env.RSA_BENCH_WORKSPACE!, "normal", (type, data, trace, metadata) => process.send!({ kind: "event", type, data, trace, metadata }), flush);
+const log = new EventLog(process.env.LUDENS_BENCH_RUN_DIR!, { id: process.env.LUDENS_BENCH_TRIAL_ID!, now: () => performance.now() },
+  process.env.LUDENS_BENCH_WORKSPACE!, "normal", (type, data, trace, metadata) => process.send!({ kind: "event", type, data, trace, metadata }), flush);
 process.send({ kind: "ready" });
-const input = JSON.parse(await readFile(process.env.RSA_BENCH_INPUT!, "utf8"));
+const input = JSON.parse(await readFile(process.env.LUDENS_BENCH_INPUT!, "utf8"));
 const cancel = () => cancellation.abort(new Error("Shiori cancelled program"));
 process.once("SIGTERM", cancel); process.once("SIGINT", cancel);
 const metadata: BenchmarkContext["metadata"] = {};
@@ -35,10 +35,10 @@ try {
     model: input.parameters.model ?? "openai-codex/gpt-6.1-sol", seconds: input.budgetSeconds,
     maxRequests: input.parameters.maxRequests ?? 30, seed: input.parameters.seed ?? 7, signal: cancellation.signal, budget });
   cancellation.signal.throwIfAborted();
-  await atomicJson(join(process.env.RSA_BENCH_ARTIFACTS!, "measurements.json"), measurements);
+  await atomicJson(join(process.env.LUDENS_BENCH_ARTIFACTS!, "measurements.json"), measurements);
 } catch (error) { console.error(error); exitCode = 1; }
 finally {
-  await atomicJson(join(process.env.RSA_BENCH_ARTIFACTS!, "context.json"), { ...metadata, trialId: process.env.RSA_BENCH_TRIAL_ID, workspace: process.cwd() });
+  await atomicJson(join(process.env.LUDENS_BENCH_ARTIFACTS!, "context.json"), { ...metadata, trialId: process.env.LUDENS_BENCH_TRIAL_ID, workspace: process.cwd() });
   await flush();
   process.removeListener("SIGTERM", cancel); process.removeListener("SIGINT", cancel);
 }

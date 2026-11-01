@@ -485,7 +485,7 @@ function reapRetired() {
   }
 }
 export function indexStorageRoot(path: string) {
-  return process.env.RSA_DASHBOARD_INDEX_ROOT ? join(process.env.RSA_DASHBOARD_INDEX_ROOT, path.split("/").at(-1)!) : join(path, ".dashboard-index");
+  return process.env.LUDENS_APP_INDEX_ROOT ? join(process.env.LUDENS_APP_INDEX_ROOT, path.split("/").at(-1)!) : join(path, ".dashboard-index");
 }
 function activeDirectory(path: string) {
   const root = indexStorageRoot(path), pointer = join(root, "active.json");
@@ -507,8 +507,8 @@ function activeDirectory(path: string) {
 }
 export function pruneLogIndexes(now = Date.now()) {
   reapRetired();
-  const max = Math.max(1, Number(process.env.RSA_DASHBOARD_INDEX_MAX_RUNS) || 3);
-  const idle = Math.max(1, Number(process.env.RSA_DASHBOARD_INDEX_IDLE_MS) || 300_000);
+  const max = Math.max(1, Number(process.env.LUDENS_APP_INDEX_MAX_RUNS) || 3);
+  const idle = Math.max(1, Number(process.env.LUDENS_APP_INDEX_IDLE_MS) || 300_000);
   for (const [path, index] of [...registry].sort((a, b) => a[1].lastUsed - b[1].lastUsed)) {
     if (index.leases || (registry.size <= max && now - index.lastUsed < idle)) continue;
     index.close(); registry.delete(path);

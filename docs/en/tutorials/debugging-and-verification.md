@@ -9,7 +9,7 @@ Unless a command block explicitly `cd`s elsewhere, all commands below run at the
 Each package's `package.json` scripts follow one naming scheme, and package managers and lockfiles keep each component's existing choice:
 
 - Package-level generic commands use `dev` (dev server), `build` (produce build artifacts), `start` (launch the built app), `test` (default automated test suite), and `typecheck` (type checking); only provide the commands a component actually needs.
-- Special-purpose commands use `<object>:<action>[:<variant>]`, with each segment in lowercase kebab-case, e.g. `pet:preview`, `omp:test:transport`. Local tasks must not use bare `preview`, `smoke`, or `check`; passthrough entries sharing a name with a CLI such as `rsa` or `baseware` may stay, with the concrete action given by subsequent subcommands.
+- Special-purpose commands use `<object>:<action>[:<variant>]`, with each segment in lowercase kebab-case, e.g. `pet:preview`, `omp:test:transport`. Local tasks must not use bare `preview`, `smoke`, or `check`; passthrough entries sharing a name with a CLI such as `ludens` or `baseware` may stay, with the concrete action given by subsequent subcommands.
 - The default `test` includes integration tests and must never be named `unit`. Checking existing build artifacts uses `build:check`, which only checks and never builds.
 - When renaming a command, update callers and docs together; keep no legacy aliases.
 
@@ -18,7 +18,7 @@ Catalog scripts run in their component directory. Bun packages use `bun run <com
 | Component directory | Package-level commands | Special commands and entries |
 | --- | --- | --- |
 | `baseware` | `typecheck`, `test` | `baseware`: run the device-service CLI. |
-| `core` | `typecheck`: check TypeScript and Python; `test`: run the default test suites of both languages. | `typescript:typecheck`, `python:typecheck`: check one language only; `typescript:test`, `python:test`: run one language's tests only; `omp:test:transport`: run the OMP WebSocket transport-recovery tests; `rsa`: run the Host CLI. |
+| `core` | `typecheck`: check TypeScript and Python; `test`: run the default test suites of both languages. | `typescript:typecheck`, `python:typecheck`: check one language only; `typescript:test`, `python:test`: run one language's tests only; `omp:test:transport`: run the OMP WebSocket transport-recovery tests; `ludens`: run the Host CLI. |
 | `app` | `dev`, `build`, `start`, `test`, `typecheck` | `build:check`: verify the existing production build matches the current source fingerprint. |
 | `app` (desktop) | `desktop:build`: produce Electron artifacts with esbuild; `desktop:start`, `desktop:test`, `desktop:typecheck` | `pet:preview`: interactive pet preview; `pet:smoke`: interactive pet smoke test. Both run `desktop:build` first. |
 
@@ -26,7 +26,7 @@ Catalog scripts run in their component directory. Bun packages use `bun run <com
 
 ### 1. Foreground Step-by-Step Debugging of Baseware and Host
 
-When debugging standalone without `rsa up`, prepare the device bridge per [Device and Driver Preparation](devices.md) first, then start the services in two terminals in the same workspace:
+When debugging standalone without `ludens up`, prepare the device bridge per [Device and Driver Preparation](devices.md) first, then start the services in two terminals in the same workspace:
 
 ```sh
 # Terminal 1: start the device service
@@ -37,12 +37,12 @@ baseware serve --driver <id> \
 ```
 
 ```sh
-# Terminal 2: start the foreground Host (ignores rsa.json; defaults: 300s / 50 requests)
+# Terminal 2: start the foreground Host (ignores ludens.json; defaults: 300s / 50 requests)
 cd /absolute/path/to/workspace
-rsa run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
+ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 ```
 
-Once terminal 2 prints `"ready": true`, run `rsa auto on` in a third terminal inside that workspace. To test device and workspace capabilities without starting an OMP model session, pass `rsa run --device-only`. By default both sides derive the Unix socket address from the workspace path; override explicitly with `BASEWARE_SOCKET` / `--baseware-socket` and `RSA_SOCKET`.
+Once terminal 2 prints `"ready": true`, run `ludens auto on` in a third terminal inside that workspace. To test device and workspace capabilities without starting an OMP model session, pass `ludens run --device-only`. By default both sides derive the Unix socket address from the workspace path; override explicitly with `BASEWARE_SOCKET` / `--baseware-socket` and `LUDENS_SOCKET`.
 
 ### 2. Dashboard Web Console
 
@@ -52,39 +52,39 @@ Developing or viewing the frontend alone needs no model or emulator — it runs 
 # Dev mode (frontend HMR; restart the process after editing lib/ or worker/)
 (cd app && npm run dev)
 
-# Prod mode (the mode rsa up uses for managed startup)
+# Prod mode (the mode ludens up uses for managed startup)
 (cd app && npm run build && npm run start)
 ```
 
-When `rsa up` needs to start Dashboard fresh, it calls `npm run build:check` before bringing up devices to verify the build artifacts match the current source fingerprint; if unbuilt or the sources changed, it prompts to run `npm run build` first. If a Dashboard API is already available, `rsa up` reuses it directly without checking or hot-updating that process's build. Updating the production console requires rebuilding and restarting Dashboard; stopping or restarting Dashboard alone never stops a running Host, Baseware, or emulator.
+When `ludens up` needs to start Dashboard fresh, it calls `npm run build:check` before bringing up devices to verify the build artifacts match the current source fingerprint; if unbuilt or the sources changed, it prompts to run `npm run build` first. If a Dashboard API is already available, `ludens up` reuses it directly without checking or hot-updating that process's build. Updating the production console requires rebuilding and restarting Dashboard; stopping or restarting Dashboard alone never stops a running Host, Baseware, or emulator.
 
 Open `http://127.0.0.1:3015` in a browser to use the console. The sidebar is grouped by scope: **Workspace** pages show the active workspace's run data, **Global** pages hold settings and catalogs independent of any single run, and **Developer** pages host mechanism workbenches; the run/cycle selector and live-refresh toggle appear only in headers that use run context.
 
 - **Run & replay (`?view=live` / `?view=replay`)**: watch model reasoning streams, tool calls, device inputs, and perception frames live, or replay sampled frames and events synchronously on the history timeline. Archive worker, cold-index builder subprocess, and memory budgets: see [Consumption and Metrics](../reference/logging.md#consumption-and-metric-interpretation).
 - **Performance & benchmarks (`?view=benchmark`)**: inspect per-request latency, caches, and call-chain profiling, or browse cross-workspace Harbor task runs and score comparisons in the "benchmark catalog" (`?view=benchmark&bench=cases`).
-- **Capability catalog & driver validation (`?view=caps`)**: statically display the selected workspace's device catalog snapshot (`baseware.json`), Python `@capability` declarations, and Harbor eval tasks, plus online validation of external driver packages and `rsa init` command generation.
-- **Perception settings (`?view=perception`)**: configure the selected workspace's hot-window seconds, video segment duration, and idle-stop finalization seconds (written to `.rsa/settings.json`, effective after `rsa perception reload`).
+- **Capability catalog & driver validation (`?view=caps`)**: statically display the selected workspace's device catalog snapshot (`baseware.json`), Python `@capability` declarations, and Harbor eval tasks, plus online validation of external driver packages and `ludens init` command generation.
+- **Perception settings (`?view=perception`)**: configure the selected workspace's hot-window seconds, video segment duration, and idle-stop finalization seconds (written to `.ludens/settings.json`, effective after `ludens perception reload`).
 - **Workspaces (`?view=workspaces`)**: search and open registered folders, create a new workspace, add an existing directory, or change the default parent directory in the same `LUDENS_HOME`.
 - **In-console docs (`?view=docs`)**: browse `tutorials/`, `reference/`, and `insights/` inside the console, with cross-article and section-anchor navigation.
 - **Global settings (`?view=settings`)**: centralizes Ludens Pet companion preferences (follow target, bubbles, sound) and console language independent of any specific run; workspace-scoped settings stay on their respective pages.
-- **Developer panel (`?view=dev`)**: interactive mechanism workbenches, currently including the Loop injection workbench (`?view=dev&panel=loop`) that simulates takeover context composition across the native OMP layer, the RSA injection layer, and the removed end-of-batch channel; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
+- **Developer panel (`?view=dev`)**: interactive mechanism workbenches, currently including the Loop injection workbench (`?view=dev&panel=loop`) that simulates takeover context composition across the native OMP layer, the Ludens injection layer, and the removed end-of-batch channel; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
 
 ### Workspace entry flow
 
 The Workspaces page puts **New workspace** and **Add existing** beside the library. Desktop creation only needs a folder name. A community driver requires an explicit package check, which may download the package and install dependencies; its manifest determines the driver ID and which optional fields are available. **Location & advanced options** accepts a full custom directory; the preview and folder name reflect that exact destination.
 
-Creation initializes files without starting the agent. The confirmation offers **Open workspace**, a copyable `rsa --workspace '…' up` command, and the setup guide. New workspaces remain selectable in Live and Replay before their first run, with a next-step prompt instead of an endless loading state.
+Creation initializes files without starting the agent. The confirmation offers **Open workspace**, a copyable `ludens --workspace '…' up` command, and the setup guide. New workspaces remain selectable in Live and Replay before their first run, with a next-step prompt instead of an endless loading state.
 
 **Folder available** means the workspace identity can be read, not that its services are running. **Remove from list** keeps files and services and clears only that workspace’s pet follow target before removing the registration. If target cleanup fails, registration remains. **Undo** uses the actual removed registration to add the folder again, without resuming pet following; an unavailable folder must be reconnected before registration can succeed. For a moved or disconnected folder, reconnect its drive or use **Add new location**. Changing **Default location** only affects future creations.
 
 ### 3. Ludens Pet Desktop Companion
 
-This is an optional component; the web console does not depend on Electron. After the [optional pet install](quickstart.md#optional-pet) and with Dashboard running, run `app/bin/app --show-window` at the repo root to start the desktop client standalone; its main window loads the same Dashboard console, and the pet character (Ludens) and bubbles consume the same incremental activity log. When managing the pet via `rsa up`, append `--pet` to the new workspace's `rsa init` command, or set `pet: true` in an existing `rsa.json`. `rsa up --pet` / `--no-pet` temporarily override the config, are mutually exclusive, and are never written back to the file; `--no-pet` does not shut down an already-running shared pet.
+This is an optional component; the web console does not depend on Electron. After the [optional pet install](quickstart.md#optional-pet) and with Dashboard running, run `app/bin/app --show-window` at the repo root to start the desktop client standalone; its main window loads the same Dashboard console, and the pet character (Ludens) and bubbles consume the same incremental activity log. When managing the pet via `ludens up`, append `--pet` to the new workspace's `ludens init` command, or set `pet: true` in an existing `ludens.json`. `ludens up --pet` / `--no-pet` temporarily override the config, are mutually exclusive, and are never written back to the file; `--no-pet` does not shut down an already-running shared pet.
 
-- **Workspace following**: use **Set as follow target** on a workspace page or the **Saved workspace** selector in Settings. The choice is stored in `$LUDENS_HOME/pet/target.json`; **Desktop status** separately reports whether Ludens Pet has connected and applied it. Browsing other workspaces or history never changes this choice. A saved choice remains visible when the desktop is disconnected or the directory is unavailable. If a save response cannot be confirmed, read the saved target again before another change; this recovery does not repeat the save. The heartbeat is stored in `$LUDENS_HOME/pet/consumer.json`. The stable ID in `.rsa/workspace.json` preserves workspace identity after a move and re-registration.
+- **Workspace following**: use **Set as follow target** on a workspace page or the **Saved workspace** selector in Settings. The choice is stored in `$LUDENS_HOME/pet/target.json`; **Desktop status** separately reports whether Ludens Pet has connected and applied it. Browsing other workspaces or history never changes this choice. A saved choice remains visible when the desktop is disconnected or the directory is unavailable. If a save response cannot be confirmed, read the saved target again before another change; this recovery does not repeat the save. The heartbeat is stored in `$LUDENS_HOME/pet/consumer.json`. The stable ID in `.ludens/workspace.json` preserves workspace identity after a move and re-registration.
 - **Language and play**: the Settings language applies to the console, native menus, pet dialogue, activity controls, and games. The pet starts with its saved language or the operating system locale, then follows the restored Dashboard preference. Right-click the pet and choose **Play · Catch the Stars** to start a 20-second round; catch 10 stars to win, or press Escape to stop. Starting a game explicitly focuses the pet, including from the tray, so Escape works immediately; ordinary activity notifications do not take focus. Live activity immediately ends the round and takes over the bubble. The best score lasts for the current pet process only.
 - **Brief notifications**: redacted notifications keep their generic status title; language rendering does not infer whether a run has finished or is waiting for AI from a retained connection ID.
-- **Launch flags**: `--workspace PATH` (or `RSA_WORKSPACE`) sets the initial default workspace, `--dashboard URL` the console address, `--profile PATH` a standalone preferences directory (default `RSA Ludens Pet` under Electron `appData`), and `LUDENS_DISABLE_COMPANION=1` disables the pet widget. Closing the main window only hides to the tray; double-click the pet or use the system tray menu to bring it back — only Quit exits the process for good.
+- **Launch flags**: `--workspace PATH` (or `LUDENS_WORKSPACE`) sets the initial default workspace, `--dashboard URL` the console address, `--profile PATH` a standalone preferences directory (default `Ludens Pet` under Electron `appData`), and `LUDENS_DISABLE_COMPANION=1` disables the pet widget. Closing the main window only hides to the tray; double-click the pet or use the system tray menu to bring it back — only Quit exits the process for good.
 - **Build sync**: when Dashboard shared log-client code consumed by the pet changes, re-run `(cd app && npm run desktop:build)` and restart the Electron main process.
 
 ## Verification
@@ -96,7 +96,7 @@ The following core component checks are fully offline — no external model or r
 ```sh
 (cd baseware && bun run typecheck && bun test)
 python3 baseware/scripts/sync-cua-contract.py --check
-(cd rsa && bun run typecheck && bun run test)
+(cd ludens && bun run typecheck && bun run test)
 (cd app && npm test && npm run typecheck && npm run build)
 ```
 
@@ -129,9 +129,9 @@ The Ludens pet uses static transparent WebP assets (defined in `app/public/compa
 
 | Test | Prerequisite | Run at repo root |
 | --- | --- | --- |
-| Live device control handoff | Target environment and bridge are running; run this workspace's Baseware and `rsa run --device-only` in a separate terminal | `RSA_LIVE_DEVICE=1 RSA_WORKSPACE=/absolute/path/to/workspace bun test core/tests/device.live.test.ts` |
-| External bridge sampling / long-action interruption | Park the target environment on a safe input-ready screen; stop Host and Baseware and keep the bridge running (override the port with `RSA_BRIDGE_PORT`) | `RSA_BRIDGE_DRIVER='<id>' RSA_BRIDGE_DRIVER_PACKAGE='github:<org>/<driver-repo>#<rev>' RSA_BRIDGE_TEST=1 bun test core/tests/bridge.live.test.ts` |
-| External bridge system keyboard dialog | Same as above, with an eight-character system naming dialog open. The test types nine characters and presses Enter to verify rejection, then cancels; do not run it in any other input box, or it may actually submit text. | `RSA_BRIDGE_DRIVER='<id>' RSA_BRIDGE_DRIVER_PACKAGE='github:<org>/<driver-repo>#<rev>' RSA_BRIDGE_KEYBOARD_TEST=1 bun test core/tests/bridge.live.test.ts` |
+| Live device control handoff | Target environment and bridge are running; run this workspace's Baseware and `ludens run --device-only` in a separate terminal | `LUDENS_LIVE_DEVICE=1 LUDENS_WORKSPACE=/absolute/path/to/workspace bun test core/tests/device.live.test.ts` |
+| External bridge sampling / long-action interruption | Park the target environment on a safe input-ready screen; stop Host and Baseware and keep the bridge running (override the port with `LUDENS_BRIDGE_PORT`) | `LUDENS_BRIDGE_DRIVER='<id>' LUDENS_BRIDGE_DRIVER_PACKAGE='github:<org>/<driver-repo>#<rev>' LUDENS_BRIDGE_TEST=1 bun test core/tests/bridge.live.test.ts` |
+| External bridge system keyboard dialog | Same as above, with an eight-character system naming dialog open. The test types nine characters and presses Enter to verify rejection, then cancels; do not run it in any other input box, or it may actually submit text. | `LUDENS_BRIDGE_DRIVER='<id>' LUDENS_BRIDGE_DRIVER_PACKAGE='github:<org>/<driver-repo>#<rev>' LUDENS_BRIDGE_KEYBOARD_TEST=1 bun test core/tests/bridge.live.test.ts` |
 
 ## WS Recovery Test Basis
 

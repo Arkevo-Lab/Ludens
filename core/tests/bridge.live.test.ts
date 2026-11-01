@@ -10,9 +10,9 @@ import type { ToolArguments, ControllerContext, ToolExecutionResult } from "@lud
 import { Runtime } from "../src/core/shiori/runtime.ts";
 
 async function createBridgeProvider(options: DriverCreateOptions) {
-  const id = process.env.RSA_BRIDGE_DRIVER;
-  const spec = process.env.RSA_BRIDGE_DRIVER_PACKAGE;
-  if (!id || !spec) throw new Error("Set RSA_BRIDGE_DRIVER and RSA_BRIDGE_DRIVER_PACKAGE to the external bridge driver package before live tests");
+  const id = process.env.LUDENS_BRIDGE_DRIVER;
+  const spec = process.env.LUDENS_BRIDGE_DRIVER_PACKAGE;
+  if (!id || !spec) throw new Error("Set LUDENS_BRIDGE_DRIVER and LUDENS_BRIDGE_DRIVER_PACKAGE to the external bridge driver package before live tests");
   const registration = await resolveDriver(id, spec, defaultDriverCacheRoot());
   return registration.load(options);
 }
@@ -23,9 +23,9 @@ function imageBytes(capture: ToolExecutionResult): Buffer {
   return Buffer.from(block.data, "base64");
 }
 
-test.skipIf(process.env.RSA_BRIDGE_TEST !== "1")("external bridge captures frames, interrupts long actions, hands back control, rejects stale epochs and clears disconnects", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-bridge-"));
-  const port = Number(process.env.RSA_BRIDGE_PORT ?? 47663);
+test.skipIf(process.env.LUDENS_BRIDGE_TEST !== "1")("external bridge captures frames, interrupts long actions, hands back control, rejects stale epochs and clears disconnects", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ludens-bridge-"));
+  const port = Number(process.env.LUDENS_BRIDGE_PORT ?? 47663);
   const connect = () => createBridgeProvider({ port, clock: { id: "bridge-test", now: () => performance.now() } });
   let provider = await connect();
   const signal = new AbortController().signal;
@@ -134,9 +134,9 @@ test.skipIf(process.env.RSA_BRIDGE_TEST !== "1")("external bridge captures frame
   } finally { provider.close(); await rm(directory, { recursive: true }); }
 }, 40000);
 
-test.skipIf(process.env.RSA_BRIDGE_KEYBOARD_TEST !== "1")("foreground keyboard can be captured while the game is paused, edited, cancelled and handed back", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-keyboard-"));
-  const provider = await createBridgeProvider({ port: Number(process.env.RSA_BRIDGE_PORT ?? 47663),
+test.skipIf(process.env.LUDENS_BRIDGE_KEYBOARD_TEST !== "1")("foreground keyboard can be captured while the game is paused, edited, cancelled and handed back", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ludens-keyboard-"));
+  const provider = await createBridgeProvider({ port: Number(process.env.LUDENS_BRIDGE_PORT ?? 47663),
     clock: { id: "keyboard-test", now: () => performance.now() } });
   const signal = new AbortController().signal;
   const epoch = crypto.randomUUID();
@@ -155,7 +155,7 @@ test.skipIf(process.env.RSA_BRIDGE_KEYBOARD_TEST !== "1")("foreground keyboard c
     await key("keyboard.type", {text: "123456789"}); // The active naming dialog limits input to eight characters.
     await expect(key("keyboard.press", {key: "ENTER"})).rejects.toThrow("TEXT_INVALID");
     await key("keyboard.press", {key: "CTRL+A"});
-    await key("keyboard.type", {text: "RSA"});
+    await key("keyboard.type", {text: "Ludens"});
     await key("keyboard.press", {key: "BACKSPACE"});
     const after = await screen.execute({}, { signal });
     expect(after.observations![0].sourceSequence).toBeUndefined();

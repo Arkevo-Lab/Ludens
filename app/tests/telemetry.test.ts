@@ -18,7 +18,7 @@ function fixture() {
     type,
     data,
     trace: { epoch: "old", traceId: "trace", spanId, ...trace },
-    source: { component: type.startsWith("shiori") ? "shiori" : "rsa" },
+    source: { component: type.startsWith("shiori") ? "shiori" : "ludens" },
   });
 }
 

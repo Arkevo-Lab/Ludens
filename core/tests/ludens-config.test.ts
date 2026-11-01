@@ -12,7 +12,7 @@ async function fixture() {
   await mkdir(cwd);
   const run = async (...args: string[]) => {
     const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
-    delete env.RSA_WORKSPACE; delete env.RSA_SOCKET; delete env.BASEWARE_SOCKET;
+    delete env.LUDENS_WORKSPACE; delete env.LUDENS_SOCKET; delete env.BASEWARE_SOCKET;
     const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), ...args], { cwd, env, stdout: "pipe", stderr: "pipe" });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     return { code, stdout, stderr };
@@ -146,7 +146,7 @@ test("workspace identity survives moves and index loss; unavailable and forgotte
     await mkdir(original);
     const [one, two] = await Promise.all([ensureWorkspaceIdentity(original), ensureWorkspaceIdentity(original)]);
     expect(one.id).toBe(two.id);
-    await writeFile(join(original, "rsa.json"), '{"driver":"cua"}');
+    await writeFile(join(original, "ludens.json"), '{"driver":"cua"}');
     await writeFile(join(original, "important.txt"), "preserved");
     await registerWorkspace(original, f.home);
     await rename(original, moved);
@@ -169,10 +169,10 @@ test("new-id checks owned target cleanup before changing identity or resume stat
     await mkdir(original);
     const identity = await ensureWorkspaceIdentity(original);
     await registerWorkspace(original, f.home);
-    const selector = join(original, ".rsa/shiori/current-session.json");
-    await mkdir(join(original, ".rsa/shiori"), { recursive: true });
+    const selector = join(original, ".ludens/shiori/current-session.json");
+    await mkdir(join(original, ".ludens/shiori"), { recursive: true });
     await writeFile(selector, JSON.stringify({ sessionFile: "sessions/keep.jsonl" }));
-    const identityPath = join(original, ".rsa/workspace.json"), registration = join(f.home, `registry/${identity.id}.json`);
+    const identityPath = join(original, ".ludens/workspace.json"), registration = join(f.home, `registry/${identity.id}.json`);
     const before = await Promise.all([identityPath, selector, registration].map(path => readFile(path, "utf8")));
     await mkdir(join(f.home, "pet"));
     const targetPath = join(f.home, "pet/target.json"); await writeFile(targetPath, "{");
@@ -201,9 +201,9 @@ test("independent copies require a new identity and retain explicit archive owne
     const original = join(f.root, "original"), copy = join(f.root, "copy");
     await mkdir(original);
     const first = await ensureWorkspaceIdentity(original);
-    await writeFile(join(original, "rsa.json"), '{"driver":"cua"}');
-    await mkdir(join(original, ".rsa/shiori"), { recursive: true });
-    await writeFile(join(original, ".rsa/shiori/current-session.json"), JSON.stringify({ sessionFile: "sessions/old.jsonl" }));
+    await writeFile(join(original, "ludens.json"), '{"driver":"cua"}');
+    await mkdir(join(original, ".ludens/shiori"), { recursive: true });
+    await writeFile(join(original, ".ludens/shiori/current-session.json"), JSON.stringify({ sessionFile: "sessions/old.jsonl" }));
     await registerWorkspace(original, f.home);
     await cp(original, copy, { recursive: true });
     expect((await f.run("workspace", "open", copy)).stderr).toContain("--new-id");
@@ -213,8 +213,8 @@ test("independent copies require a new identity and retain explicit archive owne
     expect(second.id).not.toBe(first.id);
     expect(second.historyIds).toEqual([first.id]);
     expect((await readWorkspaceIdentity(original)).id).toBe(first.id);
-    expect(await Bun.file(join(copy, ".rsa/shiori/current-session.json")).exists()).toBe(false);
-    expect(await Bun.file(join(original, ".rsa/shiori/current-session.json")).exists()).toBe(true);
+    expect(await Bun.file(join(copy, ".ludens/shiori/current-session.json")).exists()).toBe(false);
+    expect(await Bun.file(join(original, ".ludens/shiori/current-session.json")).exists()).toBe(true);
     expect((await listRegisteredWorkspaces(f.home)).length).toBe(2);
     const third = await renewWorkspaceIdentity(copy, f.home);
     expect(third.historyIds).toEqual([second.id, first.id]);
@@ -229,7 +229,7 @@ test("a workspace-relative community package remains portable in saved configura
     await writeFile(join(workspace, "driver/index.ts"), 'export default { id: "fixture", transport: "bridge", defaultPort: 45678, load() { throw new Error("must not load"); } };');
     const result = await f.run("init", "--workspace", workspace, "--driver", "fixture", "--driver-package", "file:./driver/index.ts");
     expect(result.code, result.stderr).toBe(0);
-    expect(JSON.parse(await readFile(join(workspace, "rsa.json"), "utf8")).driverPackage).toBe("file:./driver/index.ts");
+    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).driverPackage).toBe("file:./driver/index.ts");
     const moved = join(f.root, "moved-driver");
     await rename(workspace, moved);
     const preview = await f.run("--workspace", moved, "up", "--dry-run");

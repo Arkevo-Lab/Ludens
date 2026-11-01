@@ -6,7 +6,7 @@ from pathlib import Path
 from random import Random
 from time import perf_counter
 
-from rsa_tools import capability, current_trial
+from ludens_tools import capability, current_trial
 
 
 @capability

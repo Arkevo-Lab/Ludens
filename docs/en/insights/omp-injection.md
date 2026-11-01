@@ -4,7 +4,7 @@ If an agent just sits in a terminal doing Q&A, it knows when the environment cha
 
 ## What the original design intended
 
-The RSA extension hung two automatic injection channels on the OMP loop:
+The Ludens extension hung two automatic injection channels on the OMP loop:
 
 1. **Turn-start channel**: the `before_agent_start` hook, which hands the model the latest main-channel perception record plus sampler state transitions (`state / codeSHA / error`) as a persisted custom message at the start of every prompt;
 2. **End-of-batch channel**: the `tool_result` hook, which appends the latest frame to the result of the **last tool to finish** in a tool batch.
@@ -19,9 +19,9 @@ Sounds reasonable on paper, but in practice it introduced four clear flaws.
 
 **2. Non-deterministic attribution.** The frame was attached to whichever tool in the batch **finished last**. With `read` + `bash` in the same batch, whoever returns later carries the frame; a slight timing difference between runs lands the same frame in a different tool's result, muddying log attribution and session replay.
 
-**3. Uncontrolled frequency.** Auto queries use latest mode, where the spacetime axis returns only the **newest** record (the `_select` in `core/python/rsa_tools/_observation_history.py`), and deduplication only checks whether the newest main-sample ID changed. With the sampler running at 30Hz by default, new frames inevitably arrive between boundaries — so **every tool batch triggered an injection**. In a simulated 300-second takeover, 27 of 31 injected frames came from the end-of-batch channel.
+**3. Uncontrolled frequency.** Auto queries use latest mode, where the spacetime axis returns only the **newest** record (the `_select` in `core/python/ludens_tools/_observation_history.py`), and deduplication only checks whether the newest main-sample ID changed. With the sampler running at 30Hz by default, new frames inevitably arrive between boundaries — so **every tool batch triggered an injection**. In a simulated 300-second takeover, 27 of 31 injected frames came from the end-of-batch channel.
 
-**4. Persistent context growth.** The enriched tool results were persisted into session history, while RSA sets the provider image-count budget to `Infinity` (see the caching discussion in [OMP background compaction rework](omp-compaction.md)). Once a frame entered history, only compaction could clear it — one of the most expensive operations in the system.
+**4. Persistent context growth.** The enriched tool results were persisted into session history, while Ludens sets the provider image-count budget to `Infinity` (see the caching discussion in [OMP background compaction rework](omp-compaction.md)). Once a frame entered history, only compaction could clear it — one of the most expensive operations in the system.
 
 ## Running the numbers
 

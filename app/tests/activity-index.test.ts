@@ -17,7 +17,7 @@ const frame = (type: string, item_id: string, text: string, sequence: number) =>
     ...(type.endsWith("delta") ? { delta: text } : { text }), sequence_number: sequence }) },
 }) + "\n";
 async function fixture(work: (path: string) => Promise<void>) {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-activity-index-")));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-activity-index-")));
   try {
     await mkdir(join(path, "streams"));
     await writeFile(join(path, "events.jsonl"), [event(1, "control", { mode: "auto" }), event(2, "model_start")].map(value => JSON.stringify(value)).join("\n") + "\n");

@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { PerceptionRuntime, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/core/subsystems/perception.ts";
 
 async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv } = {}) {
-  const workspace = await realpath(await mkdtemp(join(tmpdir(), "rsa-perception-")));
+  const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-perception-")));
   const events: { type: string; data: any; trace: any }[] = [];
   const runtime = new PerceptionRuntime({ workspace, runDir: join(workspace, "logs", "run"),
     env: { BASEWARE_EPOCH: "must-not-leak" }, ...options,
@@ -20,7 +20,7 @@ async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: nu
     expect(predicate()).toBe(true);
   };
   const samples = () => {
-    const directory = join(workspace, ".rsa/timeline/segments");
+    const directory = join(workspace, ".ludens/timeline/segments");
     return readdirSync(directory).filter(name => name.endsWith(".jsonl")).sort().flatMap(name =>
       readFileSync(join(directory, name), "utf8").split("\n").filter(Boolean).map(line => {
         const record = JSON.parse(line);
@@ -40,8 +40,8 @@ async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: nu
 function source(body: string, start = "", close = "", hz = 20) {
   return `from pathlib import Path
 import os, time
-from rsa_tools._context import current
-from rsa_tools import capability, record
+from ludens_tools._context import current
+from ludens_tools import capability, record
 class Perception:
     sample_hz = ${hz}
     def start(self, context):
@@ -75,7 +75,7 @@ test("empty implementation stays blind; sampler failure can be repaired without 
 });
 
 test("retention policy reaches the worker and expired history cannot invalidate delivered media", async () => {
-  const f = await fixture({ env: { RSA_PERCEPTION_PERSIST: "0", RSA_PERCEPTION_HOT_SECONDS: "0.15" } });
+  const f = await fixture({ env: { LUDENS_PERCEPTION_PERSIST: "0", LUDENS_PERCEPTION_HOT_SECONDS: "0.15" } });
   try {
     await f.load(source(`        self.count += 1
         Path("frame.txt").write_text(str(self.count))
@@ -104,7 +104,7 @@ test("retention policy reaches the worker and expired history cannot invalidate 
 });
 
 test("cold history remains queryable across segments and worker reload", async () => {
-  const f = await fixture({ env: { RSA_PERCEPTION_HOT_SECONDS: "0.1", RSA_PERCEPTION_SEGMENT_SECONDS: "0.15" } });
+  const f = await fixture({ env: { LUDENS_PERCEPTION_HOT_SECONDS: "0.1", LUDENS_PERCEPTION_SEGMENT_SECONDS: "0.15" } });
   try {
     const code = source('        self.count += 1\n        return {"text": str(self.count)}');
     await f.load(code);
@@ -120,7 +120,7 @@ test("cold history remains queryable across segments and worker reload", async (
 });
 
 test("budget eviction status updates without observe calls and resets on reload", async () => {
-  const f = await fixture({ env: { RSA_PERCEPTION_PERSIST: "0", RSA_PERCEPTION_HOT_BYTES: "3500" } });
+  const f = await fixture({ env: { LUDENS_PERCEPTION_PERSIST: "0", LUDENS_PERCEPTION_HOT_BYTES: "3500" } });
   try {
     await f.runtime.reload(); // A timeline writer exists even without a sampler.
     expect(f.runtime.status().history?.budgetEvictions).toBe(0);

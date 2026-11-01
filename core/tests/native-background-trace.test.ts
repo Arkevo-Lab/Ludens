@@ -9,7 +9,7 @@ import { ModelTrace } from "../src/core/agent-omp/trace.ts";
 import { readArtifact } from "@ludens/protocol/log-archive";
 
 test("native background deliveries retain launch traces across turns and reused service names", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-native-background-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-native-background-"));
   const log = new EventLog(directory, { id: "background-fixture", now: () => performance.now() }, directory);
   let epoch = "first";
   const trace = new ModelTrace(log, () => ({ epoch }));

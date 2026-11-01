@@ -6,13 +6,13 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
-import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
-test.each(["request budget", "human handback"] as const)("native OMP retries respect RSA %s", async mode => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-retry-budget-"));
+test.each(["request budget", "human handback"] as const)("native OMP retries respect Ludens %s", async mode => {
+  const directory = await mkdtemp(join(tmpdir(), "ludens-retry-budget-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), { recursive: true });
   const network = spyOn(globalThis, "fetch").mockRejectedValue(new Error("Unexpected network request in offline retry test"));
@@ -28,7 +28,7 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
   const model = registry.find("openai-codex", "gpt-6.1-sol")!;
   let cycle: Cycle | undefined;
   let cancelTimer: ReturnType<typeof setTimeout> | undefined;
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 2,
     cycle: () => { if (!cycle) throw new Error("No active control cycle"); return cycle; },
   });
@@ -41,10 +41,10 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
       enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
       disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
       toolNames: ["observe"], customTools: extension.tools,
-      preloadedPreparedExtensions: [{ path: "rsa-retry-test", resolvedPath: "rsa-retry-test", factory: extension.factory, error: null }],
+      preloadedPreparedExtensions: [{ path: "ludens-retry-test", resolvedPath: "ludens-retry-test", factory: extension.factory, error: null }],
     });
     const removeGate = session.agent.addBeforeModelCall(() =>
-      cycle && !cycle.signal.aborted ? undefined : { stop: true, reason: "RSA control cycle is inactive" });
+      cycle && !cycle.signal.aborted ? undefined : { stop: true, reason: "Ludens control cycle is inactive" });
     const retryAttempts: number[] = [];
     const unsubscribe = session.subscribe(event => {
       if (event.type !== "auto_retry_start") return;
@@ -80,7 +80,7 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
     if (!epoch) throw new Error("Runtime did not create a control epoch");
     const deadline = performance.now() + 5000;
     while (runtime.status().mode !== "manual" || runtime.status().thinking) {
-      if (performance.now() > deadline) throw new Error("Native retry did not settle after RSA control ended");
+      if (performance.now() > deadline) throw new Error("Native retry did not settle after Ludens control ended");
       await Bun.sleep(10);
     }
     const expectedCalls = mode === "request budget" ? 2 : 1;

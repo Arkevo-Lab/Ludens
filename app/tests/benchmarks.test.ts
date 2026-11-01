@@ -24,7 +24,7 @@ async function taskPackage(directory: string, name = "fixture/capability", extra
   return readTask(directory);
 }
 async function fixture() {
-  const temporary = await mkdtemp(join(tmpdir(), "rsa-bench-dashboard-"));
+  const temporary = await mkdtemp(join(tmpdir(), "ludens-bench-dashboard-"));
   const base = await realpath(temporary), root = join(base, "home"), workspace = join(base, "workspace"), repository = join(base, "tasks");
   await mkdir(join(workspace, "logs"), { recursive: true });
   await registerFixture(root, "ws-bench", workspace);
@@ -197,7 +197,7 @@ test("timeline gaps and escaping evidence remain unavailable without capturing r
       { kind: "file", path: "escape" },
     ];
     const trial = f.make("run-010", { evidence: references });
-    const directory = await f.save(trial), timeline = join(f.workspace, ".rsa/timeline");
+    const directory = await f.save(trial), timeline = join(f.workspace, ".ludens/timeline");
     await mkdir(join(timeline, "video"), { recursive: true });
     await writeFile(join(timeline, "video/abc.mp4"), "fixture bytes");
     await json(join(timeline, "video/abc.mp4.json"), { status: "ready" });

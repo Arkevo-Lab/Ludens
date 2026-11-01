@@ -202,7 +202,7 @@ async function storedStream(text: string, path: string, model: string, anchor: E
   for (const row of streamRows(text)) {
     const wire = row.event ?? row;
     // Skip uploads before dereferencing: their entire input history is not activity.
-    if (row.format === "rsa-stream-v1" && wire.event !== "response.create" && wire.type !== "response.create") {
+    if (row.format === "ludens-stream-v1" && wire.event !== "response.create" && wire.type !== "response.create") {
       const data = await artifact(path, wire.dataRef, workspace);
       rows.push({ ...row, event: { ...wire, data } });
     } else rows.push(row);

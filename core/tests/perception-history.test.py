@@ -1,6 +1,6 @@
 """Offline checks: timestamped history and a sampler independent of agent reads.
 
-Run: PYTHONPATH=rsa/python python3 rsa/tests/perception-history.test.py
+Run: PYTHONPATH=ludens/python python3 ludens/tests/perception-history.test.py
 """
 
 import base64
@@ -18,7 +18,7 @@ import tracemalloc
 import unittest
 from unittest.mock import patch
 
-from rsa_tools._observation_history import ObservationHistory
+from ludens_tools._observation_history import ObservationHistory
 
 
 SAMPLING = {"clock": "test", "startedAtMs": 0, "finishedAtMs": 1}
@@ -26,9 +26,9 @@ SAMPLING = {"clock": "test", "startedAtMs": 0, "finishedAtMs": 1}
 class HistoryTests(unittest.TestCase):
     def test_workspace_settings_override_environment_defaults(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_PERCEPTION_HOT_SECONDS": "300", "RSA_VIDEO_SEGMENT_SECONDS": "60"}):
-            (Path(directory) / ".rsa").mkdir(parents=True, exist_ok=True)
-            (Path(directory) / ".rsa" / "settings.json").write_text(json.dumps(
+                "LUDENS_PERCEPTION_HOT_SECONDS": "300", "LUDENS_VIDEO_SEGMENT_SECONDS": "60"}):
+            (Path(directory) / ".ludens").mkdir(parents=True, exist_ok=True)
+            (Path(directory) / ".ludens" / "settings.json").write_text(json.dumps(
                 {"hotSeconds": 120, "videoSegmentSeconds": 450, "videoIdleSeconds": 5}))
             history = ObservationHistory(directory)
             # File values win; unset keys fall back to the environment.
@@ -37,7 +37,7 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(history.policy()["videoIdleSeconds"], 5)
             history.close()
             # Invalid values fail loudly instead of silently using defaults.
-            (Path(directory) / ".rsa" / "settings.json").write_text('{"hotSeconds": -1}')
+            (Path(directory) / ".ludens" / "settings.json").write_text('{"hotSeconds": -1}')
             with self.assertRaisesRegex(ValueError, "hotSeconds"):
                 ObservationHistory(directory)
 
@@ -70,9 +70,9 @@ class HistoryTests(unittest.TestCase):
 
     def test_window_derivatives_expire_with_the_source_without_promotion(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_PERCEPTION_PERSIST": "0", "RSA_PERCEPTION_HOT_SECONDS": "10"}):
+                "LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_SECONDS": "10"}):
             clock = [0.0]
-            with patch("rsa_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
+            with patch("ludens_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
                 history = ObservationHistory(directory)
                 saved = history.append({"media": [{"data": base64.b64encode(b"source").decode(),
                                                     "mediaType": "application/octet-stream"}]}, "one", SAMPLING)
@@ -143,7 +143,7 @@ class HistoryTests(unittest.TestCase):
             history.close()
             recovered = ObservationHistory(root)
             self.assertEqual(recovered.append({"text": "recovered"}, "two", SAMPLING)["sequence"], 4)
-            self.assertEqual(len(list(root.glob(".rsa/timeline/objects/*"))), 1)
+            self.assertEqual(len(list(root.glob(".ludens/timeline/objects/*"))), 1)
             self.assertEqual([row["sequence"] for row in recovered.observe({"after": 0})["records"]], [1, 2, 3, 4])
             with self.assertRaises(FileNotFoundError):
                 recovered.append({"media": [sample["media"][0], {
@@ -175,9 +175,9 @@ class HistoryTests(unittest.TestCase):
 
     def test_hot_expiry_hourly_segments_and_cold_pages_after_reload(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_PERCEPTION_HOT_SECONDS": "10", "RSA_PERCEPTION_SEGMENT_SECONDS": "3600"}):
+                "LUDENS_PERCEPTION_HOT_SECONDS": "10", "LUDENS_PERCEPTION_SEGMENT_SECONDS": "3600"}):
             clock = [0.0]
-            with patch("rsa_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
+            with patch("ludens_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
                 history = ObservationHistory(directory)
                 for minute in range(0, 180, 15):
                     clock[0] += 1
@@ -207,9 +207,9 @@ class HistoryTests(unittest.TestCase):
 
     def test_budget_pressure_shrinks_the_largest_channel_not_the_smallest(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_PERCEPTION_HOT_SECONDS": "600", "RSA_PERCEPTION_HOT_BYTES": "8192"}):
+                "LUDENS_PERCEPTION_HOT_SECONDS": "600", "LUDENS_PERCEPTION_HOT_BYTES": "8192"}):
             clock = [0.0]
-            with patch("rsa_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
+            with patch("ludens_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
                 history = ObservationHistory(directory)
                 loud, quiet = {"id": "cap/loud"}, {"id": "cap/quiet"}
                 # The quiet channel samples first; the loud one floods afterwards.
@@ -230,7 +230,7 @@ class HistoryTests(unittest.TestCase):
 
     def test_window_expiry_keeps_the_highest_evicted_cursor_across_channels(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_PERCEPTION_PERSIST": "0", "RSA_PERCEPTION_HOT_BYTES": "3500"}):
+                "LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_BYTES": "3500"}):
             history = ObservationHistory(directory)
             try:
                 for second, (channel, size) in enumerate((("A", 1500), ("B", 3000), ("A", 1500))):
@@ -248,11 +248,11 @@ class HistoryTests(unittest.TestCase):
 
     def test_window_only_expiry_inline_delivery_and_source_media_ownership(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_PERCEPTION_PERSIST": "0", "RSA_PERCEPTION_HOT_SECONDS": "10"}):
+                "LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_SECONDS": "10"}):
             root, clock = Path(directory), [0.0]
             source = root / "source.png"
             source.write_bytes(b"compressed frame")
-            with patch("rsa_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
+            with patch("ludens_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
                 history = ObservationHistory(root)
                 saved = history.append({"media": [{"path": str(source), "mediaType": "application/octet-stream"}]},
                                        "one", SAMPLING, "2026-10-22T00:00:00Z")
@@ -280,14 +280,14 @@ class HistoryTests(unittest.TestCase):
                 self.assertFalse(copied.exists())
                 self.assertEqual(base64.b64decode(page["records"][0]["media"][0]["data"]), b"compressed frame")
                 history.close()
-                self.assertFalse(list((root / ".rsa/timeline").glob("window-*")))
+                self.assertFalse(list((root / ".ludens/timeline").glob("window-*")))
                 reloaded = ObservationHistory(root)
                 self.assertEqual(reloaded.append({"text": "new generation"}, "two", SAMPLING)["sequence"], 3)
                 self.assertEqual(len(reloaded.observe({"after": 0})["records"]), 1)
                 reloaded.close()
 
     def test_window_cleanup_never_removes_a_live_instances_files(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"RSA_PERCEPTION_PERSIST": "0"}):
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0"}):
             history = ObservationHistory(directory)
             live = history._temporary
             marker = live / "marker"
@@ -307,14 +307,14 @@ class HistoryTests(unittest.TestCase):
             self.assertTrue(marker.exists())
             self.assertTrue(dead.exists())
             history.close()
-            with patch("rsa_tools._observation_history.os.kill", new=owner_status):
+            with patch("ludens_tools._observation_history.os.kill", new=owner_status):
                 other = ObservationHistory(directory)
             self.assertFalse(dead.exists())
             other.close()
 
     def test_hot_byte_budget_and_process_allocations_do_not_follow_total_history(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
-                "RSA_PERCEPTION_HOT_BYTES": "65536", "RSA_PERCEPTION_SEGMENT_BYTES": "262144"}):
+                "LUDENS_PERCEPTION_HOT_BYTES": "65536", "LUDENS_PERCEPTION_SEGMENT_BYTES": "262144"}):
             history = ObservationHistory(directory)
             tracemalloc.start()
             try:
@@ -388,8 +388,8 @@ class HistoryTests(unittest.TestCase):
             source = """
 import json, time
 from pathlib import Path
-from rsa_tools._context import current
-from rsa_tools import capability, record
+from ludens_tools._context import current
+from ludens_tools import capability, record
 class Perception:
     sample_hz = 20
     def start(self, context):
@@ -409,7 +409,7 @@ class Perception:
             environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "python"),
                            "BASEWARE_EPOCH": "must-not-leak"}
             with (root / "stderr.log").open("w") as stderr:
-                process = subprocess.Popen([sys.executable, "-u", "-m", "rsa_tools._perception"], cwd=root,
+                process = subprocess.Popen([sys.executable, "-u", "-m", "ludens_tools._perception"], cwd=root,
                                            env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                            stderr=stderr, text=True)
                 incoming = queue.Queue()

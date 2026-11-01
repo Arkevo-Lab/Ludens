@@ -4,13 +4,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { customToolToDefinition, type ExtensionAPI, type ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import { resizeImage } from "@oh-my-pi/pi-coding-agent/utils/image-resize";
-import { createRsaExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
 import { PerceptionRuntime, perceptionInput, type PerceptionRead, type PerceptionStatus } from "../src/core/subsystems/perception.ts";
 import { captureResult, createTestRuntime } from "./runtime-fixture.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 
 test("request budgets reset on a new takeover while repeated prompts share the same epoch budget", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-epoch-budget-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-epoch-budget-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), { recursive: true });
   const requests: {epoch?: string; request: number}[] = [];
@@ -27,7 +27,7 @@ test("request budgets reset on a new takeover while repeated prompts share the s
     async abort() {},
     async close() {},
   } });
-  const extension = createRsaExtension({runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
+  const extension = createLudensExtension({runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 2,
     cycle: () => cycle,
   });
@@ -56,7 +56,7 @@ test("request budgets reset on a new takeover while repeated prompts share the s
 });
 
 test("OMP's SDK adapter delivers the abort signal correctly and returns real image blocks", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-omp-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-omp-"));
   await mkdir(join(directory, "workspace", "skills"), { recursive: true });
   const file = join(directory, "sample.png");
   const tree = join(directory, "tree.json");
@@ -76,7 +76,7 @@ test("OMP's SDK adapter delivers the abort signal correctly and returns real ima
   }] }, () => {});
   const work = join(directory, "workspace");
   if (await Bun.file(join(directory, "sample.png")).exists()) {
-    await Bun.write(join(work, "perception.py"), `from rsa_tools import capability, record
+    await Bun.write(join(work, "perception.py"), `from ludens_tools import capability, record
 class Perception:
     def start(self, context): pass
     def close(self): pass
@@ -90,7 +90,7 @@ class Perception:
   for (let i = 0; i < 200 && runtime.perception!.status().state === "loading"; i++) await Bun.sleep(10);
   }
   const control = new AbortController();
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(join(directory, "workspace"), join(directory, "skill-versions")),
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(join(directory, "workspace"), join(directory, "skill-versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 1,
     cycle: () => ({ epoch: "test-epoch", signal: control.signal }),
   });
@@ -112,7 +112,7 @@ class Perception:
 });
 
 test("text-only perception reaches automatic context and explicit reads are not duplicated", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-text-observation-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-text-observation-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), { recursive: true });
   let calls = 0;
@@ -122,7 +122,7 @@ test("text-only perception reaches automatic context and explicit reads are not 
       return { ...captureResult([]), id: `windows-${++calls}`, stdout: JSON.stringify({ title: `Window ${calls}` }) };
     },
   }] }, () => {});
-  await Bun.write(join(workspace, "perception.py"), `from rsa_tools import capability, record
+  await Bun.write(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
     sample_hz = 0.01
     def start(self, context): self.count = 0
@@ -137,7 +137,7 @@ class Perception:
   await runtime.perception!.reload();
   for (let i = 0; i < 200 && runtime.perception!.status().state === "loading"; i++) await Bun.sleep(10);
   const control = new AbortController();
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 3,
     cycle: () => ({ epoch: "test", signal: control.signal }),
   });
@@ -200,7 +200,7 @@ test("model projection keeps each record once with time, data and paging but no 
 });
 
 test("automatic delivery stays bounded across fast tools, unavailable sampling and context replacement", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-delivery-policy-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-delivery-policy-"));
   const work = new Workspace(directory, join(directory, "versions"));
   await mkdir(join(directory, "skills"));
   const events: { type: string; data: any }[] = [];
@@ -218,7 +218,7 @@ test("automatic delivery stays bounded across fast tools, unavailable sampling a
       text: `position-${sequence}`, media: [{ id: `image-${sequence}`, controllerId: "perception", mediaType: "image/png", data: png,
         timing: { clock: "test", requestedAtMs: sequence, receivedAtMs: sequence } }] }] });
   const abort = new AbortController();
-  const extension = createRsaExtension({ runtime, workspace: work, basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
+  const extension = createLudensExtension({ runtime, workspace: work, basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     maxRequests: 2000, cycle: () => ({ epoch: "test", signal: abort.signal }) });
   const handlers: Record<string, (event: any) => any> = {};
   await extension.factory({ on(name: string, handler: (event: any) => any) { handlers[name] = handler; } } as ExtensionAPI);
@@ -287,7 +287,7 @@ test("automatic delivery stays bounded across fast tools, unavailable sampling a
 test.each(["injection disabled", "explicit observe", "context replacement"])(
   "sampler state remains deliverable after %s",
   async (suppression) => {
-    const directory = await mkdtemp(join(tmpdir(), "rsa-state-delivery-"));
+    const directory = await mkdtemp(join(tmpdir(), "ludens-state-delivery-"));
     const runtime = createTestRuntime({ controllers: [] });
     const localPerception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
   runtime.attach({ perception: localPerception });
@@ -296,7 +296,7 @@ test.each(["injection disabled", "explicit observe", "context replacement"])(
     perception.status = () => status;
     perception.observe = async () => ({ queryId: "explicit-query", ok: true, query: {}, hasMore: false, records: [] });
     const abort = new AbortController();
-    const extension = createRsaExtension({ runtime, workspace: new Workspace(directory, join(directory, "versions")),
+    const extension = createLudensExtension({ runtime, workspace: new Workspace(directory, join(directory, "versions")),
       basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 10,
       cycle: () => ({ epoch: "test", signal: abort.signal }) });
     const handlers: Record<string, (event: any) => any> = {};
@@ -338,7 +338,7 @@ test.each(["injection disabled", "explicit observe", "context replacement"])(
 );
 
 test("cancelled perception reads do not consume an undelivered sampler state", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-state-abort-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-state-abort-"));
   const runtime = createTestRuntime({ controllers: [] });
   const localPerception = new PerceptionRuntime({ workspace: directory, runDir: join(directory, "run"), record: runtime.record });
   runtime.attach({ perception: localPerception });
@@ -346,7 +346,7 @@ test("cancelled perception reads do not consume an undelivered sampler state", a
   perception.status = () => ({ state: "ready", generation: "generation", codeSHA: "source" });
   let abort = new AbortController();
   perception.observe = async (signal) => { abort.abort(); signal.throwIfAborted(); throw new Error("unreachable"); };
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(directory, join(directory, "versions")),
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(directory, join(directory, "versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 10,
     cycle: () => ({ epoch: "test", signal: abort.signal }) });
   const handlers: Record<string, (event: any) => any> = {};

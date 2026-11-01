@@ -1,5 +1,5 @@
 import { installCompanionActivity, type OwnerAccess } from './companion-activity.js'
-import type { RsaActivitySource } from './rsa-source.js'
+import type { LudensActivitySource } from './ludens-source.js'
 import { app, BrowserWindow, ipcMain, Menu, screen } from 'electron'
 import { readFileSync } from 'node:fs'
 import { writeFile, rename } from 'node:fs/promises'
@@ -29,7 +29,7 @@ function companionBounds(window: BrowserWindow): Rect {
 
 export interface CompanionHandle {
   readonly window: BrowserWindow
-  configureActivity(source: RsaActivitySource): void
+  configureActivity(source: LudensActivitySource): void
   trayMenuItems(): Electron.MenuItemConstructorOptions[]
   locale(): CompanionLocale
   copy(): (typeof companionI18n)[CompanionLocale]['menu']

@@ -1,6 +1,6 @@
 # @ludens/protocol
 
-Zero-dependency contract layer for the Ludens workspace. Every other package (`baseware`, `rsa`, `rsa-dashboard`, `rsa-companion`) consumes these types and helpers through workspace imports only — no cross-package deep relative paths.
+Zero-dependency contract layer for the Ludens workspace. Every other package (`baseware`, `core`, `app`) consumes these types and helpers through workspace imports only — no cross-package deep relative paths.
 
 ## Exports
 
@@ -8,7 +8,7 @@ Zero-dependency contract layer for the Ludens workspace. Every other package (`b
 | --- | --- |
 | `@ludens/protocol/activity` | Activity block / projection / changes DTOs and the `ActivityChangesClient` contract shared by Dashboard and Ludens Pet. |
 | `@ludens/protocol/event-sources` | Multi-source event fact declarations (`{sourceId, root, format, recordingId, windows}`) and on-demand merging. |
-| `@ludens/protocol/log-archive` | Content-addressed structured archive (`.rsa/archive/`) reader/writer. |
+| `@ludens/protocol/log-archive` | Content-addressed structured archive (`.ludens/archive/`) reader/writer. |
 | `@ludens/protocol/ludens` | Shared Ludens domain types. |
 | `@ludens/protocol/python` | Python worker protocol types. |
 | `@ludens/protocol/timeline-media` | Timeline media asset types. |

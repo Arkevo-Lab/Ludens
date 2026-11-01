@@ -9,17 +9,17 @@ import { ensureWorkspaceIdentity, readGlobalConfig, registerWorkspace, validateW
 import { parseConfig, launchPlan, WorkspaceLauncher } from "../daemon/launcher.ts";
 
 export const WORKSPACE_HELP = `Workspace startup (macOS):
-rsa init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]
-rsa up [--dry-run] [--pet | --no-pet]
-rsa services
-rsa down [--keep-emulator] [--dashboard] [--pet]
+ludens init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]
+ludens up [--dry-run] [--pet | --no-pet]
+ludens services
+ludens down [--keep-emulator] [--dashboard] [--pet]
 
-These commands use <workspace>/rsa.json. Paths are relative to that workspace.
+These commands use <workspace>/ludens.json. Paths are relative to that workspace.
 init uses the configured workspaceRoot unless --workspace selects a directory.
 An explicit directory does not require --name. Global defaults are copied at creation only.
-New hosts start in manual mode; use rsa auto on to let the agent act.
-Ludens Pet is off by default. init --pet enables it in rsa.json.
-up --pet or --no-pet overrides that setting for this launch without changing rsa.json.
+New hosts start in manual mode; use ludens auto on to let the agent act.
+Ludens Pet is off by default. init --pet enables it in ludens.json.
+up --pet or --no-pet overrides that setting for this launch without changing ludens.json.
 --no-pet leaves any already running shared Pet open.
 Repeated up reuses running services; down then up applies configuration changes.
 down stops this workspace's managed host, Baseware and emulator (save your game first).
@@ -62,13 +62,13 @@ export async function workspaceCommand(command: string, args: string[], selected
     const resolvedPackage = packageSpec?.startsWith("file:") ? `file:${resolve(workspace, packageSpec.slice(5))}` : packageSpec;
     const manifest = await resolveDriver(raw.driver as string, resolvedPackage, defaultDriverCacheRoot());
     const config = parseConfig(raw, manifest);
-    await writeFile(join(workspace, "rsa.json"), `${JSON.stringify(config, null, 2)}\n`, { flag: "wx" });
+    await writeFile(join(workspace, "ludens.json"), `${JSON.stringify(config, null, 2)}\n`, { flag: "wx" });
     await writeFile(join(workspace, "AGENTS.md"), workspaceGuide, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
     await writeFile(join(workspace, "perception.py"), perceptionTemplate, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
     await writeFile(join(workspace, "action.py"), actionTemplate, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
     await ensureWorkspaceIdentity(workspace);
     const entry = await registerWorkspace(workspace);
-    console.log(JSON.stringify({ ...entry, configPath: join(workspace, "rsa.json") }, null, 2));
+    console.log(JSON.stringify({ ...entry, configPath: join(workspace, "ludens.json") }, null, 2));
     return;
   }
   const workspace = await realpath(selectedWorkspace);
@@ -79,13 +79,13 @@ export async function workspaceCommand(command: string, args: string[], selected
       else await registerWorkspace(workspace);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        throw new Error("Workspace identity is missing. Use rsa init for a new workspace, or rsa workspace import <path> for an existing workspace.");
+        throw new Error("Workspace identity is missing. Use ludens init for a new workspace, or ludens workspace import <path> for an existing workspace.");
       }
       throw error;
     }
   }
   // Status and shutdown remain available even if the launch config was removed or edited badly.
-  const raw = command === "up" ? await Bun.file(join(workspace, "rsa.json")).json() : { driver: "cua" };
+  const raw = command === "up" ? await Bun.file(join(workspace, "ludens.json")).json() : { driver: "cua" };
   if (typeof raw.driverPackage === "string" && raw.driverPackage.startsWith("file:")) raw.driverPackage = `file:${resolve(workspace, raw.driverPackage.slice(5))}`;
   const manifest = await resolveDriver(raw.driver, raw.driverPackage, defaultDriverCacheRoot());
   const config = parseConfig(raw, manifest);

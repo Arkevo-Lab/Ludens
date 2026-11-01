@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Slider } from "@/components/ui/slider";
 import { LoopChart } from "@/features/benchmark/loop-chart";
-import { OMP_LAYER_DEFS, PRESETS, RSA_LAYER_DEFS, defaultParams, simulate, type LoopConfig, type LoopEvent, type LoopParams } from "@/lib/loop-lab";
+import { OMP_LAYER_DEFS, PRESETS, LUDENS_LAYER_DEFS, defaultParams, simulate, type LoopConfig, type LoopEvent, type LoopParams } from "@/lib/loop-lab";
 import { LOOP_PARAM_KEYS, PARAM_GROUPS, createLoopDraft, validateLoopDraft, validateLoopParams, type LoopDraft, type LoopParamError } from "@/lib/loop-params";
 import "@/features/benchmark/loop-lab.css";
 
@@ -26,7 +26,7 @@ let tabSession: Session | undefined;
 function initialSession(): Session {
   const saved = typeof window === "undefined" ? undefined : tabSession;
   if (saved && validateLoopParams(saved.params).params && LOOP_PARAM_KEYS.every(key => typeof saved.draft[key] === "string")
-    && RSA_LAYER_DEFS.every(({ key }) => typeof saved.config.rsa[key] === "boolean")
+    && LUDENS_LAYER_DEFS.every(({ key }) => typeof saved.config.ludens[key] === "boolean")
     && OMP_LAYER_DEFS.every(({ key }) => typeof saved.config.omp[key] === "boolean")) return saved;
   const params = defaultParams();
   return { params, draft: createLoopDraft(params), config: PRESETS[0]!.cfg, selected: 1, requestDraft: "1" };
@@ -38,19 +38,19 @@ const EVENT_ROLE_KEYS: Partial<Record<LoopEvent["ch"], string>> = {
 
 function Anatomy({ config }: { config: LoopConfig }) {
   const t = useTranslations("loopLab");
-  const node = (label: string, on: boolean, kind: "rsa" | "nat") => <span className={`loop-node ${on ? `${kind}-on` : "off"}`}>{label}</span>;
+  const node = (label: string, on: boolean, kind: "ludens" | "nat") => <span className={`loop-node ${on ? `${kind}-on` : "off"}`}>{label}</span>;
   const arrow = <span className="loop-arrow" aria-hidden="true">→</span>;
   return <div className="loop-anatomy">
     <div className="loop-arow"><span className="loop-gname">{t("anatomy.inner")}</span>
-      {node(t("anatomy.promptPrep"), true, "nat")}{arrow}{node("① before_agent_start", config.rsa.ch1, "rsa")}{arrow}
+      {node(t("anatomy.promptPrep"), true, "nat")}{arrow}{node("① before_agent_start", config.ludens.ch1, "ludens")}{arrow}
       {node(`${t("anatomy.transform")} (${[config.omp.dateCwd && "date/cwd", config.omp.schemas && "schema"].filter(Boolean).join(" + ") || t("anatomy.none")})`, config.omp.dateCwd || config.omp.schemas, "nat")}{arrow}
       {node(t("anatomy.modelRequest"), true, "nat")}{arrow}{node(t("anatomy.toolBatch"), true, "nat")}{arrow}
-      {node(t("anatomy.appendTools"), config.rsa.ch2, "rsa")}{arrow}
+      {node(t("anatomy.appendTools"), config.ludens.ch2, "ludens")}{arrow}
       {node(`${t("anatomy.turnEndCheck")} (pruning${config.omp.compaction ? " / compaction" : ""})`, config.omp.pruning || config.omp.compaction, "nat")}
       <span className="loop-arrow" aria-hidden="true">↻</span>{node("final", true, "nat")}
     </div>
     <div className="loop-arow"><span className="loop-gname">{t("anatomy.outer")}</span>{node("final", true, "nat")}{arrow}
-      {node(t("anatomy.resendCont"), config.rsa.cont, "rsa")}{arrow}{node(t("anatomy.backToPrep"), config.rsa.cont, "rsa")}
+      {node(t("anatomy.resendCont"), config.ludens.cont, "ludens")}{arrow}{node(t("anatomy.backToPrep"), config.ludens.cont, "ludens")}
     </div>
   </div>;
 }
@@ -156,10 +156,10 @@ export function LoopLab({ navigate }: { navigate?: (patch: Record<string, string
             })}</div>
           </details>)}
           <p className="loop-layers-notice">{t("layersImmediate")}</p>
-          <details className="loop-control-group" data-loop-layer-group="rsa"><summary><strong>{t("rsaTitle")}</strong><ChevronDownIcon className="loop-disclosure-icon" aria-hidden="true" /></summary><div className="loop-layer-list">
-            {RSA_LAYER_DEFS.map(layer => <Label key={layer.key} htmlFor={`${id}-rsa-${layer.key}`} className="loop-layer items-start font-normal">
-              <Checkbox id={`${id}-rsa-${layer.key}`} data-loop-layer={`rsa.${layer.key}`} checked={config.rsa[layer.key]} onCheckedChange={checked => setConfig(previous => ({ ...previous, rsa: { ...previous.rsa, [layer.key]: checked === true } }))} />
-              <span><b>{t(`rsaLayers.${layer.key}.name`)}</b><small>{t(`rsaLayers.${layer.key}.desc`)}</small></span>
+          <details className="loop-control-group" data-loop-layer-group="ludens"><summary><strong>{t("ludensTitle")}</strong><ChevronDownIcon className="loop-disclosure-icon" aria-hidden="true" /></summary><div className="loop-layer-list">
+            {LUDENS_LAYER_DEFS.map(layer => <Label key={layer.key} htmlFor={`${id}-ludens-${layer.key}`} className="loop-layer items-start font-normal">
+              <Checkbox id={`${id}-ludens-${layer.key}`} data-loop-layer={`ludens.${layer.key}`} checked={config.ludens[layer.key]} onCheckedChange={checked => setConfig(previous => ({ ...previous, ludens: { ...previous.ludens, [layer.key]: checked === true } }))} />
+              <span><b>{t(`ludensLayers.${layer.key}.name`)}</b><small>{t(`ludensLayers.${layer.key}.desc`)}</small></span>
             </Label>)}
           </div></details>
           <details className="loop-control-group" data-loop-layer-group="omp"><summary><strong>{t("ompTitle")}</strong><ChevronDownIcon className="loop-disclosure-icon" aria-hidden="true" /></summary><div className="loop-layer-list">
@@ -219,7 +219,7 @@ function HistoryRow({ event }: { event: LoopEvent }) {
   const role = event.ch === "prompt_start" ? t("history.promptStart") : event.ch === "tool_batch" ? t("history.toolBatch") : t(EVENT_ROLE_KEYS[event.ch] ?? event.ch);
   const badge = event.changed === true ? t("history.changed") : event.changed === false ? t("history.unchanged") : "";
   return <div className={`loop-msg ${event.ch === "prompt_start" ? "pstart" : event.ch === "tool_batch" ? "pbatch" : "system"}`}>
-    <span className={`loop-src ${event.omp ? "omp" : "rsa"}`}>{event.omp ? "OMP" : "RSA"}</span><span className="loop-role">{role}{badge && <i>{badge}</i>}</span>
+    <span className={`loop-src ${event.omp ? "omp" : "ludens"}`}>{event.omp ? "OMP" : "Ludens"}</span><span className="loop-role">{role}{badge && <i>{badge}</i>}</span>
     <span className="loop-tok">{event.tok !== 0 ? `${event.tok > 0 ? "+" : "−"}${fmt(Math.abs(event.tok))} tok · ` : ""}{Math.round(event.t)}s</span>
   </div>;
 }

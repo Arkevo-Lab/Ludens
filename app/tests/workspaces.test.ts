@@ -25,7 +25,7 @@ test("workspace management preserves defaults, missing registrations, files, and
     await assert.rejects(updateWorkspaceRoot("relative", home), /绝对路径/);
     const old = join(root, "old-directory"); await mkdir(old);
     await assert.rejects(openWorkspace(old, home), /import/);
-    await assert.rejects(readFile(join(old, ".rsa/workspace.json")), { code: "ENOENT" });
+    await assert.rejects(readFile(join(old, ".ludens/workspace.json")), { code: "ENOENT" });
     assert.deepEqual((await removeWorkspace(registered.id, home)).removed, registered);
     assert.deepEqual((await workspaceSettings(home)).workspaces, []);
     assert.equal(await readFile(join(workspace, "keep.txt"), "utf8"), "retained");
@@ -173,17 +173,17 @@ test("concurrent follow of another workspace survives removal", async () => {
 
 test("creating through the CLI uses the global default or explicit directory without starting services", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-create-"))), home = join(root, "home");
-  const inherited = { RSA_WORKSPACE: process.env.RSA_WORKSPACE, RSA_SOCKET: process.env.RSA_SOCKET,
+  const inherited = { LUDENS_WORKSPACE: process.env.LUDENS_WORKSPACE, LUDENS_SOCKET: process.env.LUDENS_SOCKET,
     BASEWARE_DRIVER_PACKAGES: process.env.BASEWARE_DRIVER_PACKAGES, BASEWARE_SOCKET: process.env.BASEWARE_SOCKET };
   try {
-    Object.assign(process.env, { RSA_WORKSPACE: join(root, "unrelated-workspace"), RSA_SOCKET: join(root, "unrelated-rsa.sock"),
+    Object.assign(process.env, { LUDENS_WORKSPACE: join(root, "unrelated-workspace"), LUDENS_SOCKET: join(root, "unrelated-ludens.sock"),
       BASEWARE_DRIVER_PACKAGES: "/nonexistent/inherited-driver", BASEWARE_SOCKET: join(root, "unrelated-baseware.sock") });
     const before = await readGlobalConfig(home);
     await writeGlobalConfig({ ...before, defaults: { seconds: 79, requests: 13, pet: false } }, home);
     const created = await createWorkspace({ name: "one", driver: "cua" }, undefined, home);
     assert.equal(created.workspace, join(home, "workspaces/one"));
     assert.deepEqual((await workspaceSettings(home)).workspaces.map(entry => entry.id), [created.id]);
-    const config = JSON.parse(await readFile(join(created.workspace, "rsa.json"), "utf8"));
+    const config = JSON.parse(await readFile(join(created.workspace, "ludens.json"), "utf8"));
     assert.equal(config.seconds, 79); assert.equal(config.requests, 13); assert.equal(config.pet, false);
     await assert.rejects(readFile(join(created.workspace, "logs/background/host.plist")), { code: "ENOENT" });
     const explicit = join(root, "custom path");

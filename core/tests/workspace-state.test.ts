@@ -6,15 +6,15 @@ import { Workspace } from "../src/core/storage/workspace.ts";
 import { readCurrentSession, initializeWorkspaceState, resolveWorkspaceAddress, resolveWorkspaceState, writeCurrentSession } from "../src/core/storage/workspace-state.ts";
 
 test("address and state resolution never initialize a bare or missing directory", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-read-only-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-read-only-"));
   const workspace = join(directory, "bare"), alias = join(directory, "alias"), home = join(directory, "home");
   await mkdir(workspace); await symlink(workspace, alias);
   try {
     expect(await resolveWorkspaceAddress(alias)).toEqual(await resolveWorkspaceAddress(workspace));
-    await expect(resolveWorkspaceState(workspace, home)).rejects.toThrow("rsa workspace import");
-    await expect(resolveWorkspaceState(join(directory, "missing"), home)).rejects.toThrow("rsa init");
+    await expect(resolveWorkspaceState(workspace, home)).rejects.toThrow("ludens workspace import");
+    await expect(resolveWorkspaceState(join(directory, "missing"), home)).rejects.toThrow("ludens init");
     expect(await readdir(workspace)).toEqual([]);
-    expect(await Bun.file(join(workspace, ".rsa", "workspace.json")).exists()).toBe(false);
+    expect(await Bun.file(join(workspace, ".ludens", "workspace.json")).exists()).toBe(false);
     expect((await readdir(directory)).sort()).toEqual(["alias", "bare"]);
     const state = await initializeWorkspaceState(workspace, home);
     await rm(state.sessionsDir, { recursive: true });
@@ -24,18 +24,18 @@ test("address and state resolution never initialize a bare or missing directory"
 });
 
 test("CLI queries and direct run cannot create an identity in an uninitialized directory", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-query-init-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-query-init-"));
   const workspace = join(directory, "bare"), home = join(directory, "home");
   await mkdir(workspace);
   const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
-  for (const key of ["RSA_SOCKET", "RSA_WORKSPACE", "BASEWARE_SOCKET", "BASEWARE_EPOCH"]) delete env[key];
+  for (const key of ["LUDENS_SOCKET", "LUDENS_WORKSPACE", "BASEWARE_SOCKET", "BASEWARE_EPOCH"]) delete env[key];
   try {
     for (const args of [["status"], ["controller", "list"], ["perception", "status"], ["action", "status"], ["run", "--device-only"]]) {
       const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "--workspace", workspace, ...args],
         { cwd: workspace, env, stdout: "pipe", stderr: "pipe" });
       const [code, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       expect({ code, output }).toEqual({ code: 1, output: "" });
-      if (args[0] === "run") expect(errors).toContain("rsa workspace import");
+      if (args[0] === "run") expect(errors).toContain("ludens workspace import");
       expect(await readdir(workspace)).toEqual([]);
       expect(await readdir(directory)).toEqual(["bare"]);
     }
@@ -43,19 +43,19 @@ test("CLI queries and direct run cannot create an identity in an uninitialized d
 });
 
 test("creating a benchmark execution workspace cannot adopt unimported history", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-legacy-guard-"));
-  const workspace = join(directory, "old"), sessions = join(workspace, ".rsa", "shiori", "sessions");
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-legacy-guard-"));
+  const workspace = join(directory, "old"), sessions = join(workspace, ".ludens", "shiori", "sessions");
   await mkdir(sessions, { recursive: true });
   await writeFile(join(sessions, "old.jsonl"), "preserve old history");
   try {
-    await expect(initializeWorkspaceState(workspace, join(directory, "home"))).rejects.toThrow("rsa workspace import");
-    expect(await Bun.file(join(workspace, ".rsa", "workspace.json")).exists()).toBe(false);
+    await expect(initializeWorkspaceState(workspace, join(directory, "home"))).rejects.toThrow("ludens workspace import");
+    expect(await Bun.file(join(workspace, ".ludens", "workspace.json")).exists()).toBe(false);
     expect(await readFile(join(sessions, "old.jsonl"), "utf8")).toBe("preserve old history");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("sessions, identity, versions and relative selection stay within each workspace", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-state-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-state-"));
   try {
     const artifacts = join(directory, "artifacts");
     const first = await initializeWorkspaceState(join(directory, "workspaces", "one"), artifacts);
@@ -64,8 +64,8 @@ test("sessions, identity, versions and relative selection stay within each works
     expect(first.sessionsDir).not.toBe(second.sessionsDir);
     expect(first.versionsDir).not.toBe(second.versionsDir);
     expect(first.socket).not.toBe(second.socket);
-    expect(first.sessionsDir).toBe(join(first.workspace, ".rsa", "shiori", "sessions"));
-    expect(first.dir).toBe(join(first.workspace, ".rsa"));
+    expect(first.sessionsDir).toBe(join(first.workspace, ".ludens", "shiori", "sessions"));
+    expect(first.dir).toBe(join(first.workspace, ".ludens"));
     expect(first.versionsDir).toBe(join(first.dir, "skill-versions"));
     expect(await Bun.file(join(artifacts, "registry", `${first.id}.json`)).exists()).toBe(false);
     expect(await readCurrentSession(first)).toBeUndefined();
@@ -84,15 +84,15 @@ test("sessions, identity, versions and relative selection stay within each works
     await writeCurrentSession(first, replacement);
     expect(await readCurrentSession(first)).toBe(replacement);
     expect(await readCurrentSession(second)).toBe(secondSession);
-    expect(JSON.parse(await readFile(join(first.shioriDir, "current-session.json"), "utf8"))).toEqual({ version: 1, workspaceId: first.id, sessionFile: ".rsa/shiori/sessions/new.jsonl" });
+    expect(JSON.parse(await readFile(join(first.shioriDir, "current-session.json"), "utf8"))).toEqual({ version: 1, workspaceId: first.id, sessionFile: ".ludens/shiori/sessions/new.jsonl" });
     expect((await readdir(first.shioriDir)).some(name => name.endsWith(".tmp"))).toBe(false);
-    expect(await readdir(first.workspace)).toEqual([".rsa"]);
-    expect(await readdir(second.workspace)).toEqual([".rsa"]);
+    expect(await readdir(first.workspace)).toEqual([".ludens"]);
+    expect(await readdir(second.workspace)).toEqual([".ludens"]);
   } finally { await rm(directory, { recursive: true }); }
 });
 
 test("a symlink and the original workspace resolve to the same identity and socket", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-alias-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-alias-"));
   try {
     const original = join(directory, "Game Workspace");
     const alias = join(directory, "alias");
@@ -107,7 +107,7 @@ test("a symlink and the original workspace resolve to the same identity and sock
 });
 
 test("skill and memory snapshots travel inside the task workspace", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-evidence-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-evidence-"));
   try {
     const state = await initializeWorkspaceState(join(directory, "tasks", "workspace"), join(directory, "state"));
     await mkdir(join(state.workspace, "skills", "learned"), { recursive: true });
@@ -117,13 +117,13 @@ test("skill and memory snapshots travel inside the task workspace", async () => 
     const index = await new Workspace(state.workspace, state.versionsDir).snapshot();
     expect(await Bun.file(join(state.versionsDir, `${index.version}.json`)).exists()).toBe(true);
     expect(await Bun.file(join(state.versionsDir, `${index.memory.version}.json`)).exists()).toBe(true);
-    expect((await readdir(state.workspace)).sort()).toEqual([".rsa", "memory", "skills"]);
+    expect((await readdir(state.workspace)).sort()).toEqual([".ludens", "memory", "skills"]);
     expect(await readdir(join(directory, "tasks"))).toEqual(["workspace"]);
   } finally { await rm(directory, { recursive: true }); }
 });
 
 test("moving keeps the relative selection and identity while escaped or foreign selections are rejected", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-workspace-relocation-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-relocation-"));
   try {
     const original = await initializeWorkspaceState(join(directory, "original"), join(directory, "home"));
     await writeCurrentSession(original, join(original.sessionsDir, "selected.jsonl"));
@@ -136,7 +136,7 @@ test("moving keeps the relative selection and identity while escaped or foreign 
     const path = join(moved.shioriDir, "current-session.json");
     await writeFile(path, JSON.stringify({ version: 1, workspaceId: moved.id, sessionFile: "../foreign.jsonl" }));
     await expect(readCurrentSession(moved)).rejects.toThrow("inside");
-    await writeFile(path, JSON.stringify({ version: 1, workspaceId: "another-workspace", sessionFile: ".rsa/shiori/sessions/selected.jsonl" }));
+    await writeFile(path, JSON.stringify({ version: 1, workspaceId: "another-workspace", sessionFile: ".ludens/shiori/sessions/selected.jsonl" }));
     await expect(readCurrentSession(moved)).rejects.toThrow("foreign");
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

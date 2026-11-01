@@ -69,10 +69,10 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
     if (argv.length === 1 && argv[0] === "status") return runtime.action.status();
     if (argv.length === 1 && argv[0] === "reload") return runtime.action.reload(status.epoch ?? undefined);
     if (argv.length === 1 && argv[0] === "stop") return runtime.action.stop();
-    throw new Error("Usage: rsa action status|reload|stop");
+    throw new Error("Usage: ludens action status|reload|stop");
   }
   if (kind === "timeline") {
-    if (!runtime.perception) throw new Error("Timeline recorder is unavailable; run rsa perception reload.");
+    if (!runtime.perception) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
     if (request.action === "derive") {
       if (!request.media) throw new Error("Timeline derive requires encoded media and its recorded source");
       const modelMedia = await runtime.perception.deriveMedia(request.media, signal, request.id);
@@ -96,10 +96,10 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       if (argv.length === 1) return { perceptionInjection: runtime.perceptionInjectionEnabled() };
       if (argv.length === 2 && (argv[1] === "on" || argv[1] === "off"))
         return runtime.setPerceptionInjection(argv[1] === "on", trace);
-      throw new Error("Usage: rsa perception inject [on|off] (automatic context only; recording continues)");
+      throw new Error("Usage: ludens perception inject [on|off] (automatic context only; recording continues)");
     }
     if (!runtime.perception) throw new Error("Perception is not configured");
-    const usage = "Usage: rsa perception status|reload|stop|observe | inject [on|off]; stop ends recording, inject off only disables automatic context";
+    const usage = "Usage: ludens perception status|reload|stop|observe | inject [on|off]; stop ends recording, inject off only disables automatic context";
     if (argv.length !== 1) throw new Error(usage);
     if (argv[0] === "status") return runtime.perception.status();
     if (argv[0] === "reload") return runtime.perception.reload(trace);
@@ -137,10 +137,10 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       let value: unknown;
       if (request.action === "list") value = await runtime.controller.list(signal, trace);
       else {
-        if (!request.id) throw new Error("Missing capability ID; see rsa controller --help");
+        if (!request.id) throw new Error("Missing capability ID; see ludens controller --help");
         if (request.action === "help") value = await runtime.controller.help(request.id, signal, trace);
         else if (request.action === "call") value = await runtime.callController(request.id, request.arguments, epoch, signal, trace);
-        else throw new Error("Unknown controller action; see rsa controller --help");
+        else throw new Error("Unknown controller action; see ludens controller --help");
       }
       // Driver failures are successful RPC replies with a nonzero exitCode.
       const execution = request.action === "call" && request.id?.startsWith("controller/")
@@ -167,14 +167,14 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
     if (kind === "consolidate") {
       if (argv.length === 0) return runtime.consolidate();
       if (argv.length === 2 && argv[0] === "--seconds") return runtime.consolidate(Number(argv[1]));
-      throw new Error("Usage: rsa consolidate [--seconds <n>]");
+      throw new Error("Usage: ludens consolidate [--seconds <n>]");
     }
     if (argv.length === 1 && argv[0] === "on") return runtime.start();
     if (argv.length === 3 && argv[0] === "on" && argv[1] === "--message" && argv[2]?.trim()) return runtime.start(argv[2]);
     if (argv.length === 1 && argv[0] === "off") { await runtime.stop(); return runtime.status(); }
-    throw new Error("Usage: rsa auto on [--message <text>] | rsa auto off");
+    throw new Error("Usage: ludens auto on [--message <text>] | ludens auto off");
   }
-  throw new Error("Unknown command; see rsa --help");
+  throw new Error("Unknown command; see ludens --help");
 }
 
 export function send(path: string, request: Request): Promise<unknown> {

@@ -46,11 +46,11 @@
 所以我们在架构实现期用 TDD 的思路，写了一套完全离线的传输层测试（[core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)）和配套的看板 Benchmark（[ws-recovery.ts](../../../core/src/bench/cases/ws-recovery.ts)）：直接在进程内用夹具接管 `streamOpenAICodexResponses` 底层的 WebSocket 与 HTTP，并用虚拟时钟秒级快进 60 秒冷却期，不用连真模型、也不用消耗在线 Token：
 
 ```sh
-(cd rsa && bun run omp:test:transport)
-(cd rsa && bun run typecheck)
+(cd ludens && bun run omp:test:transport)
+(cd ludens && bun run typecheck)
 
 # 生成可直接在 Dashboard 看板里查看事件与评分证据的基准记录：
-core/bin/rsa --workspace /absolute/path/to/workspace bench run ludens/ws-recovery
+core/bin/ludens --workspace /absolute/path/to/workspace bench run ludens/ws-recovery
 ```
 
 测试覆盖以下 **13 类工况**（包含 R3 的 `Agent.prompt` 端到端工具回调单次执行回归验证）：
@@ -71,4 +71,4 @@ core/bin/rsa --workspace /absolute/path/to/workspace bench run ludens/ws-recover
 | 工具已交付后收到 `1009` | 工具提交后触发尺寸超限 | 当前请求不重放工具，同时记录尺寸阻断；后续使用 SSE 直至压缩完成后恢复 WS。 |
 | 人工交还或预算到期取消 | 握手中 / 部分输出 / 报错同时触发 `AbortSignal` | 立即以 `aborted` 退出，不发起额外 SSE 请求，不污染下一轮传输状态机。 |
 
-以后每次准备升级 OMP 版本时，先跑一遍 `bun run omp:test:transport` 和 `rsa bench run ludens/ws-recovery`，检查这些受控恢复行为是否被上游改动破坏。虚拟时钟与传输夹具不衡量真实重连耗时，也不证明线上永不掉线；长跑、调度与吞吐仍需查看实际运行日志。
+以后每次准备升级 OMP 版本时，先跑一遍 `bun run omp:test:transport` 和 `ludens bench run ludens/ws-recovery`，检查这些受控恢复行为是否被上游改动破坏。虚拟时钟与传输夹具不衡量真实重连耗时，也不证明线上永不掉线；长跑、调度与吞吐仍需查看实际运行日志。

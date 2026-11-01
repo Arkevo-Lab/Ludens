@@ -66,7 +66,7 @@ export class ShioriTelemetry {
           conversationId: event.conversationId, stepNumber: event.stepNumber, toolName: event.toolName }, trace);
         onStart(event, trace);
       },
-      // This is one native agentLoop invocation, not an RSA takeover epoch.
+      // This is one native agentLoop invocation, not an Ludens takeover epoch.
       onRunEnd: (summary, coverage) => record("shiori_run_end", { scope: "agent_loop", summary, coverage }, this.run),
       onTelemetryWarning: (warning) => record("shiori_telemetry_warning", {
         code: warning.code, message: warning.message,

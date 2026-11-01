@@ -55,7 +55,7 @@ function command(root: string, ref: TimelineAssetReference) {
       throw Object.assign(new Error("Recorded video is unavailable: segment is missing"), { status: 410 });
     throw error;
   }
-  return ["-m", "rsa_tools._video", "--root", root, "--asset", ref.asset, "--pts", String(ref.video.pts),
+  return ["-m", "ludens_tools._video", "--root", root, "--asset", ref.asset, "--pts", String(ref.video.pts),
     "--time-base", ref.video.timeBase.join("/")];
 }
 

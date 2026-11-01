@@ -7,13 +7,13 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { buildTransformedCodexRequestBody } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { buildResponsesDeltaInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
-import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { captureResult, readTestController, createTestRuntime, installTestPerception } from "./runtime-fixture.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 
 test.each([1, 26])("OMP persists batches of %i images and reuses the Codex prefix across tools and prompts", async (batchSize) => {
-  const directory = await mkdtemp(join(tmpdir(), "rsa-history-"));
+  const directory = await mkdtemp(join(tmpdir(), "ludens-history-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), { recursive: true });
   const image = join(directory, "sample.png");
@@ -33,7 +33,7 @@ test.each([1, 26])("OMP persists batches of %i images and reuses the Codex prefi
   installTestPerception(runtime, workspace, directory, (signal, trace) =>
     readTestController(runtime, "camera", {}, signal, trace));
   const control = new AbortController();
-  const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
+  const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     maxRequests: 9, cycle: () => ({ epoch: "test", signal: control.signal }),
   });
@@ -51,7 +51,7 @@ test.each([1, 26])("OMP persists batches of %i images and reuses the Codex prefi
     enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
     disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
     toolNames: ["bash", "observe"], customTools: extension.tools,
-    preloadedPreparedExtensions: [{ path: "rsa-test", resolvedPath: "rsa-test", factory: extension.factory, error: null }],
+    preloadedPreparedExtensions: [{ path: "ludens-test", resolvedPath: "ludens-test", factory: extension.factory, error: null }],
   });
   let { session } = await openSession();
   let requests = 0;
@@ -130,7 +130,7 @@ test.each([1, 26])("OMP persists batches of %i images and reuses the Codex prefi
     expect(deltas).toHaveLength(8);
     expect(deltas.every((delta) => delta !== null)).toBe(true);
     const entries = manager.getEntries();
-    expect(entries.filter((e) => e.type === "custom_message" && e.customType === "rsa-observation")).toHaveLength(3);
+    expect(entries.filter((e) => e.type === "custom_message" && e.customType === "ludens-observation")).toHaveLength(3);
     const results = entries.filter((e) => e.type === "message" && e.message.role === "toolResult");
     expect(results).toHaveLength(11);
     const counts = results.map(entry => entry.type === "message" && entry.message.role === "toolResult"

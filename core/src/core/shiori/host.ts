@@ -9,17 +9,17 @@ import type { WorkspaceState } from "../storage/workspace-state.ts";
 /** The Host assembly used by daily play and evaluated agents. Transports remain owned by the caller. */
 export async function createHostRuntime(options: {
   devices: DeviceSession; workspace: string; runDir: string; state: WorkspaceState;
-  log: EventLog; record?: RecordEvent; rsaSocket: string; basewareSocket: string;
+  log: EventLog; record?: RecordEvent; ludensSocket: string; basewareSocket: string;
   seconds: number; model?: string; maxRequests: number; resume?: string; compactionThreshold?: number;
   action?: boolean; budget?: SharedBudget;
 }) {
-  const { devices, workspace, runDir, state, log, rsaSocket, basewareSocket } = options;
+  const { devices, workspace, runDir, state, log, ludensSocket, basewareSocket } = options;
   const record = options.record ?? log.record;
   const runtime = new Runtime(devices, record, options.seconds, log.clock.id, log.diagnostics, options.budget);
   const binDir = resolve(import.meta.dir, "../../../bin");
   const env = {
-    RSA_SOCKET: rsaSocket, BASEWARE_SOCKET: basewareSocket, RSA_WORKSPACE: workspace, RSA_RUN_ID: log.clock.id,
-    RSA_LOG_DIAGNOSTICS: log.diagnostics, BASEWARE_TRACE: JSON.stringify({ recordingId: log.clock.id }),
+    LUDENS_SOCKET: ludensSocket, BASEWARE_SOCKET: basewareSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: log.clock.id,
+    LUDENS_LOG_DIAGNOSTICS: log.diagnostics, BASEWARE_TRACE: JSON.stringify({ recordingId: log.clock.id }),
     PATH: [binDir, resolve(import.meta.dir, "../../../../baseware/bin"), process.env.PATH ?? ""].join(delimiter),
   };
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, record, env }) });
@@ -35,7 +35,7 @@ export async function createHostRuntime(options: {
   try {
     if (options.model) {
       const { createOmpAgent } = await import("../agent-omp/session.ts");
-      runtime.attach({ agent: await createOmpAgent({ runtime, workspace, runDir, state, log, binDir, rsaSocket, basewareSocket,
+      runtime.attach({ agent: await createOmpAgent({ runtime, workspace, runDir, state, log, binDir, ludensSocket, basewareSocket,
         model: options.model, maxRequests: options.maxRequests, resume: options.resume,
         compactionThreshold: options.compactionThreshold }) });
     }

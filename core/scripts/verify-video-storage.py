@@ -13,8 +13,8 @@ import subprocess
 import time
 
 from PIL import Image, ImageChops, ImageDraw, ImageStat
-from rsa_tools._observation_history import ObservationHistory
-from rsa_tools import current_trial
+from ludens_tools._observation_history import ObservationHistory
+from ludens_tools import current_trial
 
 
 def picture(index, channel):
@@ -40,7 +40,7 @@ def main():
     parser.add_argument("--records", type=int, default=2400)
     parser.add_argument("--rate", type=float, default=30)
     arguments = parser.parse_args()
-    trial = current_trial() if os.environ.get("RSA_BENCH_TRIAL_ID") else None
+    trial = current_trial() if os.environ.get("LUDENS_BENCH_TRIAL_ID") else None
     if arguments.output is None:
         if trial is None:
             parser.error("--output is required outside a Shiori trial")
@@ -51,8 +51,8 @@ def main():
         trial.conditions(records=arguments.records, sample_hz=arguments.rate, streams=2)
         trial.limitations("Synthetic images; RSS is sampled. Cold decode measures recorded frames, not a live device.")
     arguments.output.mkdir(parents=True, exist_ok=False)
-    os.environ["RSA_PERCEPTION_HOT_BYTES"] = "1048576"
-    os.environ["RSA_PERCEPTION_HOT_SECONDS"] = "1"
+    os.environ["LUDENS_PERCEPTION_HOT_BYTES"] = "1048576"
+    os.environ["LUDENS_PERCEPTION_HOT_SECONDS"] = "1"
     history = ObservationHistory(arguments.output, sample_hz=arguments.rate)
     saved, points, png_bytes = [], [], 0
     started = time.monotonic()

@@ -11,7 +11,7 @@ export function freezeReuseEvents(events: any[], runDir: string): any[] {
       try { data.args = readArtifactSync(runDir, data.argsRef, { media: "reference" }); } catch { delete data.args; }
       delete data.argsRef;
     }
-    if (event.type === "tool_end" && (data.result?.encoding === "gzip" || data.result?.encoding === "rsa-json-v1")) {
+    if (event.type === "tool_end" && (data.result?.encoding === "gzip" || data.result?.encoding === "ludens-json-v1")) {
       try { data.result = readArtifactSync(runDir, data.result, { media: "reference" }); } catch { delete data.result; }
     }
     // Media and assistant reasoning are not required to judge helper reuse.

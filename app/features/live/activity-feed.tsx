@@ -34,7 +34,7 @@ const filters: ActivityFilter[] = [
 ];
 const sourceNames: Record<string, string> = {
   shiori: "Shiori",
-  rsa: "RSA",
+  ludens: "Ludens",
   baseware: "Baseware",
   pet: "Ludens Pet",
   dashboard: "Dashboard",

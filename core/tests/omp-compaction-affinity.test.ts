@@ -14,7 +14,7 @@ const model = buildModel({
 });
 // Synthetic credential; all traffic is intercepted before reaching a network.
 const apiKey = `aaa.${Buffer.from(JSON.stringify({
-  "https://api.openai.com/auth": {chatgpt_account_id: "rsa-offline-affinity-test"},
+  "https://api.openai.com/auth": {chatgpt_account_id: "ludens-offline-affinity-test"},
 })).toString("base64url")}.bbb`;
 
 test("native V2 summaries share parent header affinity while preserving isolated SSE sessions and Lite bodies", async () => {
@@ -43,10 +43,10 @@ test("native V2 summaries share parent header affinity while preserving isolated
     turnPrefixMessages: [], recentMessages: [], isSplitTurn: false, tokensBefore: 100,
     fileOps: {read: new Set(), written: new Set(), edited: new Set()}, settings: DEFAULT_COMPACTION_SETTINGS,
   };
-  const parentSessionId = "rsa-parent-session";
+  const parentSessionId = "ludens-parent-session";
   const promptCacheKey = "separate-body-cache-key";
   try {
-    for (const sessionId of ["rsa-parent-session:spec:first", "rsa-parent-session:spec:second"]) {
+    for (const sessionId of ["ludens-parent-session:spec:first", "ludens-parent-session:spec:second"]) {
       const result = await compact(preparation, model, apiKey, undefined, undefined, {
         sessionId, parentSessionId, promptCacheKey, preferWebsockets: false, providerSessionState, fetch,
         thinkingLevel: ThinkingLevel.Low, remoteSystemPrompt: ["Keep useful game state."], tools: [],
@@ -57,7 +57,7 @@ test("native V2 summaries share parent header affinity while preserving isolated
     }
     expect(requests).toHaveLength(2);
     for (const [index, request] of requests.entries()) {
-      const specSessionId = index === 0 ? "rsa-parent-session:spec:first" : "rsa-parent-session:spec:second";
+      const specSessionId = index === 0 ? "ludens-parent-session:spec:first" : "ludens-parent-session:spec:second";
       for (const header of ["session_id", "conversation_id", "session-id"]) {
         expect(request.headers.get(header)).toBe(parentSessionId);
         expect(request.headers.get(header)).not.toBe(promptCacheKey);

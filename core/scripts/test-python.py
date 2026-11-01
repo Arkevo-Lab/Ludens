@@ -9,7 +9,7 @@ import unittest
 def main() -> int:
     suite = unittest.TestSuite()
     for index, path in enumerate(sorted((Path(__file__).resolve().parents[1] / "tests").glob("*.test.py"))):
-        spec = spec_from_file_location(f"rsa_test_{index}", path)
+        spec = spec_from_file_location(f"ludens_test_{index}", path)
         assert spec is not None and spec.loader is not None
         module = module_from_spec(spec)
         sys.modules[spec.name] = module

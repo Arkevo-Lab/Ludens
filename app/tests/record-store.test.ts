@@ -7,13 +7,13 @@ import { BulkBudget, FileRecords, recordCacheStats, resetStorageMetrics, storage
 
 const id = (n: number) => `record-${String(n).padStart(5, "0")}`;
 async function fixture(work: (path: string) => Promise<void>) {
-  const path = await realpath(await mkdtemp(join(tmpdir(), "rsa-record-pages-")));
-  const oldLimit = process.env.RSA_DASHBOARD_INDEX_CACHE_BYTES;
-  process.env.RSA_DASHBOARD_INDEX_CACHE_BYTES = String(1024 * 1024);
+  const path = await realpath(await mkdtemp(join(tmpdir(), "ludens-record-pages-")));
+  const oldLimit = process.env.LUDENS_APP_INDEX_CACHE_BYTES;
+  process.env.LUDENS_APP_INDEX_CACHE_BYTES = String(1024 * 1024);
   try { await work(path); }
   finally {
-    if (oldLimit === undefined) delete process.env.RSA_DASHBOARD_INDEX_CACHE_BYTES;
-    else process.env.RSA_DASHBOARD_INDEX_CACHE_BYTES = oldLimit;
+    if (oldLimit === undefined) delete process.env.LUDENS_APP_INDEX_CACHE_BYTES;
+    else process.env.LUDENS_APP_INDEX_CACHE_BYTES = oldLimit;
     await rm(path, { recursive: true, force: true });
   }
 }

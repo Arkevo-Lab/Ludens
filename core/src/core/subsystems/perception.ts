@@ -121,7 +121,7 @@ export class PerceptionRuntime {
 
   async append(input: TimelineAppend, signal: AbortSignal): Promise<unknown> {
     const worker = this.worker;
-    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run rsa perception reload.");
+    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
     const reply = await this.request(worker, { ...input, action: "append" }, 30_000, signal);
     if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
     return reply.result;
@@ -129,7 +129,7 @@ export class PerceptionRuntime {
 
   async deriveMedia(input: TimelineDerive, signal: AbortSignal, observationId?: string): Promise<TimelineMedia> {
     const worker = this.worker;
-    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run rsa perception reload.");
+    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
     const reply = await this.request(worker, { ...input, action: "derive" }, 30_000, signal);
     if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
     const media = reply.result as TimelineMedia;
@@ -235,13 +235,13 @@ export class PerceptionRuntime {
     await mkdir(directory, { recursive: true });
     if (source) await writeFile(join(directory, "perception.py"), source);
     const backgroundTrace = childTrace({ recordingId: basename(this.options.runDir), recordingPurpose: "continuous-perception" });
-    const env: NodeJS.ProcessEnv = { ...process.env, ...this.options.env, RSA_WORKSPACE: this.workspace,
-      RSA_RUN_ID: basename(this.options.runDir), RSA_LOG_DIAGNOSTICS: this.options.diagnostics ?? "normal",
+    const env: NodeJS.ProcessEnv = { ...process.env, ...this.options.env, LUDENS_WORKSPACE: this.workspace,
+      LUDENS_RUN_ID: basename(this.options.runDir), LUDENS_LOG_DIAGNOSTICS: this.options.diagnostics ?? "normal",
       BASEWARE_TRACE: JSON.stringify(backgroundTrace) };
-    for (const key of ["RSA_EPOCH", "RSA_TRACE", "BASEWARE_EPOCH"]) delete (env as NodeJS.ProcessEnv)[key];
+    for (const key of ["LUDENS_EPOCH", "LUDENS_TRACE", "BASEWARE_EPOCH"]) delete (env as NodeJS.ProcessEnv)[key];
     env.PYTHONPATH = [...pythonModulePaths(), ...(env.PYTHONPATH ? [env.PYTHONPATH] : [])].join(delimiter);
     const worker = new PythonWorker(generation, {
-      executable: pythonExecutable(env), module: "rsa_tools._perception", workspace: this.workspace, env,
+      executable: pythonExecutable(env), module: "ludens_tools._perception", workspace: this.workspace, env,
       stderrPath: join(directory, "stderr.log"),
       onEvent: reply => {
         // Expected exits still flush statistics and media registrations.

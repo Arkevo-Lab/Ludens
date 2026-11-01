@@ -211,7 +211,7 @@ export function projectTelemetry(
       let durationMs = duration(result?.durationMs);
       if (definition.start === "action_start" && start.data.timing?.clock === result?.timing?.clock)
         durationMs = duration(result?.timing?.receivedAtMs - start.data.timing?.submittedAtMs);
-      // Device events are forwarded by RSA. Only the original clock measures
+      // Device events are forwarded by Ludens. Only the original clock measures
       // the device span; receipt timestamps include transport and scheduling.
       if (
         definition.kind === "device" &&

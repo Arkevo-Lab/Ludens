@@ -6,7 +6,7 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
-import { createRsaExtension } from "../src/core/agent-omp/extension.ts";
+import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { listen } from "../src/daemon/transport.ts";
@@ -14,12 +14,12 @@ import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("OMP can disable automatic perception while recording video and explicitly reading cold history", async () => {
-  const directory = await realpath(await mkdtemp(join(tmpdir(), "rsa-omp-injection-")));
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "ludens-omp-injection-")));
   const workspace = join(directory, "workspace"), runDir = join(directory, "run");
   await mkdir(join(workspace, "skills"), { recursive: true });
   await writeFile(join(workspace, "frame.png"), encodeRawPng(Uint8Array.from(
     Array.from({ length: 16 * 16 }, () => [220, 20, 20]).flat()), 16, 16, 3));
-  await writeFile(join(workspace, "perception.py"), `from rsa_tools import capability, record
+  await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
     sample_hz = 20
     def start(self, context): self.count = 0
@@ -34,8 +34,8 @@ class Perception:
   const events: { type: string; data: any; trace: any }[] = [];
   const runtime = createTestRuntime({ controllers: [] }, (type, data, trace) => events.push({ type, data, trace }));
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: runtime.record,
-    env: { RSA_PERCEPTION_HOT_SECONDS: "0.1", RSA_VIDEO_SEGMENT_SECONDS: "1" } }) });
-  const socket = `/tmp/rsa-omp-injection-${crypto.randomUUID()}.sock`;
+    env: { LUDENS_PERCEPTION_HOT_SECONDS: "0.1", LUDENS_VIDEO_SEGMENT_SECONDS: "1" } }) });
+  const socket = `/tmp/ludens-omp-injection-${crypto.randomUUID()}.sock`;
   const closeServer = await listen(socket, runtime);
   const abort = new AbortController();
   const settings = Settings.isolated({ "memory.backend": "off", "autolearn.enabled": false, "retry.enabled": false,
@@ -46,7 +46,7 @@ class Perception:
   const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
   let session: AgentSession | undefined;
   const snapshots: { messages: any[]; images: any[]; json: any[]; text: string }[] = [];
-  const timeline = join(workspace, ".rsa", "timeline");
+  const timeline = join(workspace, ".ludens", "timeline");
   const records = async (): Promise<any[]> => (await Promise.all((await readdir(join(timeline, "segments")))
     .filter(name => name.endsWith(".jsonl")).sort().map(async name => (await readFile(join(timeline, "segments", name), "utf8"))
       .split("\n").filter(Boolean).map(line => JSON.parse(line))))).flat();
@@ -60,8 +60,8 @@ class Perception:
     await until(async () => runtime.perception!.status().state === "ready");
     const generation = runtime.perception!.status().generation;
     const { epoch } = await runtime.start();
-    const extension = createRsaExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")), runDir,
-      basewareSocket: "/tmp/unused.sock", rsaSocket: socket, binDir: resolve(import.meta.dir, "../bin"),
+    const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")), runDir,
+      basewareSocket: "/tmp/unused.sock", ludensSocket: socket, binDir: resolve(import.meta.dir, "../bin"),
       maxRequests: 12, cycle: () => ({ epoch: epoch!, signal: abort.signal }) });
     ({ session } = await createOmpSession({ cwd: workspace, agentDir: join(directory, "omp"), model, authStorage, modelRegistry, settings,
       sessionManager: SessionManager.create(workspace, join(directory, "session")), systemPrompt: "Exercise local observation controls.",
@@ -69,7 +69,7 @@ class Perception:
       enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
       disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
       toolNames: ["bash", "observe"], customTools: extension.tools,
-      preloadedPreparedExtensions: [{ path: "rsa-injection-test", resolvedPath: "rsa-injection-test", factory: extension.factory, error: null }],
+      preloadedPreparedExtensions: [{ path: "ludens-injection-test", resolvedPath: "ludens-injection-test", factory: extension.factory, error: null }],
     }));
     let history: any[] = [];
     let after: number | undefined;
@@ -86,12 +86,12 @@ class Perception:
       const index = snapshots.length;
       if (index === 6) after = json.find(value => value.records)?.nextAfter;
       const calls: Record<number, { name: string; arguments: Record<string, unknown> }> = {
-        1: { name: "bash", arguments: { command: "rsa perception inject off" } },
+        1: { name: "bash", arguments: { command: "ludens perception inject off" } },
         3: { name: "bash", arguments: { command: "printf 'ordinary local work\\n'" } },
         4: { name: "observe", arguments: { id: history[0]?.id } },
         5: { name: "observe", arguments: { start: history[0]?.recordedAt, end: history.at(-1)?.recordedAt, limit: 2 } },
         6: { name: "observe", arguments: { start: history[0]?.recordedAt, end: history.at(-1)?.recordedAt, after, limit: 64 } },
-        7: { name: "bash", arguments: { command: "rsa perception inject on" } },
+        7: { name: "bash", arguments: { command: "ludens perception inject on" } },
       };
       const call = calls[index];
       const message: AssistantMessage = { role: "assistant", api: model.api, provider: model.provider, model: model.id,

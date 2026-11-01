@@ -13,7 +13,7 @@ import { readArtifact } from "@ludens/protocol/log-archive";
 
 const lines = async (path: string) => (await readFile(path, "utf8")).trim().split("\n").map(line => JSON.parse(line));
 async function fixture() {
-  const workspace = await mkdtemp(join(tmpdir(), "rsa-indexed-trace-"));
+  const workspace = await mkdtemp(join(tmpdir(), "ludens-indexed-trace-"));
   const directory = join(workspace, "logs", "run");
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "manifest.json"), JSON.stringify({ workspace }));
@@ -42,7 +42,7 @@ test("indexed request, compressed HTTP and stream share semantic content with di
     f.log.stream("streams/call.jsonl", { event: "message", data: "plain\ntext", raw: [": comment", "data: plain", "data:text"] }, trace);
     expect(JSON.stringify(event)).toBe(before);
     const [request, done, plain] = await lines(join(f.directory, "streams/call.jsonl"));
-    expect(request.format).toBe("rsa-stream-v1");
+    expect(request.format).toBe("ludens-stream-v1");
     expect(request.event.dataRef).toMatchObject({ sha256: ref.sha256, bytes: ref.bytes });
     expect(await f.read(request.event.dataRef)).toEqual(payload);
     expect(request.event.dataSha256).toBe(new Bun.SHA256().update(text).digest("hex"));
@@ -138,7 +138,7 @@ test("indexed SSE HTTP retry, errors and cancellation keep native provider behav
       .toEqual({ error: { message: "try again" } });
     const ends = events.filter(e => e.type === "model_end");
     expect(ends.map(e => e.data.stopReason)).toEqual(["stop", "aborted"]);
-    expect(ends[0].data.response.encoding).toBe("rsa-json-v1");
+    expect(ends[0].data.response.encoding).toBe("ludens-json-v1");
     expect((await f.read(ends[0].data.response) as { content: unknown[] }).content).toEqual([{ type: "text", text: "readable text" }]);
     expect(events.find(e => e.type === "model_http_error").trace.requestId).toBe(ends[1].trace.requestId);
   } finally { await trace.shiori.close(); await f.close(); }
@@ -187,8 +187,8 @@ test("indexed compaction completion keeps only statistics inline and preserves t
     } } };
   const original = JSON.stringify(result);
   try {
-    await mkdir(join(f.workspace, ".rsa", "timeline", "objects"), { recursive: true });
-    await writeFile(join(f.workspace, ".rsa", "timeline", asset), bytes);
+    await mkdir(join(f.workspace, ".ludens", "timeline", "objects"), { recursive: true });
+    await writeFile(join(f.workspace, ".ludens", "timeline", asset), bytes);
     f.log.archive!.registerMedia({ sha256, asset, mediaType: "image/png" });
     emit!({ type: "auto_compaction_start", action: "context-full", reason: "threshold" });
     epoch = "next";
@@ -203,7 +203,7 @@ test("indexed compaction completion keeps only statistics inline and preserves t
     expect(end.data.durationMs).toBeGreaterThanOrEqual(0);
     expect(end.data.result).toEqual({ tokensBefore: 250000,
       preserveData: { openaiRemoteCompaction: { retainedImageCount: 1, usage: result.preserveData.openaiRemoteCompaction.usage } } });
-    expect(end.data.resultRef.encoding).toBe("rsa-json-v1");
+    expect(end.data.resultRef.encoding).toBe("ludens-json-v1");
     expect(await f.read(end.data.resultRef)).toEqual(result);
     expect(raw).not.toContain("large replacement summary");
     expect(raw).not.toContain("native display summary");

@@ -2,8 +2,8 @@
   "task": "ludens/background-compaction",
   "argv": [
     "{bun}",
-    "{rsa}/src/core/shiori/module-program.ts",
-    "{rsa}/src/bench/cases/background-compaction.ts"
+    "{core}/src/core/shiori/module-program.ts",
+    "{core}/src/bench/cases/background-compaction.ts"
   ],
   "workspace": "isolated",
   "seconds": 180,

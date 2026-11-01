@@ -4,14 +4,14 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PetSessionCoordinator, type PetTarget } from './pet-session.js'
-import { RsaActivityController } from './rsa-activity-controller.js'
+import { LudensActivityController } from './ludens-activity-controller.js'
 import { DEFAULT_ACTIVITY_PREFERENCES } from './activity-policy.js'
-import type { RsaActivitySnapshot, RsaPetSnapshot } from './rsa-source.js'
+import type { LudensActivitySnapshot, LudensPetSnapshot } from './ludens-source.js'
 
 function target(name: string): PetTarget {
   return { project: `ws-${name}`, workspace: `/${name}`, revision: name, updatedAt: '2026-10-20T00:00:00Z' }
 }
-function snapshot(name: string): RsaActivitySnapshot {
+function snapshot(name: string): LudensActivitySnapshot {
   const blocks = [{ id: name, kind: 'text' as const, title: name, text: name, status: 'running' as const, at: '', createdRevision: 1, revision: 1 }]
   return { identity: `${name}:run:epoch`, activity: 'running', blocks, mode: 'delta', revision: 1, hasMore: false, current: {
     workspace: `/${name}`, runId: `run-${name}`, epoch: 'epoch', phase: name,
@@ -47,15 +47,15 @@ describe('shared Pet follow target', () => {
 
   it('switches immediately during an old read, clears its bubble, and rejects late old callbacks and results', async () => {
     let selected: PetTarget | null = target('a')
-    const posts: any[] = [], stops: string[] = [], publications: RsaPetSnapshot[] = []
-    const callbacks = new Map<string, (snapshot: RsaPetSnapshot) => void>()
-    const pending = new Map<string, (snapshot: RsaActivitySnapshot) => void>()
+    const posts: any[] = [], stops: string[] = [], publications: LudensPetSnapshot[] = []
+    const callbacks = new Map<string, (snapshot: LudensPetSnapshot) => void>()
+    const pending = new Map<string, (snapshot: LudensActivitySnapshot) => void>()
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
       if (init.method === 'POST') posts.push(JSON.parse(init.body as string))
       return Response.json({ target: selected })
     }))
     const sent: any[] = []
-    let controller!: RsaActivityController
+    let controller!: LudensActivityController
     const session = new PetSessionCoordinator({
       dashboardUrl: 'http://localhost:3015', onSnapshot: value => publications.push(value),
       onTargetChanged: () => { void controller.poll() },
@@ -65,7 +65,7 @@ describe('shared Pet follow target', () => {
           read: () => new Promise(resolve => { pending.set(workspace, resolve) }) }
       },
     })
-    controller = new RsaActivityController(session, { petVisible: () => true, foreground: () => false,
+    controller = new LudensActivityController(session, { petVisible: () => true, foreground: () => false,
       send: (_surface, event) => sent.push(event), open: () => {} }, structuredClone(DEFAULT_ACTIVITY_PREFERENCES))
     await session.pollTarget()
     callbacks.get('/a')!(snapshot('a').current)
@@ -98,12 +98,12 @@ describe('shared Pet follow target', () => {
 
   it('uses an explicit launch workspace only as ifUnset initialization and keeps target polling independent of reads', async () => {
     vi.useFakeTimers()
-    const workspace = mkdtempSync(join(tmpdir(), 'rsa-pet-launch-')), project = `ws-${randomUUID()}`
-    directories.push(workspace); mkdirSync(join(workspace, '.rsa'))
-    writeFileSync(join(workspace, '.rsa', 'workspace.json'), JSON.stringify({ version: 1, id: project }))
+    const workspace = mkdtempSync(join(tmpdir(), 'ludens-pet-launch-')), project = `ws-${randomUUID()}`
+    directories.push(workspace); mkdirSync(join(workspace, '.ludens'))
+    writeFileSync(join(workspace, '.ludens', 'workspace.json'), JSON.stringify({ version: 1, id: project }))
     let selected = target('saved')
     const calls: { method: string; body: any }[] = [], changed = vi.fn()
-    const snapshots: RsaPetSnapshot[] = []
+    const snapshots: LudensPetSnapshot[] = []
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
       calls.push({ method: init.method!, body: init.body ? JSON.parse(init.body as string) : null })
       if (init.method === 'PUT') return Response.json({ target: selected })
@@ -129,7 +129,7 @@ describe('shared Pet follow target', () => {
 
   it('attributes a failed source attempt to its selection without claiming that revision loaded', async () => {
     let selected = target('a')
-    const posts: any[] = [], publications: RsaPetSnapshot[] = []
+    const posts: any[] = [], publications: LudensPetSnapshot[] = []
     vi.stubGlobal('fetch', vi.fn(async (_url: string, init: RequestInit) => {
       if (init.method === 'POST') {
         const consumer = JSON.parse(init.body as string)

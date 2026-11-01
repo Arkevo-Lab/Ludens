@@ -10,21 +10,21 @@ import { readDataset } from "../bench/dataset.ts";
 import { readReward } from "../bench/reward.ts";
 import { runTask, verifyTask, aggregateTasks } from "../bench/shiori-benchmark.ts";
 
-export const BENCH_HELP = `rsa bench list
-rsa bench help <namespace/task> [--digest sha256:...]
-rsa bench run <namespace/task> [--config run.json] [--args '<JSON object>'] [--digest sha256:...] [--seconds n] [--repeat n] [--no-verify]
-rsa bench verify <run-id> [--task <task-directory>] [--reason text]
-rsa bench get <run-id[@verification-id]>
-rsa bench history [namespace/task] [--cursor id] [--limit n]
-rsa bench verifications <run-id> [--cursor id] [--limit n]
-rsa bench compare <run-id[@verification-id]> <run-id[@verification-id]>
-rsa bench aggregate <dataset.toml> <run-id[@verification-id]>... [--policy all|graded]
-rsa bench import-legacy [run-id]
-rsa bench rebuild-index
-rsa bench schema [task|reward|dataset]
-rsa bench validate task <task-directory>
-rsa bench validate reward <reward-json-file|verifier-directory>
-rsa bench validate dataset <dataset.toml>
+export const BENCH_HELP = `ludens bench list
+ludens bench help <namespace/task> [--digest sha256:...]
+ludens bench run <namespace/task> [--config run.json] [--args '<JSON object>'] [--digest sha256:...] [--seconds n] [--repeat n] [--no-verify]
+ludens bench verify <run-id> [--task <task-directory>] [--reason text]
+ludens bench get <run-id[@verification-id]>
+ludens bench history [namespace/task] [--cursor id] [--limit n]
+ludens bench verifications <run-id> [--cursor id] [--limit n]
+ludens bench compare <run-id[@verification-id]> <run-id[@verification-id]>
+ludens bench aggregate <dataset.toml> <run-id[@verification-id]>... [--policy all|graded]
+ludens bench import-legacy [run-id]
+ludens bench rebuild-index
+ludens bench schema [task|reward|dataset]
+ludens bench validate task <task-directory>
+ludens bench validate reward <reward-json-file|verifier-directory>
+ludens bench validate dataset <dataset.toml>
 Tasks follow Harbor 1.4; native program bindings are separate JSON argv configurations.
 list/help show bindings discovered in the Task source's benchmarks/runs directory by their task field.
 A unique binding is the default; otherwise select --config <path> (relative to --workspace).
