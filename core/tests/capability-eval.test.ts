@@ -420,3 +420,98 @@ test("controller list and capabilities query expose evaluation enrichment", asyn
       evalRewards: { samples: 4, coverage: 1, sum: 10 }, evalEvaluatedAt: run.results[0]!.evaluatedAt, evalError: null }]);
   } finally { await rm(directory, { recursive: true, force: true }); await rm(home, { recursive: true, force: true }); }
 });
+
+const CLOSED_LOOP_SOURCE = `from ludens_tools import capability, record, eval_capability, eval_env, Client
+
+class FakeEnv:
+    def __init__(self):
+        self.recorded = []
+        self.calls = []
+    def observe(self, query):
+        # Surrogate composites over committed timeline frames read from disk;
+        # Client().observe inside this callback must not recurse into env.observe.
+        real = Client().observe(query)
+        return list(real["records"])
+    def call(self, capability_id, arguments):
+        self.calls.append((capability_id, dict(arguments)))
+        return {"ok": True, "id": capability_id, "echo": dict(arguments)}
+    def list(self):
+        return ["controller/pad.play"]
+    def help(self, capability_id):
+        return {"id": capability_id, "arguments": {}}
+
+@record
+@capability
+def reel_on_bite(slot: int) -> dict:
+    """Closed-loop: observe committed history, then act through the env."""
+    observed = Client().observe({"capability": "*", "limit": 8, "after": 0})
+    listing = Client().list()
+    helped = Client().help("controller/pad.play")
+    played = Client().call("controller/pad.play", {"slot": slot, "speed": 2})
+    data = {"ticks": len(observed["records"]), "listed": len(listing), "helped": helped["id"], "played": played["echo"]["slot"]}
+    return {"text": "reeled", "data": data}
+
+@eval_capability(reel_on_bite)
+def eval_reel() -> dict[str, float]:
+    """Evaluate the closed-loop capability against a surrogate environment."""
+    env = FakeEnv()
+    with eval_env(env):
+        outcome = reel_on_bite(slot=3)
+        Client().call("controller/pad.release")
+        try:
+            Client().call("controller/pad.play", [])
+        except TypeError:
+            pass
+        else:
+            raise AssertionError("non-dict driver arguments accepted")
+    assert outcome["timeline"]["recordId"].startswith("eval-record-")
+    assert outcome["timeline"]["sequence"] == 1
+    assert env.recorded and env.recorded[0]["timeline"] == outcome["timeline"]
+    assert env.calls == [("controller/pad.play", {"slot": 3, "speed": 2}), ("controller/pad.release", {})]
+    data = outcome["data"]
+    assert data["ticks"] == 2 and data["played"] == 3
+    return {"ticks": float(data["ticks"]), "acted": float(data["played"]), "listed": float(data["listed"])}
+`;
+
+test("closed-loop @record @capability evaluates offline through eval_env without a host socket", async () => {
+  const directory = await workspace();
+  try {
+    await writeFile(join(directory, "actions.py"), CLOSED_LOOP_SOURCE);
+    await commitTimeline(directory, [1, 2]);
+    const python = new PythonCapabilities(directory);
+    const { capabilities } = await python.discover();
+    const result = await python.evaluate(capabilities[0]!.id);
+    expect(result.isError).toBe(false);
+    expect(result.details.rewards).toEqual({ ticks: 2, acted: 3, listed: 1 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("@record @capability succeeds during eval run without eval_env and attaches a synthetic timeline envelope", async () => {
+  const directory = await workspace();
+  try {
+    await writeFile(join(directory, "actions.py"), `from ludens_tools import capability, record, eval_capability
+
+@record
+@capability
+def move_cursor_to_slot(slot: int) -> dict:
+    """Move the cursor; recorded offline by the eval bridge."""
+    return {"text": "moved", "data": {"slot": slot, "target": slot * 2}}
+
+@eval_capability(move_cursor_to_slot)
+def eval_move() -> dict[str, float]:
+    """Evaluate without any eval_env wrapper."""
+    outcome = move_cursor_to_slot(slot=5)
+    assert "timeline" in outcome, outcome
+    assert outcome["timeline"]["recordId"].startswith("eval-record-")
+    assert outcome["timeline"]["sequence"] == 1
+    assert outcome["data"]["slot"] == 5
+    return {"moved": float(outcome["data"]["slot"]), "sequence": float(outcome["timeline"]["sequence"])}
+`);
+    await commitTimeline(directory, []);
+    const python = new PythonCapabilities(directory);
+    const { capabilities } = await python.discover();
+    const result = await python.evaluate(capabilities[0]!.id);
+    expect(result.isError).toBe(false);
+    expect(result.details.rewards).toEqual({ moved: 5, sequence: 1 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});

@@ -104,26 +104,58 @@ def capture_top(exposure: int = 1) -> dict:
 
 ### 3. 使用 @eval_capability 与 ludens eval 评估能力
 
-对延迟敏感或重复性交互，使用**快速闭环（`@capability`）+ 离线 VLM 标注校准（`@eval_capability`）**模式。逐轮 LLM 观测存在数秒延迟：既无法响应钓鱼咬钩、限时连击或移动目标等亚秒级游戏窗口，也会在重复对话循环上浪费轮次。将这些交互封装为本地 Python `@capability` 函数，在进程内高频轮询并执行动作，再在 `@eval_capability` 中使用经 VLM 标注的 `.ludens/timeline/` 记录，离线校准其触发/检测逻辑。
+对延迟敏感或重复性交互，使用**快速闭环（`@capability`）+ 离线评估（`@eval_capability`）**模式。逐轮 LLM 观测存在数秒延迟：既无法响应钓鱼咬钩、限时连击或移动目标等亚秒级游戏窗口，也会在重复对话循环上浪费轮次。将这些交互封装为本地 Python `@capability` 函数，在进程内高频轮询并执行动作，再离线评估其检测与控制逻辑。
 
-当单项工作区能力（如感知解析或纯决策辅助函数）适合离线评估时，可在同一 Python 模块中按需为其配对一个同步、无必填参数的评估函数。评估函数可通过 `Client().observe()` 重放已提交的 `.ludens/timeline/` 记录。评估会移除继承的 Host/设备 socket 与控制 epoch，因此即使从运行中的 Host 会话启动，观测也会直接读取持久化时空轴。
+当单项工作区能力适合离线评估时，可在同一 Python 模块中按需为其配对一个同步、无必填参数的评估函数。评估会移除继承的 Host/设备 socket 与控制 epoch，因此无法驱动实机。应根据能力类型选择评估方式：
+
+1. **重放已标注的 `.ludens/timeline/` 记录**，用于纯感知或解析函数。`Client().observe()` 直接读取持久化时空轴，已标注记录可测试单步预测是否等于已知输出。
+2. **通过 `with eval_env(env):` 挂载本地代理环境（surrogate environment）**，用于钓鱼收线、捕虫或网格/菜单导航等闭环动作/反应能力。环境通过 `env.observe(query)` 拦截 `Client().observe(query)`，通过 `env.call(id, args)` 拦截 `Client().call("controller/...", args)`，在虚拟时间中推进潜在真值状态，并跨随机试验直接依据该状态为能力评分。
+
+代理环境同时解决静态帧列表的泛化缺口，以及根据输出帧反推闭环是否成功的逆向验证难题。它从已知正确结果的潜在状态生成观测，还可在 `env.observe()` 内调用 `Client().observe()`，合成来自 `.ludens/timeline/` 的真实背景帧或裁剪图且不会递归。由于环境也会拦截控制器调用，它可以模拟随机假咬与咬钩窗口、移动目标或光标转移，并直接根据最终真值状态评分，而无需再让另一个模型判断能力是否成功。
 
 ```python
-from ludens_tools import Client, capability, eval_capability
+import random
+from ludens_tools import Client, capability, eval_capability, eval_env
 
 @capability
-def parse_hp_bar(frame_path: str) -> dict:
-    """Parse HP values from a frame."""
-    ...
+def reel_on_bite() -> dict:
+    """Poll for a real bite and reel inside its reaction window."""
+    client = Client()
+    for _ in range(20):
+        observation = client.observe()
+        if observation["event"] == "bite":
+            client.call("controller/pad.play", {"button": "a"})
+            return {"reeled": True}
+    return {"reeled": False}
 
-@eval_capability(parse_hp_bar)
-def eval_parse_hp_bar() -> dict:
-    """Evaluate HP parsing on recorded timeline frames."""
-    observations = Client().observe()
-    samples = [...]  # Derive labeled samples from observations or fixtures.
-    failed = [sample for sample in samples if parse_hp_bar(sample["frame_path"])["hp"] != sample["hp"]]
-    accuracy = (len(samples) - len(failed)) / len(samples)
-    return {"passed": accuracy == 1.0, "rewards": {"accuracy": accuracy, "samples": len(samples)}, "details": {"failed": failed}}
+class BiteEnv:
+    def __init__(self, seed: int):
+        self.tick = 0
+        self.bite_at = random.Random(seed).randrange(3, 10)
+        self.reeled = False
+
+    def observe(self, query=None):
+        self.tick += 1  # Advance virtual time; randomized nibbles precede the bite.
+        # Client().observe() may supply real timeline backgrounds/crops here.
+        return {"event": "bite" if self.tick == self.bite_at else "nibble"}
+
+    def call(self, id, args):
+        if id == "controller/pad.play" and self.tick == self.bite_at:
+            self.reeled = True
+        return {"ok": True}
+
+@eval_capability(reel_on_bite)
+def eval_reel_on_bite() -> dict:
+    """Grade closed-loop reeling from surrogate ground truth."""
+    failed_seeds = []
+    for seed in range(20):
+        env = BiteEnv(seed)
+        with eval_env(env):
+            reel_on_bite()
+        if not env.reeled:
+            failed_seeds.append(seed)
+    pass_rate = (20 - len(failed_seeds)) / 20
+    return {"passed": not failed_seeds, "rewards": {"pass_rate": pass_rate}, "details": {"failed_seeds": failed_seeds}}
 ```
 
 评估函数必须包含 docstring，并返回非空的扁平 `dict[str, int | float]` 有限数值奖励，或信封 `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`。当 `passed` 为 `False` 时，运行会记录 `failed`，同时保留 `rewards` 与 `details` 以便迭代。发现过程只进行静态扫描；只有显式请求时才执行评估：
@@ -143,6 +175,8 @@ ludens eval adapt python/perception.py:parse_hp_bar --reason "False positive on 
 ludens eval history python/perception.py:parse_hp_bar
 ludens eval history
 ```
+
+当实机执行暴露未建模的动态或视觉边界情况时，`ludens eval adapt <id> --reason "<why>" --record <record-id>` 会将能力标记为 `adapting` 并关联反例。改进代理环境或重放题集，使评估复现该实机失败，再迭代能力，直到 `ludens eval run <id>` 重新通过。由此闭合 Sim-to-Real 循环：实机失败 → 记录反例 → 离线复现 → 验证修复。
 
 记录保存在 `.ludens/evals/latest.json` 与 `.ludens/evals/runs/<run-id>.json`。能力目录包含六种状态：
 
@@ -190,6 +224,8 @@ def detect_scene() -> dict:
 | `sampledAt` | `str`（ISO 时间戳） | 已知的源采样时刻（不填则仅保留记录完成时刻 `recordedAt`）。 |
 | `sources` | `list` | 衍生自其他观测或内层记录的来源引用列表。 |
 | `space` | `dict` | 设备或算法定义的坐标系描述。 |
+
+在 `ludens eval run` 中，`@record` 仍会校验此信封，但只在内存中附加合成的 `timeline: {recordId, sequence}`，不会持久化记录或归档媒体。在 `eval_env(env)` 内，追加的信封还会收集到 `env.recorded`（若环境不允许新增属性，请预先将其初始化为列表）。这些记录不会加入 `Client().observe()` 的历史。可选的 `env.list()` 与 `env.help(id)` 回调提供模拟目录信息。驱动调用保留常规参数契约：省略参数时使用 `{}`，非字典参数会被拒绝。
 
 ### 2. 单写入者与媒体归档机制
 

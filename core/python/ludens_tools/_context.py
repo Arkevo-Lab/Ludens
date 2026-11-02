@@ -69,6 +69,36 @@ def continuous(context):
     return (context.get("recording_purpose") in ("continuous-perception", "continuous-action")
             or context.get("trace", {}).get("recordingPurpose") in ("continuous-perception", "continuous-action"))
 
+def offline_timeline_append(records_sink=None):
+    """Build a timeline_append for offline/simulated runs; no host socket needed."""
+    sequence = 0
+
+    def timeline_append(**message):
+        nonlocal sequence
+        sequence += 1
+        record_id = "eval-record-" + uuid.uuid4().hex[:8]
+        envelope = {**message["sample"], "timeline": {"recordId": record_id, "sequence": sequence}}
+        if isinstance(records_sink, list):
+            records_sink.append(envelope)
+        return envelope
+
+    return timeline_append
+
+
+@contextmanager
+def eval_env(env):
+    """Run closed-loop capabilities against a surrogate environment, offline."""
+    base = current()
+    recorded = getattr(env, "recorded", None)
+    if not isinstance(recorded, list):
+        recorded = []
+        try:
+            setattr(env, "recorded", recorded)
+        except (AttributeError, TypeError):
+            pass
+    with scope({**base, "eval_env": env, "timeline_append": offline_timeline_append(recorded)}):
+        yield env
+
 
 def diagnostic_channel(context):
     """Local observers run even when this call has no persistent event."""

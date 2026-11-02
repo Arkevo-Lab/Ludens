@@ -10,6 +10,7 @@ import sys
 import traceback
 
 from ludens_tools._capabilities import discover, load_eval_function, load_function, validate
+from ludens_tools._context import current, offline_timeline_append, scope
 
 
 def verified_source(workspace, path, expected):
@@ -86,7 +87,8 @@ def evaluate(workspace, request):
     with invocation_output():
         function = load_eval_function(workspace, binding["origin"]["path"], binding["origin"]["function"],
                                       raw=sources[binding["origin"]["path"]])
-        rewards, details, passed = _eval_rewards(function())
+        with scope({**current(), "timeline_append": offline_timeline_append()}):
+            rewards, details, passed = _eval_rewards(function())
         encoded = json.dumps({"ok": True, "passed": passed, "rewards": rewards,
                               **({"details": details} if details is not None else {})}, allow_nan=False)
     return encoded
