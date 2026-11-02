@@ -4,6 +4,13 @@ import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/
 export { pythonModulePaths } from "@ludens/protocol/python";
 import { childTrace, type EventTrace, type RecordEvent } from "../storage/events.ts";
 
+export interface PythonCapabilityEval {
+  id: string;
+  origin: { path: string; function: string; line: number };
+  codeSHA: string;
+  description: string;
+}
+
 export interface PythonCapability {
   id: string;
   name: string;
@@ -12,6 +19,7 @@ export interface PythonCapability {
   origin: { path: string; function: string; line: number };
   codeSHA: string;
   recorded?: boolean;
+  eval: PythonCapabilityEval | null;
 }
 
 export interface PythonDiagnostic {
@@ -39,6 +47,18 @@ export interface PythonInvocationDetails {
   origin: PythonCapability["origin"];
   codeSHA: string;
   result?: unknown;
+  error?: { type: string; message: string; traceback?: string };
+  exitCode: number;
+  stderr: string;
+}
+
+export interface PythonEvalDetails {
+  capabilityId: string;
+  evalId: string;
+  origin: PythonCapability["origin"];
+  codeSHA: string;
+  rewards?: Record<string, number>;
+  details?: Record<string, unknown>;
   error?: { type: string; message: string; traceback?: string };
   exitCode: number;
   stderr: string;
@@ -87,7 +107,7 @@ export class PythonCapabilities {
       if (!capability) throw new Error(`Unknown Python capability: ${id}; discover the workspace before invoking it`);
       if (args === null || typeof args !== "object" || Array.isArray(args)) throw new TypeError("Python capability arguments must be an object");
       const processResult = await this.run({ action: "invoke", workspace: this.workspace, capability, arguments: args }, {
-        ...options, env: { ...options.env, BASEWARE_TRACE: JSON.stringify(trace) },
+        ...options, env: { ...options.env, BASEWARE_TRACE: JSON.stringify(trace) } as NodeJS.ProcessEnv,
       });
       let reply: { ok: boolean; result?: unknown; error?: PythonInvocationDetails["error"] };
       try { reply = JSON.parse(processResult.stdout); }
@@ -113,14 +133,45 @@ export class PythonCapabilities {
     }
   }
 
-  private run(request: unknown, options: PythonInvocationOptions, sourceOnly = false): Promise<{ exitCode: number; stdout: string; stderr: string }> {
+  /** Run the capability's bound @eval_capability; evals never inherit device control. */
+  async evaluate(id: string, options: PythonInvocationOptions = {}) {
+    const trace = childTrace(options.trace ?? {}), started = performance.now();
+    const capability = this.catalog.get(id);
+    this.emit("python_eval", { capabilityId: id, ...(capability ? { origin: capability.origin, codeSHA: capability.codeSHA } : {}) }, trace);
+    try {
+      options.signal?.throwIfAborted();
+      if (!capability) throw new Error(`Unknown Python capability: ${id}; discover the workspace before invoking it`);
+      if (!capability.eval) throw new Error(`Capability ${id} has no @eval_capability bound`);
+      const processResult = await this.run({ action: "eval", workspace: this.workspace, capability }, options, false, true);
+      let reply: { ok: boolean; rewards?: Record<string, number>; details?: Record<string, unknown>; error?: PythonEvalDetails["error"] };
+      try { reply = JSON.parse(processResult.stdout); }
+      catch {
+        reply = { ok: false, error: { type: "PythonProcessError", message: `Python exited ${processResult.exitCode} without a valid result` } };
+      }
+      const failed = !reply.ok || processResult.exitCode !== 0;
+      const details: PythonEvalDetails = { capabilityId: id, evalId: capability.eval.id, origin: capability.origin, codeSHA: capability.codeSHA,
+        ...(failed ? { error: reply.error ?? { type: "PythonProcessError", message: `Python exited ${processResult.exitCode}` } }
+          : { rewards: reply.rewards, ...(reply.details ? { details: reply.details } : {}) }),
+        exitCode: processResult.exitCode, stderr: processResult.stderr };
+      this.emit("python_eval_result", { ...details, outcome: failed ? "error" : "success", durationMs: performance.now() - started }, trace);
+      return { content: [{ type: "text" as const, text: JSON.stringify(failed ? { error: details.error } : { rewards: details.rewards, ...(details.details ? { details: details.details } : {}) }) }], details, isError: failed };
+    } catch (error) {
+      this.emit("python_eval_result", { capabilityId: id, outcome: options.signal?.aborted ? "cancelled" : "error",
+        durationMs: performance.now() - started,
+        error: { type: error instanceof Error ? error.name : "Error", message: error instanceof Error ? error.message : String(error) } }, trace);
+      throw error;
+    }
+  }
+
+  private run(request: unknown, options: PythonInvocationOptions, sourceOnly = false, offline = false): Promise<{ exitCode: number; stdout: string; stderr: string }> {
     options.signal?.throwIfAborted();
     const input = JSON.stringify(request);
     const env = pythonEnvironment({ ...options.env, LUDENS_WORKSPACE: this.workspace });
     // Static discovery must not import workspace modules that shadow the bridge
     // or its standard-library imports. Invocation retains the author's environment.
     if (sourceOnly) env.PYTHONPATH = pythonModulePaths().join(delimiter);
-    for (const name of ["LUDENS_EPOCH", "LUDENS_TRACE"]) delete env[name];
+    for (const name of offline ? ["LUDENS_EPOCH", "LUDENS_TRACE", "BASEWARE_EPOCH", "BASEWARE_TRACE"] : ["LUDENS_EPOCH", "LUDENS_TRACE"]) delete env[name];
+    if (offline) { delete env.LUDENS_SOCKET; delete env.BASEWARE_SOCKET; }
     env.PYTHONDONTWRITEBYTECODE = "1";
     return new Promise((done, fail) => {
       const child = spawn(this.pythonPath, ["-B", "-m", "ludens_tools._bridge"], {

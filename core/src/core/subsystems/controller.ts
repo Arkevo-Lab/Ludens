@@ -1,5 +1,6 @@
 import type { EventTrace, RecordEvent } from "../storage/events.ts";
 import { PythonCapabilities, type PythonCapability } from "./python-capabilities.ts";
+import { capabilityEvalId, readLatestEvals, resolveCapabilityEval } from "./capability-evals.ts";
 import type { DeviceSession } from "../shiori/runtime.ts";
 import { objectArguments } from "@ludens/baseware/tool-contract";
 
@@ -30,11 +31,12 @@ export class WorkspaceController {
   async list(signal: AbortSignal, trace: EventTrace = {}) {
     const discovered = await this.python.discover(signal, trace);
     const { controllers } = this.options.devices.catalog;
+    const latest = await readLatestEvals(this.options.workspace);
     return {
       capabilities: [
         ...controllers.map(item => ({ ...item, id: `controller/${item.name}` })),
         ...discovered.capabilities.map(item => ({ id: pythonId(item), description: summary(item.description),
-          recorded: item.recorded ?? false })),
+          recorded: item.recorded ?? false, ...resolveCapabilityEval(item, latest[capabilityEvalId(item)]) })),
       ],
       diagnostics: discovered.diagnostics,
     };
@@ -47,9 +49,11 @@ export class WorkspaceController {
       return JSON.stringify({ ...device, id, usage: `ludens controller ${id} [--args '<JSON object>' | --file <arguments.json>]` }, null, 2);
     }
     const capability = await this.pythonCapability(id, signal, trace);
+    const latest = await readLatestEvals(this.options.workspace);
     return JSON.stringify({ id, usage: `ludens controller ${id} --args '<JSON object>'`,
       description: capability.description, parameters: capability.parameters,
       recorded: capability.recorded ?? false,
+      ...resolveCapabilityEval(capability, latest[capabilityEvalId(capability)]),
     }, null, 2);
   }
 

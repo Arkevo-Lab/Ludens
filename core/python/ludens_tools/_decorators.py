@@ -84,3 +84,28 @@ def capability(function=None):
 def record(function=None):
     """Record each successful @capability result envelope on the workspace timeline."""
     return (lambda target: _mark(target, "recorded")) if function is None else _mark(function, "recorded")
+
+def _target_identity(target):
+    if isinstance(target, str):
+        return target
+    marked = getattr(target, "__ludens_identity__", None)
+    if marked is not None:
+        return marked["id"]
+    source = Path(target.__code__.co_filename).resolve()
+    workspace = Path(current()["workspace"]).resolve()
+    return "python/" + os.path.relpath(source, workspace).replace(os.sep, "/") + ":" + target.__qualname__
+
+
+def eval_capability(target):
+    """Bind an evaluation function to a @capability; static discovery resolves it."""
+    capability_id = _target_identity(target)
+
+    def decorate(function):
+        function.__ludens_eval__ = True
+        function.__ludens_eval_target__ = capability_id
+        return function
+
+    return decorate
+
+
+eval = eval_capability

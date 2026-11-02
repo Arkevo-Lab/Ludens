@@ -360,6 +360,14 @@
     "descriptionCol": "说明",
     "controlCol": "控制要求",
     "noDescription": "无描述",
+    "evalFunction": "评估函数",
+    "evalStatuses": {
+      "verified": "已验证",
+      "stale": "已过期",
+      "unverified": "未验证",
+      "missing": "未配置",
+      "failed": "失败"
+    },
     "taskCol": "任务",
     "versionCol": "版本摘要",
     "taskDigest": "内容摘要",

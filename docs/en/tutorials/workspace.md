@@ -102,6 +102,54 @@ How the call entry points differ in execution location and data boundary:
 | `ludens controller python/... --args '{...}'` | One-shot Python subprocess started by the Host | Cross-process JSON serialization; the subprocess exits after the call and keeps no in-memory state | Agent triggering a single Python capability from the command line via the native `bash` tool |
 | `Client().call("controller/...", {...})` or `ludens controller controller/...` | Forwarded to Baseware via Ludens | JSON argument object, returning an `ExecutionResult` with the native `result` and media bytes | Driving device inputs or collecting sensor/screen data |
 
+### 3. Evaluating Capabilities with @eval_capability and ludens eval
+
+Pair an atomic workspace capability with a synchronous, zero-required-argument eval function in the same Python module. The eval can replay committed `.ludens/timeline/` records through `Client().observe()`. Evaluation strips inherited Host/device sockets and control epochs, so observation reads the persisted timeline directly even when launched from a live Host session.
+
+```python
+from ludens_tools import Client, capability, eval_capability
+
+@capability
+def parse_hp_bar(frame_path: str) -> dict:
+    """Parse HP values from a frame."""
+    ...
+
+@eval_capability(parse_hp_bar)
+def eval_parse_hp_bar() -> dict[str, float]:
+    """Evaluate HP parsing on recorded timeline frames."""
+    observations = Client().observe()
+    samples = [...]  # Derive labeled samples from observations or fixtures.
+    correct = sum(parse_hp_bar(sample["frame_path"])["hp"] == sample["hp"] for sample in samples)
+    return {"accuracy": correct / len(samples), "samples": len(samples)}
+```
+
+The eval must have a docstring and return either a non-empty flat `dict[str, int | float]` of finite rewards or an envelope with `rewards` and optional `details`. Discovery is static; evaluation executes only when requested:
+
+```sh
+# List bindings, current statuses, rewards, and discovery diagnostics
+ludens eval list
+
+# Run one bound eval, or every capability with a bound eval
+ludens eval run python/perception.py:parse_hp_bar
+ludens eval run --all
+
+# Read immutable historical runs, newest first
+ludens eval history python/perception.py:parse_hp_bar
+ludens eval history
+```
+
+Records are stored in `.ludens/evals/latest.json` and `.ludens/evals/runs/<run-id>.json`. The catalog exposes five statuses:
+
+| Status | Meaning |
+| --- | --- |
+| `missing` | No `@eval_capability` is bound to the capability. |
+| `unverified` | An eval is bound, but no latest run exists. |
+| `stale` | The capability or eval source `codeSHA`, or the bound eval ID, changed after the latest run. |
+| `failed` | The latest matching run failed or produced no valid non-empty rewards. |
+| `verified` | The latest matching run passed with valid rewards for the current capability and eval code. |
+
+Because both source files' `codeSHA` values are recorded, editing either the capability or its eval automatically makes the result `stale`; rerun it before relying on the old rewards. `ludens consolidate` supplies a fresh static evaluation catalog to its file-only prompt and instructs the agent to retain or promote only `verified` capabilities into `skills/`. It does not execute evals or edit capability/eval source during consolidation; unverified entries are pruned and needed changes or eval commands are recorded in memory for a later execution turn.
+
 ## Capability Archiving and the Workspace Timeline
 
 ### 1. The `@record` Decorator and the Record Envelope

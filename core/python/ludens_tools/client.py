@@ -2,7 +2,9 @@
 
 from pathlib import Path
 from typing import Any
+import uuid
 from ._context import LudensError, continuous, current, request, scope
+from ._observation_history import read_timeline
 
 
 class Client:
@@ -58,10 +60,26 @@ class Client:
     def observe(self, query: dict[str, Any] | None = None) -> Any:
         """Read timeline history without sampling; returns the same envelope as ludens observe."""
         context = self._context()
-        return request(context["socket_path"], {
-            "kind": "perception", "argv": ["observe"], "query": query or {},
-            **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-        }, context["timeout"])
+        if context["socket_path"] is None:
+            return self._offline_timeline(context, query)
+        try:
+            return request(context["socket_path"], {
+                "kind": "perception", "argv": ["observe"], "query": query or {},
+                **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
+            }, context["timeout"])
+        except (FileNotFoundError, ConnectionRefusedError):
+            return self._offline_timeline(context, query)
+        except LudensError as error:
+            # A host that never started or already stopped still serves reads.
+            text = str(error)
+            if "ENOENT" in text or "ECONNREFUSED" in text or "Unavailable" in text:
+                return self._offline_timeline(context, query)
+            raise
+
+    @staticmethod
+    def _offline_timeline(context: dict[str, Any], query: dict[str, Any] | None) -> Any:
+        result = read_timeline(context["workspace"], query)
+        return {"queryId": "offline-" + uuid.uuid4().hex[:8], "ok": True, **result}
 
     def call(self, capability_id: str, arguments: dict[str, Any] | None = None) -> Any:
         """Call a driver or local Python function with named arguments."""

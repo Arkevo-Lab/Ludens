@@ -78,7 +78,7 @@ def calculate(value: int = 4):
 
     await writeFile(join(workspace, "actions.py"), source);
     cycle = {...cycle, purpose: "consolidate"};
-    await consolidateOmpSession(session, cycle.signal);
+    await consolidateOmpSession(session, cycle.signal, workspace);
     expect(snapshots[4]!.tools.sort()).toEqual(["read", "write", "edit"].sort());
     cycle = {epoch: "next-epoch", signal: control.signal};
     await session.prompt("Continue after consolidation.");

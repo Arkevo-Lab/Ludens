@@ -102,6 +102,54 @@ def capture_top(exposure: int = 1) -> dict:
 | `ludens controller python/... --args '{...}'` | Host 启动一次性 Python 子进程 | 跨进程 JSON 序列化；调用结束后子进程退出，不保留内存状态 | Agent 在原生 `bash` 工具中通过命令行触发单次 Python 能力 |
 | `Client().call("controller/...", {...})` 或 `ludens controller controller/...` | 经 Ludens 转发至 Baseware | JSON 参数对象，返回包含原生 `result` 与媒体字节的 `ExecutionResult` | 执行设备输入或采集传感器/屏幕数据 |
 
+### 3. 使用 @eval_capability 与 ludens eval 评估能力
+
+在同一 Python 模块中，为单项工作区能力配对一个同步、无必填参数的评估函数。评估函数可通过 `Client().observe()` 重放已提交的 `.ludens/timeline/` 记录。评估会移除继承的 Host/设备 socket 与控制 epoch，因此即使从运行中的 Host 会话启动，观测也会直接读取持久化时空轴。
+
+```python
+from ludens_tools import Client, capability, eval_capability
+
+@capability
+def parse_hp_bar(frame_path: str) -> dict:
+    """Parse HP values from a frame."""
+    ...
+
+@eval_capability(parse_hp_bar)
+def eval_parse_hp_bar() -> dict[str, float]:
+    """Evaluate HP parsing on recorded timeline frames."""
+    observations = Client().observe()
+    samples = [...]  # Derive labeled samples from observations or fixtures.
+    correct = sum(parse_hp_bar(sample["frame_path"])["hp"] == sample["hp"] for sample in samples)
+    return {"accuracy": correct / len(samples), "samples": len(samples)}
+```
+
+评估函数必须包含 docstring，并返回非空的扁平 `dict[str, int | float]` 有限数值奖励，或包含 `rewards` 与可选 `details` 的信封。发现过程只进行静态扫描；只有显式请求时才执行评估：
+
+```sh
+# 列出绑定、当前状态、奖励与发现诊断
+ludens eval list
+
+# 运行一个已绑定评估，或运行所有已绑定评估
+ludens eval run python/perception.py:parse_hp_bar
+ludens eval run --all
+
+# 按时间倒序读取不可变历史运行
+ludens eval history python/perception.py:parse_hp_bar
+ludens eval history
+```
+
+记录保存在 `.ludens/evals/latest.json` 与 `.ludens/evals/runs/<run-id>.json`。能力目录包含五种状态：
+
+| 状态 | 含义 |
+| --- | --- |
+| `missing` | 能力没有绑定 `@eval_capability`。 |
+| `unverified` | 已绑定评估，但尚无最新运行记录。 |
+| `stale` | 最新运行后，能力或评估源码的 `codeSHA` 发生变化，或绑定的评估 ID 已改变。 |
+| `failed` | 最新匹配运行失败，或未产出合法的非空奖励。 |
+| `verified` | 当前能力与评估代码对应的最新匹配运行已通过，并产出合法奖励。 |
+
+由于运行会记录两个源码文件的 `codeSHA`，编辑能力或其评估函数都会自动将结果标为 `stale`；复用旧奖励前必须重新运行。`ludens consolidate` 会向仅允许文件工具的提示注入最新静态评估目录，并要求 Agent 仅保留或提升 `verified` 能力到 `skills/`。整理期间不会执行评估或编辑能力/评估源码；未验证条目会被剪除，所需修改或评估命令会记录到 memory，留待后续执行轮次处理。
+
 ## 能力留档与 workspace 时空轴
 
 ### 1. `@record` 装饰器与记录信封

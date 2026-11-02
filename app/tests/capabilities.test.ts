@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { access, chmod, mkdtemp, mkdir, readFile, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { capabilities } from "../lib/capabilities";
 import { catalog, clearCatalogCache } from "../lib/data";
 import { DashboardWorker } from "../lib/dashboard-worker";
@@ -62,11 +63,61 @@ test("capability catalog reads the selected run-free workspace and real static P
     assert.ok(Number.isFinite(Date.parse(page.checkedAt)));
     assert.deepEqual(page.deviceSnapshot, { generatedAt: "2026-10-30T00:00:00.000Z", drivers: [{ id: "recorded-driver", version: "recorded-version" }] });
     assert.deepEqual(page.groups[1].items, [{ id: "python/actions.py:clamp", kind: "workspace",
-      description: "Clamp a value to the unit interval.", requiresControl: null, readOnly: null }]);
+      description: "Clamp a value to the unit interval.", requiresControl: null, readOnly: null,
+      evalStatus: "missing", evalId: null, evalRewards: null, evalEvaluatedAt: null, evalError: null }]);
     assert.ok(page.tasks.some(item => item.name === "workspace/custom"));
     await assert.rejects(access(join(f.base, "MUST_NOT_EXECUTE")));
     await assert.rejects(access(join(f.base, "SHADOW_EXECUTED")));
     await assert.rejects(capabilities("missing", f.workspace, f.root), /ENOENT/);
+  } finally { clearCatalogCache(); await f.cleanup(); }
+});
+
+test("workspace capabilities expose evaluation bindings, rewards, and stale source detection", async () => {
+  const f = await fixture();
+  try {
+    const capabilityId = "python/actions.py:clamp";
+    const evalId = "python/actions.py:eval_clamp";
+    const source = join(f.workspace, "actions.py");
+    const workspaceItem = async () => (await capabilities("ws-capabilities", f.workspace, f.root)).groups[1].items[0];
+    assert.equal((await workspaceItem()).evalStatus, "missing");
+
+    const declared = `from ludens_tools import capability, eval_capability
+@capability
+def clamp(value: float) -> float:
+    """Clamp a value to the unit interval."""
+    return min(1, max(0, value))
+@eval_capability(clamp)
+def eval_clamp() -> dict[str, float]:
+    """Evaluate clamp against fixed boundaries."""
+    return {"accuracy": 1.0, "samples": 3}
+`;
+    await writeFile(source, declared);
+    const unverified = await workspaceItem();
+    assert.equal(unverified.evalStatus, "unverified");
+    assert.equal(unverified.evalId, evalId);
+    assert.equal(unverified.evalRewards, null);
+    assert.equal(unverified.evalEvaluatedAt, null);
+    assert.equal(unverified.evalError, null);
+
+    const codeSHA = createHash("sha256").update(declared).digest("hex");
+    await mkdir(join(f.workspace, ".ludens/evals/runs"), { recursive: true });
+    const evaluatedAt = "2026-11-02T00:00:00.000Z";
+    await json(join(f.workspace, ".ludens/evals/latest.json"), { version: 1, capabilities: {
+      [capabilityId]: { runId: "eval-run-1", capabilityId, evalId, capabilityCodeSHA: codeSHA, evalCodeSHA: codeSHA,
+        evaluatedAt, durationMs: 4, outcome: "passed", rewards: { accuracy: 1, samples: 3 } },
+    } });
+    const verified = await workspaceItem();
+    assert.equal(verified.evalStatus, "verified");
+    assert.equal(verified.evalId, evalId);
+    assert.deepEqual(verified.evalRewards, { accuracy: 1, samples: 3 });
+    assert.equal(verified.evalEvaluatedAt, evaluatedAt);
+    assert.equal(verified.evalError, null);
+
+    await writeFile(source, declared + "\n# Source changed after evaluation.\n");
+    const stale = await workspaceItem();
+    assert.equal(stale.evalStatus, "stale");
+    assert.equal(stale.evalId, evalId);
+    assert.deepEqual(stale.evalRewards, { accuracy: 1, samples: 3 });
   } finally { clearCatalogCache(); await f.cleanup(); }
 });
 

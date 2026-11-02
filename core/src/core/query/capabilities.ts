@@ -6,6 +6,9 @@ import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-sta
 import { discoverTasks } from "@ludens/core/bench/catalog";
 import { isObject } from "@ludens/core/bench/contract";
 import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
+import { readLatestEvals, resolveCapabilityEval, type CapabilityEvalBinding, type CapabilityEvalStatus } from "../subsystems/capability-evals.ts";
+
+export type { CapabilityEvalStatus };
 
 export interface CapabilityEntry {
   id: string;
@@ -13,6 +16,11 @@ export interface CapabilityEntry {
   description: string;
   requiresControl: boolean | null;
   readOnly: boolean | null;
+  evalStatus?: CapabilityEvalStatus | null;
+  evalId?: string | null;
+  evalRewards?: Record<string, number> | null;
+  evalEvaluatedAt?: string | null;
+  evalError?: string | null;
 }
 
 async function deviceCapabilities(workspace: string, signal?: AbortSignal) {
@@ -55,11 +63,24 @@ async function workspaceCapabilities(workspace: string, signal?: AbortSignal) {
   });
   const result: unknown = JSON.parse(stdout);
   if (!isObject(result) || !Array.isArray(result.capabilities) || !Array.isArray(result.diagnostics)) throw new Error("Invalid Python discovery response");
+  const evalBinding = (value: unknown): CapabilityEvalBinding | null => {
+    if (value === null || value === undefined) return null;
+    if (!isObject(value) || typeof value.id !== "string" || !isObject(value.origin)
+        || typeof value.origin.path !== "string" || typeof value.origin.function !== "string"
+        || typeof value.origin.line !== "number" || typeof value.codeSHA !== "string"
+        || typeof value.description !== "string") throw new Error("Invalid Python capability declaration");
+    return { id: value.id, origin: { path: value.origin.path, function: value.origin.function, line: value.origin.line },
+      codeSHA: value.codeSHA, description: value.description };
+  };
+  const latest = await readLatestEvals(workspace);
   const items: CapabilityEntry[] = result.capabilities.map(item => {
     if (!isObject(item) || !isObject(item.origin) || typeof item.origin.path !== "string"
         || typeof item.origin.function !== "string" || typeof item.description !== "string") throw new Error("Invalid Python capability declaration");
-    return { id: `python/${item.origin.path}:${item.origin.function}`, kind: "workspace",
-      description: item.description, requiresControl: null, readOnly: null };
+    const id = `python/${item.origin.path}:${item.origin.function}`;
+    return { id, kind: "workspace",
+      description: item.description, requiresControl: null, readOnly: null,
+      ...resolveCapabilityEval({ codeSHA: typeof item.codeSHA === "string" ? item.codeSHA : "",
+        eval: evalBinding(item.eval) }, latest[id]) } as CapabilityEntry;
   });
   const issues = result.diagnostics.map(item => {
     if (!isObject(item) || typeof item.path !== "string" || typeof item.message !== "string") throw new Error("Invalid Python discovery diagnostic");

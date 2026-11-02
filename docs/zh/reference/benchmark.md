@@ -2,13 +2,16 @@
 
 Ludens 评测系统遵循 [Harbor Framework](https://github.com/harbor-framework/harbor/tree/f3a5a923f6d722472c9e797af836ae4425fb215f)（固定参考版本 `f3a5a9`，Schema `1.4`）的 Task、Verifier、Reward 与 Dataset 文件约定，并针对本机实验环境实现 `ludens-native` Profile。
 
-评测是三个正交质量分层之一，不要混用语义：
+质量检查分为四个正交分层，不要混用语义：
 
 | 分层 | 位置 | 回答的问题 | 命令 |
 | --- | --- | --- | --- |
 | `test` | `core/tests/`（`ws-recovery.test.ts`、`background-compaction.test.ts` 等） | 框架行为或故障回归是否被破坏？（`Pass` / `Fail`） | `cd core && bun run test` |
 | `perf` | `core/src/perf/` 与 `app/perf/` | 子系统延迟、吞吐与内存预算是否仍然成立？ | `cd core && bun run perf` / `cd app && npm run perf` |
-| `bench` | `core/benchmarks/`、`core/src/bench/`、`app/features/benchmark/` | Harbor Agent/任务评测与独立评分 | `ludens bench ...` |
+| `eval` | 工作区 Python 能力与 `.ludens/evals/` | 单项原子能力能否基于时空轴观测或夹具通过其绑定的 `@eval_capability`？ | `ludens eval ...` |
+| `bench` | `core/benchmarks/`、`core/src/bench/`、`app/features/benchmark/` | 端到端 Harbor Agent/任务运行能否通过独立评分？ | `ludens bench ...` |
+
+`ludens eval` 评估工作区内的单个 Python 函数，并将能力绑定的状态与奖励存入 `.ludens/evals/`。相比之下，`ludens bench` 通过 Harbor 评估完整 Agent 或程序任务，将执行产物与独立计算的分数存入 `logs/<run-id>/`；单项能力评估不是一次 Harbor Benchmark 运行。能力评估的编写与运行见 [工作区与能力编程](../tutorials/workspace.md#3-使用-eval-capability-与-ludens-eval-评估能力)。
 
 本文只覆盖 `bench`；子系统性能基线见 [控制台调试与验证](../tutorials/debugging-and-verification.md)。
 

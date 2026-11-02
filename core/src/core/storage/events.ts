@@ -1,7 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { JsonArchive, type JsonArchiveRef } from "@ludens/protocol/log-archive";
 import type { Clock } from "@ludens/baseware/contracts";
 import type { EventMetadata, EventSource } from "@ludens/baseware/protocol";
@@ -79,7 +79,7 @@ export class EventLog {
   }
 
   bytes(bytes: Uint8Array, format = "bin", headers: { contentType?: string | null; contentEncoding?: string | null } = {}): WireRef {
-    const sha256 = new Bun.SHA256().update(bytes).digest("hex");
+    const sha256 = createHash("sha256").update(bytes).digest("hex");
     if (this.archive) {
       const wire: WireMetadata = { sha256, bytes: bytes.byteLength, representation: "unavailable",
         ...(headers.contentType ? { contentType: headers.contentType } : {}),
@@ -115,7 +115,7 @@ export class EventLog {
       try { data = JSON.parse(input.data); dataFormat = "json"; } catch { /* Non-JSON SSE and [DONE] remain text. */ }
       let line = 0;
       stored = { event: input.event, dataRef: this.archive.write(data, { inline: true }), dataFormat,
-        dataSha256: new Bun.SHA256().update(input.data).digest("hex"), dataBytes: Buffer.byteLength(input.data),
+        dataSha256: createHash("sha256").update(input.data).digest("hex"), dataBytes: Buffer.byteLength(input.data),
         raw: input.raw?.map(value => value.startsWith("data:")
           ? { data: true, prefix: value.startsWith("data: ") ? "data: " : "data:", line: line++ } : value) };
       format = "ludens-stream-v1";
