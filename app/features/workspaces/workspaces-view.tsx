@@ -266,10 +266,10 @@ export function WorkspacesView({ onChanged, onOpen, catalogError, catalogLoading
               </CardHeader>
               <CardContent>
                 <ul className="grid gap-3" aria-label={t("collectionTitle")}>
-                  {matches.map(entry => <li key={entry.id} className="rounded-lg border bg-background/35 p-4">
-                    <div className="flex flex-wrap items-center gap-4">
-                      <div aria-hidden="true" className="grid size-11 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Folder className="size-6" /></div>
-                      <div className="min-w-0 flex-1 basis-40 space-y-1.5"><strong className="block break-words text-sm font-semibold">{entry.name}</strong><p className="break-all font-mono text-xs leading-relaxed text-muted-foreground">{entry.workspace}</p></div>
+                  {matches.map(entry => <li key={entry.id} className="rounded-md border bg-[var(--surface-inset)] p-4">
+                    <div className="flex flex-wrap items-center gap-3.5">
+                      <div aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--panel)] text-[var(--gold)]"><Folder className="size-4" /></div>
+                      <div className="min-w-0 flex-1 basis-40 space-y-1"><strong className="block break-words text-sm font-semibold">{entry.name}</strong><p className="break-all font-mono text-xs leading-relaxed text-muted-foreground">{entry.workspace}</p></div>
                       <Badge variant="outline" className={entry.available ? "border-success/25 bg-success/5 text-success" : "text-muted-foreground"}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{entry.available ? t("available") : t("unavailable")}</Badge>
                       <div className="flex w-full flex-wrap items-center gap-2 min-[1200px]:w-auto">
                         <Button type="button" variant="outline" size="sm" disabled={!!pending || !entry.available} onClick={() => onOpen(entry.id)}>{t("open")}<ArrowRight /></Button>
@@ -281,14 +281,14 @@ export function WorkspacesView({ onChanged, onOpen, catalogError, catalogLoading
                         })}>{pending === entry.id ? t("removing") : t("remove")}</Button>
                       </div>
                     </div>
-                    {!entry.available && <p className="mt-3 text-xs leading-relaxed text-muted-foreground">{t("unavailableHint")}</p>}
+                    {!entry.available && <p className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed text-muted-foreground">{t("unavailableHint")}</p>}
                   </li>)}
                 </ul>
                 {!matches.length && <div className="space-y-3 py-10 text-center"><p className="text-sm text-muted-foreground">{t("noMatches")}</p><Button type="button" size="sm" variant="outline" onClick={() => { setFilter(""); searchInput.current?.focus(); }}>{t("clearSearch")}</Button></div>}
                 <p className="mt-5 border-t pt-4 text-xs leading-relaxed text-muted-foreground">{t("removeHint")}</p>
               </CardContent>
             </> : <CardContent className="flex flex-col items-center py-10 text-center sm:py-16">
-              <div aria-hidden="true" className="mb-5 grid size-14 place-items-center rounded-xl bg-primary/10 text-primary"><FolderOpen className="size-7" /></div>
+              <div aria-hidden="true" className="mb-5 grid size-12 place-items-center rounded-md border border-primary/25 bg-primary/10 text-primary"><FolderOpen className="size-6" /></div>
               <h2 className="mb-2 text-xl font-semibold">{t("emptyTitle")}</h2><p className="max-w-md text-sm leading-relaxed text-muted-foreground">{t("emptyHint")}</p>
               <div className="mt-6 flex flex-wrap justify-center gap-2"><Button type="button" disabled={!!pending} onClick={event => openDialog("create", event.currentTarget)}><Plus />{t("newWorkspace")}</Button><Button type="button" variant="outline" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget)}>{t("addExisting")}</Button></div>
             </CardContent>}
@@ -299,7 +299,7 @@ export function WorkspacesView({ onChanged, onOpen, catalogError, catalogLoading
           </CardContent></Card>
         </>}
       </section>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-xl bg-card sm:max-w-xl" showCloseButton={false}
+      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-md bg-card sm:max-w-xl" showCloseButton={false}
         onEscapeKeyDown={event => { if (busy.current) event.preventDefault(); }}
         onInteractOutside={event => { if (busy.current) event.preventDefault(); }}
         onCloseAutoFocus={event => {

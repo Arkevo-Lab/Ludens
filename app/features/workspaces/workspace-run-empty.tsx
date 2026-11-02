@@ -35,12 +35,12 @@ export function WorkspaceRunEmpty({ state, project, workspaceName, benchmarkRun,
     </Button>
   );
   return <Card aria-labelledby={headingId}>
-    <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-5">
-      <span className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary" aria-hidden="true">
-        {loading ? <LoaderCircle className="size-5 animate-spin" /> : <Folder className="size-5" />}
+    <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-4">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-[var(--surface-inset)] text-[var(--gold)]" aria-hidden="true">
+        {loading ? <LoaderCircle className="size-4 animate-spin" /> : <Folder className="size-4" />}
       </span>
-      <div className="min-w-0 flex-1 space-y-3">
-        {workspaceName && <p className="break-words text-xs text-muted-foreground">{workspaceName}</p>}
+      <div className="min-w-0 flex-1 space-y-2.5">
+        {workspaceName && <p className="break-words font-mono text-xs text-muted-foreground">{workspaceName}</p>}
         <div className="space-y-2" role={loading ? "status" : undefined}>
           <h2 id={headingId} className="text-base font-semibold">{t(`${copy}.title`)}</h2>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{t(`${copy}.description`)}</p>

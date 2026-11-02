@@ -236,13 +236,13 @@ export function BenchmarkCases({ search, workspace, workspacePath, ready, refres
       </aside>}
       <div className="bench-case-main">
         {fullGuidance && <Card data-benchmark-guidance="first-task" className="border-primary/25">
-          <CardHeader className="gap-3"><span className="flex size-10 items-center justify-center rounded-lg bg-primary/10 text-primary"><ClipboardList aria-hidden size={22} /></span>
+          <CardHeader className="gap-3"><span className="flex size-9 items-center justify-center rounded-md border border-primary/25 bg-primary/10 text-primary"><ClipboardList aria-hidden size={18} /></span>
             <CardTitle><h2>{t("firstTaskTitle")}</h2></CardTitle><CardDescription className="max-w-2xl">{t("firstTaskDescription")}</CardDescription></CardHeader>
           <CardContent className="grid gap-5"><div className="flex flex-wrap gap-2">
             <Button asChild><a href={links.guide} onClick={event => link(event, links.guide)}><BookOpen aria-hidden />{t("readTaskGuide")}</a></Button>
             {links.capabilities && <Button asChild variant="outline"><a href={links.capabilities} onClick={event => link(event, links.capabilities!)}>{t("viewCapabilities")}<ArrowRight aria-hidden /></a></Button>}
           </div><ol className="grid gap-4 border-t pt-4 sm:grid-cols-3">
-            {["addTask", "runTerminal", "inspectEvidence"].map((step, index) => <li key={step} className="flex gap-3"><span className="flex size-6 shrink-0 items-center justify-center rounded-full border text-xs text-muted-foreground">{index + 1}</span><div className="space-y-1"><h3 className="text-sm font-medium">{t(`steps.${step}.title`)}</h3><p className="text-xs leading-relaxed text-muted-foreground">{t(`steps.${step}.description`)}</p></div></li>)}
+            {["addTask", "runTerminal", "inspectEvidence"].map((step, index) => <li key={step} className="flex gap-3"><span className="flex size-6 shrink-0 items-center justify-center rounded-sm border font-mono text-xs text-muted-foreground">{index + 1}</span><div className="space-y-1"><h3 className="text-sm font-medium">{t(`steps.${step}.title`)}</h3><p className="text-xs leading-relaxed text-muted-foreground">{t(`steps.${step}.description`)}</p></div></li>)}
           </ol>{workspacePath && <details className="text-xs text-muted-foreground"><summary>{t("inspectTaskCatalog")}</summary><div className="bench-command mt-3"><code>{benchmarkListCommand(workspacePath)}</code><Button type="button" variant="outline" size="sm" onClick={() => void copy(benchmarkListCommand(workspacePath))}>{t("copyListCommand")}</Button></div></details>}
           </CardContent>
         </Card>}

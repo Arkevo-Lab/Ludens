@@ -112,7 +112,7 @@ export function WorkspaceCreateForm({ defaultRoot, initialIntent, pending, error
           {(["desktop", "community"] as const).map(environment => {
             const Icon = environment === "desktop" ? MonitorIcon : PlugIcon;
             return <Label key={environment} htmlFor={`${id}-${environment}`}
-              className={`flex min-w-0 cursor-pointer items-center gap-2.5 rounded-lg border p-3.5 transition-colors has-[:focus-visible]:ring-[3px] has-[:focus-visible]:ring-ring/50 ${draft.environment === environment ? "border-primary bg-primary/10" : "border-border hover:bg-muted/50"} ${pending ? "pointer-events-none opacity-50" : ""}`}>
+              className={`flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md border p-3.5 transition-colors has-[:focus-visible]:ring-1 has-[:focus-visible]:ring-ring/60 ${draft.environment === environment ? "border-[var(--gold)] bg-[var(--surface-inset)]" : "border-border hover:bg-muted/50"} ${pending ? "pointer-events-none opacity-50" : ""}`}>
               <RadioGroupItem id={`${id}-${environment}`} value={environment} />
               <Icon className="hidden size-5 shrink-0 text-muted-foreground min-[420px]:block" aria-hidden="true" />
               <span className="min-w-0 leading-snug"><span className="block text-sm font-medium">{t(environment)}</span>
