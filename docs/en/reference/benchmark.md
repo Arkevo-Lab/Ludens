@@ -2,13 +2,16 @@
 
 The Ludens evaluation system follows the [Harbor Framework](https://github.com/harbor-framework/harbor/tree/f3a5a923f6d722472c9e797af836ae4425fb215f) (pinned reference `f3a5a9`, Schema `1.4`) Task, Verifier, Reward, and Dataset file conventions, and implements a `ludens-native` Profile for the local experiment environment.
 
-Evaluation is one of three orthogonal quality tiers; do not mix their semantics:
+Quality checks span four orthogonal tiers; do not mix their semantics:
 
 | Tier | Location | Question answered | Command |
 | --- | --- | --- | --- |
 | `test` | `core/tests/` (`ws-recovery.test.ts`, `background-compaction.test.ts`, …) | Did a framework behavior or fault regression break? (`Pass` / `Fail`) | `cd core && bun run test` |
 | `perf` | `core/src/perf/` and `app/perf/` | Do subsystem latency, throughput, and memory budgets still hold? | `cd core && bun run perf` / `cd app && npm run perf` |
-| `bench` | `core/benchmarks/`, `core/src/bench/`, `app/features/benchmark/` | Harbor Agent/Task evaluation with independent scoring | `ludens bench ...` |
+| `eval` | Workspace Python capabilities and `.ludens/evals/` | Does one atomic capability pass its bound `@eval_capability` against timeline observations or fixtures? | `ludens eval ...` |
+| `bench` | `core/benchmarks/`, `core/src/bench/`, `app/features/benchmark/` | Does an end-to-end Harbor Agent/Task run pass independent scoring? | `ludens bench ...` |
+
+`ludens eval` evaluates individual in-workspace Python functions and stores capability-bound status and rewards under `.ludens/evals/`. In contrast, `ludens bench` evaluates complete agent or program tasks through Harbor and stores execution artifacts and independently computed scores under `logs/<run-id>/`; an atomic capability eval is not a Harbor benchmark run. Authoring and running capability evals is covered in [Workspace and Capability Programming](../tutorials/workspace.md#3-evaluating-capabilities-with-eval_capability-and-ludens-eval).
 
 This document covers `bench` only; subsystem performance baselines live in [Console debugging & verification](../tutorials/debugging-and-verification.md).
 

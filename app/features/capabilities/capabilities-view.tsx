@@ -109,8 +109,17 @@ function CapabilityDeclarations({ items, title }: { items: CapabilityEntry[]; ti
     <div className="capability-declaration-columns" aria-hidden="true"><span>{t("capabilityCol")}</span><span>{t("descriptionCol")}</span><span>{t("controlCol")}</span></div>
     <ul className="capability-declaration-list" role="list" aria-label={title}>
       {items.map(item => <li key={item.id} className="capability-declaration" data-capability-declaration={item.id}>
-        <h4 className="capability-declaration-name"><code>{item.id}</code></h4>
-        <p className="capability-declaration-description">{item.description || <span className="text-muted-foreground">{t("noDescription")}</span>}</p>
+        <h4 className="capability-declaration-name"><code>{item.id}</code>
+          {(item.kind === "workspace" || item.evalStatus) && item.evalStatus && <Badge variant="outline" className="capability-eval-status" data-capability-eval-status={item.evalStatus}>{t(`evalStatuses.${item.evalStatus}`)}</Badge>}
+        </h4>
+        <div className="capability-declaration-description">
+          <p>{item.description || <span className="text-muted-foreground">{t("noDescription")}</span>}</p>
+          {item.evalId && <p className="capability-eval-id"><span>{t("evalFunction")}</span><code data-capability-eval-id={item.evalId}>{item.evalId}</code></p>}
+          {item.evalRewards && Object.keys(item.evalRewards).length > 0 && <div className="capability-eval-rewards" data-capability-eval-rewards>
+            {Object.entries(item.evalRewards).map(([key, value]) => <span key={key}>{key}: {value}</span>)}
+          </div>}
+          {item.evalError && <p className="capability-eval-error" data-capability-eval-error>{item.evalError}</p>}
+        </div>
         <dl className="capability-declaration-control"><dt>{t("controlCol")}</dt><dd>
           <span data-capability-control>{item.requiresControl === null ? "—" : t(item.requiresControl ? "needsControl" : "noControl")}</span>
           {item.readOnly !== null && <span data-capability-read-only>{t(item.readOnly ? "readOnlySuffix" : "sideEffectsSuffix")}</span>}

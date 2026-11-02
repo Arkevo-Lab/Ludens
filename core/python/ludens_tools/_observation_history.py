@@ -772,3 +772,34 @@ def read_timeline_record(workspace, sequence):
             raise ValueError("Timeline record identity does not match its index")
         return record
     raise ValueError("Timeline record is unavailable; benchmark references require persistent recorded media")
+
+def read_timeline(workspace, query=None):
+    """Read committed persistent segments without owning or starting a writer."""
+    root = Path(workspace).resolve()
+    directory = root / ".ludens" / "timeline"
+    reader = ObservationHistory.__new__(ObservationHistory)
+    # A read-only view over the same selection and delivery logic as a live
+    # writer: no writer.lock, no hot window, no window reclamation.
+    reader.root = root
+    reader.directory = directory
+    reader.objects = directory / "objects"
+    reader.persistent = True
+    reader.hot_seconds = _configured(_workspace_settings(root), "hotSeconds", "LUDENS_PERCEPTION_HOT_SECONDS", 600)
+    reader.lock = threading.Lock()
+    reader._hot = OrderedDict()
+    reader._hot_media = {}
+    reader._channel_order = {}
+    reader._channel_bytes = Counter()
+    reader._expired = None
+    reader._segments = []
+    for metadata in (directory / "segments").glob("*.meta.json"):
+        if metadata.resolve() != metadata:
+            raise ValueError("Timeline segment metadata must not follow symlinks")
+        segment = json.loads(metadata.read_text())
+        segment["path"] = str(metadata).removesuffix(".meta.json")
+        reader._segments.append(segment)
+    if not reader._segments:
+        return {"records": [], "query": query if query is not None else {}, "hasMore": False,
+                "availability": {"persistent": True, "hotSeconds": 600, "earliest": None, "latest": None, "expired": False}}
+    reader._segments.sort(key=lambda item: item["firstSequence"])
+    return reader.observe(query)

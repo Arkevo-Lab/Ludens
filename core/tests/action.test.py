@@ -121,8 +121,10 @@ class Action:
 
 class ActionTests(unittest.TestCase):
     def test_manual_history_query_omits_absent_epoch(self):
+        # A socket path keeps observe on the live request path; without one it
+        # reads the committed timeline offline instead of building a message.
         with scope({**current(), "epoch": None}), patch("ludens_tools.client.request", return_value={"records": []}) as rpc:
-            self.assertEqual(Client().observe({"after": 1}), {"records": []})
+            self.assertEqual(Client("/tmp/ludens-manual.sock").observe({"after": 1}), {"records": []})
         self.assertNotIn("epoch", rpc.call_args.args[1])
         self.assertEqual(rpc.call_args.args[1]["query"], {"after": 1})
 

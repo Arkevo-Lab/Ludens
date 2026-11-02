@@ -7,6 +7,17 @@
   .capability-declaration-name { font:500 13px/1.6 ui-monospace,monospace; }
   .capability-declaration-name code { font:inherit; white-space:normal; }
   .capability-declaration-description { font-size:13px; line-height:1.6; }
+  .capability-declaration-description > p { margin:0; }
+  .capability-eval-status { margin-left:8px; font-family:ui-sans-serif,sans-serif; font-size:10px; line-height:1.4; text-transform:uppercase; }
+  .capability-eval-status[data-capability-eval-status="verified"] { border-color:var(--success); color:var(--success); background:color-mix(in srgb,var(--success) 8%,transparent); }
+  .capability-eval-status[data-capability-eval-status="stale"],.capability-eval-status[data-capability-eval-status="unverified"] { border-color:var(--gold); color:var(--gold); background:color-mix(in srgb,var(--gold) 8%,transparent); }
+  .capability-eval-status[data-capability-eval-status="failed"] { border-color:var(--destructive); color:var(--destructive); background:color-mix(in srgb,var(--destructive) 8%,transparent); }
+  .capability-eval-status[data-capability-eval-status="missing"] { color:var(--muted-foreground); }
+  .capability-eval-id { display:flex; flex-wrap:wrap; gap:4px 8px; margin-top:6px!important; color:var(--muted-foreground); font-size:11px; }
+  .capability-eval-id code { overflow-wrap:anywhere; color:var(--foreground); }
+  .capability-eval-rewards { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+  .capability-eval-rewards span { padding:1px 6px; border:1px solid var(--border); background:var(--muted); font:11px/1.6 ui-monospace,monospace; }
+  .capability-eval-error { margin-top:6px!important; color:var(--destructive); font-size:12px; }
   .capability-declaration-control { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:12px; line-height:1.6; }
   .capability-declaration-control dt { color:var(--muted-foreground); }
   .capability-declaration-control dd { min-width:0; margin:0; }

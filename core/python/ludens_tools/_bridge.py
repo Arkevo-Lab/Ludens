@@ -3,22 +3,28 @@
 import contextlib
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
 import traceback
 
-from ludens_tools._capabilities import discover, load_function, validate
+from ludens_tools._capabilities import discover, load_eval_function, load_function, validate
+
+
+def verified_source(workspace, path, expected):
+    source = (workspace / path).resolve()
+    source.relative_to(workspace)
+    raw = source.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != expected:
+        raise ValueError("Capability source changed after discovery; refresh before invoking it")
+    return raw
 
 
 def invoke(workspace, request):
     capability = request["capability"]
     validate(request["arguments"], capability["parameters"])
-    source = (workspace / capability["origin"]["path"]).resolve()
-    source.relative_to(workspace)
-    raw = source.read_bytes()
-    if hashlib.sha256(raw).hexdigest() != capability["codeSHA"]:
-        raise ValueError("Capability source changed after discovery; refresh before invoking it")
+    raw = verified_source(workspace, capability["origin"]["path"], capability["codeSHA"])
     # -B prevents cache writes, but still reads existing timestamp-based pyc.
     # Give this fresh process a nonexistent cache root so quick helper edits load.
     sys.pycache_prefix = str(workspace / "__pycache__" / ("ludens-" + os.urandom(12).hex()))
@@ -27,6 +33,58 @@ def invoke(workspace, request):
         result = function(**request["arguments"])
         # JSON is the cross-process contract; incidental prints go to stderr.
         encoded = json.dumps({"ok": True, "result": result}, allow_nan=False)
+    return encoded
+
+
+EVAL_RESULT_ERROR = "Eval function must return a non-empty dict of finite numeric rewards or {rewards, details}"
+
+
+def _numeric_rewards(value):
+    if not isinstance(value, dict) or not value:
+        return None
+    rewards = {}
+    for name, score in value.items():
+        if not isinstance(name, str) or type(score) not in (int, float) or not math.isfinite(score):
+            return None
+        rewards[name] = score
+    return rewards
+
+
+def _eval_rewards(result):
+    """Split an eval result into (rewards, details); reject any other shape."""
+    envelope, details = result, None
+    if isinstance(result, dict) and isinstance(result.get("rewards"), dict):
+        if set(result) - {"rewards", "details"}:
+            raise ValueError(EVAL_RESULT_ERROR)
+        envelope, details = result["rewards"], result.get("details")
+        if details is not None and not isinstance(details, dict):
+            raise ValueError(EVAL_RESULT_ERROR)
+    rewards = _numeric_rewards(envelope)
+    if rewards is None:
+        raise ValueError(EVAL_RESULT_ERROR)
+    if details is not None:
+        json.dumps(details, allow_nan=False)
+    return rewards, details
+
+
+def evaluate(workspace, request):
+    capability = request["capability"]
+    binding = capability.get("eval")
+    if not isinstance(binding, dict) or not isinstance(binding.get("origin"), dict):
+        raise ValueError("Eval execution requires a capability with a bound @eval_capability")
+    sources = {path: verified_source(workspace, path, expected) for path, expected in (
+        (capability["origin"]["path"], capability["codeSHA"]),
+        (binding["origin"]["path"], binding["codeSHA"]))}
+    # Evals replay committed evidence; they never inherit live device control.
+    os.environ.pop("LUDENS_EPOCH", None)
+    os.environ.pop("BASEWARE_EPOCH", None)
+    sys.pycache_prefix = str(workspace / "__pycache__" / ("ludens-" + os.urandom(12).hex()))
+    with invocation_output():
+        function = load_eval_function(workspace, binding["origin"]["path"], binding["origin"]["function"],
+                                      raw=sources[binding["origin"]["path"]])
+        rewards, details = _eval_rewards(function())
+        encoded = json.dumps({"ok": True, "rewards": rewards,
+                              **({"details": details} if details is not None else {})}, allow_nan=False)
     return encoded
 
 
@@ -55,6 +113,8 @@ def main():
             print(json.dumps(discover(workspace), allow_nan=False))
         elif request["action"] == "invoke":
             print(invoke(workspace, request))
+        elif request["action"] == "eval":
+            print(evaluate(workspace, request))
         else:
             raise ValueError("Unknown Python bridge action")
     except BaseException as error:

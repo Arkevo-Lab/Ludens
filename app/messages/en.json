@@ -360,6 +360,14 @@
     "descriptionCol": "Description",
     "controlCol": "Control requirements",
     "noDescription": "No description",
+    "evalFunction": "Eval",
+    "evalStatuses": {
+      "verified": "Verified",
+      "stale": "Stale",
+      "unverified": "Unverified",
+      "missing": "Missing",
+      "failed": "Failed"
+    },
     "taskCol": "Task",
     "versionCol": "Version digest",
     "taskDigest": "Content digest",

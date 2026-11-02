@@ -112,17 +112,18 @@ def function_schema(node):
 
 
 def marked_functions(tree, marker_name="capability"):
+    names = (marker_name,) if isinstance(marker_name, str) else tuple(marker_name)
     decorators, modules = set(), set()
     for node in tree.body:
         if isinstance(node, ast.ImportFrom) and node.module == "ludens_tools":
-            decorators.update(alias.asname or alias.name for alias in node.names if alias.name == marker_name)
+            decorators.update(alias.asname or alias.name for alias in node.names if alias.name in names)
         if isinstance(node, ast.Import):
             modules.update(alias.asname or alias.name for alias in node.names if alias.name == "ludens_tools")
     def is_marker(node):
         if isinstance(node, ast.Call):
             node = node.func
         return (isinstance(node, ast.Name) and node.id in decorators) or (
-            isinstance(node, ast.Attribute) and node.attr == marker_name and isinstance(node.value, ast.Name) and node.value.id in modules)
+            isinstance(node, ast.Attribute) and node.attr in names and isinstance(node.value, ast.Name) and node.value.id in modules)
     return [(node, [item for item in node.decorator_list if is_marker(item)])
             for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and any(is_marker(item) for item in node.decorator_list)]
@@ -151,15 +152,73 @@ def workspace_sources(workspace, diagnostics):
             yield relative, raw, tree
 
 
+def _eval_declaration(node, markers, tree):
+    """Validate one @eval_capability function locally; return (description, target)."""
+    if len(markers) != 1:
+        raise ValueError("Use eval_capability once on each eval function")
+    marker = markers[0]
+    if not isinstance(marker, ast.Call):
+        raise ValueError("eval_capability must be called with its target capability")
+    if len(marker.args) != 1 or marker.keywords:
+        raise ValueError("eval_capability takes exactly one positional argument, the target capability")
+    if isinstance(node, ast.AsyncFunctionDef):
+        raise ValueError("Async eval functions are unsupported; use a synchronous function")
+    if node not in tree.body:
+        raise ValueError("Eval functions must be top-level functions, not methods or nested functions")
+    description = ast.get_docstring(node)
+    if not description or not description.strip():
+        raise ValueError("An eval function must have a docstring describing its rewards")
+    arguments = node.args
+    if arguments.posonlyargs or arguments.vararg or arguments.kwarg:
+        raise ValueError("Positional-only parameters, *args and **kwargs are unsupported")
+    for argument, default in zip(arguments.args, [None] * (len(arguments.args) - len(arguments.defaults)) + list(arguments.defaults)):
+        if default is None:
+            raise ValueError("Eval functions take no required parameters; give every parameter a literal default")
+        try:
+            ast.literal_eval(default)
+        except (ValueError, TypeError):
+            raise ValueError("Eval function parameters require literal defaults") from None
+    for default in arguments.kw_defaults:
+        if default is None:
+            raise ValueError("Eval functions take no required parameters; give every parameter a literal default")
+        try:
+            ast.literal_eval(default)
+        except (ValueError, TypeError):
+            raise ValueError("Eval function parameters require literal defaults") from None
+    target = marker.args[0]
+    if isinstance(target, ast.Name):
+        return description, target.id
+    if isinstance(target, ast.Constant) and isinstance(target.value, str) and target.value.strip():
+        return description, target.value
+    raise ValueError("eval_capability requires a @capability function name or a 'python/<path.py>:<function>' ID string")
+
+
 def discover(workspace):
-    capabilities, diagnostics = [], []
+    capabilities, diagnostics, pending = [], [], []
     for relative, raw, tree in workspace_sources(workspace, diagnostics):
         declarations = {}
         for kind in ("capability", "record"):
             for node, markers in marked_functions(tree, kind):
                 declarations.setdefault(node, {})[kind] = markers
+        evals = {node: markers for node, markers in marked_functions(tree, ("eval_capability", "eval"))}
         parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+        combined = {node for node in evals if node in declarations}
+        for node in combined:
+            diagnostics.append({"path": relative, "function": node.name, "line": node.lineno,
+                                "message": "eval_capability cannot be combined with capability or record decorators"})
+        for node, markers in evals.items():
+            if node in combined:
+                continue
+            try:
+                description, target = _eval_declaration(node, markers, tree)
+                pending.append({"path": relative, "function": node.name, "line": node.lineno,
+                                "codeSHA": hashlib.sha256(raw).hexdigest(), "description": description,
+                                "target": target if target.startswith("python/") else "python/" + relative + ":" + target})
+            except ValueError as error:
+                diagnostics.append({"path": relative, "function": node.name, "line": node.lineno, "message": str(error)})
         for node, kinds in declarations.items():
+            if node in combined:
+                continue
             try:
                 markers = [marker for items in kinds.values() for marker in items]
                 if any(len(items) != 1 for items in kinds.values()) or len(markers) != len(node.decorator_list):
@@ -183,13 +242,28 @@ def discover(workspace):
                 name += "_" + hashlib.sha256(identity.encode()).hexdigest()[:10]
                 capabilities.append({"id": name, "name": name, "description": description, "parameters": parameters,
                     "origin": {"path": relative, "function": node.name, "line": node.lineno}, "codeSHA": hashlib.sha256(raw).hexdigest(),
-                    "recorded": "record" in kinds})
+                    "recorded": "record" in kinds, "eval": None})
             except (ValueError, SyntaxError) as error:
                 diagnostics.append({"path": relative, "function": node.name, "line": node.lineno, "message": str(error)})
+    # Eval targets may reference capabilities discovered in any workspace file.
+    indexed = {"python/" + item["origin"]["path"] + ":" + item["origin"]["function"]: item for item in capabilities}
+    for declaration in pending:
+        capability = indexed.get(declaration["target"])
+        if capability is None:
+            diagnostics.append({"path": declaration["path"], "function": declaration["function"], "line": declaration["line"],
+                                "message": "Eval target " + declaration["target"] + " is not a discovered workspace capability"})
+            continue
+        if capability["eval"] is not None:
+            diagnostics.append({"path": declaration["path"], "function": declaration["function"], "line": declaration["line"],
+                                "message": "Capability " + declaration["target"] + " already has eval " + capability["eval"]["id"]})
+            continue
+        capability["eval"] = {"id": "python/" + declaration["path"] + ":" + declaration["function"],
+                              "origin": {"path": declaration["path"], "function": declaration["function"], "line": declaration["line"]},
+                              "codeSHA": declaration["codeSHA"], "description": declaration["description"]}
     return {"capabilities": capabilities, "diagnostics": diagnostics}
 
 
-def load_function(workspace, relative_path, function_name, *, raw=None):
+def _load_marked(workspace, relative_path, function_name, marker_attribute, unmarked, *, raw=None):
     """Load a marked function once, sharing ordinary Python imports by file."""
     workspace = Path(workspace).resolve()
     source = (workspace / relative_path).resolve()
@@ -230,9 +304,19 @@ def load_function(workspace, relative_path, function_name, *, raw=None):
             if parent is not None:
                 setattr(parent, child_name, module)
     function = getattr(module, function_name)
-    if not callable(function) or not getattr(function, "__ludens_capability__", False):
-        raise ValueError("The selected function is not marked @capability")
+    if not callable(function) or not getattr(function, marker_attribute, False):
+        raise ValueError(unmarked)
     return function
+
+
+def load_function(workspace, relative_path, function_name, *, raw=None):
+    return _load_marked(workspace, relative_path, function_name, "__ludens_capability__",
+                        "The selected function is not marked @capability", raw=raw)
+
+
+def load_eval_function(workspace, relative_path, function_name, *, raw=None):
+    return _load_marked(workspace, relative_path, function_name, "__ludens_eval__",
+                        "The selected function is not marked @eval_capability", raw=raw)
 
 
 def call_local(workspace, capability_id, arguments):
