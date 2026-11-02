@@ -118,6 +118,19 @@ def eval_clamp() -> dict[str, float]:
     assert.equal(stale.evalStatus, "stale");
     assert.equal(stale.evalId, evalId);
     assert.deepEqual(stale.evalRewards, { accuracy: 1, samples: 3 });
+
+    await writeFile(source, declared);
+    await json(join(f.workspace, ".ludens/evals/latest.json"), { version: 1, capabilities: {
+      [capabilityId]: { runId: "eval-run-2", capabilityId, evalId, capabilityCodeSHA: codeSHA, evalCodeSHA: codeSHA,
+        evaluatedAt, durationMs: 4, outcome: "failed", rewards: { accuracy: 0.5, samples: 4 },
+        adaptation: { reason: "False positive on dark transition", records: ["rec-1"], adaptedAt: evaluatedAt, evalCodeSHA: codeSHA },
+        error: { type: "EvalAdapting", message: "False positive on dark transition" } },
+    } });
+    const adapting = await workspaceItem();
+    assert.equal(adapting.evalStatus, "adapting");
+    assert.equal(adapting.evalId, evalId);
+    assert.deepEqual(adapting.evalRewards, { accuracy: 0.5, samples: 4 });
+    assert.equal(adapting.evalError, "EvalAdapting: False positive on dark transition (records: rec-1)");
   } finally { clearCatalogCache(); await f.cleanup(); }
 });
 

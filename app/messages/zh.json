@@ -365,6 +365,7 @@
       "verified": "已验证",
       "stale": "已过期",
       "unverified": "未验证",
+      "adapting": "适应中",
       "missing": "未配置",
       "failed": "失败"
     },

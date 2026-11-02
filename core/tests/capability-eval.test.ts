@@ -153,7 +153,7 @@ test("run executes bound evals offline against committed timeline records", asyn
     await commitTimeline(directory, [1, 2, 3]);
     const before = await listCapabilityEvals(directory);
     expect(before.capabilities[0]).toMatchObject({ id: "python/actions.py:score", evalStatus: "unverified", evalId: "python/actions.py:eval_score" });
-    expect(before.summary).toEqual({ missing: 0, unverified: 1, stale: 0, failed: 0, verified: 0 });
+    expect(before.summary).toEqual({ missing: 0, unverified: 1, stale: 0, adapting: 0, failed: 0, verified: 0 });
 
     const run = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:score" });
     expect(run.outcome).toBe("passed");
@@ -270,7 +270,7 @@ test("ludens eval CLI runs shorthands, sets exit codes, and prints history", asy
 
     const listed = await command(["list"]);
     expect(listed.code).toBeUndefined();
-    expect(JSON.parse(listed.output).summary).toEqual({ missing: 0, unverified: 1, stale: 0, failed: 0, verified: 0 });
+    expect(JSON.parse(listed.output).summary).toEqual({ missing: 0, unverified: 1, stale: 0, adapting: 0, failed: 0, verified: 0 });
 
     const shorthand = await command(["python/actions.py:score"]);
     expect(shorthand.code).toBe(0);
@@ -286,6 +286,107 @@ test("ludens eval CLI runs shorthands, sets exit codes, and prints history", asy
     const second = await command(["history"]);
     expect(JSON.parse(second.output).runs).toHaveLength(2);
   } finally { process.exitCode = priorExit; await rm(directory, { recursive: true, force: true }); }
+});
+
+test("eval envelope passed=false fails while preserving rewards and details", async () => {
+  const directory = await workspace();
+  try {
+    delete process.env.LUDENS_SOCKET;
+    await writeFile(join(directory, "actions.py"), `from ludens_tools import capability, eval_capability
+
+@capability
+def score(value: float) -> float:
+    """Score a value."""
+    return value
+
+@eval_capability(score)
+def eval_score() -> dict:
+    """Report passed=false with partial rewards."""
+    return {"passed": False, "rewards": {"accuracy": 0.5}, "details": {"failed": ["rec-1"]}}
+`);
+    const run = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:score" });
+    expect(run.outcome).toBe("failed");
+    expect(run.results[0]).toMatchObject({ outcome: "failed", evalStatus: "failed",
+      rewards: { accuracy: 0.5 }, details: { failed: ["rec-1"] },
+      error: { type: "EvalFailed", message: "Eval reported passed=false" } });
+    const listed = await listCapabilityEvals(directory);
+    const item = listed.capabilities.find(entry => entry.id === "python/actions.py:score")!;
+    expect(item.evalStatus).toBe("failed");
+    expect(item.evalError).toBe("EvalFailed: Eval reported passed=false");
+    expect(item.evalRewards).toEqual({ accuracy: 0.5 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("ludens eval adapt gates on the whole eval module including capability code and CASES", async () => {
+  const directory = await workspace();
+  const base = `from ludens_tools import capability, eval_capability
+
+CASES = [1, 2]
+
+@capability
+def score(value: float) -> float:
+    """Score a value."""
+    return value
+
+@eval_capability(score)
+def eval_score() -> dict[str, float]:
+    """Evaluate score."""
+    return {"samples": len(CASES)}
+`;
+  const revised = base.replace("return value", "return value + 1").replace("CASES = [1, 2]", "CASES = [1, 2, 3]");
+  try {
+    delete process.env.LUDENS_SOCKET;
+    await writeFile(join(directory, "actions.py"), base);
+    const verified = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:score" });
+    expect(verified.results[0]!.evalStatus).toBe("verified");
+
+    const adaptLog = console.log, adaptOut: string[] = [];
+    console.log = value => { adaptOut.push(String(value)); };
+    try {
+      await evalCommand(["adapt", "python/actions.py:score", "--reason", "False positive on plaza",
+        "--record", "rec-1", "--record", "rec-2"], directory);
+    } finally { console.log = adaptLog; }
+    const adapted = JSON.parse(adaptOut.join("\n"));
+    expect(adapted.evalStatus).toBe("adapting");
+
+    let listed = await listCapabilityEvals(directory);
+    const item = () => listed.capabilities.find(entry => entry.id === "python/actions.py:score")!;
+    expect(item().evalStatus).toBe("adapting");
+    expect(listed.summary.adapting).toBe(1);
+    expect(item().evalRewards).toEqual({ samples: 2 });
+    expect(item().evalError).toBe("EvalAdapting: False positive on plaza (records: rec-1, rec-2)");
+
+    // Re-running the unchanged eval cannot clear adapting.
+    const unchanged = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:score" });
+    expect(unchanged.outcome).toBe("failed");
+    expect(unchanged.results[0]).toMatchObject({ outcome: "failed", evalStatus: "adapting" });
+    listed = await listCapabilityEvals(directory);
+    expect(item().evalStatus).toBe("adapting");
+
+    // codeSHA hashes the whole module, so any source edit ends the adaptation
+    // window; the status only returns to verified once the eval passes again.
+    await writeFile(join(directory, "actions.py"), base.replace("return value", "return value + 1"));
+    listed = await listCapabilityEvals(directory);
+    expect(item().evalStatus).toBe("stale");
+    const edited = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:score" });
+    expect(edited.results[0]!.evalStatus).toBe("verified");
+
+    // Module-level test-set edits also release a fresh adaptation gate.
+    const savedLog = console.log;
+    console.log = () => {};
+    try {
+      await evalCommand(["adapt", "python/actions.py:score", "--reason", "Expand CASES"], directory);
+    } finally { console.log = savedLog; }
+    listed = await listCapabilityEvals(directory);
+    expect(item().evalStatus).toBe("adapting");
+    await writeFile(join(directory, "actions.py"), revised);
+    const rerun = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:score" });
+    expect(rerun.outcome).toBe("passed");
+    expect(rerun.results[0]).toMatchObject({ outcome: "passed", evalStatus: "verified", rewards: { samples: 3 } });
+    listed = await listCapabilityEvals(directory);
+    expect(item().evalStatus).toBe("verified");
+    expect(listed.summary.adapting).toBe(0);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
 test("controller list and capabilities query expose evaluation enrichment", async () => {

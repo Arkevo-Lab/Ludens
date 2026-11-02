@@ -11,6 +11,7 @@
   .capability-eval-status { margin-left:8px; font-family:ui-sans-serif,sans-serif; font-size:10px; line-height:1.4; text-transform:uppercase; }
   .capability-eval-status[data-capability-eval-status="verified"] { border-color:var(--success); color:var(--success); background:color-mix(in srgb,var(--success) 8%,transparent); }
   .capability-eval-status[data-capability-eval-status="stale"],.capability-eval-status[data-capability-eval-status="unverified"] { border-color:var(--gold); color:var(--gold); background:color-mix(in srgb,var(--gold) 8%,transparent); }
+  .capability-eval-status[data-capability-eval-status="adapting"] { border-color:var(--primary); color:var(--primary); background:color-mix(in srgb,var(--primary) 8%,transparent); }
   .capability-eval-status[data-capability-eval-status="failed"] { border-color:var(--destructive); color:var(--destructive); background:color-mix(in srgb,var(--destructive) 8%,transparent); }
   .capability-eval-status[data-capability-eval-status="missing"] { color:var(--muted-foreground); }
   .capability-eval-id { display:flex; flex-wrap:wrap; gap:4px 8px; margin-top:6px!important; color:var(--muted-foreground); font-size:11px; }

@@ -115,15 +115,16 @@ def parse_hp_bar(frame_path: str) -> dict:
     ...
 
 @eval_capability(parse_hp_bar)
-def eval_parse_hp_bar() -> dict[str, float]:
+def eval_parse_hp_bar() -> dict:
     """Evaluate HP parsing on recorded timeline frames."""
     observations = Client().observe()
     samples = [...]  # Derive labeled samples from observations or fixtures.
-    correct = sum(parse_hp_bar(sample["frame_path"])["hp"] == sample["hp"] for sample in samples)
-    return {"accuracy": correct / len(samples), "samples": len(samples)}
+    failed = [sample for sample in samples if parse_hp_bar(sample["frame_path"])["hp"] != sample["hp"]]
+    accuracy = (len(samples) - len(failed)) / len(samples)
+    return {"passed": accuracy == 1.0, "rewards": {"accuracy": accuracy, "samples": len(samples)}, "details": {"failed": failed}}
 ```
 
-The eval must have a docstring and return either a non-empty flat `dict[str, int | float]` of finite rewards or an envelope with `rewards` and optional `details`. Discovery is static; evaluation executes only when requested:
+The eval must have a docstring and return either a non-empty flat `dict[str, int | float]` of finite rewards or an envelope `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`. When `passed` is `False`, the run records `failed` while preserving `rewards` and `details` for iteration. Discovery is static; evaluation executes only when requested:
 
 ```sh
 # List bindings, current statuses, rewards, and discovery diagnostics
@@ -133,22 +134,28 @@ ludens eval list
 ludens eval run python/perception.py:parse_hp_bar
 ludens eval run --all
 
+# Flag a capability as adapting when live usage fails despite passing its old test set
+ludens eval adapt python/perception.py:parse_hp_bar --reason "False positive on dark transition" --record <record-id>
+
 # Read immutable historical runs, newest first
 ludens eval history python/perception.py:parse_hp_bar
 ludens eval history
 ```
 
-Records are stored in `.ludens/evals/latest.json` and `.ludens/evals/runs/<run-id>.json`. The catalog exposes five statuses:
+Records are stored in `.ludens/evals/latest.json` and `.ludens/evals/runs/<run-id>.json`. The catalog exposes six statuses:
 
 | Status | Meaning |
 | --- | --- |
 | `missing` | No `@eval_capability` is bound to the capability. |
 | `unverified` | An eval is bound, but no latest run exists. |
 | `stale` | The capability or eval source `codeSHA`, or the bound eval ID, changed after the latest run. |
+| `adapting` | Explicitly marked for eval revision; reruns stay failed/adapting while the eval module's whole-file `evalCodeSHA` is unchanged. |
 | `failed` | The latest matching run failed or produced no valid non-empty rewards. |
 | `verified` | The latest matching run passed with valid rewards for the current capability and eval code. |
 
-Because both source files' `codeSHA` values are recorded, editing either the capability or its eval automatically makes the result `stale`; rerun it before relying on the old rewards. `ludens consolidate` supplies a fresh static evaluation catalog to its file-only prompt: capabilities with a bound `@eval_capability` may be retained or promoted into `skills/` only when `verified` (while `unverified`, `stale`, or `failed` entries are pruned), whereas capabilities without a bound eval (`missing`, such as live device-action macros) may still be retained when proven useful in live runs. It does not execute evals or edit capability/eval source during consolidation; needed changes or eval commands are recorded in memory for a later execution turn.
+Both `codeSHA` values hash whole source files, not function AST nodes. This includes module-level `CASES` constants. Any edit to the eval module, including a comment or a capability-only edit in the same file, releases the adaptation gate and makes the previous result `stale`; only a subsequent passing run becomes `verified`. This is a source-change guard, not proof that counterexamples were added: add the failing records to the test set/verifier before trusting the capability again. Changes to external fixtures or imported helpers are not included in this hash; update the eval module when revising those cases.
+
+`ludens consolidate` supplies a fresh static evaluation catalog to its file-only prompt: capabilities with a bound `@eval_capability` may be retained or promoted into `skills/` only when `verified` (while `unverified`, `stale`, `adapting`, or `failed` entries are pruned), whereas capabilities without a bound eval (`missing`, such as live device-action macros) may still be retained when proven useful in live runs. It does not execute evals or edit capability/eval source during consolidation; needed changes or eval commands are recorded in memory for a later execution turn.
 
 ## Capability Archiving and the Workspace Timeline
 

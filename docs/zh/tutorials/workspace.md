@@ -115,15 +115,16 @@ def parse_hp_bar(frame_path: str) -> dict:
     ...
 
 @eval_capability(parse_hp_bar)
-def eval_parse_hp_bar() -> dict[str, float]:
+def eval_parse_hp_bar() -> dict:
     """Evaluate HP parsing on recorded timeline frames."""
     observations = Client().observe()
     samples = [...]  # Derive labeled samples from observations or fixtures.
-    correct = sum(parse_hp_bar(sample["frame_path"])["hp"] == sample["hp"] for sample in samples)
-    return {"accuracy": correct / len(samples), "samples": len(samples)}
+    failed = [sample for sample in samples if parse_hp_bar(sample["frame_path"])["hp"] != sample["hp"]]
+    accuracy = (len(samples) - len(failed)) / len(samples)
+    return {"passed": accuracy == 1.0, "rewards": {"accuracy": accuracy, "samples": len(samples)}, "details": {"failed": failed}}
 ```
 
-评估函数必须包含 docstring，并返回非空的扁平 `dict[str, int | float]` 有限数值奖励，或包含 `rewards` 与可选 `details` 的信封。发现过程只进行静态扫描；只有显式请求时才执行评估：
+评估函数必须包含 docstring，并返回非空的扁平 `dict[str, int | float]` 有限数值奖励，或信封 `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`。当 `passed` 为 `False` 时，运行会记录 `failed`，同时保留 `rewards` 与 `details` 以便迭代。发现过程只进行静态扫描；只有显式请求时才执行评估：
 
 ```sh
 # 列出绑定、当前状态、奖励与发现诊断
@@ -133,22 +134,28 @@ ludens eval list
 ludens eval run python/perception.py:parse_hp_bar
 ludens eval run --all
 
+# 当能力在旧题集上通过但实机翻车时，标记为 adapting 并记录反例帧
+ludens eval adapt python/perception.py:parse_hp_bar --reason "False positive on dark transition" --record <record-id>
+
 # 按时间倒序读取不可变历史运行
 ludens eval history python/perception.py:parse_hp_bar
 ludens eval history
 ```
 
-记录保存在 `.ludens/evals/latest.json` 与 `.ludens/evals/runs/<run-id>.json`。能力目录包含五种状态：
+记录保存在 `.ludens/evals/latest.json` 与 `.ludens/evals/runs/<run-id>.json`。能力目录包含六种状态：
 
 | 状态 | 含义 |
 | --- | --- |
 | `missing` | 能力没有绑定 `@eval_capability`。 |
 | `unverified` | 已绑定评估，但尚无最新运行记录。 |
 | `stale` | 最新运行后，能力或评估源码的 `codeSHA` 发生变化，或绑定的评估 ID 已改变。 |
+| `adapting` | 已显式标记为需要修订评估；只要评估模块的整文件 `evalCodeSHA` 未变，重跑仍为 failed/adapting。 |
 | `failed` | 最新匹配运行失败，或未产出合法的非空奖励。 |
 | `verified` | 当前能力与评估代码对应的最新匹配运行已通过，并产出合法奖励。 |
 
-由于运行会记录两个源码文件的 `codeSHA`，编辑能力或其评估函数都会自动将结果标为 `stale`；复用旧奖励前必须重新运行。`ludens consolidate` 会向仅允许文件工具的提示注入最新静态评估目录：对于绑定了 `@eval_capability` 的能力，仅当状态为 `verified` 时才允许保留或提升到 `skills/`（`unverified`、`stale` 或 `failed` 条目会被剪除）；而未绑定评估的能力（`missing`，例如实机动作编排宏）只要在实机运行中验证有效仍可保留。整理期间不会执行评估或编辑能力/评估源码；所需修改或评估命令会记录到 memory，留待后续执行轮次处理。
+两个 `codeSHA` 都对整个源码文件计算哈希，而非函数 AST 节点，因此包含模块级 `CASES` 常量。评估模块的任何修改（包括注释或同文件内仅修改能力函数）都会解除适应门控，并使旧结果变为 `stale`；只有随后运行通过才会变为 `verified`。这是源码变化保护，不是已加入反例的证明：再次信任能力前，应将失败记录加入题集或验证器。外部 fixture 或导入的辅助模块不在此哈希范围内；修订这些用例时也应更新评估模块。
+
+`ludens consolidate` 会向仅允许文件工具的提示注入最新静态评估目录：对于绑定了 `@eval_capability` 的能力，仅当状态为 `verified` 时才允许保留或提升到 `skills/`（`unverified`、`stale`、`adapting` 或 `failed` 条目会被剪除）；而未绑定评估的能力（`missing`，例如实机动作编排宏）只要在实机运行中验证有效仍可保留。整理期间不会执行评估或编辑能力/评估源码；所需修改或评估命令会记录到 memory，留待后续执行轮次处理。
 
 ## 能力留档与 workspace 时空轴
 

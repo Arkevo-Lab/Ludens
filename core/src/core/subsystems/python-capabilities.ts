@@ -143,14 +143,19 @@ export class PythonCapabilities {
       if (!capability) throw new Error(`Unknown Python capability: ${id}; discover the workspace before invoking it`);
       if (!capability.eval) throw new Error(`Capability ${id} has no @eval_capability bound`);
       const processResult = await this.run({ action: "eval", workspace: this.workspace, capability }, options, false, true);
-      let reply: { ok: boolean; rewards?: Record<string, number>; details?: Record<string, unknown>; error?: PythonEvalDetails["error"] };
+      let reply: { ok: boolean; passed?: boolean; rewards?: Record<string, number>; details?: Record<string, unknown>; error?: PythonEvalDetails["error"] };
       try { reply = JSON.parse(processResult.stdout); }
       catch {
         reply = { ok: false, error: { type: "PythonProcessError", message: `Python exited ${processResult.exitCode} without a valid result` } };
       }
-      const failed = !reply.ok || processResult.exitCode !== 0;
+      const processFailed = !reply.ok || processResult.exitCode !== 0;
+      const evalFailed = !processFailed && reply.passed === false;
+      const failed = processFailed || evalFailed;
       const details: PythonEvalDetails = { capabilityId: id, evalId: capability.eval.id, origin: capability.origin, codeSHA: capability.codeSHA,
-        ...(failed ? { error: reply.error ?? { type: "PythonProcessError", message: `Python exited ${processResult.exitCode}` } }
+        ...(failed
+          ? { ...(processFailed ? { error: reply.error ?? { type: "PythonProcessError", message: `Python exited ${processResult.exitCode}` } }
+                : { rewards: reply.rewards, ...(reply.details ? { details: reply.details } : {}),
+                    ...(evalFailed ? { error: { type: "EvalFailed", message: "Eval reported passed=false" } } : {}) }) }
           : { rewards: reply.rewards, ...(reply.details ? { details: reply.details } : {}) }),
         exitCode: processResult.exitCode, stderr: processResult.stderr };
       this.emit("python_eval_result", { ...details, outcome: failed ? "error" : "success", durationMs: performance.now() - started }, trace);

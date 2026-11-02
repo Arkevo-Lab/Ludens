@@ -36,7 +36,7 @@ def invoke(workspace, request):
     return encoded
 
 
-EVAL_RESULT_ERROR = "Eval function must return a non-empty dict of finite numeric rewards or {rewards, details}"
+EVAL_RESULT_ERROR = "Eval function must return a non-empty dict of finite numeric rewards or {rewards, details, passed}"
 
 
 def _numeric_rewards(value):
@@ -51,20 +51,24 @@ def _numeric_rewards(value):
 
 
 def _eval_rewards(result):
-    """Split an eval result into (rewards, details); reject any other shape."""
-    envelope, details = result, None
+    """Split an eval result into (rewards, details, passed); reject any other shape."""
+    envelope, details, passed = result, None, True
     if isinstance(result, dict) and isinstance(result.get("rewards"), dict):
-        if set(result) - {"rewards", "details"}:
+        if set(result) - {"rewards", "details", "passed"}:
             raise ValueError(EVAL_RESULT_ERROR)
         envelope, details = result["rewards"], result.get("details")
         if details is not None and not isinstance(details, dict):
             raise ValueError(EVAL_RESULT_ERROR)
+        if "passed" in result:
+            if type(result["passed"]) is not bool:
+                raise ValueError(EVAL_RESULT_ERROR)
+            passed = result["passed"]
     rewards = _numeric_rewards(envelope)
     if rewards is None:
         raise ValueError(EVAL_RESULT_ERROR)
     if details is not None:
         json.dumps(details, allow_nan=False)
-    return rewards, details
+    return rewards, details, passed
 
 
 def evaluate(workspace, request):
@@ -82,8 +86,8 @@ def evaluate(workspace, request):
     with invocation_output():
         function = load_eval_function(workspace, binding["origin"]["path"], binding["origin"]["function"],
                                       raw=sources[binding["origin"]["path"]])
-        rewards, details = _eval_rewards(function())
-        encoded = json.dumps({"ok": True, "rewards": rewards,
+        rewards, details, passed = _eval_rewards(function())
+        encoded = json.dumps({"ok": True, "passed": passed, "rewards": rewards,
                               **({"details": details} if details is not None else {})}, allow_nan=False)
     return encoded
 
