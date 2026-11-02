@@ -313,8 +313,8 @@ export function DocsView({ search, navigate }: {
         <div className="docs-body docs-overview-grid">
           {groups?.map(group => <Card key={group.id} className="gap-3 p-5">
             <h2 className="m-0! text-base!">{group.title}</h2><p className="text-sm text-muted-foreground">{group.blurb}</p>
-            <div className="docs-overview-links">{group.docs.map(item => <Button key={item.id} asChild variant="link" size="sm" className="h-auto justify-start whitespace-normal px-0 text-left">
-              <a href={documentUrl(search, item.id)} data-doc={item.id}>{item.title} →</a>
+            <div className="docs-overview-links">{group.docs.map(item => <Button key={item.id} asChild variant="link" size="sm" className="group h-auto justify-start whitespace-normal px-0 text-left text-foreground/85 no-underline hover:text-foreground hover:no-underline">
+              <a href={documentUrl(search, item.id)} data-doc={item.id}><span>{item.title}</span><span className="text-muted-foreground transition-colors group-hover:text-[var(--gold)]">→</span></a>
             </Button>)}</div>
           </Card>)}
         </div>

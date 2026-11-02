@@ -1,18 +1,18 @@
 /* Domain-specific desktop notification and settings layout. Settings use shared UI primitives. */
 @layer components {
 /* Follow selection and the desktop acknowledgement are separate surfaces. */
-.pet-follow-settings { min-width: 0; padding-block: 0; gap: 0; box-shadow: none; background: color-mix(in srgb, var(--background) 18%, var(--card)); }
+.pet-follow-settings { min-width: 0; padding-block: 0; gap: 0; box-shadow: none; background: var(--surface-inset); border-radius: var(--radius-sm); }
 .pet-follow-settings-content { min-width: 0; display: grid; gap: 16px; padding: 18px; }
 .pet-follow-selection { display: grid; grid-template-columns: minmax(0, 1fr) minmax(230px, 1fr); align-items: center; gap: 18px; }
 .pet-follow-selection-label { min-width: 0; }
 .pet-follow-selection-label > p, .pet-follow-desktop > div > p { margin-top: 5px; color: var(--muted-foreground); font-size: 12px; line-height: 1.6; }
 .pet-follow-selection-control { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .pet-follow-selection-control > [data-slot="native-select-wrapper"] { flex: 1 1 120px; }
-.pet-follow-save-badge { flex-shrink: 0; max-width: 45%; min-height: 32px; gap: 5px; color: var(--primary); white-space: normal; line-height: 1.4; }
+.pet-follow-save-badge { flex-shrink: 0; max-width: 45%; min-height: 32px; gap: 5px; color: var(--gold); border-color: color-mix(in srgb, var(--gold) 35%, var(--border)); white-space: normal; line-height: 1.4; }
 .pet-follow-save-badge > svg { width: 14px; height: 14px; flex-shrink: 0; }
 .pet-follow-saving, .pet-follow-empty { margin: 0; font-size: 12px; line-height: 1.6; color: var(--muted-foreground); overflow-wrap: anywhere; }
 .pet-follow-saving strong { color: var(--foreground); font-weight: 500; }
-.pet-follow-path { min-width: 0; border: 1px solid var(--border); border-radius: 7px; font-size: 12px; }
+.pet-follow-path { min-width: 0; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--panel); font-family: var(--font-mono); font-size: 11.5px; }
 .pet-follow-path > summary { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 10px 12px; cursor: pointer; list-style: none; }
 .pet-follow-path > summary::-webkit-details-marker { display: none; }
 .pet-follow-path > summary > svg { flex-shrink: 0; width: 14px; height: 14px; color: var(--muted-foreground); }
@@ -65,10 +65,10 @@
 }
 .desktop-notification {
   padding: 18px;
-  background: var(--panel, #202321);
-  border: 1px solid var(--line, #343a35);
-  border-radius: 14px;
-  box-shadow: 0 12px 40px #00000050;
+  background: var(--panel, #10131a);
+  border: 1px solid var(--line, #1e2330);
+  border-radius: var(--radius, 6px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
 }
 .desktop-notification.is-error {
   border-color: color-mix(in srgb, var(--destructive) 60%, var(--border));
@@ -80,7 +80,7 @@
   margin-bottom: 10px;
 }
 .desktop-notification-label {
-  color: var(--gold, #dbbc81);
+  color: var(--gold, #ff4f1f);
   font-size: 10px;
   letter-spacing: 1px;
 }
@@ -89,7 +89,7 @@
   font-weight: 600;
 }
 .desktop-notification p {
-  color: var(--muted-foreground, #a3aaa2);
+  color: var(--muted-foreground, #8e95a5);
   font-size: 12px;
   line-height: 1.6;
   white-space: pre-wrap;

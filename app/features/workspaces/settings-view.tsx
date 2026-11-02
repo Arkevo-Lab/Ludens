@@ -15,9 +15,9 @@ export function SettingsView({ follow, projects }: { follow: PetFollow; projects
   const languageId = useId();
   return <section className="settings-page mx-auto grid w-full max-w-5xl gap-6">
     <Card>
-      <CardHeader className="flex flex-row items-start gap-4">
-        <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Monitor aria-hidden="true" className="size-5" /></div>
-        <div className="space-y-1.5"><CardTitle role="heading" aria-level={2}>{t("consoleTitle")}</CardTitle>
+      <CardHeader className="flex flex-row items-start gap-3.5">
+        <div className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--surface-inset)] text-[var(--gold)]"><Monitor aria-hidden="true" className="size-4" /></div>
+        <div className="space-y-1"><CardTitle role="heading" aria-level={2}>{t("consoleTitle")}</CardTitle>
           <CardDescription>{t("consoleDescription")}</CardDescription></div>
       </CardHeader>
       <CardContent>

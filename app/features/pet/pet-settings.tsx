@@ -75,11 +75,11 @@ export function PetSettings({ follow, projects }: { follow: PetFollow; projects:
   const blockLabels: Record<BlockKind, string> = { thinking: t("blockThinking"), text: t("blockText"), tool: t("blockTool"), system: t("blockSystem"), diagnostic: t("blockDiagnostic") };
   const prefsDisabled = prefs.pending || !!prefs.readError || !!prefs.writeError;
   const soundDisabled = sound.pending || !!sound.readError || (!!sound.writeError && sound.writeError.code !== "invalidFile");
-  return <section aria-labelledby={titleId} className="grid min-w-0 gap-5 rounded-xl border bg-card p-5 max-[480px]:p-4">
-    <header className="flex items-start gap-4">
-      <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary/10 font-serif text-2xl text-primary" aria-hidden="true">L</div>
-      <div className="min-w-0 space-y-1.5"><div className="flex flex-wrap items-center gap-2"><h2 id={titleId} className="text-base font-semibold">{t("title")}</h2><Badge variant="outline">{t("optionalBadge")}</Badge></div>
-        <p className="text-sm leading-relaxed text-muted-foreground">{t("subtitle")}</p></div>
+  return <section aria-labelledby={titleId} className="grid min-w-0 gap-5 rounded-md border bg-card p-5 max-[480px]:p-4">
+    <header className="flex items-start gap-3.5">
+      <div className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--surface-inset)] font-mono text-sm font-bold text-[var(--gold)]" aria-hidden="true">L</div>
+      <div className="min-w-0 space-y-1"><div className="flex flex-wrap items-center gap-2"><h2 id={titleId} className="text-base font-semibold">{t("title")}</h2><Badge variant="outline">{t("optionalBadge")}</Badge></div>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t("subtitle")}</p></div>
     </header>
     <div className="grid min-w-0 gap-4">
       <PetFollowSettings follow={follow} projects={projects} />
