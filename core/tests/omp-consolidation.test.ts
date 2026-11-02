@@ -82,7 +82,7 @@ test("consolidation uses the same session with file tools, records memory reads,
     await session.prompt("Explore.");
     expect(captures).toBe(1);
     cycle = { epoch: "consolidate", signal: control.signal, purpose: "consolidate" };
-    await consolidateOmpSession(session, control.signal);
+    await consolidateOmpSession(session, control.signal, workspace);
     expect(captures).toBe(1);
     expect(session.sessionFile).toBe(originalFile);
     expect(session.getActiveToolNames()).toEqual(originalTools);
@@ -120,7 +120,9 @@ test.each(["prompt failure", "abort during tool change"])("consolidation restore
     async prompt() { prompts++; throw new Error("offline prompt failure"); },
     getLastAssistantMessage: () => undefined,
   };
-  await expect(consolidateOmpSession(session, control.signal)).rejects.toThrow();
+  const workspace = await mkdtemp(join(tmpdir(), "ludens-consolidation-failure-"));
+  try { await expect(consolidateOmpSession(session, control.signal, workspace)).rejects.toThrow(); }
+  finally { await rm(workspace, { recursive: true, force: true }); }
   expect(changes).toEqual([["read", "write", "edit"], original]);
   expect(prompts).toBe(failure === "prompt failure" ? 1 : 0);
 });

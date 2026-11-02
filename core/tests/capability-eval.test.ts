@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:net";
 import { pythonExecutable } from "@ludens/protocol/python";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { PythonCapabilities } from "../src/core/subsystems/python-capabilities.ts";
@@ -31,6 +32,37 @@ def eval_score() -> dict[str, float]:
     ticks = [record["data"]["tick"] for record in records]
     return {"samples": float(len(ticks)), "coverage": 1.0 if ticks else 0.0, "sum": float(sum(ticks))}
 `;
+
+test("eval ignores an inherited live Host socket and reads committed history", async () => {
+  const directory = await workspace();
+  const socket = join(directory, "host.sock");
+  let requests = 0;
+  const server = createServer(connection => {
+    connection.on("data", () => {
+      requests++;
+      connection.end(JSON.stringify({ ok: true, value: { queryId: "live", records: [] } }) + "\n");
+    });
+  });
+  try {
+    const listening = Promise.withResolvers<void>();
+    server.once("error", listening.reject);
+    server.listen(socket, listening.resolve);
+    await listening.promise;
+    await writeFile(join(directory, "actions.py"), CAPABILITY_SOURCE);
+    await commitTimeline(directory, [1, 2]);
+    const python = new PythonCapabilities(directory);
+    const { capabilities } = await python.discover();
+    const result = await python.evaluate(capabilities[0]!.id, { env: { LUDENS_SOCKET: socket } });
+    expect(result.isError).toBe(false);
+    expect(result.details.rewards).toEqual({ samples: 2, coverage: 1, sum: 3 });
+    expect(requests).toBe(0);
+  } finally {
+    const closed = Promise.withResolvers<void>();
+    server.close(() => closed.resolve());
+    await closed.promise;
+    await rm(directory, { recursive: true, force: true });
+  }
+});
 
 /** Commit persistent timeline records with a short-lived writer, then release it. */
 async function commitTimeline(directory: string, ticks: number[]) {

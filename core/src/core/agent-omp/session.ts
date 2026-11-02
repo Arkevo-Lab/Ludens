@@ -10,6 +10,7 @@ import { createLudensExtension, type Cycle, type ExtensionHost } from "./extensi
 import type { EventLog } from "../storage/events.ts";
 import { installCompactionHttpTrace, ModelTrace } from "./trace.ts";
 import { SHIORI_SOURCE } from "./shiori.ts";
+import { listCapabilityEvals } from "../subsystems/capability-evals.ts";
 import continuation from "../../../prompts/continue.md" with { type: "text" };
 import consolidation from "../../../prompts/consolidate.md" with { type: "text" };
 
@@ -17,13 +18,15 @@ import consolidation from "../../../prompts/consolidate.md" with { type: "text" 
 export async function consolidateOmpSession(
   session: Pick<AgentSession, "getActiveToolNames" | "setActiveToolsByName" | "prompt" | "getLastAssistantMessage">,
   signal: AbortSignal,
+  workspace: string,
 ) {
   const tools = session.getActiveToolNames();
   signal.throwIfAborted();
   try {
     await session.setActiveToolsByName(["read", "write", "edit"]);
     signal.throwIfAborted();
-    await session.prompt(consolidation);
+    const evaluations = await listCapabilityEvals(workspace, { signal });
+    await session.prompt(`${consolidation}\n\nCurrent capability evaluations (static discovery; no workspace code executed):\n${JSON.stringify(evaluations)}`);
     signal.throwIfAborted();
     const last = session.getLastAssistantMessage();
     if (last?.stopReason === "error") throw new Error(last.errorMessage ?? "Model request failed");
@@ -142,7 +145,7 @@ export async function createOmpAgent(options: {
       },
       async consolidate(context) {
         cycle = { ...context, purpose: "consolidate" };
-        try { await consolidateOmpSession(session, context.signal); }
+        try { await consolidateOmpSession(session, context.signal, options.workspace); }
         finally { cycle = undefined; }
       },
       abort: () => session.abort(),

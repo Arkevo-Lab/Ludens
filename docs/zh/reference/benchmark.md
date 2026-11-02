@@ -11,7 +11,7 @@ Ludens 评测系统遵循 [Harbor Framework](https://github.com/harbor-framework
 | `eval` | 工作区 Python 能力与 `.ludens/evals/` | 单项原子能力能否基于时空轴观测或夹具通过其绑定的 `@eval_capability`？ | `ludens eval ...` |
 | `bench` | `core/benchmarks/`、`core/src/bench/`、`app/features/benchmark/` | 端到端 Harbor Agent/任务运行能否通过独立评分？ | `ludens bench ...` |
 
-`ludens eval` 评估工作区内的单个 Python 函数，并将能力绑定的状态与奖励存入 `.ludens/evals/`。相比之下，`ludens bench` 通过 Harbor 评估完整 Agent 或程序任务，将执行产物与独立计算的分数存入 `logs/<run-id>/`；单项能力评估不是一次 Harbor Benchmark 运行。能力评估的编写与运行见 [工作区与能力编程](../tutorials/workspace.md#3-使用-eval_capability-与-ludens-eval-评估能力)。
+`ludens eval` 评估工作区内的单个 Python 函数，并将能力绑定的状态与奖励存入 `.ludens/evals/`。相比之下，`ludens bench` 通过 Harbor 评估完整 Agent 或程序任务，将执行产物与独立计算的分数存入 `logs/<run-id>/`；单项能力评估不是一次 Harbor Benchmark 运行。能力评估的编写与运行见 [工作区与能力编程](../tutorials/workspace.md#3-使用-eval-capability-与-ludens-eval-评估能力)。
 
 本文只覆盖 `bench`；子系统性能基线见 [控制台调试与验证](../tutorials/debugging-and-verification.md)。
 

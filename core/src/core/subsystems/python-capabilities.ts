@@ -171,6 +171,7 @@ export class PythonCapabilities {
     // or its standard-library imports. Invocation retains the author's environment.
     if (sourceOnly) env.PYTHONPATH = pythonModulePaths().join(delimiter);
     for (const name of offline ? ["LUDENS_EPOCH", "LUDENS_TRACE", "BASEWARE_EPOCH", "BASEWARE_TRACE"] : ["LUDENS_EPOCH", "LUDENS_TRACE"]) delete env[name];
+    if (offline) { delete env.LUDENS_SOCKET; delete env.BASEWARE_SOCKET; }
     env.PYTHONDONTWRITEBYTECODE = "1";
     return new Promise((done, fail) => {
       const child = spawn(this.pythonPath, ["-B", "-m", "ludens_tools._bridge"], {

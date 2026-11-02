@@ -11,7 +11,7 @@ Quality checks span four orthogonal tiers; do not mix their semantics:
 | `eval` | Workspace Python capabilities and `.ludens/evals/` | Does one atomic capability pass its bound `@eval_capability` against timeline observations or fixtures? | `ludens eval ...` |
 | `bench` | `core/benchmarks/`, `core/src/bench/`, `app/features/benchmark/` | Does an end-to-end Harbor Agent/Task run pass independent scoring? | `ludens bench ...` |
 
-`ludens eval` evaluates individual in-workspace Python functions and stores capability-bound status and rewards under `.ludens/evals/`. In contrast, `ludens bench` evaluates complete agent or program tasks through Harbor and stores execution artifacts and independently computed scores under `logs/<run-id>/`; an atomic capability eval is not a Harbor benchmark run. Authoring and running capability evals is covered in [Workspace and Capability Programming](../tutorials/workspace.md#3-evaluating-capabilities-with-eval_capability-and-ludens-eval).
+`ludens eval` evaluates individual in-workspace Python functions and stores capability-bound status and rewards under `.ludens/evals/`. In contrast, `ludens bench` evaluates complete agent or program tasks through Harbor and stores execution artifacts and independently computed scores under `logs/<run-id>/`; an atomic capability eval is not a Harbor benchmark run. Authoring and running capability evals is covered in [Workspace and Capability Programming](../tutorials/workspace.md#3-evaluating-capabilities-with-eval-capability-and-ludens-eval).
 
 This document covers `bench` only; subsystem performance baselines live in [Console debugging & verification](../tutorials/debugging-and-verification.md).
 

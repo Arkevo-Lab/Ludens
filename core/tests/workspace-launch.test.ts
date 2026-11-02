@@ -425,7 +425,7 @@ test("external packages resolve workspace-relative file specs and check only exe
       expect(unavailable.stderr).toContain("Missing executable fixture-emulator");
     }
   } finally { await rm(directory, { recursive: true, force: true }); }
-});
+}, 15_000); // Real CLI startup includes two independently bounded Dashboard probes.
 
 test("failed startup preserves ready services and repeated up resumes without duplicate hosts or takeover", async () => {
   const value = await plan();
