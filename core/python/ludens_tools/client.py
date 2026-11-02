@@ -1,10 +1,13 @@
 """Synchronous access to the workspace's unified capability interface."""
 
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 import uuid
 from ._context import LudensError, continuous, current, request, scope
 from ._observation_history import read_timeline
+
+_in_eval_env_observe = ContextVar("ludens_in_eval_env_observe", default=False)
 
 
 class Client:
@@ -51,15 +54,34 @@ class Client:
 
     def list(self) -> Any:
         """List registered driver and workspace capabilities."""
+        env = current().get("eval_env")
+        if env is not None and hasattr(env, "list") and callable(env.list):
+            return env.list()
         return self._request("list")
 
     def help(self, capability_id: str) -> Any:
         """Read the selected capability's description and arguments."""
+        env = current().get("eval_env")
+        if env is not None and hasattr(env, "help") and callable(env.help):
+            return env.help(capability_id)
         return self._request("help", id=capability_id)
 
     def observe(self, query: dict[str, Any] | None = None) -> Any:
         """Read timeline history without sampling; returns the same envelope as ludens observe."""
         context = self._context()
+        env = context.get("eval_env")
+        if (env is not None and not _in_eval_env_observe.get()
+                and hasattr(env, "observe") and callable(env.observe)):
+            token = _in_eval_env_observe.set(True)
+            try:
+                raw = env.observe(query or {})
+            finally:
+                _in_eval_env_observe.reset(token)
+            if isinstance(raw, list):
+                return {"queryId": "eval-env-" + uuid.uuid4().hex[:8], "ok": True, "records": raw, "hasMore": False}
+            if isinstance(raw, dict):
+                return {"queryId": "eval-env-" + uuid.uuid4().hex[:8], "ok": True, "records": [], "hasMore": False, **raw}
+            raise ValueError("eval_env.observe must return a record list or observation envelope dict")
         if context["socket_path"] is None:
             return self._offline_timeline(context, query)
         try:
@@ -92,5 +114,12 @@ class Client:
             arguments = {}
         if not isinstance(arguments, dict):
             raise TypeError("Driver capability arguments must be a JSON object")
+        env = current().get("eval_env")
+        if env is not None:
+            if hasattr(env, "call") and callable(env.call):
+                return env.call(capability_id, arguments)
+            if callable(env):
+                return env(capability_id, arguments)
+            raise ValueError("eval_env must define call(capability_id, arguments) or be callable to handle " + capability_id)
         fields = {"id": capability_id, "arguments": arguments}
         return self._request("call", **fields)

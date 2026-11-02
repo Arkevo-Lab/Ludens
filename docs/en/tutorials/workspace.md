@@ -104,26 +104,58 @@ How the call entry points differ in execution location and data boundary:
 
 ### 3. Evaluating Capabilities with @eval_capability and ludens eval
 
-Use the **Fast Loop (`@capability`) + Offline VLM-Labeled Calibration (`@eval_capability`)** pattern for latency-sensitive or repetitive interactions. Turn-by-turn LLM observation has multi-second latency: it cannot react to sub-second game windows such as fishing bites, timed combos, or moving targets, and it wastes turns on repetitive dialogue loops. Encapsulate those interactions as local Python `@capability` functions that poll and act at high frequency in-process, then use VLM-labeled `.ludens/timeline/` records in `@eval_capability` to calibrate their trigger/detection logic offline.
+Use the **Fast Loop (`@capability`) + Offline Evaluation (`@eval_capability`)** pattern for latency-sensitive or repetitive interactions. Turn-by-turn LLM observation has multi-second latency: it cannot react to sub-second game windows such as fishing bites, timed combos, or moving targets, and it wastes turns on repetitive dialogue loops. Encapsulate those interactions as local Python `@capability` functions that poll and act at high frequency in-process, then evaluate their detection and control logic offline.
 
-When an atomic workspace capability (such as a perception parser or pure decision helper) can be evaluated offline, you can optionally pair it with a synchronous, zero-required-argument eval function in the same Python module. The eval can replay committed `.ludens/timeline/` records through `Client().observe()`. Evaluation strips inherited Host/device sockets and control epochs, so observation reads the persisted timeline directly even when launched from a live Host session.
+When an atomic workspace capability can be evaluated offline, you can optionally pair it with a synchronous, zero-required-argument eval function in the same Python module. Evaluation strips inherited Host/device sockets and control epochs, so it cannot drive the live device. Choose the evaluation style that matches the capability:
+
+1. **Replay labeled `.ludens/timeline/` records** for pure perception or parsing functions. `Client().observe()` reads the persisted timeline directly, and labeled records test single-step predictions against known outputs.
+2. **Mount a local surrogate environment with `with eval_env(env):`** for closed-loop action/reaction capabilities such as fishing reels, bug catching, or grid/menu navigation. The environment intercepts `Client().observe(query)` through `env.observe(query)` and `Client().call("controller/...", args)` through `env.call(id, args)`, advances latent ground-truth state in virtual time, and scores the capability directly against that state across randomized trials.
+
+A surrogate environment solves both the generalization gap of static frame lists and the inverse-verifier difficulty of inferring closed-loop success from output frames. It generates observations from state whose correct outcome it already knows, optionally compositing real background frames or crops from `.ludens/timeline/` by calling `Client().observe()` inside `env.observe()` without recursion. Because the environment also intercepts controller calls, it can model randomized nibbles and bite windows, moving targets, or cursor transitions and grade the resulting ground-truth state rather than asking another model to judge whether the capability succeeded.
 
 ```python
-from ludens_tools import Client, capability, eval_capability
+import random
+from ludens_tools import Client, capability, eval_capability, eval_env
 
 @capability
-def parse_hp_bar(frame_path: str) -> dict:
-    """Parse HP values from a frame."""
-    ...
+def reel_on_bite() -> dict:
+    """Poll for a real bite and reel inside its reaction window."""
+    client = Client()
+    for _ in range(20):
+        observation = client.observe()
+        if observation["event"] == "bite":
+            client.call("controller/pad.play", {"button": "a"})
+            return {"reeled": True}
+    return {"reeled": False}
 
-@eval_capability(parse_hp_bar)
-def eval_parse_hp_bar() -> dict:
-    """Evaluate HP parsing on recorded timeline frames."""
-    observations = Client().observe()
-    samples = [...]  # Derive labeled samples from observations or fixtures.
-    failed = [sample for sample in samples if parse_hp_bar(sample["frame_path"])["hp"] != sample["hp"]]
-    accuracy = (len(samples) - len(failed)) / len(samples)
-    return {"passed": accuracy == 1.0, "rewards": {"accuracy": accuracy, "samples": len(samples)}, "details": {"failed": failed}}
+class BiteEnv:
+    def __init__(self, seed: int):
+        self.tick = 0
+        self.bite_at = random.Random(seed).randrange(3, 10)
+        self.reeled = False
+
+    def observe(self, query=None):
+        self.tick += 1  # Advance virtual time; randomized nibbles precede the bite.
+        # Client().observe() may supply real timeline backgrounds/crops here.
+        return {"event": "bite" if self.tick == self.bite_at else "nibble"}
+
+    def call(self, id, args):
+        if id == "controller/pad.play" and self.tick == self.bite_at:
+            self.reeled = True
+        return {"ok": True}
+
+@eval_capability(reel_on_bite)
+def eval_reel_on_bite() -> dict:
+    """Grade closed-loop reeling from surrogate ground truth."""
+    failed_seeds = []
+    for seed in range(20):
+        env = BiteEnv(seed)
+        with eval_env(env):
+            reel_on_bite()
+        if not env.reeled:
+            failed_seeds.append(seed)
+    pass_rate = (20 - len(failed_seeds)) / 20
+    return {"passed": not failed_seeds, "rewards": {"pass_rate": pass_rate}, "details": {"failed_seeds": failed_seeds}}
 ```
 
 The eval must have a docstring and return either a non-empty flat `dict[str, int | float]` of finite rewards or an envelope `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`. When `passed` is `False`, the run records `failed` while preserving `rewards` and `details` for iteration. Discovery is static; evaluation executes only when requested:
@@ -143,6 +175,8 @@ ludens eval adapt python/perception.py:parse_hp_bar --reason "False positive on 
 ludens eval history python/perception.py:parse_hp_bar
 ludens eval history
 ```
+
+When live execution exposes an unmodeled dynamic or visual edge case, `ludens eval adapt <id> --reason "<why>" --record <record-id>` marks the capability `adapting` and links the counterexample. Refine the surrogate environment or replay test set so the eval reproduces that live failure, then iterate on the capability until `ludens eval run <id>` passes again. This closes the Sim-to-Real loop: live failure → recorded counterexample → offline reproduction → verified fix.
 
 Records are stored in `.ludens/evals/latest.json` and `.ludens/evals/runs/<run-id>.json`. The catalog exposes six statuses:
 
@@ -190,6 +224,8 @@ An `@record` function's return value must be a dict envelope containing only the
 | `sampledAt` | `str` (ISO timestamp) | Known source sampling time (omit to keep only the record-completion time `recordedAt`). |
 | `sources` | `list` | Source references derived from other observations or nested records. |
 | `space` | `dict` | Coordinate-system description defined by the device or algorithm. |
+
+During `ludens eval run`, `@record` still validates this envelope, but appends only a synthetic `timeline: {recordId, sequence}` in memory; it does not persist records or archive media. Inside `eval_env(env)`, appended envelopes are also collected in `env.recorded` (initialize it as a list on environments that cannot accept new attributes). These records are not added to `Client().observe()` history. Optional `env.list()` and `env.help(id)` callbacks provide simulated catalog information. Driver calls preserve the normal argument contract: omitted arguments become `{}`, and non-dict arguments are rejected.
 
 ### 2. Single Writer and Media Archiving
 
