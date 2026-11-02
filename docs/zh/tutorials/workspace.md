@@ -104,6 +104,8 @@ def capture_top(exposure: int = 1) -> dict:
 
 ### 3. 使用 @eval_capability 与 ludens eval 评估能力
 
+对延迟敏感或重复性交互，使用**快速闭环（`@capability`）+ 离线 VLM 标注校准（`@eval_capability`）**模式。逐轮 LLM 观测存在数秒延迟：既无法响应钓鱼咬钩、限时连击或移动目标等亚秒级游戏窗口，也会在重复对话循环上浪费轮次。将这些交互封装为本地 Python `@capability` 函数，在进程内高频轮询并执行动作，再在 `@eval_capability` 中使用经 VLM 标注的 `.ludens/timeline/` 记录，离线校准其触发/检测逻辑。
+
 当单项工作区能力（如感知解析或纯决策辅助函数）适合离线评估时，可在同一 Python 模块中按需为其配对一个同步、无必填参数的评估函数。评估函数可通过 `Client().observe()` 重放已提交的 `.ludens/timeline/` 记录。评估会移除继承的 Host/设备 socket 与控制 epoch，因此即使从运行中的 Host 会话启动，观测也会直接读取持久化时空轴。
 
 ```python

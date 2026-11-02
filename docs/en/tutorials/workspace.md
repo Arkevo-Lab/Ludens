@@ -104,6 +104,8 @@ How the call entry points differ in execution location and data boundary:
 
 ### 3. Evaluating Capabilities with @eval_capability and ludens eval
 
+Use the **Fast Loop (`@capability`) + Offline VLM-Labeled Calibration (`@eval_capability`)** pattern for latency-sensitive or repetitive interactions. Turn-by-turn LLM observation has multi-second latency: it cannot react to sub-second game windows such as fishing bites, timed combos, or moving targets, and it wastes turns on repetitive dialogue loops. Encapsulate those interactions as local Python `@capability` functions that poll and act at high frequency in-process, then use VLM-labeled `.ludens/timeline/` records in `@eval_capability` to calibrate their trigger/detection logic offline.
+
 When an atomic workspace capability (such as a perception parser or pure decision helper) can be evaluated offline, you can optionally pair it with a synchronous, zero-required-argument eval function in the same Python module. The eval can replay committed `.ludens/timeline/` records through `Client().observe()`. Evaluation strips inherited Host/device sockets and control epochs, so observation reads the persisted timeline directly even when launched from a live Host session.
 
 ```python
