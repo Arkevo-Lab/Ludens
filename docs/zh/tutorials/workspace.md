@@ -104,7 +104,7 @@ def capture_top(exposure: int = 1) -> dict:
 
 ### 3. 使用 @eval_capability 与 ludens eval 评估能力
 
-在同一 Python 模块中，为单项工作区能力配对一个同步、无必填参数的评估函数。评估函数可通过 `Client().observe()` 重放已提交的 `.ludens/timeline/` 记录。评估会移除继承的 Host/设备 socket 与控制 epoch，因此即使从运行中的 Host 会话启动，观测也会直接读取持久化时空轴。
+当单项工作区能力（如感知解析或纯决策辅助函数）适合离线评估时，可在同一 Python 模块中按需为其配对一个同步、无必填参数的评估函数。评估函数可通过 `Client().observe()` 重放已提交的 `.ludens/timeline/` 记录。评估会移除继承的 Host/设备 socket 与控制 epoch，因此即使从运行中的 Host 会话启动，观测也会直接读取持久化时空轴。
 
 ```python
 from ludens_tools import Client, capability, eval_capability
@@ -148,7 +148,7 @@ ludens eval history
 | `failed` | 最新匹配运行失败，或未产出合法的非空奖励。 |
 | `verified` | 当前能力与评估代码对应的最新匹配运行已通过，并产出合法奖励。 |
 
-由于运行会记录两个源码文件的 `codeSHA`，编辑能力或其评估函数都会自动将结果标为 `stale`；复用旧奖励前必须重新运行。`ludens consolidate` 会向仅允许文件工具的提示注入最新静态评估目录，并要求 Agent 仅保留或提升 `verified` 能力到 `skills/`。整理期间不会执行评估或编辑能力/评估源码；未验证条目会被剪除，所需修改或评估命令会记录到 memory，留待后续执行轮次处理。
+由于运行会记录两个源码文件的 `codeSHA`，编辑能力或其评估函数都会自动将结果标为 `stale`；复用旧奖励前必须重新运行。`ludens consolidate` 会向仅允许文件工具的提示注入最新静态评估目录：对于绑定了 `@eval_capability` 的能力，仅当状态为 `verified` 时才允许保留或提升到 `skills/`（`unverified`、`stale` 或 `failed` 条目会被剪除）；而未绑定评估的能力（`missing`，例如实机动作编排宏）只要在实机运行中验证有效仍可保留。整理期间不会执行评估或编辑能力/评估源码；所需修改或评估命令会记录到 memory，留待后续执行轮次处理。
 
 ## 能力留档与 workspace 时空轴
 
