@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { atomicJson } from "../../bench/store.ts";
 import { PythonCapabilities, type PythonCapability, type PythonDiagnostic } from "./python-capabilities.ts";
 
-export type CapabilityEvalStatus = "missing" | "unverified" | "stale" | "failed" | "verified";
+export type CapabilityEvalStatus = "missing" | "unverified" | "stale" | "adapting" | "failed" | "verified";
 
 export interface CapabilityEvalRecord {
   runId: string;
@@ -19,6 +19,14 @@ export interface CapabilityEvalRecord {
   rewards: Record<string, number> | null;
   details?: Record<string, unknown>;
   error?: { type: string; message: string; traceback?: string };
+  adaptation?: CapabilityEvalAdaptation;
+}
+
+export interface CapabilityEvalAdaptation {
+  reason: string;
+  records: string[];
+  adaptedAt: string;
+  evalCodeSHA: string;
 }
 
 export interface CapabilityEvalBinding {
@@ -58,7 +66,17 @@ function parseRecord(value: unknown, location: string): CapabilityEvalRecord {
       || typeof value.evalCodeSHA !== "string" || typeof value.evaluatedAt !== "string"
       || typeof value.durationMs !== "number" || (value.outcome !== "passed" && value.outcome !== "failed")
       || (value.rewards !== null && !isObject(value.rewards))) throw new Error(`Invalid capability eval record: ${location}`);
+  if (value.adaptation !== undefined && !(isObject(value.adaptation) && typeof value.adaptation.reason === "string"
+      && Array.isArray(value.adaptation.records) && value.adaptation.records.every(item => typeof item === "string")
+      && typeof value.adaptation.adaptedAt === "string" && typeof value.adaptation.evalCodeSHA === "string"))
+    throw new Error(`Invalid capability eval record: ${location}`);
   return value as unknown as CapabilityEvalRecord;
+}
+
+
+function formatAdaptationError(adaptation: CapabilityEvalAdaptation): string {
+  const suffix = adaptation.records.length ? ` (records: ${adaptation.records.join(", ")})` : "";
+  return `EvalAdapting: ${adaptation.reason}${suffix}`;
 }
 
 
@@ -89,8 +107,17 @@ export async function writeEvalRecord(workspace: string, record: CapabilityEvalR
 
 /** Join a discovered capability with its latest record into the dashboard/CLI view. */
 export function resolveCapabilityEval(capability: EvaluatedCapability, latestRecord?: CapabilityEvalRecord | null): CapabilityEvalView {
-  if (!capability.eval) return { evalStatus: "missing", evalId: null, evalRewards: null, evalEvaluatedAt: null, evalError: null };
-  const evalId = capability.eval.id;
+  const evalId = capability.eval?.id ?? null;
+  if (latestRecord?.adaptation && (capability.eval?.codeSHA ?? "") === latestRecord.adaptation.evalCodeSHA) {
+    return {
+      evalStatus: "adapting",
+      evalId,
+      evalRewards: latestRecord.rewards,
+      evalEvaluatedAt: latestRecord.evaluatedAt,
+      evalError: formatAdaptationError(latestRecord.adaptation),
+    };
+  }
+  if (!capability.eval) return { evalStatus: "missing", evalId, evalRewards: null, evalEvaluatedAt: null, evalError: null };
   if (!latestRecord) return { evalStatus: "unverified", evalId, evalRewards: null, evalEvaluatedAt: null, evalError: null };
   const view = { evalId, evalRewards: latestRecord.rewards, evalEvaluatedAt: latestRecord.evaluatedAt };
   if (latestRecord.capabilityCodeSHA !== capability.codeSHA || latestRecord.evalCodeSHA !== capability.eval.codeSHA
@@ -118,7 +145,7 @@ export interface CapabilityEvalListing {
 /** Discover workspace capabilities and join them with the persisted eval store. */
 export async function listCapabilityEvals(workspace: string, options: { signal?: AbortSignal } = {}): Promise<CapabilityEvalListing> {
   const discovered = await new PythonCapabilities(workspace).discover(options.signal);
-  const summary: Record<CapabilityEvalStatus, number> = { missing: 0, unverified: 0, stale: 0, failed: 0, verified: 0 };
+  const summary: Record<CapabilityEvalStatus, number> = { missing: 0, unverified: 0, stale: 0, adapting: 0, failed: 0, verified: 0 };
   const latest = await readLatestEvals(workspace);
   const capabilities = discovered.capabilities.map(capability => {
     const id = capabilityEvalId(capability);
@@ -157,8 +184,19 @@ export async function runCapabilityEvals(workspace: string, options: { capabilit
     targets = entries.filter(entry => entry.capability.eval);
   } else throw new Error("Specify a capability ID or --all");
   const results: CapabilityEvalRunResult[] = [];
+  const latest = await readLatestEvals(workspace);
   for (const { capability, id } of targets) {
+    const priorAdaptation = latest[id]?.adaptation;
+    const stillAdapting = Boolean(priorAdaptation && (capability.eval?.codeSHA ?? "") === priorAdaptation.evalCodeSHA);
     if (!capability.eval) {
+      if (stillAdapting && priorAdaptation) {
+        results.push({ runId: newEvalRunId(), capabilityId: id, evalId: "", capabilityCodeSHA: capability.codeSHA,
+          evalCodeSHA: "", evaluatedAt: new Date().toISOString(), durationMs: 0, outcome: "failed",
+          rewards: latest[id]?.rewards ?? null, adaptation: priorAdaptation,
+          error: { type: "EvalAdapting", message: `Bind @eval_capability covering adaptation cases before running: ${priorAdaptation.reason}` },
+          evalStatus: "adapting" });
+        continue;
+      }
       // No binding to execute or persist; the run itself still reports failure.
       results.push({ runId: newEvalRunId(), capabilityId: id, evalId: "", capabilityCodeSHA: capability.codeSHA,
         evalCodeSHA: "", evaluatedAt: new Date().toISOString(), durationMs: 0, outcome: "failed", rewards: null,
@@ -173,10 +211,40 @@ export async function runCapabilityEvals(workspace: string, options: { capabilit
       outcome: execution.isError ? "failed" : "passed", rewards: execution.details.rewards ?? null,
       ...(execution.details.details ? { details: execution.details.details } : {}),
       ...(execution.details.error ? { error: execution.details.error } : {}) };
+    if (stillAdapting && priorAdaptation) {
+      record.outcome = "failed";
+      record.adaptation = priorAdaptation;
+      record.error = { type: "EvalAdapting", message: `Update ${capability.eval.id} test set/verifier before re-running: ${priorAdaptation.reason}` };
+    }
     await writeEvalRecord(workspace, record);
     results.push({ ...record, evalStatus: resolveCapabilityEval(capability, record).evalStatus });
   }
   return { results, outcome: results.every(result => result.outcome === "passed") ? "passed" : "failed" };
+}
+
+/** Mark a capability's eval as being adapted; re-running an unchanged eval cannot clear it. */
+export async function adaptCapabilityEval(workspace: string, options: {
+  capabilityId: string; reason: string; records?: string[]; signal?: AbortSignal;
+}): Promise<CapabilityEvalRunResult> {
+  const reason = options.reason.trim();
+  if (!reason) throw new Error("Adaptation reason must be non-empty");
+  const discovered = await new PythonCapabilities(workspace).discover(options.signal);
+  const capability = discovered.capabilities.find(item => capabilityEvalId(item) === options.capabilityId);
+  if (!capability) throw new Error(`Unknown Python capability: ${options.capabilityId}; use ludens eval list`);
+  const latest = await readLatestEvals(workspace);
+  const now = new Date().toISOString();
+  const records = (options.records ?? []).map(item => item.trim()).filter(Boolean);
+  const evalCodeSHA = capability.eval?.codeSHA ?? "";
+  const adaptation: CapabilityEvalAdaptation = { reason, records, adaptedAt: now, evalCodeSHA };
+  const record: CapabilityEvalRecord = {
+    runId: newEvalRunId(), capabilityId: options.capabilityId, evalId: capability.eval?.id ?? "",
+    capabilityCodeSHA: capability.codeSHA, evalCodeSHA, evaluatedAt: now, durationMs: 0,
+    outcome: "failed", rewards: latest[options.capabilityId]?.rewards ?? null,
+    ...(records.length ? { details: { adaptationRecords: records } } : {}),
+    error: { type: "EvalAdapting", message: reason }, adaptation,
+  };
+  await writeEvalRecord(workspace, record);
+  return { ...record, evalStatus: resolveCapabilityEval(capability, record).evalStatus };
 }
 
 /** List persisted eval runs newest-first from `.ludens/evals/runs/`. */

@@ -365,6 +365,7 @@
       "verified": "Verified",
       "stale": "Stale",
       "unverified": "Unverified",
+      "adapting": "Adapting",
       "missing": "Missing",
       "failed": "Failed"
     },
