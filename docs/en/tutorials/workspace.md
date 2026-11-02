@@ -104,7 +104,7 @@ How the call entry points differ in execution location and data boundary:
 
 ### 3. Evaluating Capabilities with @eval_capability and ludens eval
 
-Pair an atomic workspace capability with a synchronous, zero-required-argument eval function in the same Python module. The eval can replay committed `.ludens/timeline/` records through `Client().observe()`. Evaluation strips inherited Host/device sockets and control epochs, so observation reads the persisted timeline directly even when launched from a live Host session.
+When an atomic workspace capability (such as a perception parser or pure decision helper) can be evaluated offline, you can optionally pair it with a synchronous, zero-required-argument eval function in the same Python module. The eval can replay committed `.ludens/timeline/` records through `Client().observe()`. Evaluation strips inherited Host/device sockets and control epochs, so observation reads the persisted timeline directly even when launched from a live Host session.
 
 ```python
 from ludens_tools import Client, capability, eval_capability
@@ -148,7 +148,7 @@ Records are stored in `.ludens/evals/latest.json` and `.ludens/evals/runs/<run-i
 | `failed` | The latest matching run failed or produced no valid non-empty rewards. |
 | `verified` | The latest matching run passed with valid rewards for the current capability and eval code. |
 
-Because both source files' `codeSHA` values are recorded, editing either the capability or its eval automatically makes the result `stale`; rerun it before relying on the old rewards. `ludens consolidate` supplies a fresh static evaluation catalog to its file-only prompt and instructs the agent to retain or promote only `verified` capabilities into `skills/`. It does not execute evals or edit capability/eval source during consolidation; unverified entries are pruned and needed changes or eval commands are recorded in memory for a later execution turn.
+Because both source files' `codeSHA` values are recorded, editing either the capability or its eval automatically makes the result `stale`; rerun it before relying on the old rewards. `ludens consolidate` supplies a fresh static evaluation catalog to its file-only prompt: capabilities with a bound `@eval_capability` may be retained or promoted into `skills/` only when `verified` (while `unverified`, `stale`, or `failed` entries are pruned), whereas capabilities without a bound eval (`missing`, such as live device-action macros) may still be retained when proven useful in live runs. It does not execute evals or edit capability/eval source during consolidation; needed changes or eval commands are recorded in memory for a later execution turn.
 
 ## Capability Archiving and the Workspace Timeline
 
