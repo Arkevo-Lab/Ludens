@@ -113,7 +113,7 @@ Inside an `auto` control cycle, the outer loop runs as follows:
 Ludens consists of a TypeScript host (`core/src/`) plus a Python toolkit (`core/python/ludens_tools/`):
 
 - **TypeScript side**: owns the Shiori runtime, control leases, OMP session extensions, cross-process RPC, and CLI / Benchmark orchestration.
-- **Python side**: owns `@capability` static discovery and dynamic execution, the resident `Perception` / `Action` loops, PyAV video-segment encoding, on-demand cold-frame decoding, and `current_trial()` evaluation evidence registration. Video encode/decode happens on demand inside the resident perception process; no separate streaming service is introduced.
+- **Python side**: owns `@capability` static discovery and dynamic execution, the resident `Perception` / `Action` loops, PyAV video-segment encoding, on-demand cold-frame decoding, and `current_trial()` evaluation evidence registration. Continuous perception ingests Baseware's spooled media references (`_StreamMediaRef`) directly from disk without inline Base64 IPC round-trips, automatically binds device observation `sources` provenance onto the timeline record, and short-circuits unchanged latest-frame `Client().observe()` polls via `ifNoneMatchSequence`. Video encode/decode happens inside the resident perception process without introducing a separate streaming service.
 
 ## Capability Persistence Boundaries
 

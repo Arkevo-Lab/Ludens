@@ -62,8 +62,8 @@ TS/Python API 与 CLI 统一返回完整的 `ExecutionResult` 信封，而 MCP �
 | `actionId` | 当操作关联异步手柄动作（如 `pad.play / wait / status / cancel`）时，标识该动作实例。 |
 | `readOnly` | 标识该次调用是否为不改变设备输入的只读查询。 |
 | `timing` | `{clock, requestedAtMs, receivedAtMs}`，基于当前 Baseware 进程单调时钟。 |
-| `observations` | 媒体观测元数据列表（含 `id`、`controllerId`、`mediaType`、`contentIndex`、`timing` 及可选 `sourceSequence`）。 |
-| `result` | 原生 `ToolResult`（含完整媒体字节 `data`/`blob`、`structuredContent` 与 `isError`）。 |
+| `observations` | 媒体观测元数据列表（含 `id`、`controllerId`、`mediaType`、`contentIndex`、`timing` 及可选 `sourceSequence`、`path`、`sha256`、`bytes`）。 |
+| `result` | 原生 `ToolResult`（默认含完整媒体字节 `data`/`blob`，启用 `omitInlineMedia: true` 时改为引用字段 `path`/`sha256`/`bytes`，并含 `structuredContent` 与 `isError`）。 |
 | `stdout` / `stderr` | 供终端阅读的简短文本摘要。 |
 
 ## 控制权独立于能力描述
@@ -74,9 +74,9 @@ TS/Python API 与 CLI 统一返回完整的 `ExecutionResult` 信封，而 MCP �
 
 ## 媒体、时间与日志
 
-### 1. 临时采集与归档省略
+### 1. 有界媒体流缓冲与归档省略
 
-- **不建冗余截图库**：模拟器截图时，Bridge 仅将 PNG 写入临时文件供 Provider 读取字节并封装进返回值的 `result.content`，读取完成后立即删除临时文件；能力结果是否永久留档完全由工作区代码的 `@record` 与 `.ludens/timeline/` 决定。
+- **有界媒体流缓冲（`ObservationStreamSpool`）**：面对高频 `continuous-perception` 采样调用（`omitInlineMedia: true`），Baseware 将原始媒体字节写入 `<dataDir>/stream/` 下的有界本地环形缓冲（若 Driver 已直接提供本地 `path` 则直接复用），在观测元数据中附上 `path`、`sha256` 与 `bytes`，并从跨进程 IPC 响应中剥离内联 Base64 `data`，供 Ludens 感知层按引用直接摄取原始字节与时空溯源。能力结果是否永久留档仍完全由工作区代码的 `@record` 与 `.ludens/timeline/` 决定。
 - **日志载荷脱敏瘦身**：写入 Baseware 设备日志的 `execution.result` 会自动剥离二进制 `data` / `blob` 字节，仅保留 `mediaType`、`contentIndex`、字节大小以及已有的 `timeline` 或文件引用（未留档则标记 `dataOmitted: true` / `blobOmitted: true`）。
 
 ### 2. 记录模式与连续采样统计

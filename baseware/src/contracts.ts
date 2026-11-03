@@ -12,6 +12,8 @@ export interface Observation {
   mediaType: string;
   /** Explicit caller-owned output or a timeline asset; inline media has no path. */
   path?: string;
+  sha256?: string;
+  bytes?: number;
   timeline?: { recordId?: string; sequence?: number; asset: string; video?: import("@ludens/protocol/timeline-types").VideoFrameReference };
   /** Transient response bytes; never written into device event logs. */
   data?: string;

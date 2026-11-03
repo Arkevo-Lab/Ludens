@@ -9,7 +9,7 @@ import sys
 import threading
 import traceback
 
-from ludens_tools._context import current, scope
+from ludens_tools._context import continuous, current, scope
 from ludens_tools._observation_history import ObservationHistory, observation_result
 from ludens_tools._sampling import env_sample_hz
 from ludens_tools._resident import load_instance, run_continuously
@@ -33,7 +33,8 @@ def main():
     def append(*, sample, identity, sampling, generation=None, runId=None, trace=None):
         if history is None:
             raise ValueError("Workspace timeline has not started")
-        record = history.append(sample, generation, sampling, identity=identity, run_id=runId, trace=trace)
+        record = history.append(sample, generation, sampling, identity=identity, run_id=runId, trace=trace,
+                                deliver_media=not continuous(current()))
         send({"event": "sample", "snapshot": {
             key: value for key, value in record.items() if key not in ("text", "media", "data", "space", "sources")
         }, "mediaCount": len(record["media"]), "trace": trace or {},

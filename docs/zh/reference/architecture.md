@@ -113,7 +113,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python/ludens_tools/`）共同组成：
 
 - **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、跨进程 RPC 与 CLI / Benchmark 编排。
-- **Python 侧**：负责 `@capability` 静态发现与动态执行、常驻 `Perception` / `Action` 循环、PyAV 视频段编码、冷帧按需解码以及 `current_trial()` 评测证据登记。视频编解码直接在常驻感知进程内按需完成，不额外引入独立的流媒体服务。
+- **Python 侧**：负责 `@capability` 静态发现与动态执行、常驻 `Perception` / `Action` 循环、PyAV 视频段编码、冷帧按需解码以及 `current_trial()` 评测证据登记。常驻感知通过媒体流引用（`_StreamMediaRef`）直接从磁盘摄取 Baseware 缓冲的原始字节，省去跨进程内联 Base64 往返，自动将设备观测 `sources` 时空溯源绑定至时间线记录，并通过 `ifNoneMatchSequence` 对未发生帧变化的最新帧 `Client().observe()` 轮询执行零编码短路。视频编解码直接在常驻感知进程内完成，不额外引入独立的流媒体服务。
 
 ## 能力持久化边界
 
