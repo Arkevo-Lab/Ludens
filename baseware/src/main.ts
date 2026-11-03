@@ -42,7 +42,8 @@ export async function main(args = process.argv.slice(2)) {
     const log = new EventLog(dataDir, serviceId);
     provider = await registration.load({ port, command: values["cua-command"], clock });
     core = new BasewareCore({ capabilities: provider.capabilities, record: log.record, serviceId, source: log.source,
-      diagnostics: values.diagnostics,
+      diagnostics: values.diagnostics, streamDir: join(dataDir, "stream"),
+      streamPrefetch: process.env.LUDENS_BASEWARE_STREAM_PREFETCH !== "0",
       drivers: [{ id: registration.id, version: provider.version ?? registration.version ?? registration.fallbackVersion ?? "unknown",
         source: registration.source,
         ...(registration.transport ? { transport: registration.transport } : {}),
@@ -58,6 +59,7 @@ export async function main(args = process.argv.slice(2)) {
     await new Promise<void>(done => { process.once("SIGINT", done); process.once("SIGTERM", done); });
   } finally {
     await closeServer();
+    await core?.close();
     await provider?.close();
     core?.record("service_end", core.status());
   }

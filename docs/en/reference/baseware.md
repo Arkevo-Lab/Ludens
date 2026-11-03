@@ -62,8 +62,8 @@ The TS/Python API and CLI uniformly return the full `ExecutionResult` envelope, 
 | `actionId` | When the operation is tied to an async gamepad action (e.g. `pad.play / wait / status / cancel`), identifies that action instance. |
 | `readOnly` | Whether this call was a read-only query that does not change device input. |
 | `timing` | `{clock, requestedAtMs, receivedAtMs}`, based on the current Baseware process's monotonic clock. |
-| `observations` | Media observation metadata list (with `id`, `controllerId`, `mediaType`, `contentIndex`, `timing`, and optional `sourceSequence`). |
-| `result` | Native `ToolResult` (with full media bytes `data`/`blob`, `structuredContent`, and `isError`). |
+| `observations` | Media observation metadata list (with `id`, `controllerId`, `mediaType`, `contentIndex`, `timing`, and optional `sourceSequence`, `path`, `sha256`, `bytes`). |
+| `result` | Native `ToolResult` (with full media bytes `data`/`blob` by default, or reference fields `path`/`sha256`/`bytes` when `omitInlineMedia: true`, plus `structuredContent` and `isError`). |
 | `stdout` / `stderr` | Short human-readable text summary. |
 
 ## Control is independent of capability description
@@ -74,9 +74,9 @@ The TS/Python API and CLI uniformly return the full `ExecutionResult` envelope, 
 
 ## Media, time, and logs
 
-### 1. Ephemeral capture and omitted archiving
+### 1. Bounded stream spool and omitted archiving
 
-- **No redundant screenshot library**: on emulator screenshots, the Bridge only writes the PNG to a temporary file for the Provider to read the bytes and pack into the return value's `result.content`, deleting the temporary file immediately after reading; whether a capability result is permanently archived is entirely decided by workspace code's `@record` and `.ludens/timeline/`.
+- **Bounded stream spool (`ObservationStreamSpool`)**: for high-frequency `continuous-perception` calls (`omitInlineMedia: true`), Baseware spools raw media bytes into a bounded local ring buffer under `<dataDir>/stream/` (when the Driver has not already provided a local `path`), attaches `path`, `sha256`, and `bytes` to each observation, and strips inline Base64 `data` from IPC responses so the Ludens Perception layer can ingest raw bytes and provenance by reference. Whether a capability result is permanently archived is still decided solely by workspace code's `@record` and `.ludens/timeline/`.
 - **Slimmed, redacted log payloads**: the `execution.result` written to the Baseware device log automatically strips binary `data` / `blob` bytes, keeping only `mediaType`, `contentIndex`, byte size, and any existing `timeline` or file reference (unarchived data is marked `dataOmitted: true` / `blobOmitted: true`).
 
 ### 2. Recording modes and continuous-sampling statistics

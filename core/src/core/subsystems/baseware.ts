@@ -117,7 +117,9 @@ export async function connectBaseware(options: { socket: string; seconds: number
         await client.request({ kind: "input_generation", epoch, generation, trace: { recordingId } });
       },
       async execute(id, args, epoch, signal, trace, origin) {
-        const result = await client.request({ kind: "controller", id, arguments: args, epoch, trace: { ...trace, recordingId }, origin }, signal) as ExecutionResult;
+        const omitInlineMedia = trace?.recordingPurpose === "continuous-perception";
+        const result = await client.request({ kind: "controller", id, arguments: args, epoch, trace: { ...trace, recordingId }, origin,
+          ...(omitInlineMedia ? { omitInlineMedia: true } : {}) }, signal) as ExecutionResult;
         return result;
       },
     };

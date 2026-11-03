@@ -84,6 +84,33 @@ def _key(value):
 MAIN_CAPABILITY = "python/perception.py:Perception.sample"
 SAMPLE_FIELDS = {"text", "data", "media", "sampledAt", "sources", "space", "timeline"}
 
+class _StreamMediaRef(str):
+    """A reference to Baseware's spooled stream media, passed as inline Base64.
+
+    When the inline payload was omitted over IPC (empty string), ``encode()``
+    lazily Base64-encodes the spooled file, so ``base64.b64decode(ref)``
+    keeps working without the multi-megabyte string ever crossing the wire.
+    """
+
+    def __new__(cls, value="", *, path, sha256=None, media_bytes=None, media_type=None, source=None):
+        ref = super().__new__(cls, value)
+        ref.path = str(path)
+        ref.sha256 = sha256
+        ref.media_bytes = media_bytes
+        ref.media_type = media_type
+        ref.source = source
+        return ref
+
+    def raw_bytes(self):
+        if str.__len__(self) > 0:
+            return base64.b64decode(str.__str__(self), validate=True)
+        return Path(self.path).read_bytes()
+
+    def encode(self, encoding="utf-8", errors="strict"):
+        if str.__len__(self) == 0 and self.path:
+            return base64.b64encode(Path(self.path).read_bytes())
+        return super().encode(encoding, errors)
+
 
 def validate_sample(sample, workspace):
     """Validate the recorded result envelope without silently dropping fields."""
@@ -105,12 +132,18 @@ def validate_sample(sample, workspace):
                 or not item["mediaType"] or set(item) - {"path", "data", "mediaType", "timeline", "sha256", "bytes", "approximate"}):
             raise TypeError("sample.media entries require mediaType and path or base64 data")
         if "data" in item:
-            if not isinstance(item["data"], str):
+            if isinstance(item["data"], _StreamMediaRef) and getattr(item["data"], "path", None):
+                source = Path(item["data"].path)
+                source = source if source.is_absolute() else Path(workspace) / source
+                if not source.is_file():
+                    raise FileNotFoundError(str(source))
+            elif not isinstance(item["data"], str):
                 raise TypeError("sample.media.data must be base64 text")
-            try:
-                base64.b64decode(item["data"], validate=True)
-            except (ValueError, binascii.Error):
-                raise ValueError("sample.media.data must be valid base64") from None
+            else:
+                try:
+                    base64.b64decode(item["data"], validate=True)
+                except (ValueError, binascii.Error):
+                    raise ValueError("sample.media.data must be valid base64") from None
         elif isinstance(item.get("path"), str):
             source = Path(item["path"])
             source = source if source.is_absolute() else Path(workspace) / source
@@ -286,7 +319,7 @@ class ObservationHistory:
         segment["count"] += 1
         segment["recordBytes"] = record_bytes
 
-    def append(self, sample, generation, sampling, recorded_at=None, *, identity=None, run_id=None, trace=None):
+    def append(self, sample, generation, sampling, recorded_at=None, *, identity=None, run_id=None, trace=None, deliver_media=True):
         validate_sample(sample, self.root)
         if not isinstance(sampling, dict) or set(sampling) != {"clock", "startedAtMs", "finishedAtMs"}:
             raise ValueError("sampling requires clock, startedAtMs and finishedAtMs")
@@ -336,7 +369,8 @@ class ObservationHistory:
                     channel = json.dumps([identity["id"], identity.get("codeSHA"), index, generation, item["mediaType"]])
                     idle = None if identity["id"] == MAIN_CAPABILITY else min(self.video_idle_seconds, 0.25)
                     location = self._video.submit(raw, channel, at, size, sample_hz=self.sample_hz, idle_seconds=idle)
-                    archived.append({"mediaType": item["mediaType"], "sha256": hashlib.sha256(raw).hexdigest(),
+                    digest = item["data"].sha256 if isinstance(item.get("data"), _StreamMediaRef) and item["data"].sha256 else hashlib.sha256(raw).hexdigest()
+                    archived.append({"mediaType": item["mediaType"], "sha256": digest,
                                      "bytes": len(raw), "timeline": {**reference, **location}})
                     originals[index] = raw
                     media_bytes += len(raw)
@@ -352,6 +386,12 @@ class ObservationHistory:
                       "generation": generation, "runId": run_id, "trace": trace or {},
                       "recordedAt": recorded_at, "sampling": sampling,
                       "text": sample.get("text", ""), "media": archived}
+            if "sources" not in sample:
+                inferred = [item["data"].source for item in sample.get("media", [])
+                            if isinstance(item.get("data"), _StreamMediaRef)
+                            and isinstance(getattr(item["data"], "source", None), dict)]
+                if inferred:
+                    record["sources"] = inferred
             for key in ("sampledAt", "sources", "data", "space"):
                 if key in sample:
                     record[key] = sample[key]
@@ -380,12 +420,17 @@ class ObservationHistory:
             self._references.update(paths)
             # Window media may expire as soon as this call releases the lock.
             # Deliver its bytes now, without a second permanent archive or lease.
-            result = self._delivery(record, originals)
+            # Continuous background perception skips delivery: metadata only.
+            result = self._delivery(record, originals) if deliver_media else observation_result(record)
             self._prune()
             return result
 
     def _media_bytes(self, item):
         if "data" in item:
+            if isinstance(item["data"], _StreamMediaRef) and getattr(item["data"], "path", None):
+                source = Path(item["data"].path)
+                source = source if source.is_absolute() else self.root / source
+                return source.read_bytes()
             return base64.b64decode(item["data"], validate=True)
         source = Path(item["path"])
         source = source if source.is_absolute() else self.root / source
@@ -398,12 +443,13 @@ class ObservationHistory:
         temporary = Path(name)
         try:
             with os.fdopen(descriptor, "wb") as output:
-                if "data" in item:
+                if "data" in item and not (isinstance(item["data"], _StreamMediaRef) and getattr(item["data"], "path", None)):
                     block = base64.b64decode(item["data"], validate=True)
                     digest.update(block)
                     output.write(block)
                 else:
-                    source = Path(item["path"])
+                    raw_path = item["data"].path if "data" in item else item["path"]
+                    source = Path(raw_path)
                     source = source if source.is_absolute() else self.root / source
                     with source.open("rb") as incoming:
                         while block := incoming.read(1024 * 1024):
@@ -662,7 +708,7 @@ class ObservationHistory:
         query = {} if query is None else query
         if not isinstance(query, dict):
             raise ValueError("Observation query must be an object")
-        if set(query) - {"at", "start", "end", "limit", "after", "capability", "id"}:
+        if set(query) - {"at", "start", "end", "limit", "after", "capability", "id", "ifNoneMatchSequence"}:
             raise ValueError("Unknown observation query parameter")
         query = {key: value for key, value in query.items()
                  if value is not None and not (key in {"at", "start", "end", "capability", "id"}
@@ -681,6 +727,10 @@ class ObservationHistory:
             raise ValueError("limit must be an integer from 1 to 64")
         if isinstance(after, bool) or not isinstance(after, int) or after < 0:
             raise ValueError("after must be a non-negative sequence integer")
+        if_none_match = query.get("ifNoneMatchSequence")
+        if if_none_match is not None and (isinstance(if_none_match, bool)
+                                           or not isinstance(if_none_match, int) or if_none_match < 1):
+            raise ValueError("ifNoneMatchSequence must be a positive integer")
         if "at" in query and query.get("after") == 0:
             query.pop("after")
         if "at" in query and any(key in query for key in ("start", "end", "after")):
@@ -693,6 +743,25 @@ class ObservationHistory:
         latest = at is None and not any(key in query for key in ("start", "end", "after"))
         with self.lock:
             self._prune()
+            if if_none_match is not None and latest and record_id is None:
+                capability_key = None if capability == "*" else _key(capability)
+                latest_sequence = None
+                for sequence, entry in reversed(self._hot.items()):
+                    if capability_key is None or entry[5] == capability_key:
+                        latest_sequence = sequence
+                        break
+                if latest_sequence is None and self.persistent:
+                    for segment in reversed(self._segments):
+                        if not segment["count"]:
+                            continue
+                        for entry in self._entries(segment):
+                            if capability_key is None or entry[5] == capability_key:
+                                latest_sequence = entry[1]
+                        if latest_sequence is not None:
+                            break
+                if latest_sequence is not None and latest_sequence == if_none_match:
+                    return {"query": query, "records": [], "hasMore": False, "unchanged": True,
+                            "sequence": if_none_match, "availability": self._availability(query, [])}
             selected = []
             if not self.persistent:
                 entries = ((entry[1], sequence, 0, 0, None, entry[5], entry[6]) for sequence, entry in self._hot.items())

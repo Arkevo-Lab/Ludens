@@ -56,9 +56,12 @@ export function archivedToolResult(result: ToolResult, observations: readonly Ob
   return { ...result, content: result.content.map((block, index) => {
     const observation = observations.find(item => item.contentIndex === index);
     if (block.type === "image" || block.type === "audio") {
-      const { data, ...rest } = block;
+      const { data, path: _path, sha256: _sha256, bytes: _bytes, ...rest } = block as typeof block & {
+        path?: string; sha256?: string; bytes?: number;
+      };
+      const encodedBytes = data.length || (observation?.bytes !== undefined ? Math.ceil(observation.bytes / 3) * 4 : 0);
       return { ...rest, ...(observation?.timeline ? { timeline: observation.timeline }
-        : observation?.path ? { dataPath: observation.path } : { dataOmitted: true }), encodedBytes: data.length };
+        : observation?.path ? { dataPath: observation.path } : { dataOmitted: true }), encodedBytes };
     }
     if (block.type === "resource" && "blob" in block.resource) {
       const { blob, ...resource } = block.resource;

@@ -36,6 +36,7 @@ export interface ObservationQuery {
   at?: string | null; start?: string | null; end?: string | null;
   limit?: number | null; after?: number | null;
   capability?: string | null; id?: string | null;
+  ifNoneMatchSequence?: number | null;
 }
 export interface PerceptionRecord extends PerceptionSnapshot {
   text: string; media: Observation[];
@@ -63,6 +64,8 @@ export interface PerceptionRead {
   query: ObservationQuery;
   records: PerceptionRecord[];
   hasMore: boolean;
+  unchanged?: boolean;
+  sequence?: number;
   nextAfter?: number;
   error?: { code: string; message: string };
   availability?: { persistent: boolean; hotSeconds: number;
@@ -170,7 +173,7 @@ export class PerceptionRuntime {
       const value = reply.result as { records: Array<PerceptionSnapshot & {
         text: string; data?: unknown; space?: unknown;
         media: { path?: string; mediaType: string; data?: string; timeline?: Observation["timeline"] }[];
-      }>; query: ObservationQuery; hasMore: boolean; nextAfter?: number; availability?: PerceptionRead["availability"] };
+      }>; query: ObservationQuery; hasMore: boolean; nextAfter?: number; unchanged?: boolean; sequence?: number; availability?: PerceptionRead["availability"] };
       const records: PerceptionRecord[] = value.records.map(({ media, ...record }) => ({
         ...record,
         media: media.map((item, index) => ({
@@ -191,6 +194,10 @@ export class PerceptionRuntime {
         return this.finish(failure(this.current.state === "loading" ? "NOT_READY" : "UNAVAILABLE",
           this.current.error ?? `Perception is ${this.current.state}.`,
           value.availability), started, trace);
+      }
+      if (value.unchanged === true && (!mainLatest || this.current.state === "ready")) {
+        return this.finish({ queryId, ok: true, query, records: [], hasMore: false, unchanged: true,
+          ...(value.sequence === undefined ? {} : { sequence: value.sequence }), availability: value.availability }, started, trace);
       }
       if (!currentRecords.length) {
         // Retention metadata cannot prove that an unknown ID/capability ever
@@ -349,6 +356,8 @@ export function perceptionInput(read: PerceptionRead) {
     ...(record.space === undefined ? {} : { space: record.space }),
     media: record.media.map(({ id, mediaType }) => ({ id, mediaType })),
   })), hasMore: read.hasMore,
+    ...(read.unchanged === undefined ? {} : { unchanged: read.unchanged }),
+    ...(read.sequence === undefined ? {} : { sequence: read.sequence }),
     ...(read.nextAfter === undefined ? {} : { nextAfter: read.nextAfter }),
     ...(read.availability === undefined ? {} : { availability: read.availability }),
     ...(read.error === undefined ? {} : { error: read.error }),

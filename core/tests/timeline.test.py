@@ -24,7 +24,8 @@ import uuid
 from ludens_tools import Client, record_window
 from ludens_tools._capabilities import discover, load_function, call_local
 from ludens_tools._context import scope
-from ludens_tools._observation_history import ObservationHistory, observation_result, MAIN_CAPABILITY
+from ludens_tools._observation_history import (ObservationHistory, observation_result, MAIN_CAPABILITY,
+                                               validate_sample, _StreamMediaRef)
 
 
 SAMPLING = {"clock": "test", "startedAtMs": 0, "finishedAtMs": 1}
@@ -425,6 +426,94 @@ def sensor(value: int) -> dict:
                 serving.join(timeout=2)
                 Path(socket_path).unlink(missing_ok=True)
                 worker.close()
+
+    def test_stream_media_ref_ingests_without_base64_and_infers_sources(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = b"spooled-frame-bytes"
+            spool = root / "stream" / "000001-feed.bin"
+            spool.parent.mkdir(parents=True)
+            spool.write_bytes(payload)
+            source_meta = {"id": "obs-1", "controllerId": "screen.capture", "sourceSequence": 7}
+            ref = _StreamMediaRef("", path=str(spool), sha256=hashlib.sha256(payload).hexdigest(),
+                                  media_bytes=len(payload), media_type="image/png", source=source_meta)
+            sample = {"media": [{"data": ref, "mediaType": "audio/wav"}], "data": {"seen": True}}
+            validate_sample(sample, root)
+            self.assertEqual(ref.raw_bytes(), payload)
+            self.assertEqual(base64.b64decode(ref), payload)  # transparent lazy encode
+            history = ObservationHistory(root)
+            try:
+                result = history.append(sample, "g", SAMPLING, "2026-11-03T00:00:00Z")
+                self.assertEqual(result["sources"], [source_meta])
+                self.assertEqual(Path(result["media"][0]["path"]).read_bytes(), payload)
+                self.assertEqual(history.observe()["records"][0]["sources"], [source_meta])
+            finally:
+                history.close()
+            missing = _StreamMediaRef("", path=str(root / "stream" / "gone.bin"))
+            with self.assertRaises(FileNotFoundError):
+                validate_sample({"media": [{"data": missing, "mediaType": "audio/wav"}]}, root)
+
+    def test_append_without_media_delivery_returns_metadata_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = ObservationHistory(directory)
+            try:
+                record = history.append({"media": [{"mediaType": "audio/wav", "data": "YWJj"}]},
+                                        "g", SAMPLING, "2026-11-03T00:00:00Z", deliver_media=False)
+                self.assertNotIn("data", record["media"][0])
+                self.assertIn("path", record["media"][0])
+                self.assertEqual(Path(record["media"][0]["path"]).read_bytes(), b"abc")
+                spool = Path(directory) / "audio-ref.bin"
+                spool.write_bytes(b"raw-audio-bytes")
+                ref = _StreamMediaRef("", path=str(spool))
+                with patch.object(base64, "b64encode", side_effect=AssertionError("unexpected b64encode")), \
+                        patch.object(base64, "b64decode", side_effect=AssertionError("unexpected b64decode")):
+                    ref_record = history.append({"media": [{"mediaType": "audio/wav", "data": ref}]},
+                                                "g", SAMPLING, "2026-11-03T00:00:01Z", deliver_media=False)
+                self.assertEqual(Path(ref_record["media"][0]["path"]).read_bytes(), b"raw-audio-bytes")
+            finally:
+                history.close()
+
+    def test_observe_if_none_match_sequence_short_circuits_unchanged_latest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            history = ObservationHistory(directory)
+            try:
+                first = history.append({"data": 1}, "g", SAMPLING, "2026-11-03T00:00:00Z")
+                seq = first["sequence"]
+                unchanged = history.observe({"ifNoneMatchSequence": seq})
+                self.assertTrue(unchanged["unchanged"])
+                self.assertEqual(unchanged["sequence"], seq)
+                self.assertEqual(unchanged["records"], [])
+                for invalid in (0, -1, True, 1.5, "1"):
+                    with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                        history.observe({"ifNoneMatchSequence": invalid})
+                history.append({"data": 2}, "g", SAMPLING, "2026-11-03T00:00:01Z")
+                fresh = history.observe({"ifNoneMatchSequence": seq})
+                self.assertNotIn("unchanged", fresh)
+                self.assertEqual(fresh["records"][0]["data"], 2)
+            finally:
+                history.close()
+
+    def test_client_call_wraps_spooled_observations_into_stream_refs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            spool = Path(directory) / "stream-1.bin"
+            spool.write_bytes(b"spooled-frame")
+
+            def fake_request(_self, action, **fields):
+                assert (action, fields["id"]) == ("call", "controller/screen.capture")
+                return {"result": {"content": [{"type": "image", "mimeType": "image/png", "data": ""}]},
+                        "observations": [{"contentIndex": 0, "path": str(spool), "sha256": "feed",
+                                          "bytes": 13, "sourceSequence": 4, "controllerId": "screen.capture"}]}
+
+            with patch.object(Client, "_request", fake_request):
+                result = Client().call("controller/screen.capture", {})
+            block = result["result"]["content"][0]
+            self.assertEqual(block["path"], str(spool))
+            self.assertIsInstance(block["data"], _StreamMediaRef)
+            self.assertEqual(block["data"].path, str(spool))
+            self.assertEqual(block["data"].sha256, "feed")
+            self.assertEqual(block["data"].media_bytes, 13)
+            self.assertEqual(block["data"].source, {"controllerId": "screen.capture", "sourceSequence": 4})
+            self.assertEqual(base64.b64decode(block["data"]), b"spooled-frame")
 
 
 if __name__ == "__main__":

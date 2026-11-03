@@ -1,18 +1,21 @@
 """Synchronous access to the workspace's unified capability interface."""
 
 from __future__ import annotations
-
 from contextvars import ContextVar
 import builtins
+import copy
 import math
 from pathlib import Path
+import threading
 import time
 from typing import Any
 import uuid
 from ._context import LudensError, continuous, current, request, scope
-from ._observation_history import _iso, read_timeline, timestamp
+from ._observation_history import MAIN_CAPABILITY, _StreamMediaRef, _iso, read_timeline, timestamp
 
 _in_eval_env_observe = ContextVar("ludens_in_eval_env_observe", default=False)
+_LATEST_OBSERVE_LOCK = threading.Lock()
+_LATEST_OBSERVE_CACHE: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
 
 
 class RecordWindow:
@@ -123,11 +126,21 @@ class Client:
             if isinstance(raw, dict):
                 return {"queryId": "eval-env-" + uuid.uuid4().hex[:8], "ok": True, "records": [], "hasMore": False, **raw}
             raise ValueError("eval_env.observe must return a record list or observation envelope dict")
+        q = dict(query or {})
+        eligible = (set(q.keys()) <= {"capability", "limit"} and q.get("limit") in (None, 1)
+                    and q.get("capability") != "*")
         if context["socket_path"] is None:
             return self._offline_timeline(context, query)
+        cache_key = None
+        cached = None
+        if eligible:
+            cache_key = (str(Path(context["workspace"]).resolve()), str(q.get("capability") or MAIN_CAPABILITY))
+            with _LATEST_OBSERVE_LOCK:
+                cached = _LATEST_OBSERVE_CACHE.get(cache_key)
+        req_query = {**q, "ifNoneMatchSequence": cached[0]} if cached is not None else q
         try:
-            return request(context["socket_path"], {
-                "kind": "perception", "argv": ["observe"], "query": query or {},
+            reply = request(context["socket_path"], {
+                "kind": "perception", "argv": ["observe"], "query": req_query,
                 **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
             }, context["timeout"])
         except (FileNotFoundError, ConnectionRefusedError):
@@ -138,6 +151,22 @@ class Client:
             if "ENOENT" in text or "ECONNREFUSED" in text or "Unavailable" in text:
                 return self._offline_timeline(context, query)
             raise
+        if cache_key is not None and isinstance(reply, dict) and reply.get("ok") is True:
+            if reply.get("unchanged") is True and cached is not None and reply.get("sequence") == cached[0]:
+                restored = {key: value for key, value in reply.items() if key not in ("unchanged", "sequence")}
+                restored["records"] = [copy.deepcopy(cached[1])]
+                echoed = restored.get("query")
+                if isinstance(echoed, dict) and "ifNoneMatchSequence" not in q:
+                    restored["query"] = {key: value for key, value in echoed.items() if key != "ifNoneMatchSequence"}
+                return restored
+            records = reply.get("records") or []
+            if len(records) == 1 and isinstance(records[0].get("sequence"), int):
+                with _LATEST_OBSERVE_LOCK:
+                    _LATEST_OBSERVE_CACHE[cache_key] = (records[0]["sequence"], copy.deepcopy(records[0]))
+                echoed = reply.get("query")
+                if isinstance(echoed, dict) and "ifNoneMatchSequence" not in q:
+                    reply["query"] = {key: value for key, value in echoed.items() if key != "ifNoneMatchSequence"}
+        return reply
 
     @staticmethod
     def _offline_timeline(context: dict[str, Any], query: dict[str, Any] | None) -> Any:
@@ -231,7 +260,28 @@ class Client:
                 return env(capability_id, arguments)
             raise ValueError("eval_env must define call(capability_id, arguments) or be callable to handle " + capability_id)
         fields = {"id": capability_id, "arguments": arguments}
-        return self._request("call", **fields)
+        result = self._request("call", **fields)
+        if isinstance(result, dict):
+            observations = result.get("observations")
+            outcome = result.get("result")
+            content = outcome.get("content") if isinstance(outcome, dict) else None
+            if isinstance(observations, list):
+                # Baseware spools stream media to disk and omits the inline
+                # Base64 payload; wrap the content block in a lazy reference.
+                for obs in observations:
+                    if isinstance(obs, dict) and isinstance(obs.get("path"), str) and obs["path"]:
+                        source_meta = {key: obs[key] for key in ("id", "controllerId", "timing", "sourceSequence")
+                                       if key in obs}
+                        index = obs.get("contentIndex")
+                        if (isinstance(content, list) and isinstance(index, int)
+                                and 0 <= index < len(content) and isinstance(content[index], dict)):
+                            block = content[index]
+                            block["path"] = obs["path"]
+                            block["data"] = _StreamMediaRef(
+                                block.get("data") if isinstance(block.get("data"), str) else "",
+                                path=obs["path"], sha256=obs.get("sha256"), media_bytes=obs.get("bytes"),
+                                media_type=obs.get("mediaType") or block.get("mimeType"), source=source_meta)
+        return result
 
 
 def replay(window: Any = None, *, start: str | float | int | None = None,

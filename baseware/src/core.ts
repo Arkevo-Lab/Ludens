@@ -5,6 +5,7 @@ import type { Catalog, DeviceEvent, EventMetadata, RecordEvent, Request, Trace }
 import type { DriverManifest } from "./drivers/registry.ts";
 import type { EventSourceDescriptor } from "@ludens/protocol/event-sources";
 import { SamplingStats } from "./sampling-stats.ts";
+import { ObservationStreamSpool } from "./stream.ts";
 
 export type DriverInfo = Pick<DriverManifest, "id" | "transport" | "defaultPort" | "needsGame" | "launchHint" | "launchCommand" | "launchEnv" | "source"> & { version: string };
 export interface ClientContext { id: string; onEvent?(event: DeviceEvent): void }
@@ -46,11 +47,12 @@ export class BasewareCore {
   private sequence = 0;
   private validators = new Map<string, (value: unknown) => ToolArguments>();
   private sampling: SamplingStats;
+  private stream: ObservationStreamSpool;
   private statsTimer: ReturnType<typeof setInterval>;
   private logFailure?: { firstSeq: number; lastSeq: number; count: number; error: string };
 
   constructor(options: { capabilities: Capabilities; drivers: DriverInfo[]; record?: RecordEvent; serviceId?: string;
-    source?: EventSourceDescriptor; diagnostics?: "normal" | "full"; inputResetTimeoutMs?: number }) {
+    source?: EventSourceDescriptor; diagnostics?: "normal" | "full"; inputResetTimeoutMs?: number; streamDir?: string; streamPrefetch?: boolean }) {
     this.capabilities = options.capabilities;
     this.drivers = options.drivers;
     this.sink = options.record ?? (() => {});
@@ -64,6 +66,7 @@ export class BasewareCore {
     }
     for (const controller of this.capabilities.controllers) this.validators.set(controller.tool.name, argumentValidator(controller.tool));
     this.sampling = new SamplingStats(this.record);
+    this.stream = new ObservationStreamSpool({ streamDir: options.streamDir, prefetch: options.streamPrefetch });
     this.statsTimer = setInterval(() => this.sampling.flush(), this.sampling.periodMs);
     this.statsTimer.unref();
   }
@@ -179,6 +182,7 @@ export class BasewareCore {
     this.inputGeneration = null;
     this.reason = reason;
     this.control?.abort();
+    this.stream.stopProducers();
     clearTimeout(this.timer);
     this.stopping = (async () => {
       // Try to unblock a pending native OWN now. Its late-success path also
@@ -325,7 +329,7 @@ export class BasewareCore {
     });
   }
 
-  async execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, parent: Trace = {}, operationId: string = crypto.randomUUID(), origin = "cli") {
+  async execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, parent: Trace = {}, operationId: string = crypto.randomUUID(), origin = "cli", options?: { omitInlineMedia?: boolean }) {
     const trace = operationTrace({ ...parent, ...(epoch ? { epoch } : {}) }, operationId);
     const controller = this.capabilities.controllers.find(c => c.tool.name === id);
     const readOnly = controller?.tool.annotations?.readOnlyHint === true;
@@ -356,7 +360,8 @@ export class BasewareCore {
         this.writes.add(admittedWrite);
       }
       combined.throwIfAborted();
-      const result = await controller.execute(this.validators.get(id)!(args), { epoch, signal: combined,
+      const validatedArgs = this.validators.get(id)!(args);
+      const executeRaw = () => controller.execute(validatedArgs, { epoch, signal: combined,
         controlSignal: inputControl?.signal,
         record: (type, data) => {
           const outcome = data.status === "interrupted" ? "cancelled" : data.status === "failed" ? "error" : "success";
@@ -366,6 +371,9 @@ export class BasewareCore {
           this.record(type, { ...data, controllerId: id, requiresControl: controller.requiresControl,
             ...(type === "action_end" ? { outcome } : {}) }, trace);
         } });
+      const result = readOnly && options?.omitInlineMedia
+        ? await this.stream.readOrProduce(id, validatedArgs, trace.recordingPurpose === "continuous-perception", true, executeRaw)
+        : options?.omitInlineMedia ? await this.stream.spool(await executeRaw(), options) : await executeRaw();
       // Read-only calls must not displace the last action; revoked calls cannot attach to a new owner.
       if (controller.requiresControl && !result.actionId && !result.readOnly && epoch === this.epoch
         && inputControl === this.control && !inputControl?.signal.aborted) this.lastExecution = { result, trace };
@@ -416,7 +424,7 @@ export class BasewareCore {
         case "controller":
           if (!request.id) throw new Error("Missing controller ID");
           deviceOperation = true;
-          return await this.execute(request.id, request.arguments === undefined ? {} : request.arguments, request.epoch, signal, request.trace, request.operationId, request.origin);
+          return await this.execute(request.id, request.arguments === undefined ? {} : request.arguments, request.epoch, signal, request.trace, request.operationId, request.origin, { omitInlineMedia: request.omitInlineMedia });
         default: throw new Error(`Unknown request kind: ${request.kind}`);
       }
     } catch (error) {
@@ -433,5 +441,6 @@ export class BasewareCore {
     await this.release(undefined, "shutdown");
     clearInterval(this.statsTimer);
     this.sampling.flush(true);
+    await this.stream.close();
   }
 }

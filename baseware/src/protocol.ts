@@ -26,6 +26,7 @@ export interface Request {
   trace?: Trace;
   origin?: string;
   operationId?: string;
+  omitInlineMedia?: boolean;
 }
 export interface Envelope { id: string; request: Request }
 export type Response = { id: string; ok: true; value: unknown } | { id: string; ok: false; error: string };
