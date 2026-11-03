@@ -15,7 +15,6 @@ export function PerceptionRuntimeStatus({ project, workspace, settings, revision
   const [result, setResult] = useState<{ value: PerceptionRuntimeSnapshot; revision: number } | null>(null);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const request = useRef<AbortController | null>(null);
-  useEffect(() => () => request.current?.abort(), [project, workspace]);
   const check = async () => {
     if (request.current || saving) return;
     const controller = new AbortController(); request.current = controller; setLoading(true);
@@ -27,8 +26,12 @@ export function PerceptionRuntimeStatus({ project, workspace, settings, revision
       if (!controller.signal.aborted && request.current === controller) { setResult({ value, revision }); setError(""); }
     } catch (cause) {
       if (!controller.signal.aborted && request.current === controller) setError(cause instanceof Error ? cause.message : String(cause));
-    } finally { if (!controller.signal.aborted) setLoading(false); if (request.current === controller) request.current = null; }
+    } finally { if (request.current === controller) { request.current = null; if (!controller.signal.aborted) setLoading(false); } }
   };
+  useEffect(() => {
+    void check();
+    return () => { const controller = request.current; request.current = null; controller?.abort(); };
+  }, [project, workspace]);
   const perception = result?.value.perception, values = perception?.values;
   const stale = !!result && (result.revision !== revision || !!error);
   const current = perception?.valueStatus === "current" && !stale;

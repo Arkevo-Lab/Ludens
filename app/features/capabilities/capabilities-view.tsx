@@ -1,9 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, ArrowUpRight, BookOpen, Box, CheckCircle2, FileCode2, ListChecks, Monitor } from "lucide-react";
+import { Activity, ArrowUpRight, BookOpen, FileCode2, ListChecks, Monitor } from "lucide-react";
 import type { CapabilityEntry, CapabilitiesResult, CapabilityRuntime } from "@/lib/capabilities";
-import type { DiscoveredDriver } from "@/lib/drivers";
-import { driverCreationHref } from "@/lib/driver-onboarding";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useReadResource } from "@/components/use-read-resource";
@@ -12,8 +10,6 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 
 interface WorkspaceCatalogProps {
   project: string;
@@ -22,7 +18,6 @@ interface WorkspaceCatalogProps {
   catalogError?: string;
   catalogLoading?: boolean;
   onRetryCatalog(): void;
-  onCreateWithDriver(driver: DiscoveredDriver): void;
   onNavigate(href: string): void;
 }
 function NavigationLink({ href, onNavigate, children, primary = false }: {
@@ -35,72 +30,6 @@ function NavigationLink({ href, onNavigate, children, primary = false }: {
 function useGuideHref(project: string) {
   const { locale } = useLocale();
   return (doc: string) => "/?" + new URLSearchParams({ view: "docs", doc, docLang: locale, ...(project ? { project } : {}) });
-}
-
-function DiscoverDriver({ project, onCreateWithDriver, onNavigate }: Pick<WorkspaceCatalogProps, "project" | "onCreateWithDriver" | "onNavigate">) {
-  const t = useTranslations("capabilitiesView"), guide = useGuideHref(project);
-  const [spec, setSpec] = useState("");
-  const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<DiscoveredDriver | null>(null);
-  const [failure, setFailure] = useState("");
-  const request = useRef<AbortController | null>(null);
-  useEffect(() => () => { const controller = request.current; request.current = null; controller?.abort(); }, []);
-  const changeSpec = (value: string) => {
-    const controller = request.current; request.current = null; controller?.abort();
-    setSpec(value); setPending(false); setResult(null); setFailure("");
-  };
-  const discover = async () => {
-    if (request.current || !spec.trim()) return;
-    const controller = new AbortController(); request.current = controller;
-    setPending(true); setFailure(""); setResult(null);
-    try {
-      const response = await fetch("/api/drivers/discover", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec: spec.trim() }), signal: controller.signal,
-      });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error ?? t("readFailed"));
-      if (!controller.signal.aborted && request.current === controller) setResult(value as DiscoveredDriver);
-    } catch (error) {
-      if (!controller.signal.aborted && request.current === controller) setFailure(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (request.current === controller) { request.current = null; if (!controller.signal.aborted) setPending(false); }
-    }
-  };
-  return <Card className="min-w-0" aria-label={t("driverSectionLabel")} data-driver-verification>
-    <CardContent className="min-w-0 space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex min-w-0 items-center gap-3">
-        <Box className="size-5 shrink-0 text-primary" /><h2 className="text-base font-semibold">{t("driverTitle")}</h2>
-      </div><Badge variant="outline">{t("onDemandBadge")}</Badge></div>
-      <p className="text-sm leading-relaxed text-muted-foreground">{t("discoverNote1a")}<code>github:org/repo#rev</code>{t("discoverNote1b")}<code>{t("examplePath")}</code>{t("discoverNote1c")}</p>
-      <form className="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={event => { event.preventDefault(); void discover(); }}>
-        <div className="min-w-0 space-y-2">
-          <Label htmlFor="driver-package-spec">{t("specAriaLabel")}</Label>
-          <Input id="driver-package-spec" className="font-mono" value={spec} onChange={event => changeSpec(event.target.value)} placeholder={t("specPlaceholder")}
-            aria-describedby="driver-import-boundary" spellCheck={false} autoCapitalize="none" autoCorrect="off" />
-        </div>
-        <Button type="submit" aria-disabled={pending || !spec.trim()} className="h-auto min-h-9 whitespace-normal py-2 aria-disabled:opacity-50">{pending ? t("verifying") : t("verifyDriver")}</Button>
-      </form>
-      <p id="driver-import-boundary" className="text-xs leading-relaxed text-muted-foreground">{t("discoverNote2a")}<code>load()</code>{t("discoverNote2b")}</p>
-      {failure && <Alert variant="destructive"><AlertDescription>{failure}</AlertDescription></Alert>}
-      {result && <div className="space-y-4 rounded-lg border border-primary/25 bg-primary/5 p-4" data-verified-driver>
-        <div className="flex flex-col items-start justify-between gap-4 sm:flex-row"><div className="min-w-0 w-full flex-1 space-y-3">
-          <h3 className="flex items-center gap-2 text-sm font-semibold" role="status"><CheckCircle2 className="size-4 shrink-0 text-primary" />{t("verifiedTitle")}</h3>
-          <p className="break-all font-mono text-xs">{result.spec}</p>
-          <div className="flex flex-wrap items-center gap-2 text-xs"><Badge variant="outline">{result.id}</Badge><span>{t("declaredVersion")}: {result.version}</span>
-            {result.transport && <span>{result.transport}</span>}{result.defaultPort !== undefined && <span>{t("defaultPortPrefix")}{result.defaultPort}</span>}</div>
-        </div><Button asChild className="h-auto min-h-9 max-w-full whitespace-normal py-2 text-left">
-          <a href={driverCreationHref(result.spec)} onClick={event => {
-            if (isPlainNavigationClick(event)) { event.preventDefault(); onCreateWithDriver(result); }
-          }}>{t("createWithDriver")}<ArrowUpRight /></a>
-        </Button></div>
-        {result.launchHint && <p className="break-words text-xs leading-relaxed text-muted-foreground">{result.launchHint}</p>}
-        <div className="space-y-2 border-t border-border/70 pt-3 text-xs leading-relaxed text-muted-foreground"><p>{t("verifiedBoundary")}</p><p>{t("creationRechecks")}</p></div>
-      </div>}
-      <div className="flex flex-wrap items-center gap-3 border-t pt-4"><NavigationLink href={guide("tutorials/devices")} onNavigate={onNavigate}><BookOpen />{t("deviceGuide")}</NavigationLink>
-        <p className="min-w-0 flex-1 basis-72 text-xs leading-relaxed text-muted-foreground">{t("existingWorkspaceHint")}</p></div>
-    </CardContent>
-  </Card>;
 }
 
 function CapabilityDeclarations({ items, title }: { items: CapabilityEntry[]; title: string }) {
@@ -154,7 +83,6 @@ function ConnectionCheck({ project, workspace }: { project: string; workspace: s
   const t = useTranslations("capabilitiesView");
   const [value, setValue] = useState<CapabilityRuntime | null>(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(false), request = useRef<AbortController | null>(null);
-  useEffect(() => () => { const controller = request.current; request.current = null; controller?.abort(); }, []);
   const check = async () => {
     if (request.current) return;
     const controller = new AbortController(); request.current = controller; setLoading(true);
@@ -168,6 +96,10 @@ function ConnectionCheck({ project, workspace }: { project: string; workspace: s
       if (request.current === controller && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
     } finally { if (request.current === controller) { request.current = null; if (!controller.signal.aborted) setLoading(false); } }
   };
+  useEffect(() => {
+    void check();
+    return () => { const controller = request.current; request.current = null; controller?.abort(); };
+  }, [project, workspace]);
   const status = loading ? "runtimeChecking" : error ? value ? "runtimeStale" : "runtimeReadFailed" : !value ? "runtimeUnchecked" : value.host === "unavailable" ? "runtimeUnavailable"
     : value.controlConnected === null ? "runtimeUnknown" : value.controlConnected ? "runtimeConnected" : "runtimeDisconnected";
   return <Card className="min-w-0" data-capability-runtime><CardContent className="min-w-0 space-y-4">
@@ -225,7 +157,6 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
 export function CapabilitiesView(props: WorkspaceCatalogProps) {
   const t = useTranslations("capabilitiesView");
   return <div className="mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-6"><header className="space-y-2"><h1>{t("title")}</h1><p className="text-sm leading-relaxed text-muted-foreground">{t("description")}</p></header>
-    <DiscoverDriver project={props.project} onCreateWithDriver={props.onCreateWithDriver} onNavigate={props.onNavigate} />
     <WorkspaceCapabilities {...props} />
   </div>;
 }

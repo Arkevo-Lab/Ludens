@@ -88,3 +88,7 @@ export function workspaceCreateInput(defaultRoot: string, draft: WorkspaceDraft,
     ...(capabilities.stdio && draft.cuaCommand.trim() ? { cuaCommand: draft.cuaCommand.trim() } : {}),
   } };
 }
+
+export function workspaceUpCommand(workspace: string) {
+  return `ludens --workspace '${workspace.replace(/'/g, "'\\''")}' up`;
+}

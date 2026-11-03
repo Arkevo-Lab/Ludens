@@ -18,6 +18,7 @@ import { SettingsView } from "@/features/workspaces/settings-view";
 import { DevPanel } from "@/shell/dev-panel";
 import { TimelinePlayer } from "@/features/replay/timeline-player";
 import { replayEvidenceFromSearch, replayEvidencePatch } from "@/features/replay/replay-navigation";
+import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { ArchiveBuild } from "@/shell/archive-build";
 import { WorkspacesView } from "@/features/workspaces/workspaces-view";
 import { Metric, ObservationPanel, seconds, percent, bytes, clockTime } from "@/features/live/run-visuals";
@@ -38,6 +39,7 @@ export default function ConsoleShell() {
       <Metric label={dt("metric.cache")} value={percent(s!.cacheHit)} detail={dt("metric.afterFirst") + percent(s!.warmCacheHit)} />
     </section>
   ) : null;
+  const workspaceScopedView = view === "live" || view === "replay" || view === "perf" || view === "benchmark" || view === "caps" || view === "perception";
   return (
     <div className="console-shell">
       <DesktopBridge onNavigate={navigateUrl} />
@@ -45,15 +47,36 @@ export default function ConsoleShell() {
       <div className="console-main">
         <header className={"context-bar" + (view === "live" ? " live-context-bar" : "")}>
           <div className="context-workspace">
-            <WorkspacePicker projects={projects} value={selection.project} loading={!catalogReady} error={catalogError}
-              onChange={id => navigate({ project: id, workspace: null, run: null, epoch: null,
-                beforeCall: null, call: null, block: null, image: null, at: null, ...replayEvidencePatch(null),
-                case: null, caseDigest: null, result: null, baseline: null, verification: null,
-                baselineVerification: null, report: null, baselineReport: null,
-                verificationCursor: null, evidenceCursor: null, benchCursor: null })} />
-            <div className="breadcrumb"><i>/</i><strong>{t(`nav.${view}`)}</strong></div>
+            {workspaceScopedView ? (
+              <>
+                <WorkspacePicker projects={projects} value={selection.project} loading={!catalogReady} error={catalogError}
+                  onChange={id => navigate({ project: id, workspace: null, run: null, epoch: null,
+                    beforeCall: null, call: null, block: null, image: null, at: null, ...replayEvidencePatch(null),
+                    case: null, caseDigest: null, result: null, baseline: null, verification: null,
+                    baselineVerification: null, report: null, baselineReport: null,
+                    verificationCursor: null, evidenceCursor: null, benchCursor: null })} />
+                <div className="breadcrumb"><i>/</i><strong>{t(`nav.${view}`)}</strong></div>
+              </>
+            ) : (
+              <div className="breadcrumb">
+                <span>{t(view === "dev" ? "navSectionDev" : "navSectionGlobal")}</span>
+                <i>/</i>
+                <strong>{t(`nav.${view}`)}</strong>
+              </div>
+            )}
           </div>
           <div className="context-controls">
+            {!workspaceScopedView && project && (
+              <Button asChild size="sm" variant="outline" className="text-muted-foreground">
+                <a href={viewLink("live")} onClick={event => {
+                  if (!isPlainNavigationClick(event)) return;
+                  event.preventDefault();
+                  navigateUrl(viewLink("live"));
+                }}>
+                  {workspaceName(project)} · {t("nav.live")} <ArrowRight className="size-3.5" aria-hidden="true" />
+                </a>
+              </Button>
+            )}
             {runControls && (
               <>
                 <RunPicker runs={project?.runs ?? []} latest={latest}
@@ -180,7 +203,7 @@ export default function ConsoleShell() {
             </Button>
           </section>}
           {view === "workspaces" ? (
-            <WorkspacesView onChanged={refreshCatalog} onOpen={id => navigateUrl("/?" + new URLSearchParams({ view: "caps", project: id }))}
+            <WorkspacesView onChanged={refreshCatalog} onOpen={id => navigateUrl("/?" + new URLSearchParams({ view: "live", project: id }))}
               catalogError={catalogError} catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog}
               createIntent={query.get("create") === "1" ? { driverPackage: query.get("driverPackage") ?? "",
                 driver: verifiedCreationDriver?.spec === query.get("driverPackage") ? verifiedCreationDriver : undefined } : null}
@@ -196,10 +219,11 @@ export default function ConsoleShell() {
             <DocsView search={search} navigate={navigate} />
           ) : view === "caps" ? (
             <CapabilitiesView project={selection.project} ready={catalogReady} catalogError={catalogError}
-              workspace={project?.workspace ?? null} onCreateWithDriver={createWithDriver} onNavigate={navigateUrl}
+              workspace={project?.workspace ?? null} onNavigate={navigateUrl}
               catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog} />
           ) : runControls && entry !== "ready" ? (
             <WorkspaceRunEmpty state={entry} project={project?.id} workspaceName={workspaceName(project)}
+              workspacePath={project?.workspace ?? undefined}
               benchmarkRun={project?.runs.find(r => r.kind === "benchmark" || r.benchmark)?.id}
               error={catalogError} retrying={catalogLoading} onRetry={retryCatalog} onNavigate={navigateUrl} />
           ) : view === "replay" ? (
