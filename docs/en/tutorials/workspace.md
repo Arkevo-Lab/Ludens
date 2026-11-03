@@ -108,25 +108,33 @@ Use the **Fast Loop (`@capability`) + Offline Evaluation (`@eval_capability`)** 
 
 When an atomic workspace capability can be evaluated offline, you can optionally pair it with a synchronous, zero-required-argument eval function in the same Python module. Evaluation strips inherited Host/device sockets and control epochs, so it cannot drive the live device. Choose the evaluation style that matches the capability:
 
-1. **Replay labeled `.ludens/timeline/` records** for pure perception or parsing functions. `Client().observe()` reads the persisted timeline directly, and labeled records test single-step predictions against known outputs.
-2. **Mount a local surrogate environment with `with eval_env(env):`** for closed-loop action/reaction capabilities such as fishing reels, bug catching, or grid/menu navigation. The environment intercepts `Client().observe(query)` through `env.observe(query)` and `Client().call("controller/...", args)` through `env.call(id, args)`, advances latent ground-truth state in virtual time, and scores the capability directly against that state across randomized trials.
+1. **Replay labeled `.ludens/timeline/` records or 30 Hz trajectory slices** for perception, parsing, or sequence-detection functions. `Client().observe()` reads single pages from the persisted timeline, while `Client().replay(...)` (and `with record_window() as win:`) slices and automatically paginates multi-second 30 Hz trajectories by time window (`window=win` or `start=...`, `end=...`) or around an anchor record (`around=record_id, before_seconds=2.0, after_seconds=2.0`).
+   Replay includes all capability streams unless `capability=...` is specified and returns at most `max_records=256`; increase this limit for longer trajectories.
+2. **Mount a local surrogate environment with `with eval_env(env):` and co-evolve Actor + Critic** for closed-loop action/reaction capabilities such as fishing reels, bug catching, or grid/menu navigation. The environment (**Critic** / world model) intercepts `Client().observe(query)` through `env.observe(query)` and `Client().call("controller/...", args)` through `env.call(id, args)`, advances latent ground-truth state in virtual time, and scores the capability (**Actor** / policy) directly against that state across randomized trials.
 
-A surrogate environment solves both the generalization gap of static frame lists and the inverse-verifier difficulty of inferring closed-loop success from output frames. It generates observations from state whose correct outcome it already knows, optionally compositing real background frames or crops from `.ludens/timeline/` by calling `Client().observe()` inside `env.observe()` without recursion. Because the environment also intercepts controller calls, it can model randomized nibbles and bite windows, moving targets, or cursor transitions and grade the resulting ground-truth state rather than asking another model to judge whether the capability succeeded.
+In nontrivial game interactions, neither the Actor (`@capability`) nor the Critic (`eval_env`) can be built to perfection in a single shot before touching the real environment. Treat them as a **co-evolving pair** powered by 30 Hz `.ludens/timeline/` replays:
+
+1. **Bootstrap a minimal `v0` Actor + Critic and run a live probe**: build a minimal closed-loop capability and `eval_env`, then run a live attempt wrapped in `with record_window() as win:` (or a `@record @capability` probe) while 30 Hz `Perception.sample` captures the full trajectory.
+2. **Slice the 30 Hz replay to upgrade the Critic (`eval_env`) first**: inspect the captured trajectory with `Client().replay(win)` or `Client().replay(around=record_id, before_seconds=3.0, after_seconds=2.0)`. Measure real multi-frame dynamics (e.g., how many 33ms frames a nibble vs. a bite splash lasts, or how background ripples fluctuate) and feed those real timeline slices or calibrated dynamics into `env.observe()` (which can call `Client().observe()` or `Client().replay()` without recursion) until the upgraded Critic reproduces the failure mode and causes the naive `v0` Actor to fail (`passed=False`).
+3. **Iterate the Actor offline against the upgraded Critic**: refine the `@capability` and run `ludens eval run <id>` offline until it passes (`verified`), then validate in live play.
 
 ```python
 import random
-from ludens_tools import Client, capability, eval_capability, eval_env
+from ludens_tools import Client, capability, eval_capability, eval_env, record_window
 
 @capability
 def reel_on_bite() -> dict:
     """Poll for a real bite and reel inside its reaction window."""
     client = Client()
-    for _ in range(20):
-        observation = client.observe()
-        if observation["event"] == "bite":
-            client.call("controller/pad.play", {"button": "a"})
-            return {"reeled": True}
-    return {"reeled": False}
+    reeled = False
+    with record_window() as window:
+        for _ in range(20):
+            observation = client.observe()
+            if observation["event"] == "bite":
+                client.call("controller/pad.play", {"button": "a"})
+                reeled = True
+                break
+    return {"reeled": reeled, "window": window.to_dict()}
 
 class BiteEnv:
     def __init__(self, seed: int):
@@ -136,7 +144,7 @@ class BiteEnv:
 
     def observe(self, query=None):
         self.tick += 1  # Advance virtual time; randomized nibbles precede the bite.
-        # Client().observe() may supply real timeline backgrounds/crops here.
+        # Client().replay(...) or Client().observe() may supply real 30 Hz timeline slices here.
         return {"event": "bite" if self.tick == self.bite_at else "nibble"}
 
     def call(self, id, args):

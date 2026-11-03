@@ -5,6 +5,7 @@ PYTHONPATH=ludens/python python3 ludens/tests/timeline.test.py
 
 import base64
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import os
@@ -20,6 +21,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 
+from ludens_tools import Client, record_window
 from ludens_tools._capabilities import discover, load_function, call_local
 from ludens_tools._context import scope
 from ludens_tools._observation_history import ObservationHistory, observation_result, MAIN_CAPABILITY
@@ -89,6 +91,61 @@ class Perception:
 
 
 class TimelineTests(unittest.TestCase):
+    def test_record_window_slices_replay(self):
+        base = datetime(2026, 11, 2, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            history = ObservationHistory(directory)
+            for index in range(6):
+                at = base + timedelta(milliseconds=index * 30)
+                history.append({"data": {"tick": index}}, "generation-one", SAMPLING,
+                               at.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                               identity={"id": "python/actions.py:move"}, run_id="run-one")
+            history.close()
+            with patch("ludens_tools.client.time.time", side_effect=[base.timestamp(), base.timestamp() + 0.06, base.timestamp() + 0.15]):
+                with record_window() as window:
+                    self.assertIsNone(window.end)
+                    self.assertEqual(window.to_dict(), {"start": window.start})
+                    self.assertAlmostEqual(window.duration, 0.06, places=6)
+                self.assertEqual(window.end, "2026-11-02T00:00:00.150Z")
+                self.assertAlmostEqual(window.duration, 0.15, places=6)
+                self.assertEqual(window.to_dict(), {"start": "2026-11-02T00:00:00.000Z", "end": "2026-11-02T00:00:00.150Z"})
+            context = {"workspace": directory, "run_id": "run-one", "socket_path": None, "epoch": None,
+                       "trace": {}, "timeout": None, "generation": "g", "timeline_append": None}
+            with scope(context):
+                rows = Client().replay(window)
+            self.assertEqual([row["data"]["tick"] for row in rows], list(range(6)))
+
+    def test_replay_around_event_and_paginates_beyond_single_query_limit(self):
+        base = datetime(2026, 11, 2, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            history = ObservationHistory(directory)
+            for index in range(150):
+                at = base + timedelta(seconds=index / 30)
+                history.append({"data": {"tick": index + 1}}, "generation-one", SAMPLING,
+                               at.isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                               identity={"id": "python/actions.py:move"}, run_id="run-one")
+            anchor = history.observe({"after": 0, "limit": 64, "capability": "*"})["records"][60]
+            history.close()
+            context = {"workspace": directory, "run_id": "run-one", "socket_path": None, "epoch": None,
+                       "trace": {}, "timeout": None, "generation": "g", "timeline_append": None}
+            with scope(context):
+                around = Client().replay(around=anchor["id"], before_seconds=0.1, after_seconds=0.1)
+                rows = Client().replay(start=base.timestamp(), end=(base + timedelta(seconds=5)).timestamp(), max_records=150)
+            self.assertEqual([row["data"]["tick"] for row in around], list(range(58, 65)))
+            self.assertEqual([row["data"]["tick"] for row in rows], list(range(1, 151)))
+
+    def test_replay_rejects_invalid_slices(self):
+        client = Client()
+        for value in (0, -1, True, 1.5):
+            with self.subTest(max_records=value), self.assertRaises(ValueError):
+                client.replay(max_records=value)
+        for name in ("before_seconds", "after_seconds"):
+            for value in (-1, float("inf"), float("nan"), True):
+                with self.subTest(name=name, value=value), self.assertRaises(ValueError):
+                    client.replay(**{name: value})
+        with self.assertRaisesRegex(ValueError, "around cannot be combined"):
+            client.replay(start=0, around="record-one")
+
     def test_generic_data_channels_record_lookup_and_cross_segment_objects(self):
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_SEGMENT_BYTES": "1"}):
             root = Path(directory)

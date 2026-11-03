@@ -108,25 +108,33 @@ def capture_top(exposure: int = 1) -> dict:
 
 当单项工作区能力适合离线评估时，可在同一 Python 模块中按需为其配对一个同步、无必填参数的评估函数。评估会移除继承的 Host/设备 socket 与控制 epoch，因此无法驱动实机。应根据能力类型选择评估方式：
 
-1. **重放已标注的 `.ludens/timeline/` 记录**，用于纯感知或解析函数。`Client().observe()` 直接读取持久化时空轴，已标注记录可测试单步预测是否等于已知输出。
-2. **通过 `with eval_env(env):` 挂载本地代理环境（surrogate environment）**，用于钓鱼收线、捕虫或网格/菜单导航等闭环动作/反应能力。环境通过 `env.observe(query)` 拦截 `Client().observe(query)`，通过 `env.call(id, args)` 拦截 `Client().call("controller/...", args)`，在虚拟时间中推进潜在真值状态，并跨随机试验直接依据该状态为能力评分。
+1. **重放已标注的 `.ludens/timeline/` 记录或 30 Hz 轨迹切片**，用于感知、解析或序列检测函数。`Client().observe()` 直接按页读取持久化时空轴；`Client().replay(...)`（配合 `with record_window() as win:`）则按时间窗口（`window=win` 或 `start=...`、`end=...`）或围绕锚点记录（`around=record_id, before_seconds=2.0, after_seconds=2.0`）自动分页拉取数秒长的 30 Hz 连续帧序列。
+   回放默认包含所有能力流，可用 `capability=...` 筛选；默认最多返回 `max_records=256` 条记录，较长轨迹需增大此上限。
+2. **通过 `with eval_env(env):` 挂载本地代理环境并联合演进 Actor + Critic**，用于钓鱼收线、捕虫或网格/菜单导航等闭环动作/反应能力。环境（**Critic** / 世界模型）通过 `env.observe(query)` 拦截 `Client().observe(query)`，通过 `env.call(id, args)` 拦截 `Client().call("controller/...", args)`，在虚拟时间中推进潜在真值状态，并跨随机试验直接依据该状态为能力（**Actor** / 策略）评分。
 
-代理环境同时解决静态帧列表的泛化缺口，以及根据输出帧反推闭环是否成功的逆向验证难题。它从已知正确结果的潜在状态生成观测，还可在 `env.observe()` 内调用 `Client().observe()`，合成来自 `.ludens/timeline/` 的真实背景帧或裁剪图且不会递归。由于环境也会拦截控制器调用，它可以模拟随机假咬与咬钩窗口、移动目标或光标转移，并直接根据最终真值状态评分，而无需再让另一个模型判断能力是否成功。
+在非平凡的游戏交互中，无论 Actor（`@capability`）还是 Critic（`eval_env`）都很难在接触真实环境前一次造到完美。应借助 30 Hz `.ludens/timeline/` 回放将二者作为**联合演进（Actor-Critic Co-Evolution）**的一对组件迭代：
+
+1. **先搭最小 `v0` Actor + Critic 并实机探测**：构建最小闭环能力与 `eval_env`，在实机尝试中用 `with record_window() as win:`（或 `@record @capability` 探针）包裹动作，由 30 Hz `Perception.sample` 录下完整轨迹。
+2. **切片 30 Hz 回放并优先升级 Critic（`eval_env`）**：用 `Client().replay(win)` 或 `Client().replay(around=record_id, before_seconds=3.0, after_seconds=2.0)` 提取连续帧，观察真实的多帧动态（例如假咬与真咬水花各自持续多少个 33ms 帧、背景水波如何波动），在 `env.observe()` 内直接重放真实切片或校准动态参数（内部调用 `Client().observe()` 或 `Client().replay()` 不会递归），直到升级后的 Critic 能复现真实环境中的干扰并让朴素 `v0` Actor 暴露失败（`passed=False`）。
+3. **基于升级后的 Critic 离线迭代 Actor**：修改 `@capability` 并离线运行 `ludens eval run <id>` 直至重新通过（`verified`），再回实机验证。
 
 ```python
 import random
-from ludens_tools import Client, capability, eval_capability, eval_env
+from ludens_tools import Client, capability, eval_capability, eval_env, record_window
 
 @capability
 def reel_on_bite() -> dict:
     """Poll for a real bite and reel inside its reaction window."""
     client = Client()
-    for _ in range(20):
-        observation = client.observe()
-        if observation["event"] == "bite":
-            client.call("controller/pad.play", {"button": "a"})
-            return {"reeled": True}
-    return {"reeled": False}
+    reeled = False
+    with record_window() as window:
+        for _ in range(20):
+            observation = client.observe()
+            if observation["event"] == "bite":
+                client.call("controller/pad.play", {"button": "a"})
+                reeled = True
+                break
+    return {"reeled": reeled, "window": window.to_dict()}
 
 class BiteEnv:
     def __init__(self, seed: int):
@@ -136,7 +144,7 @@ class BiteEnv:
 
     def observe(self, query=None):
         self.tick += 1  # Advance virtual time; randomized nibbles precede the bite.
-        # Client().observe() may supply real timeline backgrounds/crops here.
+        # Client().replay(...) or Client().observe() may supply real 30 Hz timeline slices here.
         return {"event": "bite" if self.tick == self.bite_at else "nibble"}
 
     def call(self, id, args):

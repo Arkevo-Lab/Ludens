@@ -421,7 +421,7 @@ test("controller list and capabilities query expose evaluation enrichment", asyn
   } finally { await rm(directory, { recursive: true, force: true }); await rm(home, { recursive: true, force: true }); }
 });
 
-const CLOSED_LOOP_SOURCE = `from ludens_tools import capability, record, eval_capability, eval_env, Client
+const CLOSED_LOOP_SOURCE = `from ludens_tools import capability, record, eval_capability, eval_env, Client, replay
 
 class FakeEnv:
     def __init__(self):
@@ -429,9 +429,8 @@ class FakeEnv:
         self.calls = []
     def observe(self, query):
         # Surrogate composites over committed timeline frames read from disk;
-        # Client().observe inside this callback must not recurse into env.observe.
-        real = Client().observe(query)
-        return list(real["records"])
+        # Client().replay inside this callback must not recurse into env.observe.
+        return Client().replay(start="2026-11-02T00:00:00Z", end="2026-11-03T00:00:00Z", capability="*")
     def call(self, capability_id, arguments):
         self.calls.append((capability_id, dict(arguments)))
         return {"ok": True, "id": capability_id, "echo": dict(arguments)}
@@ -469,8 +468,10 @@ def eval_reel() -> dict[str, float]:
     assert env.recorded and env.recorded[0]["timeline"] == outcome["timeline"]
     assert env.calls == [("controller/pad.play", {"slot": 3, "speed": 2}), ("controller/pad.release", {})]
     data = outcome["data"]
+    replayed = replay(capability="*")
+    assert len(replayed) == 2
     assert data["ticks"] == 2 and data["played"] == 3
-    return {"ticks": float(data["ticks"]), "acted": float(data["played"]), "listed": float(data["listed"])}
+    return {"ticks": float(len(replayed)), "acted": float(data["played"]), "listed": float(data["listed"])}
 `;
 
 test("closed-loop @record @capability evaluates offline through eval_env without a host socket", async () => {

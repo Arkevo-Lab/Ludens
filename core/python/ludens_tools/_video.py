@@ -135,6 +135,7 @@ class _Segment:
     updated: float
     last_at: float
     sample_hz: float = DEFAULT_SAMPLE_HZ
+    idle_seconds: float | None = None
     last_pts: int = -1
     queued: int = 0
     frames: int = 0
@@ -195,15 +196,15 @@ class VideoRecorder:
         segment.last_readable_pts = segment.encoded_pts
         _state(segment.path.with_suffix(".mp4.json"), self._metadata(segment, status))
 
-    def _new_segment(self, width: int, height: int, at: float, sample_hz: float) -> _Segment:
+    def _new_segment(self, width: int, height: int, at: float, sample_hz: float, idle_seconds: float | None = None) -> _Segment:
         path = self.directory / (uuid.uuid4().hex + ".mp4")
-        segment = _Segment(path.relative_to(self.root).as_posix(), path, width, height, at, time.monotonic(), at, sample_hz)
+        segment = _Segment(path.relative_to(self.root).as_posix(), path, width, height, at, time.monotonic(), at, sample_hz, idle_seconds)
         _state(path.with_suffix(".mp4.json"), self._metadata(segment, "pending"))
         self.segments[segment.asset] = segment
         return segment
 
     def submit(self, raw: bytes, channel: str, at: float, size: tuple[int, int] | None = None,
-               *, sample_hz: float = DEFAULT_SAMPLE_HZ) -> dict[str, Any]:
+               *, sample_hz: float = DEFAULT_SAMPLE_HZ, idle_seconds: float | None = None) -> dict[str, Any]:
         sample_hz = validate_sample_hz(sample_hz)
         width, height = image_size(raw) if size is None else size
         # Charge both the submitted compressed input and its decoded RGB frame.
@@ -230,7 +231,7 @@ class VideoRecorder:
                 if channel not in self.channels and len(self.channels) >= self.max_streams:
                     oldest = min(self.channels, key=lambda key: self.channels[key].updated)
                     self.channels.pop(oldest).sealed = True
-                segment = self._new_segment(width, height, at, sample_hz)
+                segment = self._new_segment(width, height, at, sample_hz, idle_seconds)
                 self.channels[channel] = segment
             pts = max(segment.last_pts + 1, round((at - segment.started) * 1_000_000))
             segment.last_at, segment.last_pts, segment.updated = at, pts, time.monotonic()
@@ -358,7 +359,7 @@ class VideoRecorder:
                     self.condition.wait(timeout=0.25)
                 now = time.monotonic()
                 for segment in self.channels.values():
-                    if self.closed or now - segment.updated >= self.idle_seconds:
+                    if self.closed or now - segment.updated >= (segment.idle_seconds if segment.idle_seconds is not None else self.idle_seconds):
                         segment.sealed = True
                 finished = [segment for segment in self.segments.values() if segment.sealed and not segment.queued]
                 task = self.queue.popleft() if self.queue else None
