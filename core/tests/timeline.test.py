@@ -134,6 +134,42 @@ class TimelineTests(unittest.TestCase):
             self.assertEqual([row["data"]["tick"] for row in around], list(range(58, 65)))
             self.assertEqual([row["data"]["tick"] for row in rows], list(range(1, 151)))
 
+
+    def test_replay_backs_off_page_size_on_byte_budget_errors(self):
+        def record(n):
+            return {"sequence": n, "recordedAt": "2026-11-02T00:00:00Z", "id": f"rec-{n}", "data": n}
+
+        for mode in ("rpc", "offline"):
+            with self.subTest(mode=mode):
+                limits = []
+
+                def observe(self, query):
+                    limits.append(query["limit"])
+                    if query["limit"] > 8:
+                        if mode == "rpc":
+                            return {"ok": False, "records": [], "hasMore": False,
+                                    "error": {"code": "QUERY_FAILED",
+                                              "message": "ValueError: Observation media exceed the query byte budget; request a smaller range"}}
+                        raise ValueError("Observation media exceed the query byte budget; request a smaller range")
+                    return {"ok": True, "hasMore": query["after"] == 0, "nextAfter": 1,
+                            "records": [record(1)] if query["after"] == 0 else [record(2)]}
+
+                with patch.object(Client, "observe", observe):
+                    rows = Client().replay(max_records=10)
+                self.assertEqual([row["data"] for row in rows], [1, 2])
+                self.assertEqual(limits, [10, 5, 5])
+
+    def test_replay_raises_ludens_error_on_non_budget_failure(self):
+        from ludens_tools._context import LudensError
+
+        def observe(self, query):
+            return {"ok": False, "records": [], "hasMore": False,
+                    "error": {"code": "QUERY_FAILED", "message": "other failure"}}
+
+        with patch.object(Client, "observe", observe):
+            with self.assertRaisesRegex(LudensError, "other failure"):
+                Client().replay(max_records=4)
+
     def test_replay_rejects_invalid_slices(self):
         client = Client()
         for value in (0, -1, True, 1.5):
