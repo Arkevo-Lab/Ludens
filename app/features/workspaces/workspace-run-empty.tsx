@@ -8,11 +8,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { workspaceRunLinks, type WorkspaceRunEntry } from "@/lib/workspace-run-entry";
+import { workspaceUpCommand } from "@/features/workspaces/workspace-create-model";
 
-export function WorkspaceRunEmpty({ state, project, workspaceName, benchmarkRun, error, retrying, onRetry, onNavigate }: {
+export function WorkspaceRunEmpty({ state, project, workspaceName, workspacePath, benchmarkRun, error, retrying, onRetry, onNavigate }: {
   state: Exclude<WorkspaceRunEntry, "ready">;
   project?: string;
   workspaceName?: string;
+  workspacePath?: string;
   benchmarkRun?: string;
   error: string;
   retrying: boolean;
@@ -45,15 +47,20 @@ export function WorkspaceRunEmpty({ state, project, workspaceName, benchmarkRun,
           <h2 id={headingId} className="text-base font-semibold">{t(`${copy}.title`)}</h2>
           <p className="max-w-2xl text-sm leading-relaxed text-muted-foreground">{t(`${copy}.description`)}</p>
         </div>
+        {state === "no-run" && workspacePath && (
+          <pre className="overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs">{workspaceUpCommand(workspacePath)}</pre>
+        )}
         {state === "catalog-error" && <Alert variant="destructive"><AlertDescription className="break-words">{error}</AlertDescription></Alert>}
         {!loading && <div className="flex flex-wrap gap-2 pt-1">
           {state === "catalog-error" ? <Button type="button" aria-disabled={retrying} className="aria-disabled:opacity-50"
             onClick={event => { if (!retrying) onRetry(event.currentTarget); }}>
             <RefreshCw className={retrying ? "animate-spin" : undefined} />{t(retrying ? "retrying" : "retry")}
-          </Button> : state === "no-run" && links.capabilities
-            ? action(links.capabilities, t("capabilities"), true)
-            : action(links.workspaces, t("workspaces"), true)}
-          {state === "no-run" && links.benchmark && action(links.benchmark, t("benchmark"))}
+          </Button> : state === "no-run" && links.benchmark
+            ? action(links.benchmark, t("benchmark"), true)
+            : state === "no-run" && links.capabilities
+              ? action(links.capabilities, t("capabilities"), true)
+              : action(links.workspaces, t("workspaces"), true)}
+          {state === "no-run" && links.benchmark && links.capabilities && action(links.capabilities, t("capabilities"))}
           {state !== "catalog-error" && action(links.quickstart, t("quickstart"))}
           {state === "no-run" && action(links.workspaces, t("switchWorkspace"))}
         </div>}

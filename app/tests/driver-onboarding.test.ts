@@ -24,18 +24,14 @@ test("only unmodified primary activation is intercepted for an in-memory handoff
     assert.equal(isPlainNavigationClick({ ...event, ...patch }), false);
 });
 
-test("package verification and navigation remain available without a usable workspace catalog", () => {
-  for (const props of [{ project: "", ready: false }, { project: "", ready: true },
-    { project: "missing", ready: true, catalogError: "catalog unavailable" }]) {
-    const html = renderToStaticMarkup(createElement(CapabilitiesView, { ...props, workspace: null,
-      onRetryCatalog() {}, onCreateWithDriver() {}, onNavigate() {} }));
-    assert.match(html, /aria-label="capabilitiesView\.driverSectionLabel"/);
-    assert.match(html, /<label[^>]*for="driver-package-spec"[^>]*>capabilitiesView\.specAriaLabel<\/label>/);
-    assert.match(html, /<input[^>]*id="driver-package-spec"/);
-    assert.match(html, /<form/);
-    assert.match(html, /capabilitiesView\.discoverNote2a/);
-    assert.match(html, /capabilitiesView\.discoverNote2b/);
-    assert.match(html, /view=docs/);
-    assert.doesNotMatch(html, /ludens init/);
-  }
+test("capabilities overview stays available without a usable workspace catalog", () => {
+  const html = renderToStaticMarkup(createElement(CapabilitiesView, { project: "", ready: true, workspace: null,
+    onRetryCatalog() {}, onNavigate() {} }));
+  assert.match(html, /aria-label="capabilitiesView\.overviewLabel"/);
+  assert.match(html, /view=workspaces&amp;create=1/);
+  assert.match(html, /view=workspaces"/);
+  assert.doesNotMatch(html, /data-capability-runtime/);
+  const connected = renderToStaticMarkup(createElement(CapabilitiesView, { project: "my workspace", workspace: "/tmp/my-ws", ready: true,
+    onRetryCatalog() {}, onNavigate() {} }));
+  assert.match(connected, /data-capability-runtime/);
 });

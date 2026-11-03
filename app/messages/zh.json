@@ -351,7 +351,7 @@
     "loadingTitle": "正在读取能力",
     "loadingDesc": "正在从当前工作区的 baseware.json 与 Python @capability 声明读取…",
     "emptyTitle": "选择要查看的工作区",
-    "emptyDesc": "请创建或选择已登记的工作区；上方的驱动包验证不依赖工作区选择。",
+    "emptyDesc": "请创建或选择已登记的工作区，以查看其设备能力快照、Python @capability 声明与评测任务。",
     "diagnosticsTitle": "读取诊断",
     "overviewLabel": "能力概览",
     "capabilitiesUnit": "项能力",
@@ -381,9 +381,9 @@
     "loadingWorkspaces": "正在读取工作区列表…",
     "errorDetails": "技术详情",
     "showingCached": "正在显示上次读取的能力目录。",
-    "readOnlyRefreshHint": "刷新只读取能力目录，保留驱动验证结果。",
+    "readOnlyRefreshHint": "只读刷新当前工作区的能力与评测目录。",
     "title": "能力目录",
-    "description": "验证社区驱动包、创建工作区，再查看其中记录和声明的能力。",
+    "description": "查看当前工作区的设备接口快照、Python @capability 声明与评测任务。",
     "verifiedTitle": "已检查驱动包声明",
     "verifiedBoundary": "驱动包声明已通过验证；尚未测试设备、游戏或单项能力能否执行。",
     "declaredVersion": "声明版本",
@@ -931,18 +931,18 @@
     },
     "no-run": {
       "title": "这个工作区还没有游戏运行记录",
-      "description": "先配置工作区能力，再按照快速开始指南启动运行。新的运行记录会自动显示在这里。"
+      "description": "在终端启动此工作区并开启接管后，新的运行画面与记录会自动显示在这里。"
     },
     "benchmark-only": {
       "title": "这个工作区还没有游戏运行记录",
-      "description": "已有 Benchmark 结果，可以先查看结果，也可以配置能力并按照快速开始指南启动游戏运行。"
+      "description": "已有 Benchmark 评测记录，可以先查看评测结果，或在终端启动游戏运行。"
     },
     "noGameRuns": "暂无游戏运行",
     "workspaces": "管理工作区",
     "switchWorkspace": "选择其他工作区",
-    "capabilities": "配置能力",
+    "capabilities": "查看能力目录",
     "quickstart": "查看快速开始",
-    "benchmark": "查看最近的 Benchmark",
+    "benchmark": "查看 Benchmark",
     "retry": "重新读取",
     "retrying": "正在重试…"
   },

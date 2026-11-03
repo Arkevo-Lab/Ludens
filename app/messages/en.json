@@ -351,7 +351,7 @@
     "loadingTitle": "Reading capabilities",
     "loadingDesc": "Reading baseware.json and Python @capability declarations in the current workspace…",
     "emptyTitle": "Choose a workspace to inspect",
-    "emptyDesc": "Create or select a registered workspace. Package verification above works independently of workspace selection.",
+    "emptyDesc": "Create or select a registered workspace to inspect its device snapshot, Python @capability declarations, and eval tasks.",
     "diagnosticsTitle": "Diagnostics",
     "overviewLabel": "Capability overview",
     "capabilitiesUnit": "capabilities",
@@ -381,9 +381,9 @@
     "loadingWorkspaces": "Loading workspaces…",
     "errorDetails": "Technical details",
     "showingCached": "Showing the last loaded capabilities.",
-    "readOnlyRefreshHint": "Refresh reads the capability directory; driver verification stays unchanged.",
+    "readOnlyRefreshHint": "Refresh reads the selected workspace's capability and evaluation catalog.",
     "title": "Capabilities",
-    "description": "Check a community package, create a workspace, then inspect its recorded and declared capabilities.",
+    "description": "Inspect the selected workspace's device snapshot, Python @capability declarations, and eval tasks.",
     "verifiedTitle": "Package declaration checked",
     "verifiedBoundary": "The package declaration passed validation. Its device, game, and individual capabilities have not been tested.",
     "declaredVersion": "Declared version",
@@ -931,18 +931,18 @@
     },
     "no-run": {
       "title": "No game runs in this workspace yet",
-      "description": "Configure its capabilities, then follow the quickstart to start a run. New runs will appear here automatically."
+      "description": "Start this workspace from a terminal and enable takeover. New runs will appear here automatically."
     },
     "benchmark-only": {
       "title": "No game runs in this workspace yet",
-      "description": "This workspace has benchmark results. Open a result, or configure its capabilities and follow the quickstart to start a game run."
+      "description": "This workspace has benchmark results. Open Benchmark to inspect them, or start a game run from a terminal."
     },
     "noGameRuns": "No game runs yet",
     "workspaces": "Manage workspaces",
     "switchWorkspace": "Choose another workspace",
-    "capabilities": "Configure capabilities",
+    "capabilities": "View capabilities",
     "quickstart": "Open quickstart",
-    "benchmark": "View latest benchmark",
+    "benchmark": "Open Benchmark",
     "retry": "Retry loading",
     "retrying": "Retrying…"
   },
