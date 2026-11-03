@@ -78,7 +78,6 @@ class Worker:
 
 SOURCE = '''from ludens_tools import capability, record
 class Perception:
-    sample_hz = 50
     def start(self, context): self.count = 0
     @record
     @capability

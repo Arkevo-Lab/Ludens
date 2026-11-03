@@ -374,7 +374,6 @@ test("historical CLI images survive native bash, sibling tools and persistence w
     await writeFile(join(f.workspace, "perception.py"), `from pathlib import Path
 from ludens_tools import capability, record
 class Perception:
-    sample_hz = 20
     def start(self, context): pass
     @record
     @capability

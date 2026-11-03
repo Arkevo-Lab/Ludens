@@ -94,7 +94,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 在 `auto` 控制周期内，外层循环按以下步骤运转：
 
 1. **发起轮次**：使用 [continue.md](../../../core/prompts/continue.md) 发起 OMP `prompt`（首次接管若带 `auto on --message` 则附加一次性提醒）。
-2. **感知与动作并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按 `sample_hz` 持续采样写入 `.ludens/timeline/`，常驻 `Action.step()` 按 `step_hz` 持续读取时空轴并执行高频控制。
+2. **感知与动作并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按宿主配置的频率（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30` Hz）持续采样写入 `.ludens/timeline/`，常驻 `Action.step()` 按 `LUDENS_ACTION_STEP_HZ`（默认 `30` Hz）持续读取时空轴并执行高频控制；取舍见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)。
 3. **自动上下文交付**：Ludens 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../../core/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
 4. **续轮或交还**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工交还或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
 

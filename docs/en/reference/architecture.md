@@ -94,7 +94,7 @@ The Ludens Host reuses a single OMP session per workspace (persisted under `.lud
 Inside an `auto` control cycle, the outer loop runs as follows:
 
 1. **Open a turn**: issues an OMP `prompt` using [continue.md](../../../core/prompts/continue.md) (on first takeover with `auto on --message`, a one-shot reminder is appended).
-2. **Perception and action run in parallel**: the environment keeps running while the model reasons — the resident `Perception.sample()` samples continuously at `sample_hz` into `.ludens/timeline/`, and the resident `Action.step()` continuously reads the spacetime axis and executes high-frequency control at `step_hz`.
+2. **Perception and action run in parallel**: the environment keeps running while the model reasons — the resident `Perception.sample()` samples continuously at the host-configured rate (`LUDENS_PERCEPTION_SAMPLE_HZ`, default `30` Hz) into `.ludens/timeline/`, and the resident `Action.step()` continuously reads the spacetime axis and executes high-frequency control at `LUDENS_ACTION_STEP_HZ` (default `30` Hz); see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md).
 3. **Automatic context delivery**: the Ludens extension hooks OMP's `before_agent_start` hook (see [extension.ts](../../../core/src/core/agent-omp/extension.ts)). When auto-injection is on (default `inject on`), it automatically appends the latest undelivered primary-channel perception records plus sampler state transitions (`state / codeSHA / error`) at the start of each prompt; tool results are never appended with observations, the `tool_result` hook only records delivery receipts for native tool images, and mid-turn observation is composed explicitly by the model via `observe`. The former end-of-batch channel was removed on 2026-10-29; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
 4. **Continue or hand over**: when a single `prompt` ends and budget remains, the next turn starts automatically; on human handover or budget exhaustion, the `addBeforeModelCall` gate immediately blocks new model requests and releases device control.
 
@@ -123,7 +123,7 @@ Registry creation, relocation, removal, and pet target selection share per-works
 
 Pet target PUT and consumer heartbeat POST return their committed `{ target }` and `{ consumer }` independently. A state GET preserves the saved target if the consumer record is unreadable (`connected: null` with `consumerError`), rather than claiming disconnection. Offline, missing, or identity-mismatched registrations retain the saved target with `targetUnavailable: true`; desktop consumers temporarily stop that source without clearing the choice. Consumer `targetRevision` identifies the attempted target; `revision` identifies a loaded source. Application failures are attributed only to a matching attempt, and following requires a matching loaded revision. A state read waits for target writes already accepted by that worker to settle, so a queued write cannot complete after its recovery read has reported the old selection. `targetConfigured` distinguishes an unset target file from an explicit saved stop; only the latter prevents an `ifUnset` startup choice.
 
-The four state stores inside a workspace each have their own role and never redundantly duplicate each other:
+The state stores inside a workspace each have their own role and never redundantly duplicate each other:
 
 | Store Location | Ownership and Contents |
 | --- | --- |
@@ -131,6 +131,7 @@ The four state stores inside a workspace each have their own role and never redu
 | `.ludens/archive/` | **Structured text archive of models and tools**: deduplicated cross-request and cross-run by content hash into `objects/<sha256>.json.gz` plus streaming payloads; all embedded media reference `.ludens/timeline/` by reference. |
 | `logs/<run-id>/` | **Single-run event stream**: holds `manifest.json`, `events.jsonl`, `streams/`, and Benchmark `trial.json` / `verifier/`; links Baseware, Archive, and Timeline via `eventSources` and content references. |
 | `.ludens/shiori/` | **OMP-native session store**: holds `sessions/*.jsonl` and the current resume pointer, managed by the OMP SessionManager. |
+| `.ludens/skill-versions/` | **Skill and memory snapshots**: content versions recorded during runs remain inside the workspace and move with its directory. |
 
 ## Unified Spacetime Axis and Replay
 

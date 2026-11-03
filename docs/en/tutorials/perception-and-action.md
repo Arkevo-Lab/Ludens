@@ -11,10 +11,10 @@ All CLI commands below run in the **target workspace directory**, assuming the r
 The `Perception` class in `perception.py` runs in a dedicated resident Python process (template: [core/templates/perception.py](../../../core/templates/perception.py)):
 
 - `start(self, context)`: runs once when the process starts or on `reload`; load deep-learning weights, initialize state, or start background sampling threads here. `context` contains `workspace`, `runDir`, and `generation`.
-- `sample(self)`: must be annotated with `@record` and `@capability`, and is called continuously by the scheduler at the class attribute `sample_hz` (default `30.0` Hz, which also serves as the nominal frame rate for recording). If a single sample takes longer than one period, the next sample is deferred rather than overlapping concurrently or catching up with a backlog.
+- `sample(self)`: must be annotated with `@record` and `@capability`, and is called continuously by the scheduler at the host-configured rate `LUDENS_PERCEPTION_SAMPLE_HZ` (default `30.0` Hz, which also serves as the nominal frame rate for recording; `Perception.sample_hz` class attributes are ignored — see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md)). If a single sample takes longer than one period, the next sample is deferred rather than overlapping concurrently or catching up with a backlog.
 - `close(self)`: called on `reload`, `stop`, or Host exit to release self-owned resources.
 
-A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. After editing `perception.py` (including adjusting `sample_hz` or model weights), run `ludens perception reload` to hot-swap the process while keeping the historical timeline.
+A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. After editing `perception.py` (such as capture logic or model weights), run `ludens perception reload` to hot-swap the process while keeping the historical timeline.
 
 ### 2. Perception Management and History Query Commands (`ludens observe`)
 
@@ -55,15 +55,19 @@ CLI `ludens observe`, Python `Client().observe(query)`, and the OMP-native `obse
 
 The host process supports the following environment variables for timeline windows and video encoding parameters (the effective values are visible in the `history` field of `ludens perception status`):
 
+Sampling and stepping rates default only when the corresponding variable is unset. Empty or whitespace-only values, non-numeric values, zero, negative numbers, NaN, and infinity fail worker startup with a variable-specific validation error; surrounding whitespace on a valid number is accepted.
+
 | Environment variable | Default | Description |
 | --- | --- | --- |
+| `LUDENS_PERCEPTION_SAMPLE_HZ` | `30` | Target continuous sampling frequency and nominal video frame rate for `Perception.sample()` (positive finite number). |
+| `LUDENS_ACTION_STEP_HZ` | `30` | Target continuous loop frequency for `Action.step()` during `auto` control (positive finite number). |
 | `LUDENS_PERCEPTION_PERSIST` | `1` | When set to `0` (or `false`), only the in-memory/temporary hot window is kept and is cleared when the process stops or on `reload`. |
 | `LUDENS_PERCEPTION_HOT_SECONDS` | `600` | Seconds retained per channel in the hot window (10 minutes); originals in the window are deliverable directly from memory; overridable by workspace settings. |
 | `LUDENS_PERCEPTION_HOT_BYTES` | `1073741824` | Global byte budget for the hot window (1 GiB); the largest channel shrinks first under pressure. |
 | `LUDENS_PERCEPTION_SEGMENT_SECONDS` | `3600` | Rotation interval for timeline metadata JSONL and index files (1 hour). |
 | `LUDENS_PERCEPTION_SEGMENT_BYTES` | `268435456` | Byte cap per segment for metadata and non-video media (256 MiB). |
 | `LUDENS_VIDEO_SEGMENT_SECONDS` | `300` | MP4 video segment duration (5 minutes); overridable by workspace settings. |
-| `LUDENS_VIDEO_IDLE_SECONDS` | `10` | Idle finalization seconds after sampling stops; overridable by workspace settings; also finalizes when `sample_hz` changes or the process stops. |
+| `LUDENS_VIDEO_IDLE_SECONDS` | `10` | Idle finalization seconds after sampling stops; overridable by workspace settings; also finalizes when the sampling rate changes or the process stops. |
 | `LUDENS_VIDEO_QUEUE_BYTES` | `33554432` | Memory cap for the background video-encoding queue (32 MiB, including compressed input and RGB buffers). |
 | `LUDENS_VIDEO_QUEUE_FRAMES` | `64` | Maximum pending frames in the background video-encoding queue. |
 | `LUDENS_VIDEO_STREAMS` | `16` | Cap on simultaneously active image-encoding streams (least-recently-used stream is finalized first when exceeded). |
@@ -81,7 +85,7 @@ Video uses fragmented MP4 (`+frag_keyframe+empty_moov`), with roughly one keyfra
 
 The `Action` class in `action.py` runs in a dedicated resident Python process during an `auto` control period (template: [core/templates/action.py](../../../core/templates/action.py)):
 
-- **Method contract**: `start(self, context)` initializes once on takeover or reload (`context` contains `workspace`, `runDir`, `generation`, `epoch`); `step(self)` is annotated with `@capability` (add `@record` if decisions should be archived to the timeline) and runs in a loop at the class attribute `step_hz` (default `30.0` Hz); `close(self)` releases resources.
+- **Method contract**: `start(self, context)` initializes once on takeover or reload (`context` contains `workspace`, `runDir`, `generation`, `epoch`); `step(self)` is annotated with `@capability` (add `@record` if decisions should be archived to the timeline) and runs in a loop at the host-configured rate `LUDENS_ACTION_STEP_HZ` (default `30.0` Hz; `Action.step_hz` class attributes are ignored); `close(self)` releases resources.
 - **Reading perception and issuing actions**: inside `Action`, use `self.device = Client()` to call `self.device.observe()` for the latest or historical perception records, and `self.device.call("controller/...", {...})` to issue device commands. After an async `pad.play` submission there is no need to block synchronously within a single step; later `step()` calls can observe and decide concurrently.
 - **Lifecycle management**:
 

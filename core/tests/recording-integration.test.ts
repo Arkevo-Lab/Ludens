@@ -56,7 +56,7 @@ test("resident sampling records data without per-frame audit across Python, Lude
     const closeDevice = await listenDevice(deviceSocket, core);
     const devices = await connectBaseware({ socket: deviceSocket, seconds: 60, runDir, record: log.record });
     await writeFile(join(runDir, "manifest.json"), JSON.stringify({ runId, workspace, eventSources: devices.eventSources, logging: { diagnostics } }));
-    const env = pythonEnvironment({ LUDENS_SOCKET: hostSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: runId, LUDENS_LOG_DIAGNOSTICS: diagnostics });
+    const env = pythonEnvironment({ LUDENS_SOCKET: hostSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: runId, LUDENS_LOG_DIAGNOSTICS: diagnostics, LUDENS_PERCEPTION_SAMPLE_HZ: String(hz) });
     const runtime = new Runtime(devices, log.record, 60, runId, diagnostics);
     runtime.attach({ controller: new WorkspaceController({ workspace, devices, record: log.record, env }) });
     runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: log.record, env, diagnostics,
@@ -77,7 +77,6 @@ def pair():
       await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 from senses import pair
 class Perception:
-    sample_hz = ${hz}
     def start(self, context): pass
     @record
     @capability

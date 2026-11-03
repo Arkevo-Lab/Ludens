@@ -391,7 +391,6 @@ from pathlib import Path
 from ludens_tools._context import current
 from ludens_tools import capability, record
 class Perception:
-    sample_hz = 20
     def start(self, context):
         self.context = context
         self.count = 0

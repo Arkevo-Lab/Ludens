@@ -38,7 +38,7 @@ const PERCEPTION_HELP = `ludens perception status | reload | stop
 ludens perception inject [on|off]
 ${OBSERVE_HELP}
 Loads workspace/perception.py:Perception in a resident process and calls sample() continuously.
-Set sample_hz to choose a target and video nominal rate (default 30 Hz). Reload after editing code or weights.
+Samples at LUDENS_PERCEPTION_SAMPLE_HZ (default 30 Hz; slow samples never overlap). Reload after editing code or weights.
 Mark sample() with @capability and @record from ludens_tools. Only marked results enter the timeline.
 Persistent history survives reload and new runs. Defaults: 10-minute hot window, hourly segments.
 Set LUDENS_PERCEPTION_PERSIST=0 in the host environment for hot-window-only history.
@@ -50,7 +50,7 @@ Empty or failed perception supplies no default images.`;
 
 export const ACTION_HELP = `ludens action status | reload | stop
 Loads workspace/action.py:Action in its own persistent Python process during auto control.
-Implement start(context), @capability step(), close(); step_hz defaults to 30.
+Implement start(context), @capability step(), close(); steps at LUDENS_ACTION_STEP_HZ (default 30 Hz).
 Use asynchronous play to keep observing while inputs run. @record optionally retains a result
 in the existing timeline; Client().observe() reads it without resampling.
 Reload starts a new instance in the current epoch, or arms it for the next takeover while manual.

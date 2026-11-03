@@ -21,13 +21,15 @@ from ludens_tools._recording import RecordingWindow
 
 
 class Worker:
-    def __init__(self, root, role, source, *, generation="generation-one", socket_path=None):
+    def __init__(self, root, role, source, *, generation="generation-one", socket_path=None, extra_env=None):
         self.root, self.role = root, role
         self.messages, self.pending, self.lock = [], {}, threading.Lock()
         self.stderr = (root / f"{role}-{generation}.stderr").open("w")
         env = {**os.environ, "LUDENS_WORKSPACE": str(root), "BASEWARE_TRACE": "{}"}
         if socket_path:
             env["LUDENS_SOCKET"] = socket_path
+        if extra_env:
+            env.update(extra_env)
         self.process = subprocess.Popen([sys.executable, "-u", "-m", f"ludens_tools._{role}"],
             cwd=root, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.stderr, text=True)
 
@@ -79,7 +81,6 @@ class Worker:
 
 PERCEPTION = '''from ludens_tools import capability, record
 class Perception:
-    sample_hz = 30
     def start(self, context): self.count = 0
     @record
     @capability
@@ -100,7 +101,7 @@ def decision(count: int, source: dict) -> dict:
     """Record the decision and the perception it used."""
     return {"data": {"count": count, "version": identify()}, "sources": [source]}
 class Action:
-    step_hz = 30
+    step_hz = 2.0
     def start(self, context):
         self.count = 0
         self.model = object()
@@ -127,6 +128,23 @@ class ActionTests(unittest.TestCase):
             self.assertEqual(Client("/tmp/ludens-manual.sock").observe({"after": 1}), {"records": []})
         self.assertNotIn("epoch", rpc.call_args.args[1])
         self.assertEqual(rpc.call_args.args[1]["query"], {"after": 1})
+
+    def test_step_hz_attribute_is_ignored_and_env_configures_the_rate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            action = None
+            try:
+                action = Worker(root, "action", "from ludens_tools import capability\nclass Action:\n"
+                                                 "    step_hz = 2.0\n"
+                                                 "    def start(self, context): pass\n"
+                                                 "    @capability\n    def step(self): return None\n"
+                                                 "    def close(self): pass\n",
+                                extra_env={"LUDENS_ACTION_STEP_HZ": "5"})
+                self.assertTrue(action.started["ok"])
+                self.assertEqual(action.started["result"]["stepHz"], 5)
+            finally:
+                if action:
+                    action.close()
 
     def test_two_residents_share_history_and_action_failure_never_retries(self):
         with tempfile.TemporaryDirectory() as directory:

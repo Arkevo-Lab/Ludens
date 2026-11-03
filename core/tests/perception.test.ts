@@ -37,13 +37,13 @@ async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: nu
     cleanup: async () => { await runtime.stop(); await rm(workspace, { recursive: true, force: true }); } };
 }
 
-function source(body: string, start = "", close = "", hz = 20) {
+function source(body: string, start = "", close = "") {
   return `from pathlib import Path
 import os, time
 from ludens_tools._context import current
 from ludens_tools import capability, record
 class Perception:
-    sample_hz = ${hz}
+    sample_hz = 2.0
     def start(self, context):
         self.count = 0
 ${start || "        pass"}
@@ -55,6 +55,20 @@ ${body}
 ${close || "        pass"}
 `;
 }
+
+
+test("workspace sample_hz attribute is ignored; LUDENS_PERCEPTION_SAMPLE_HZ chooses the rate", async () => {
+  const plain = await fixture();
+  try {
+    await plain.load(source('        return {"text": "x"}'));
+    expect(plain.runtime.status().state).toBe("ready");
+    expect((await plain.runtime.reload()).sampleHz).toBe(30);
+  } finally { await plain.cleanup(); }
+  const configured = await fixture({ env: { LUDENS_PERCEPTION_SAMPLE_HZ: "5" } });
+  try {
+    expect((await configured.load(source('        return {"text": "x"}'))).sampleHz).toBe(5);
+  } finally { await configured.cleanup(); }
+});
 
 test("empty implementation stays blind; sampler failure can be repaired without a raw-image fallback", async () => {
   const f = await fixture();

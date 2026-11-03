@@ -4,8 +4,6 @@ from ludens_tools import Client, capability
 
 
 class Action:
-    step_hz = 30.0  # Target rate; slow steps never overlap or accumulate.
-
     def start(self, context):
         """Initialize state/models once for this control epoch and generation."""
         self.context = context
