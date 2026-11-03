@@ -160,6 +160,8 @@ class Client:
             if window is not None or start is not None or end is not None:
                 raise ValueError("around cannot be combined with window, start, or end")
             anchor = self.observe({"id": around, **({"capability": capability} if capability is not None else {})})
+            if anchor.get("ok") is False:
+                raise LudensError(str((anchor.get("error") or {}).get("message") or "Observation query failed"))
             if not anchor.get("records"):
                 raise ValueError(f"Timeline record not found: {around}")
             record = anchor["records"][0]
@@ -186,8 +188,23 @@ class Client:
         query["capability"] = capability if capability is not None else "*"
 
         records: list[dict[str, Any]] = []
+        page_limit = min(64, max_records)
         while len(records) < max_records:
-            page = self.observe({**query, "limit": min(64, max_records - len(records))})
+            limit = min(page_limit, max_records - len(records))
+            try:
+                page = self.observe({**query, "limit": limit})
+            except (ValueError, LudensError) as error:
+                if "exceed the query byte budget" in str(error):
+                    if limit > 1:
+                        page_limit = max(1, limit // 2)
+                        continue
+                raise
+            if page.get("ok") is False:
+                message = str((page.get("error") or {}).get("message") or "Observation query failed")
+                if "exceed the query byte budget" in message and limit > 1:
+                    page_limit = max(1, limit // 2)
+                    continue
+                raise LudensError(message)
             batch = page.get("records", [])
             records.extend(batch)
             if not page.get("hasMore") or not batch:
