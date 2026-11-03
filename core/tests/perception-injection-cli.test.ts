@@ -31,7 +31,6 @@ test("perception injection CLI changes only context policy and rejects stale epo
   try {
     await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
-    sample_hz = 20
     def start(self, context): self.count = 0
     def close(self): pass
     @record

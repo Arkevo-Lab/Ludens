@@ -64,7 +64,6 @@ def frame(count):
         raise ValueError("frame unavailable " + str(count))
     return {"text": str(count)}
 class Perception:
-    sample_hz = 30
     def start(self, context): self.count = 0
     @record
     @capability

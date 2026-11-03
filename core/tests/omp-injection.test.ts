@@ -21,7 +21,6 @@ test("OMP can disable automatic perception while recording video and explicitly 
     Array.from({ length: 16 * 16 }, () => [220, 20, 20]).flat()), 16, 16, 3));
   await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
-    sample_hz = 20
     def start(self, context): self.count = 0
     def close(self): pass
     @record

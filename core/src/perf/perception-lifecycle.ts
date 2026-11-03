@@ -13,7 +13,6 @@ from helper import transform
 
 from ludens_tools import capability, record
 class Perception:
-    sample_hz = 20
     def start(self, context):
         self.model = json.loads(Path("weights.json").read_text())["value"]
         self.version = transform(self.model)
@@ -42,7 +41,7 @@ export async function measurePerceptionLifecycle(ctx: PerfContext): Promise<Reco
   ctx.signal?.throwIfAborted();
   await mkdir(ctx.workspace, { recursive: true });
   const record = ctx.log.recorder({ component: "benchmark", implementation: "perception-lifecycle" });
-  const perception = new PerceptionRuntime({ workspace: ctx.workspace, runDir: ctx.runDir, record: ctx.log.record });
+  const perception = new PerceptionRuntime({ workspace: ctx.workspace, runDir: ctx.runDir, env: { LUDENS_PERCEPTION_SAMPLE_HZ: "20" }, record: ctx.log.record });
   const signal = ctx.signal ?? new AbortController().signal;
   const reload = async () => {
     await perception.reload();

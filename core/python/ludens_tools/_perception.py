@@ -11,7 +11,7 @@ import traceback
 
 from ludens_tools._context import current, scope
 from ludens_tools._observation_history import ObservationHistory, observation_result
-from ludens_tools._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
+from ludens_tools._sampling import env_sample_hz
 from ludens_tools._resident import load_instance, run_continuously
 
 
@@ -84,7 +84,7 @@ def main():
                     try:
                         with scope(context):
                             instance = load_instance(message, "perception", "Perception", "sample", recorded=True)
-                            sample_hz = validate_sample_hz(getattr(instance, "sample_hz", DEFAULT_SAMPLE_HZ))
+                            sample_hz = env_sample_hz("LUDENS_PERCEPTION_SAMPLE_HZ")
                             history.sample_hz = sample_hz
                             instance.start({"workspace": str(workspace), "runDir": message["runDir"],
                                             "generation": message["generation"]})

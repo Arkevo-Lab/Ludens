@@ -11,10 +11,10 @@
 `perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [core/templates/perception.py](../../../core/templates/perception.py)）：
 
 - `start(self, context)`：进程启动或 `reload` 时执行一次，可在此加载深度学习权重、初始化状态或后台采样线程。`context` 包含 `workspace`、`runDir` 与 `generation`。
-- `sample(self)`：需标注 `@record` 与 `@capability`，由调度器按类属性 `sample_hz`（默认 `30.0` Hz，同时作为录像编码的名义帧率）连续调用。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
+- `sample(self)`：需标注 `@record` 与 `@capability`，由调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
 - `close(self)`：在 `reload`、`stop` 或 Host 退出时调用，用于释放自建资源。
 
-新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 `perception.py`（包括调整 `sample_hz` 或模型权重）后，执行 `ludens perception reload` 即可热替换进程并保留历史时空轴。
+新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 `perception.py`（如采集逻辑或模型权重）后，执行 `ludens perception reload` 即可热替换进程并保留历史时空轴。
 
 ### 2. 感知管理与历史查询命令（`ludens observe`）
 
@@ -55,15 +55,19 @@ CLI `ludens observe`、Python `Client().observe(query)` 与 OMP 原生 `observe`
 
 宿主进程支持以下环境变量配置时空轴窗口与视频编码参数（当前生效值可通过 `ludens perception status` 的 `history` 字段查看）：
 
+采样率与动作步频仅在对应变量未设置时使用默认值。空字符串、纯空白、非数值、零、负数、NaN 与无穷大会使工作进程启动失败，并返回指明变量名的校验错误；有效数字两侧的空白可以接受。
+
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
+| `LUDENS_PERCEPTION_SAMPLE_HZ` | `30` | `Perception.sample()` 的连续采样目标频率与录像名义帧率（有限正数）。 |
+| `LUDENS_ACTION_STEP_HZ` | `30` | `auto` 控制期间 `Action.step()` 的连续执行目标步频（有限正数）。 |
 | `LUDENS_PERCEPTION_PERSIST` | `1` | 设为 `0`（或 `false`）时仅保留内存/临时热窗口，进程停止或 `reload` 即清空。 |
 | `LUDENS_PERCEPTION_HOT_SECONDS` | `600` | 每通道热窗口保留秒数（10 分钟），窗口内原图可直接内存交付；可被工作区设置覆盖。 |
 | `LUDENS_PERCEPTION_HOT_BYTES` | `1073741824` | 热窗口全局字节预算（1 GiB），压力下优先收缩占用最大的通道。 |
 | `LUDENS_PERCEPTION_SEGMENT_SECONDS` | `3600` | 时空轴元数据 JSONL 与索引文件的切段时长（1 小时）。 |
 | `LUDENS_PERCEPTION_SEGMENT_BYTES` | `268435456` | 单段元数据与非视频媒体字节上限（256 MiB）。 |
 | `LUDENS_VIDEO_SEGMENT_SECONDS` | `300` | MP4 视频分段时长（5 分钟）；可被工作区设置覆盖。 |
-| `LUDENS_VIDEO_IDLE_SECONDS` | `10` | 停采后空闲收尾秒数；可被工作区设置覆盖，更改 `sample_hz` 或停止进程时也会收尾。 |
+| `LUDENS_VIDEO_IDLE_SECONDS` | `10` | 停采后空闲收尾秒数；可被工作区设置覆盖，更改采样率或停止进程时也会收尾。 |
 | `LUDENS_VIDEO_QUEUE_BYTES` | `33554432` | 后台视频编码队列内存上限（32 MiB，含压缩输入与 RGB 缓冲）。 |
 | `LUDENS_VIDEO_QUEUE_FRAMES` | `64` | 后台视频编码队列最大待编码帧数。 |
 | `LUDENS_VIDEO_STREAMS` | `16` | 同时活跃的图像编码流数量上限（超出时最久未用流先收尾）。 |
@@ -81,7 +85,7 @@ CLI `ludens observe`、Python `Client().observe(query)` 与 OMP 原生 `observe`
 
 `action.py` 中的 `Action` 类在 `auto` 控制周期内运行于独立的常驻 Python 进程（模板见 [core/templates/action.py](../../../core/templates/action.py)）：
 
-- **方法契约**：`start(self, context)` 在接管或重载时初始化一次（`context` 含 `workspace`、`runDir`、`generation`、`epoch`）；`step(self)` 标注 `@capability`（如需将决策留档至时空轴可加 `@record`），按类属性 `step_hz`（默认 `30.0` Hz）循环执行；`close(self)` 释放资源。
+- **方法契约**：`start(self, context)` 在接管或重载时初始化一次（`context` 含 `workspace`、`runDir`、`generation`、`epoch`）；`step(self)` 标注 `@capability`（如需将决策留档至时空轴可加 `@record`），按宿主配置的频率 `LUDENS_ACTION_STEP_HZ`（默认 `30.0` Hz；忽略工作区类上的 `step_hz` 属性）循环执行；`close(self)` 释放资源。
 - **读取感知与执行动作**：在 `Action` 中通过 `self.device = Client()` 调用 `self.device.observe()` 读取最新或历史感知记录，并调用 `self.device.call("controller/...", {...})` 下发设备指令。异步 `pad.play` 提交后无需在单步内同步阻塞等待，后续 `step()` 可边观测边决策。
 - **生命周期管理**：
 

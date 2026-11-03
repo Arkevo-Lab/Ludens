@@ -192,7 +192,8 @@ class VideoHistoryTests(unittest.TestCase):
     def test_worker_default_and_reloaded_rate_reach_the_encoder(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for generation, configured, expected in (("one", "", 30), ("two", "    sample_hz = 12.5\n", 12.5)):
+            for generation, configured, expected, override in (("one", "    sample_hz = 2.0\n", 30, {}),
+                                                              ("two", "    sample_hz = 2.0\n", 12.5, {"LUDENS_PERCEPTION_SAMPLE_HZ": "12.5"})):
                 source = ("from ludens_tools import capability, record\nclass Perception:\n" + configured +
                           "    def start(self, context):\n        self.sample()\n"
                           "    @record\n    @capability\n    def sample(self):\n"
@@ -200,6 +201,7 @@ class VideoHistoryTests(unittest.TestCase):
                           "    def close(self):\n        pass\n")
                 with (root / "stderr.log").open("w") as stderr:
                     process = subprocess.Popen([sys.executable, "-u", "-m", "ludens_tools._perception"], cwd=root,
+                                               env={**os.environ, **override},
                                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=stderr, text=True)
                     incoming = queue.Queue()
                     reader = threading.Thread(target=lambda: [incoming.put(json.loads(line)) for line in process.stdout], daemon=True)

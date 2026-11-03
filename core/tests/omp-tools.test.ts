@@ -137,7 +137,6 @@ test("text-only perception reaches automatic context and explicit reads are not 
   }] }, () => {});
   await Bun.write(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
-    sample_hz = 0.01
     def start(self, context): self.count = 0
     def close(self): pass
     @record
@@ -146,7 +145,7 @@ class Perception:
         self.count += 1
         return {"text": "Window " + str(self.count)}
 `);
-  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir: join(directory, "run"), record: runtime.record }) });
+  runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir: join(directory, "run"), env: { LUDENS_PERCEPTION_SAMPLE_HZ: "0.01" }, record: runtime.record }) });
   await runtime.perception!.reload();
   for (let i = 0; i < 200 && runtime.perception!.status().state === "loading"; i++) await Bun.sleep(10);
   const control = new AbortController();

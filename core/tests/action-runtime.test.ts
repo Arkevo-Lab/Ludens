@@ -57,7 +57,7 @@ async function fixture(hz = 30, diagnostics: "normal" | "full" = "normal", secon
   ] }});
   const closeDevice = await listenDevice(deviceSocket, core);
   const devices = await connectBaseware({ socket: deviceSocket, seconds, runDir, record });
-  const env = pythonEnvironment({ LUDENS_SOCKET: socket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "run-action", LUDENS_LOG_DIAGNOSTICS: diagnostics });
+  const env = pythonEnvironment({ LUDENS_SOCKET: socket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "run-action", LUDENS_LOG_DIAGNOSTICS: diagnostics, LUDENS_ACTION_STEP_HZ: String(hz) });
   const runtime = new Runtime(devices, record, seconds, "run-action", diagnostics);
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, record, env }) });
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record, env, diagnostics }) });
@@ -69,7 +69,6 @@ async function fixture(hz = 30, diagnostics: "normal" | "full" = "normal", secon
   const closeHost = await listen(socket, runtime);
   await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record
 class Perception:
-    sample_hz = 30
     def start(self, context): self.n = 0
     @record
     @capability
@@ -81,7 +80,6 @@ class Perception:
   const source = (body?: string) => `from ludens_tools import Client, capability, record
 import os
 class Action:
-    step_hz = ${hz}
     def start(self, context):
         self.device = Client()
         self.n = 0

@@ -11,7 +11,7 @@ import traceback
 
 from ._context import current, scope
 from ._resident import load_instance, run_continuously
-from ._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
+from ._sampling import env_sample_hz
 
 
 def main():
@@ -68,7 +68,7 @@ def main():
                 try:
                     with scope(context):
                         instance = load_instance(message, "action", "Action", "step")
-                        step_hz = validate_sample_hz(getattr(instance, "step_hz", DEFAULT_SAMPLE_HZ), "step_hz")
+                        step_hz = env_sample_hz("LUDENS_ACTION_STEP_HZ")
                         instance.start({"workspace": str(workspace), "runDir": message["runDir"],
                                         "generation": message["generation"], "epoch": epoch})
                     result["stepHz"] = step_hz

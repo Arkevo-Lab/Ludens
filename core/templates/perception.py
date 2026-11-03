@@ -4,8 +4,6 @@ from ludens_tools import capability, record
 
 
 class Perception:
-    sample_hz = 30.0  # Target rate; tune as needed, then reload. Slow samples never overlap or accumulate.
-
     def start(self, context):
         """Initialize models/state once; discover device abilities in baseware.json."""
         self.context = context
