@@ -150,7 +150,12 @@ export class Runtime {
     if (message) this.record("user_message", { text: message }, { epoch });
     if (!this.budget) this.timer = setTimeout(this.budgetEnded, this.maxSeconds * 1000);
     if (control.signal.aborted) return this.status();
-    try { if (this.ownsDevice) await this._action?.activate(epoch); }
+    try {
+      if (this.ownsDevice) {
+        await this._action?.activate(epoch);
+        if (!control.signal.aborted) await this._perception?.setLease(epoch, null, control.signal);
+      }
+    }
     catch (error) { await this.stop(String(error)); throw error; }
     if (control.signal.aborted) return this.status();
     const work = program ?? (this._agent ? (context: { epoch: string; signal: AbortSignal }) => this._agent!.run({ ...context, message }) : undefined);
@@ -249,6 +254,8 @@ export class Runtime {
     this.abortAgent();
     const actionStopped = this._action?.deactivate();
     void actionStopped?.catch(error => this.record("error", String(error), { epoch: this.epoch }));
+    const perceptionRevoked = this._perception?.setLease(null);
+    void perceptionRevoked?.catch(error => this.record("error", String(error), { epoch: this.epoch }));
     this.stopping = (async () => {
       // Release also covers a pending acquisition. Send it immediately after
       // cancellation instead of waiting for the acquisition RPC to return.
@@ -264,6 +271,7 @@ export class Runtime {
       // cancelled workspace calls before another epoch can start.
       await Promise.allSettled(this.calls);
       await actionStopped?.catch(() => {});
+      await perceptionRevoked?.catch(() => {});
       this.mode = "manual";
       this.record("control", this.status(), { epoch: this.epoch });
     })().finally(() => { this.stopping = undefined; });

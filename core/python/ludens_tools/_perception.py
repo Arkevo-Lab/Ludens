@@ -10,10 +10,10 @@ import threading
 import traceback
 
 from ludens_tools._context import continuous, current, scope
+from ludens_tools._capabilities import discover
 from ludens_tools._observation_history import ObservationHistory, observation_result
 from ludens_tools._sampling import env_sample_hz
-from ludens_tools._resident import load_instance, run_continuously
-
+from ludens_tools._resident import StateMachine, load_instance, run_continuously
 
 def main():
     protocol = os.fdopen(os.dup(sys.stdout.fileno()), "w", buffering=1)
@@ -22,7 +22,7 @@ def main():
     messages = queue.Queue()
     protocol_lock = threading.Lock()
     stopped = threading.Event()
-    instance = sampler = history = None
+    instance = sampler = history = state_machine = None
 
     def send(value):
         with protocol_lock:
@@ -73,9 +73,13 @@ def main():
                     workspace = Path(message["workspace"]).resolve()
                     # The writer survives missing or broken user sensing code.
                     history = ObservationHistory(workspace)
+                    trace = dict(message.get("trace", {}))
+                    if message.get("inputGeneration"):
+                        trace["inputGeneration"] = message["inputGeneration"]
                     context = {**current(), "workspace": str(workspace), "run_id": Path(message["runDir"]).name,
-                               "epoch": None, "generation": message["generation"], "trace": dict(message.get("trace", {})),
+                               "epoch": message.get("epoch"), "generation": message["generation"], "trace": trace,
                                "diagnostics": message.get("diagnostics", os.environ.get("LUDENS_LOG_DIAGNOSTICS", "normal")),
+                               "actuate": message.get("actuate", False),
                                "timeline_append": append}
                     if context["diagnostics"] not in ("normal", "full"):
                         raise ValueError("diagnostics must be normal or full")
@@ -83,21 +87,31 @@ def main():
                     result = {"pid": os.getpid(), "history": history.policy(), "state": "loading",
                               "diagnostics": context["diagnostics"]}
                     try:
+                        discovery = discover(workspace)
+                        if any(item["message"] == "Only one @observe capability may be declared in a workspace"
+                               for item in discovery["diagnostics"]):
+                            raise ValueError("Only one @observe capability may be declared in a workspace")
                         with scope(context):
                             instance = load_instance(message, "perception", "Perception", "sample", recorded=True)
+                            if getattr(instance.sample, "__ludens_observe__", False):
+                                history.main_capability = instance.sample.__ludens_identity__["id"]
+                            state_machine = StateMachine(instance, sys.modules.get("perception"), instance.sample, context)
                             sample_hz = env_sample_hz("LUDENS_PERCEPTION_SAMPLE_HZ")
                             history.sample_hz = sample_hz
                             instance.start({"workspace": str(workspace), "runDir": message["runDir"],
-                                            "generation": message["generation"]})
+                                            "generation": message["generation"], "epoch": message.get("epoch")})
                         result["sampleHz"] = sample_hz
                         sampler = threading.Thread(target=run_continuously,
                             args=(instance.sample, sample_hz, context, stopped, send),
-                            kwargs={"role": "perception", "video_metrics": lambda: history._video.metrics() if history._video else None},
+                            kwargs={"role": "perception",
+                                    "video_metrics": lambda: history._video.metrics() if history._video else None,
+                                    "tick": state_machine.tick},
                             daemon=True)
                     except Exception as error:
                         result.update(state="unimplemented" if isinstance(error, NotImplementedError) else "error",
                                       error=f"{type(error).__name__}: {error}")
                         traceback.print_exc(file=sys.stderr)
+                    result["observeCapability"] = history.main_capability
                     send({**reply, "ok": True, "result": result})
                     if sampler is not None:
                         sampler.start()
@@ -111,6 +125,19 @@ def main():
                 elif action == "derive":
                     result = history.derive(message.get("source"), message.get("data"),
                                             message.get("mediaType"), message.get("transform"))
+                elif action == "state":
+                    if state_machine is None:
+                        raise ValueError("The perception resident has not loaded its state machine")
+                    result = state_machine.state()
+                elif action == "transition":
+                    if state_machine is None:
+                        raise ValueError("The perception resident has not loaded its state machine")
+                    result = state_machine.transition_to(message.get("to"), message.get("arguments"))
+                elif action == "lease":
+                    if state_machine is None:
+                        result = {"epoch": message.get("epoch"), "inputGeneration": message.get("inputGeneration")}
+                    else:
+                        result = state_machine.set_lease(message.get("epoch"), message.get("inputGeneration"))
                 else:
                     raise ValueError(f"Unknown perception action: {action}")
                 response = {**reply, "ok": True, "result": result}

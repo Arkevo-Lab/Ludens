@@ -88,6 +88,37 @@ def empty():
   } finally { await rm(directory, {recursive: true, force: true}); }
 });
 
+test("observe discovery selects one capability and rejects workspace duplicates", async () => {
+  const directory = await workspace();
+  try {
+    await writeFile(join(directory, "observe.py"), `from ludens_tools import capability, observe, record
+@observe
+@record
+@capability
+def inspect() -> dict:
+    """Provide the workspace's main observation."""
+    return {"text": "ready"}
+`);
+    const registry = new PythonCapabilities(directory);
+    const found = await registry.discover();
+    expect(found.diagnostics).toEqual([]);
+    expect(found.observeCapability).toBe("python/observe.py:inspect");
+    expect(found.capabilities).toHaveLength(1);
+    expect(found.capabilities[0]).toMatchObject({ observe: true, recorded: true,
+      origin: { path: "observe.py", function: "inspect" } });
+
+    await writeFile(join(directory, "duplicate.py"), `from ludens_tools import capability, observe
+@observe
+@capability
+def other() -> dict:
+    """Attempt to declare a second observation capability."""
+    return {"text": "duplicate"}
+`);
+    const duplicate = await registry.discover();
+    expect(duplicate.diagnostics.map(item => item.message)).toContain("Only one @observe capability may be declared in a workspace");
+  } finally { await rm(directory, {recursive: true, force: true}); }
+});
+
 test("static discovery does not import workspace shadows from cwd or inherited PYTHONPATH", async () => {
   const directory = await workspace(), priorPath = process.env.PYTHONPATH;
   try {

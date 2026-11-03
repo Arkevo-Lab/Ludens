@@ -19,6 +19,7 @@ import time
 import uuid
 
 from ._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
+from ._capabilities import discover
 
 
 def timestamp(value, name):
@@ -82,7 +83,7 @@ def _key(value):
 
 
 MAIN_CAPABILITY = "python/perception.py:Perception.sample"
-SAMPLE_FIELDS = {"text", "data", "media", "sampledAt", "sources", "space", "timeline"}
+SAMPLE_FIELDS = {"text", "data", "media", "sampledAt", "sources", "space", "timeline", "effect", "transition"}
 
 class _StreamMediaRef(str):
     """A reference to Baseware's spooled stream media, passed as inline Base64.
@@ -112,6 +113,53 @@ class _StreamMediaRef(str):
         return super().encode(encoding, errors)
 
 
+def _named_arguments(item, kind):
+    """Validate a shared arguments/args payload; both must be str-keyed objects."""
+    for key in ("arguments", "args"):
+        if key in item and item[key] is not None:
+            value = item[key]
+            if not isinstance(value, dict) or not all(isinstance(name, str) for name in value):
+                raise TypeError(f"sample.{kind}.{key} must be an object with string keys")
+
+
+def validate_effect(effect):
+    """Validate an immediate actuation request: one object or an array of them."""
+    if effect is None:
+        return None
+    items = [effect] if isinstance(effect, dict) else effect
+    if not isinstance(items, list):
+        raise TypeError("sample.effect must be an object or an array of effect objects")
+    for item in items:
+        if not isinstance(item, dict):
+            raise TypeError("sample.effect entries must be objects with an id")
+        unknown = set(item) - {"id", "arguments", "args"}
+        if unknown:
+            raise ValueError("Unknown effect fields: " + ", ".join(sorted(unknown)))
+        if not isinstance(item.get("id"), str) or not item["id"]:
+            raise TypeError("sample.effect.id must be a nonempty capability id")
+        _named_arguments(item, "effect")
+    return items
+
+
+def validate_transition(transition):
+    """Validate a state-machine handoff: a target name or {to, arguments}."""
+    if transition is None:
+        return None
+    if isinstance(transition, str):
+        if not transition:
+            raise ValueError("sample.transition must be a nonempty target name")
+        return transition
+    if not isinstance(transition, dict):
+        raise TypeError("sample.transition must be a target name or an object with to")
+    unknown = set(transition) - {"to", "arguments", "args"}
+    if unknown:
+        raise ValueError("Unknown transition fields: " + ", ".join(sorted(unknown)))
+    if not isinstance(transition.get("to"), str) or not transition["to"]:
+        raise TypeError("sample.transition.to must be a nonempty target name")
+    _named_arguments(transition, "transition")
+    return transition
+
+
 def validate_sample(sample, workspace):
     """Validate the recorded result envelope without silently dropping fields."""
     if not isinstance(sample, dict):
@@ -126,6 +174,10 @@ def validate_sample(sample, workspace):
         timestamp(sample["sampledAt"], "sampledAt")
     if "sources" in sample and not isinstance(sample["sources"], list):
         raise TypeError("sample.sources must be an array")
+    if sample.get("effect") is not None:
+        validate_effect(sample["effect"])
+    if sample.get("transition") is not None:
+        validate_transition(sample["transition"])
     json.dumps(sample, allow_nan=False)
     for item in sample.get("media", []):
         if (not isinstance(item, dict) or not isinstance(item.get("mediaType"), str)
@@ -186,6 +238,7 @@ class ObservationHistory:
         self._unlock()
 
     def _initialize(self):
+        self.main_capability = discover(self.root)["observeCapability"] or MAIN_CAPABILITY
         self.objects = self.directory / "objects"
         self.segment_dir = self.directory / "segments"
         self.segment_dir.mkdir(parents=True, exist_ok=True)
@@ -367,7 +420,7 @@ class ObservationHistory:
                         self._video = VideoRecorder(self.directory, video_dir,
                             segment_seconds=self.video_segment_seconds, idle_seconds=self.video_idle_seconds)
                     channel = json.dumps([identity["id"], identity.get("codeSHA"), index, generation, item["mediaType"]])
-                    idle = None if identity["id"] == MAIN_CAPABILITY else min(self.video_idle_seconds, 0.25)
+                    idle = None if identity["id"] == self.main_capability else min(self.video_idle_seconds, 0.25)
                     location = self._video.submit(raw, channel, at, size, sample_hz=self.sample_hz, idle_seconds=idle)
                     digest = item["data"].sha256 if isinstance(item.get("data"), _StreamMediaRef) and item["data"].sha256 else hashlib.sha256(raw).hexdigest()
                     archived.append({"mediaType": item["mediaType"], "sha256": digest,
@@ -392,7 +445,7 @@ class ObservationHistory:
                             and isinstance(getattr(item["data"], "source", None), dict)]
                 if inferred:
                     record["sources"] = inferred
-            for key in ("sampledAt", "sources", "data", "space"):
+            for key in ("sampledAt", "sources", "data", "space", "effect", "transition"):
                 if key in sample:
                     record[key] = sample[key]
             encoded = (json.dumps(record, allow_nan=False) + "\n").encode("utf-8")
@@ -713,7 +766,7 @@ class ObservationHistory:
         query = {key: value for key, value in query.items()
                  if value is not None and not (key in {"at", "start", "end", "capability", "id"}
                                                and isinstance(value, str) and not value.strip())}
-        capability, record_id = query.get("capability", MAIN_CAPABILITY), query.get("id")
+        capability, record_id = query.get("capability", self.main_capability), query.get("id")
         if not isinstance(capability, str) or not capability:
             raise ValueError("capability must be a nonempty capability ID or *")
         if record_id is not None and (not isinstance(record_id, str) or not record_id):
@@ -886,6 +939,7 @@ def read_timeline(workspace, query=None):
     # A read-only view over the same selection and delivery logic as a live
     # writer: no writer.lock, no hot window, no window reclamation.
     reader.root = root
+    reader.main_capability = discover(root)["observeCapability"] or MAIN_CAPABILITY
     reader.directory = directory
     reader.objects = directory / "objects"
     reader.persistent = True

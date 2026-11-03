@@ -93,6 +93,8 @@ def capture_top(exposure: int = 1) -> dict:
 
 `@capability` works on both top-level sync functions and methods (e.g. `Perception.sample`, `Action.step`). Static discovery scans workspace code (skipping `logs/`, `.ludens/`, `.git/`, and virtual environments) and requires marked functions to have a **docstring** and **explicit parameter type annotations** (scalars, `list`, `dict[str, ...]`, and `Optional` are supported); top-level sync functions plus `Perception.sample` / `Action.step` are included in the `ludens controller list` catalog. Implementation details: [_capabilities.py](../../../core/python/ludens_tools/_capabilities.py).
 
+`@observe` selects the workspace's main observation capability. It must be paired with `@capability` on the same function (and may also be paired with `@record`), and at most one `@observe` capability may be declared across the entire workspace. Discovery reports duplicate declarations as diagnostics instead of selecting an ambiguous main channel.
+
 How the call entry points differ in execution location and data boundary:
 
 | Call style | Executing process | Arguments and return values | When to use |
@@ -232,6 +234,8 @@ An `@record` function's return value must be a dict envelope containing only the
 | `sampledAt` | `str` (ISO timestamp) | Known source sampling time (omit to keep only the record-completion time `recordedAt`). |
 | `sources` | `list` | Source references derived from other observations or nested records. |
 | `space` | `dict` | Coordinate-system description defined by the device or algorithm. |
+| `effect` | `dict` or `list[dict]` | Optional in-process actuation request(s), each containing a capability/controller `id` and optional `arguments` (or `args`) object. |
+| `transition` | `str` or `dict` | Optional next state for the continuous state machine: a target capability name, or `{"to": "...", "arguments": {...}}` (`args` is also accepted). |
 
 During `ludens eval run`, `@record` still validates this envelope, but appends only a synthetic `timeline: {recordId, sequence}` in memory; it does not persist records or archive media. Inside `eval_env(env)`, appended envelopes are also collected in `env.recorded` (initialize it as a list on environments that cannot accept new attributes). These records are not added to `Client().observe()` history. Optional `env.list()` and `env.help(id)` callbacks provide simulated catalog information. Driver calls preserve the normal argument contract: omitted arguments become `{}`, and non-dict arguments are rejected.
 

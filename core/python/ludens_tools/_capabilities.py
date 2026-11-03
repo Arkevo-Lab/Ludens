@@ -195,9 +195,11 @@ def _eval_declaration(node, markers, tree):
 
 def discover(workspace):
     capabilities, diagnostics, pending = [], [], []
+    observe_declarations = []  # (relative, node, qualname) in discovery order
+    observe_capability = None
     for relative, raw, tree in workspace_sources(workspace, diagnostics):
         declarations = {}
-        for kind in ("capability", "record"):
+        for kind in ("capability", "record", "observe"):
             for node, markers in marked_functions(tree, kind):
                 declarations.setdefault(node, {})[kind] = markers
         evals = {node: markers for node, markers in marked_functions(tree, ("eval_capability", "eval"))}
@@ -222,16 +224,21 @@ def discover(workspace):
             try:
                 markers = [marker for items in kinds.values() for marker in items]
                 if any(len(items) != 1 for items in kinds.values()) or len(markers) != len(node.decorator_list):
-                    raise ValueError("Use capability and record decorators once each; other decorators are unsupported")
+                    raise ValueError("Use capability, record, and observe decorators once each; other decorators are unsupported")
                 if "record" in kinds and "capability" not in kinds:
                     raise ValueError("@record requires @capability on the same function")
+                if "observe" in kinds and "capability" not in kinds:
+                    raise ValueError("@observe requires @capability on the same function")
                 for marker in markers:
                     if isinstance(marker, ast.Call) and (marker.args or marker.keywords):
-                        raise ValueError("Use capability/record without decorator arguments")
+                        raise ValueError("Use capability/record/observe without decorator arguments")
                 if node not in tree.body:
                     if isinstance(parents.get(node), ast.ClassDef):
                         # Bound capability methods (including resident entry points)
                         # are instrumented locally, never exposed as CLI functions.
+                        if "observe" in kinds:
+                            parent = parents[node]
+                            observe_declarations.append((relative, node, f"{parent.name}.{node.name}"))
                         continue
                     raise ValueError("CLI capabilities must be top-level functions, not methods or nested functions")
                 if sum(isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and item.name == node.name for item in tree.body) != 1:
@@ -240,11 +247,24 @@ def discover(workspace):
                 identity = relative + ":" + node.name
                 name = re.sub(r"[^a-zA-Z0-9_]", "_", "python_" + relative[:-3] + "_" + node.name)[:53]
                 name += "_" + hashlib.sha256(identity.encode()).hexdigest()[:10]
+                if "observe" in kinds:
+                    observe_declarations.append((relative, node, node.name))
                 capabilities.append({"id": name, "name": name, "description": description, "parameters": parameters,
                     "origin": {"path": relative, "function": node.name, "line": node.lineno}, "codeSHA": hashlib.sha256(raw).hexdigest(),
-                    "recorded": "record" in kinds, "eval": None})
+                    "recorded": "record" in kinds, "observe": "observe" in kinds, "eval": None})
             except (ValueError, SyntaxError) as error:
                 diagnostics.append({"path": relative, "function": node.name, "line": node.lineno, "message": str(error)})
+    # @observe marks the workspace's single observation channel across files.
+    for relative, node, qualname in observe_declarations:
+        if len(observe_declarations) == 1:
+            observe_capability = "python/" + relative + ":" + qualname
+            continue
+        diagnostics.append({"path": relative, "function": node.name, "line": node.lineno,
+                            "message": "Only one @observe capability may be declared in a workspace"})
+        for entry in capabilities:
+            if entry["origin"]["path"] == relative and entry["origin"]["function"] == node.name:
+                entry["observe"] = False
+        observe_capability = None
     # Eval targets may reference capabilities discovered in any workspace file.
     indexed = {"python/" + item["origin"]["path"] + ":" + item["origin"]["function"]: item for item in capabilities}
     for declaration in pending:
@@ -260,7 +280,7 @@ def discover(workspace):
         capability["eval"] = {"id": "python/" + declaration["path"] + ":" + declaration["function"],
                               "origin": {"path": declaration["path"], "function": declaration["function"], "line": declaration["line"]},
                               "codeSHA": declaration["codeSHA"], "description": declaration["description"]}
-    return {"capabilities": capabilities, "diagnostics": diagnostics}
+    return {"capabilities": capabilities, "diagnostics": diagnostics, "observeCapability": observe_capability}
 
 
 def _load_marked(workspace, relative_path, function_name, marker_attribute, unmarked, *, raw=None):

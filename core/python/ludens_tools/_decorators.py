@@ -27,7 +27,7 @@ def _mark(target, kind):
             code_sha = hashlib.sha256(source.read_bytes()).hexdigest()
         identity = {"id": f"python/{path}:{target.__qualname__}", "codeSHA": code_sha,
                     "origin": {"path": path, "function": target.__qualname__, "line": target.__code__.co_firstlineno}}
-        flags = {"capability": False, "recorded": False}
+        flags = {"capability": False, "recorded": False, "observe": False}
         original = target
 
         def finish(result, started):
@@ -52,6 +52,8 @@ def _mark(target, kind):
         def check():
             if flags["recorded"] and not flags["capability"]:
                 raise ValueError("@record requires @capability on the same function")
+            if flags["observe"] and not flags["capability"]:
+                raise ValueError("@observe requires @capability on the same function")
 
         if inspect.iscoroutinefunction(target):
             @wraps(target)
@@ -73,6 +75,7 @@ def _mark(target, kind):
     flags[kind] = True
     target.__ludens_capability__ = flags["capability"]
     target.__ludens_recorded__ = flags["recorded"]
+    target.__ludens_observe__ = flags["observe"]
     return target
 
 
@@ -84,6 +87,12 @@ def capability(function=None):
 def record(function=None):
     """Record each successful @capability result envelope on the workspace timeline."""
     return (lambda target: _mark(target, "recorded")) if function is None else _mark(function, "recorded")
+
+
+def observe(function=None):
+    """Mark the workspace's unique observation capability for the agent loop."""
+    return (lambda target: _mark(target, "observe")) if function is None else _mark(function, "observe")
+
 
 def _target_identity(target):
     if isinstance(target, str):

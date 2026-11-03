@@ -18,7 +18,7 @@ import tracemalloc
 import unittest
 from unittest.mock import patch
 
-from ludens_tools._observation_history import ObservationHistory
+from ludens_tools._observation_history import ObservationHistory, validate_sample
 
 
 SAMPLING = {"clock": "test", "startedAtMs": 0, "finishedAtMs": 1}
@@ -369,6 +369,53 @@ class HistoryTests(unittest.TestCase):
             ):
                 with self.subTest(query=invalid), self.assertRaises(ValueError):
                     history.observe(invalid)
+
+    def test_effect_and_transition_envelopes_validate_and_persist(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for sample in (
+                {"data": 1, "effect": {"id": "controller/arm.move", "arguments": {"x": 1}}},
+                {"data": 2, "effect": {"id": "controller/arm.move", "args": {"x": 1}}},
+                {"data": 3, "effect": {"id": "controller/arm.move"}},
+                {"data": 4, "effect": [{"id": "python/a.py:focus", "args": {"k": "v"}}, {"id": "controller/b.ping"}]},
+                {"data": 5, "transition": "aim"},
+                {"data": 6, "transition": {"to": "aim"}},
+                {"data": 7, "transition": {"to": "aim", "arguments": {"offset": 2}}},
+                {"data": 8, "transition": {"to": "python/helper.py:assist", "args": {"speed": 1}}},
+                {"data": 9, "effect": None, "transition": None},
+            ):
+                with self.subTest(sample=sample):
+                    validate_sample(sample, directory)
+            for sample in (
+                {"effect": "controller/arm.move"},
+                {"effect": 4},
+                {"effect": {}},
+                {"effect": {"id": ""}},
+                {"effect": {"id": 7}},
+                {"effect": {"id": "x", "unknown": 1}},
+                {"effect": {"id": "x", "arguments": [1]}},
+                {"effect": {"id": "x", "args": {2: "int key"}}},
+                {"effect": [{"id": "ok"}, 5]},
+                {"transition": ""},
+                {"transition": 7},
+                {"transition": {"to": "aim", "extra": 1}},
+                {"transition": {"to": ""}},
+                {"transition": {"to": "aim", "arguments": "fast"}},
+                {"transition": {"aim": True}},
+            ):
+                with self.subTest(sample=sample), self.assertRaises((TypeError, ValueError)):
+                    validate_sample(sample, directory)
+            history = ObservationHistory(directory)
+            try:
+                record = history.append({"data": 10,
+                                         "effect": {"id": "controller/reel.spin", "arguments": {"speed": 3}},
+                                         "transition": {"to": "reel"}}, "g", SAMPLING, "2026-11-03T00:00:00Z")
+                self.assertEqual(record["effect"], {"id": "controller/reel.spin", "arguments": {"speed": 3}})
+                self.assertEqual(record["transition"], {"to": "reel"})
+                row = history.observe()["records"][0]
+                self.assertEqual(row["effect"], {"id": "controller/reel.spin", "arguments": {"speed": 3}})
+                self.assertEqual(row["transition"], {"to": "reel"})
+            finally:
+                history.close()
 
     def test_clock_correction_does_not_lose_records_between_pages(self):
         with tempfile.TemporaryDirectory() as directory:
