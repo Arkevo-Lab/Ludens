@@ -469,6 +469,54 @@ class VideoHistoryTests(unittest.TestCase):
             finally:
                 restarted.close()
 
+    def test_offline_read_skips_unflushed_tail_while_recording(self):
+        from ludens_tools._observation_history import read_timeline
+
+        with tempfile.TemporaryDirectory() as directory:
+            history = ObservationHistory(directory, sample_hz=30)
+            try:
+                for index in range(75):
+                    at = f"2026-10-27T00:00:{index / 30:06.3f}Z"
+                    history.append(sample(png()), "one", SAMPLING, at)
+                    self.drain(history._video)
+                asset = history.directory / "video"
+                state = json.loads(next(asset.glob("*.mp4.json")).read_text())
+                self.assertEqual(state["status"], "pending")
+                self.assertEqual(state["frames"], 60)
+
+                latest = read_timeline(directory)["records"]
+                self.assertEqual(len(latest), 1)
+                self.assertEqual(latest[0]["sequence"], 60)
+                self.assert_picture(base64.b64decode(latest[0]["media"][0]["data"]), (200, 40, 60))
+
+                window = read_timeline(directory, {"start": "2026-10-27T00:00:00Z",
+                                                   "end": "2026-10-27T00:00:02.5Z", "limit": 64})
+                self.assertFalse(window["hasMore"])
+                self.assertEqual([row["sequence"] for row in window["records"]], list(range(1, 61)))
+                self.assert_picture(base64.b64decode(window["records"][-1]["media"][0]["data"]), (200, 40, 60))
+            finally:
+                history.close()
+
+    def test_capability_channels_seal_quickly_and_read_offline(self):
+        from ludens_tools._observation_history import read_timeline
+
+        with tempfile.TemporaryDirectory() as directory:
+            history = ObservationHistory(directory)
+            try:
+                row = history.append(sample(png()), "one", SAMPLING, "2026-10-27T00:00:00Z",
+                                     identity={"id": "python/probe.py:Probe.snap"})
+                self.drain(history._video)
+                asset = history.directory / row["media"][0]["timeline"]["asset"]
+                started = time.monotonic()
+                selected = read_timeline(directory, {"id": row["id"]})["records"]
+                sealed = json.loads(asset.with_suffix(".mp4.json").read_text())
+                self.assertEqual(sealed["status"], "ready")
+                self.assertLess(time.monotonic() - started, 2.5)
+                self.assertEqual([item["id"] for item in selected], [row["id"]])
+                self.assert_picture(base64.b64decode(selected[0]["media"][0]["data"]), (200, 40, 60))
+            finally:
+                history.close()
+
     def test_public_import_does_not_load_video_dependencies(self):
         result = subprocess.run([sys.executable, "-c", "import ludens_tools,sys; print('av' in sys.modules, 'PIL' in sys.modules)"],
                                 capture_output=True, text=True, check=True)

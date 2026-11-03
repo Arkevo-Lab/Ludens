@@ -9,9 +9,11 @@ against the current `codeSHA`, and remove `unverified`, `stale`, `adapting`, or
 (`missing`, such as live device-action macros) may be retained or promoted when
 proven useful in live runs. Do not edit capability or eval source during this
 file-only turn; record needed changes, `adapting` counterexample records, any
-sim-to-real gaps or counterexample timeline records needed to refine the
-surrogate environment (`eval_env`) or test set, and `ludens eval run <id>`
-commands in `memory/current.md` for the next execution turn.
+sim-to-real gaps or 30 Hz `.ludens/timeline/` replay slices (`record_window` /
+`around=<record-id>`) needed to upgrade the Critic (`eval_env` surrogate
+environment or test set) before iterating the Actor (`@capability`), and
+`ludens eval run <id>` commands in `memory/current.md` for the next execution
+turn.
 Rewrite skills under the skill policy: resolve conflicting
 versions in place, keep only reusable methods, and separate independent
 capabilities with accurate descriptions. Update `memory/current.md` with the

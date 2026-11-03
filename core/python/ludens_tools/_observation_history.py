@@ -4,6 +4,7 @@ from collections import Counter, OrderedDict
 from datetime import datetime, timezone
 import base64
 import binascii
+from fractions import Fraction
 import fcntl
 import hashlib
 import json
@@ -333,7 +334,8 @@ class ObservationHistory:
                         self._video = VideoRecorder(self.directory, video_dir,
                             segment_seconds=self.video_segment_seconds, idle_seconds=self.video_idle_seconds)
                     channel = json.dumps([identity["id"], identity.get("codeSHA"), index, generation, item["mediaType"]])
-                    location = self._video.submit(raw, channel, at, size, sample_hz=self.sample_hz)
+                    idle = None if identity["id"] == MAIN_CAPABILITY else min(self.video_idle_seconds, 0.25)
+                    location = self._video.submit(raw, channel, at, size, sample_hz=self.sample_hz, idle_seconds=idle)
                     archived.append({"mediaType": item["mediaType"], "sha256": hashlib.sha256(raw).hexdigest(),
                                      "bytes": len(raw), "timeline": {**reference, **location}})
                     originals[index] = raw
@@ -497,6 +499,34 @@ class ObservationHistory:
                 return None
             return self._read((*values[:4], path.with_suffix(".jsonl"), *values[4:]))
         return None
+
+    def _record_video_readable(self, record, wait_seconds=0.0):
+        """Report whether every video frame of a record is flushed on disk."""
+        from ludens_tools._video import TIME_BASE, video_status
+
+        deadline = time.monotonic() + wait_seconds
+        while True:
+            readable = True
+            for item in record.get("media", []):
+                video = item.get("timeline", {}).get("video")
+                if video is None:
+                    continue
+                if video.get("status") == "gap":
+                    return True
+                info = video_status(self.directory, item["timeline"]["asset"], allow_pending=True)
+                if info.get("status") == "ready":
+                    continue
+                last_pts = info.get("lastReadablePts")
+                if (not info.get("readableBytes") or last_pts is None
+                        or Fraction(video["pts"]) * Fraction(*video["timeBase"])
+                        > Fraction(last_pts) * Fraction(*TIME_BASE)):
+                    readable = False
+                    break
+            if readable:
+                return True
+            if time.monotonic() >= deadline:
+                return False
+            time.sleep(0.02)
 
     def _delivery(self, record, originals=None, budget=None):
         originals = self._hot_media.get(record["sequence"], {}) if originals is None else originals
@@ -726,6 +756,12 @@ class ObservationHistory:
                 continue
             if (capability_key is not None and entry[5] != capability_key) or (record_key is not None and entry[6] != record_key):
                 continue
+            if getattr(self, "_offline_disk_reader", False):
+                # While a live writer is recording, unflushed fMP4 tail frames
+                # cannot be decoded. Unpinned queries skip them; a pinned id
+                # waits briefly for its fragment to flush instead of failing.
+                if not self._record_video_readable(self._read(entry), wait_seconds=0.0 if record_id is None else 2.5):
+                    continue
             if latest or at is not None:
                 key = entry[1] if latest else entry[:2]
                 previous = (selected[0][1] if latest else selected[0][:2]) if selected else None
@@ -792,6 +828,7 @@ def read_timeline(workspace, query=None):
     reader._channel_bytes = Counter()
     reader._expired = None
     reader._segments = []
+    reader._offline_disk_reader = True
     for metadata in (directory / "segments").glob("*.meta.json"):
         if metadata.resolve() != metadata:
             raise ValueError("Timeline segment metadata must not follow symlinks")
