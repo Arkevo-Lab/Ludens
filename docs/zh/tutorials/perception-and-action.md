@@ -53,8 +53,10 @@ class Perception:
 ### 2. 感知管理与历史查询命令（`ludens observe`）
 
 ```sh
-# 生命周期与自动注入策略管理
+# 生命周期、状态机控制与自动注入策略管理
 ludens perception status
+ludens perception state
+ludens perception transition track --args '{"target":"marker"}'
 ludens perception reload
 ludens perception stop
 ludens perception inject          # 查看当前自动注入策略（on / off）

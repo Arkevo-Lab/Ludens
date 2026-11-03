@@ -17,7 +17,8 @@ class Perception:
         media: [{"path": "frame.png", "mediaType": "image/png"}], or base64 data
         instead of path. sampledAt optionally supplies a known source timestamp.
         Capabilities in the continuous state machine may also return optional
-        effect and transition fields in their dict for closed-loop control.
+        effect and transition fields in their dict for closed-loop control, and
+        can be switched live with ludens perception transition <target> --args '{...}'.
         The instance stays alive; choose continuous or on-demand work as useful.
         @record adds this result to the workspace timeline and returns a timeline
         reference. observe() reads that history, across runs, without resampling.

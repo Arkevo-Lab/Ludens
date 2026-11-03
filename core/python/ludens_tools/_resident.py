@@ -225,7 +225,16 @@ class StateMachine:
                 trace["inputGeneration"] = input_generation
             # The lease epoch and inputGeneration must win over the tick's own.
             with scope({**context, "trace": trace, "epoch": epoch}):
-                Client().call(target, arguments)
+                try:
+                    Client().call(target, arguments)
+                except Exception as error:
+                    if "STALE_EPOCH" in str(error) or "STALE_INPUT_GENERATION" in str(error):
+                        with self.lock:
+                            if self.epoch == epoch:
+                                self.epoch = None
+                                self.input_generation = None
+                        continue
+                    raise
 
     def _apply_transition(self, transition):
         if isinstance(transition, str):

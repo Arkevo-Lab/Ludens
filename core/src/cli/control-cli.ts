@@ -8,7 +8,8 @@ export const HELP = `ludens status
 ludens auto on [--message <text>]
 ludens auto off
 ludens consolidate [--seconds <n>]
-ludens perception status | reload | stop
+ludens perception status | state | reload | stop
+ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
 ludens perception inject [on|off]
 ludens action status | reload | stop
 ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
@@ -34,7 +35,8 @@ OMP's native terminal image support; use it when reading pictures through bash.
 availability reports the retained range; non-persistent history expires outside its hot window.
 The same command is available as ludens perception observe.`;
 
-const PERCEPTION_HELP = `ludens perception status | reload | stop
+const PERCEPTION_HELP = `ludens perception status | state | reload | stop
+ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
 ludens perception inject [on|off]
 ${OBSERVE_HELP}
 Loads workspace/perception.py:Perception in a resident process and calls sample() continuously.
@@ -126,6 +128,18 @@ export async function cli(argv: string[], socket: string) {
   if (kind === "perception" && rest[0] === "observe") return observe(rest.slice(1), socket);
   if (kind === "perception" && (!rest.length || rest.includes("--help"))) {
     console.log(PERCEPTION_HELP);
+    return;
+  }
+  if (kind === "perception" && rest[0] === "transition") {
+    const [, target, ...args] = rest;
+    if (!target) { console.log(PERCEPTION_HELP); return; }
+    const argumentsObject = await readToolArguments(args);
+    const value = await send(socket, {
+      kind: "perception", argv: ["transition", target], arguments: argumentsObject,
+      epoch: process.env.BASEWARE_EPOCH,
+      trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined,
+    });
+    console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
     return;
   }
   if (kind === "action" && (!rest.length || rest[0] === "--help")) { console.log(ACTION_HELP); return; }

@@ -53,8 +53,10 @@ A new workspace's `Perception.sample()` raises `NotImplementedError` by default;
 ### 2. Perception Management and History Query Commands (`ludens observe`)
 
 ```sh
-# Lifecycle and auto-inject policy management
+# Lifecycle, state-machine control, and auto-inject policy management
 ludens perception status
+ludens perception state
+ludens perception transition track --args '{"target":"marker"}'
 ludens perception reload
 ludens perception stop
 ludens perception inject          # Show current auto-inject policy (on / off)

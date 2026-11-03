@@ -345,18 +345,23 @@ test("decorated observation channels bind default reads and control leases survi
   host.attach({ perception: f.runtime });
   try {
     await f.load(`from ludens_tools import capability, observe, record
+from ludens_tools._context import current
 @observe
 @record
 @capability
 def inspect() -> dict:
     """A named observation entry."""
+    assert current()["epoch"] is None
+    assert "epoch" not in current()["trace"]
     return {"text": "custom observation"}
 `);
     expect((await f.observe()).records[0]?.capability).toBe("python/perception.py:inspect");
     await host.start();
     expect((await f.runtime.stateMachine()).epoch).toBe(host.status().epoch);
     await f.runtime.reload();
+    await f.wait(() => f.runtime.status().state !== "loading");
     expect((await f.runtime.stateMachine()).epoch).toBe(host.status().epoch);
+    expect(f.runtime.status().state).toBe("ready");
     await host.stop();
     expect((await f.runtime.stateMachine()).epoch).toBeNull();
     await writeFile(join(f.workspace, "sensing.py"), `from ludens_tools import capability, observe, record

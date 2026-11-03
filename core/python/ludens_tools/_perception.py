@@ -74,16 +74,21 @@ def main():
                     # The writer survives missing or broken user sensing code.
                     history = ObservationHistory(workspace)
                     trace = dict(message.get("trace", {}))
-                    if message.get("inputGeneration"):
-                        trace["inputGeneration"] = message["inputGeneration"]
+                    input_generation = message.get("inputGeneration") or trace.get("inputGeneration")
+                    trace.pop("epoch", None)
+                    trace.pop("inputGeneration", None)
                     context = {**current(), "workspace": str(workspace), "run_id": Path(message["runDir"]).name,
-                               "epoch": message.get("epoch"), "generation": message["generation"], "trace": trace,
+                               "epoch": None, "generation": message["generation"], "trace": trace,
                                "diagnostics": message.get("diagnostics", os.environ.get("LUDENS_LOG_DIAGNOSTICS", "normal")),
                                "actuate": message.get("actuate", False),
                                "timeline_append": append}
                     if context["diagnostics"] not in ("normal", "full"):
                         raise ValueError("diagnostics must be normal or full")
-                    context["trace"].pop("epoch", None)
+                    lease_context = {
+                        **context,
+                        "epoch": message.get("epoch"),
+                        "trace": {**trace, **({"inputGeneration": input_generation} if input_generation else {})},
+                    }
                     result = {"pid": os.getpid(), "history": history.policy(), "state": "loading",
                               "diagnostics": context["diagnostics"]}
                     try:
@@ -95,7 +100,7 @@ def main():
                             instance = load_instance(message, "perception", "Perception", "sample", recorded=True)
                             if getattr(instance.sample, "__ludens_observe__", False):
                                 history.main_capability = instance.sample.__ludens_identity__["id"]
-                            state_machine = StateMachine(instance, sys.modules.get("perception"), instance.sample, context)
+                            state_machine = StateMachine(instance, sys.modules.get("perception"), instance.sample, lease_context)
                             sample_hz = env_sample_hz("LUDENS_PERCEPTION_SAMPLE_HZ")
                             history.sample_hz = sample_hz
                             instance.start({"workspace": str(workspace), "runDir": message["runDir"],
