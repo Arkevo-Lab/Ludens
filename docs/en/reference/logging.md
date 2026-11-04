@@ -1,6 +1,6 @@
 # Logging and Call Chains
 
-Offline analyzers, the Dashboard web console, the Ludens Pet desktop companion, and the Benchmark scorer all consume the same persisted run facts. The recording rule is: **continuous high-frequency capabilities archive data on demand and report periodic aggregate statistics; active decisions and device changes record full events; internal nested call chains are traced at the diagnostics level**.
+Offline analyzers, the Dashboard web console, and the Ludens Pet desktop companion all consume the same persisted run facts. The recording rule is: **continuous high-frequency capabilities archive data on demand and report periodic aggregate statistics; active decisions and device changes record full events; internal nested call chains are traced at the diagnostics level**.
 
 ## Recording modes
 
@@ -44,7 +44,7 @@ Three underlying stores shared across runs:
 
 Every JSONL event carries a top-level writer identity (`runId` or `serviceId`, incrementing `seq`, wall-clock `at`, monotonic `atMs`) plus four core blocks (defined in [core/src/core/storage/events.ts](../../../core/src/core/storage/events.ts)):
 
-- **`source`**: the responsible component that produced the semantics (`shiori`, `ludens`, `workspace`, `baseware`, `benchmark`, `dashboard`, `pet`) and its concrete implementation and version.
+- **`source`**: the responsible component that produced the semantics (`shiori`, `ludens`, `workspace`, `baseware`, `dashboard`, `pet`) and its concrete implementation and version.
 - **`origin`**: `{eventId, clockId, seq, at, atMs}` of the source process that first generated the fact; unchanged across forwarding and persistence (`atMs` may only be subtracted within the same `clockId`).
 - **`trace`**: call-chain and business-ownership context, with `traceId / spanId / parentSpanId` (call-tree relations), `epoch / modelCallId / requestId / httpId / toolCallId / operationId` (business entity IDs), `recordingId / recordingPurpose` (run ownership and resident purpose), and `inputGeneration` (action-worker reload generation within an epoch).
 - **`type` / `data`**: the concrete event type and payload.
@@ -109,7 +109,7 @@ The Dashboard isolates log parsing and index building in a dedicated Node Worker
 
 ### 3. Console HTTP API and Ludens Pet incremental follow
 
-- **`/api/activity`**: `changes` (opaque-cursor incremental block updates, shared by web and Ludens Pet), `history` (paged search by category and full-text keywords), and `block` (single-block detail expansion). Ludens Pet only consumes live `changes` deltas of the followed workspace's latest non-Benchmark run, recording its own consumption watermark under `workspace/logs/consumers/`.
+- **`/api/activity`**: `changes` (opaque-cursor incremental block updates, shared by web and Ludens Pet), `history` (paged search by category and full-text keywords), and `block` (single-block detail expansion). Ludens Pet only consumes live `changes` deltas of the followed workspace's latest run, recording its own consumption watermark under `workspace/logs/consumers/`.
 - **`/api/diagnostics`**: dedicated paged query of `full`-mode diagnostic events by `epoch`, time window, `traceId / spanId / actionId` (max 500 entries per page), never mixed into the regular Activity stream or pet bubbles.
 
 ## Experience replay

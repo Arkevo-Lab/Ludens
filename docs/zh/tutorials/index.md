@@ -19,4 +19,3 @@
 - 需要了解系统五组件边界、Shiori 控制周期与 OMP 会话装配，见 [架构与边界](../reference/architecture.md)。
 - 需要查阅设备工具 schema、控制权租约与驱动包协议，见 [Baseware 设计理念与能力契约](../reference/baseware.md) 与 [Driver Bridge 协议](../reference/driver-bridge-protocol.md)。
 - 需要排查运行事件、模型输入收据或 Dashboard 索引机制，见 [日志与调用链](../reference/logging.md)。
-- 需要运行或编写 Harbor 评测任务，见 [Benchmark](../reference/benchmark.md)。

@@ -1,7 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { EventLog as DeviceEventLog } from "../../../baseware/src/events.ts";
-import { atomicJson } from "../bench/store.ts";
+import { atomicJson } from "../core/storage/atomic-json.ts";
 import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenBaseware } from "@ludens/baseware/server";
 import { connectBaseware } from "../core/subsystems/baseware.ts";

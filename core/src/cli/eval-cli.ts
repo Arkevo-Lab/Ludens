@@ -27,7 +27,7 @@ passing run. The hash does not prove counterexample coverage: update the test
 set/verifier. Declare reusable surrogate environments with @eval_env (use them as
 with MyEnv(...) as env: or with eval_env(env):) and bind them with
 @eval_capability(fn, env=MyEnv) or env="python/envs.py:MyEnv".
-Pair @capability with @eval_capability(fn); ludens bench covers Harbor agent tasks.
+  Pair @capability with @eval_capability(fn) to verify workspace capabilities in-place.
 `;
 
 export async function evalCommand(args: string[], workspacePath: string) {

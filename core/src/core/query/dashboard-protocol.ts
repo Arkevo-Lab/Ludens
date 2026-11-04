@@ -1,7 +1,5 @@
 import type { getActivity, ActivityQuery } from "./activity";
 import type { petState, recordPetConsumer, setPetTarget } from "./pet-state";
-import type { benchmarkAttachment, benchmarkCatalog, benchmarkEvidence } from "./benchmark-data";
-import type { BenchmarkQuery, BenchmarkDetailQuery } from "./benchmarks";
 import type { capabilities, capabilityRuntime } from "./capabilities";
 import type { discoverDriver } from "./drivers";
 import type { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } from "./data";
@@ -29,9 +27,6 @@ export interface DashboardMethods {
   replay: { args: [project: string, run: string, query: ReplayQuery]; result: Awaited<ReturnType<typeof getReplay>> };
   media: { args: [project: string, run: string, id: string]; result: Awaited<ReturnType<typeof mediaFile>> };
   timelineRecord: { args: [project: string, run: string, record: string, sequence: number, source: { call?: string; observation?: string }]; result: Awaited<ReturnType<typeof timelineRecord>> };
-  benchmarkCatalog: { args: [query?: BenchmarkQuery]; result: Awaited<ReturnType<typeof benchmarkCatalog>> };
-  benchmarkEvidence: { args: [project: string, run: string, query?: BenchmarkDetailQuery]; result: Awaited<ReturnType<typeof benchmarkEvidence>> };
-  benchmarkAttachment: { args: [project: string, run: string, index: number, verification?: string]; result: Awaited<ReturnType<typeof benchmarkAttachment>> };
   capabilities: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilities>> };
   capabilityRuntime: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilityRuntime>> };
   discoverDriver: { args: [spec: string]; result: Awaited<ReturnType<typeof discoverDriver>> };

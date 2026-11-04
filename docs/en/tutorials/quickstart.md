@@ -123,7 +123,7 @@ ludens workspace import /absolute/path/to/workspace \
 
 Stop related services and back up the workspace and old state before importing. Omit `--legacy-state` when there is no old external state and `--previous-workspace` when the directory has not moved. Updating source code alone neither migrates nor starts existing workspaces.
 
-Import only brings in sessions, session selection, and skill version snapshots; it preserves the external originals. Old absolute paths in logs, video references, and Benchmark records are not rewritten, and external media is not copied automatically; these records may not replay or rescore after a move. Preserve the original directory and external dependencies when old replay is needed. Workspaces recorded in the new format support moving the whole directory and registering it again.
+Import only brings in sessions, session selection, and skill version snapshots; it preserves the external originals. Old absolute paths in logs and video references are not rewritten, and external media are not copied automatically; these records may not replay after a move. Preserve the original directory and external dependencies when old replay is needed. Workspaces recorded in the new format support moving the whole directory and registering it again.
 
 ### 2. `ludens.json` reference
 

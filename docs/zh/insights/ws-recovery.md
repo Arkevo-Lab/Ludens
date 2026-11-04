@@ -43,13 +43,13 @@
 
 这种跑五六个小时才撞上一次的网络边界问题，如果每次改完代码都去跑八小时实机实验，根本没法高效调试。
 
-所以我们在架构实现期用 TDD 的思路，写了一套完全离线的传输层测试（[core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)）和配套的看板 Benchmark（[ws-recovery.ts](../../../core/tests/ws-recovery.test.ts)）：直接在进程内用夹具接管 `streamOpenAICodexResponses` 底层的 WebSocket 与 HTTP，并用虚拟时钟秒级快进 60 秒冷却期，不用连真模型、也不用消耗在线 Token：
+所以我们在架构实现期用 TDD 的思路，写了一套完全离线的传输层测试（[core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)）和配套的性能套件（[ws-recovery.ts](../../../core/tests/ws-recovery.test.ts)）：直接在进程内用夹具接管 `streamOpenAICodexResponses` 底层的 WebSocket 与 HTTP，并用虚拟时钟秒级快进 60 秒冷却期，不用连真模型、也不用消耗在线 Token：
 
 ```sh
 (cd core && bun run omp:test:transport)
 (cd core && bun run typecheck)
 
-# 生成可直接在 Dashboard 看板里查看事件与评分证据的基准记录：
+# 生成可直接在 Dashboard 看板里查看的运行记录：
 cd core && bun test tests/ws-recovery.test.ts
 ```
 

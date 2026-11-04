@@ -3,7 +3,6 @@ import { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } fro
 import { diagnosticEvents } from "./diagnostic-events";
 import { getActivity } from "./activity";
 import { getReplay } from "./replay";
-import { benchmarkAttachment, benchmarkCatalog, benchmarkEvidence } from "./benchmark-data";
 import { capabilities, capabilityRuntime } from "./capabilities";
 import { discoverDriver } from "./drivers";
 import { docGroups, readDoc } from "./docs";
@@ -29,9 +28,6 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   replay: ([project, run, query], signal) => getReplay(project, run, query, undefined, signal),
   media: ([project, run, id], signal) => mediaFile(project, run, id, undefined, signal),
   timelineRecord: ([project, run, record, sequence, source], signal) => timelineRecord(project, run, record, sequence, source, undefined, signal),
-  benchmarkCatalog: ([query]) => benchmarkCatalog(query),
-  benchmarkEvidence: ([project, run, query], signal) => benchmarkEvidence(project, run, query, undefined, signal),
-  benchmarkAttachment: ([project, run, index, verification], signal) => benchmarkAttachment(project, run, index, verification, undefined, signal),
   capabilities: ([project, workspace], signal) => capabilities(project, workspace, undefined, signal),
   capabilityRuntime: ([project, workspace]) => capabilityRuntime(project, workspace),
   discoverDriver: ([spec], signal) => discoverDriver(spec, signal),

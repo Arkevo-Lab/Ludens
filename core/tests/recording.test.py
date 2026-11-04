@@ -239,29 +239,6 @@ class Perception:
         self.assertEqual(wire["arguments"], {"keys": ["a"]})
         self.assertEqual(wire["trace"], {"traceId": "explicit", "recordingPurpose": "continuous-perception", "recordingId": "host-run"})
 
-    def test_trial_subject_does_not_require_a_persisted_call(self):
-        from ludens_tools.benchmarks import Trial
-        for continuous, host in ((True, True), (True, False), (False, True), (False, False)):
-            with self.subTest(continuous=continuous, host=host), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory).resolve()
-                artifacts = root / "artifacts"
-                artifacts.mkdir()
-                input_path = root / "input.json"
-                input_path.write_text("{}")
-                base = context(root, socket_path="fake.sock" if host else "",
-                               recording_purpose="continuous-perception" if continuous else None)
-                functions = load(root, base)
-                with scope(base):
-                    trial = Trial("test", root, artifacts, root, input_path)
-                    with patch("ludens_tools._context._trial_observer", trial._observe), patch("ludens_tools._context.request") as rpc:
-                        functions["quality"]()
-                        trial.flush()
-                result = json.loads((artifacts / "context.json").read_text())
-                self.assertIn({"id": "python/fixture.py:helper", "revision": hashlib.sha256(SOURCE.encode()).hexdigest()}, result["subjects"])
-                self.assertEqual(result["capabilityCalls"][0]["succeeded"], 1)
-                self.assertFalse((root / "events.jsonl").exists())
-                self.assertEqual(rpc.call_count, 2 if host and not continuous else 0)
-
 
 if __name__ == "__main__":
     unittest.main()

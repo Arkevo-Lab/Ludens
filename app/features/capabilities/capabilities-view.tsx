@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Activity, ArrowUpRight, BookOpen, FileCode2, ListChecks, Monitor } from "lucide-react";
+import { Activity, BookOpen, FileCode2, Monitor } from "lucide-react";
 import type { CapabilityEntry, CapabilitiesResult, CapabilityRuntime } from "@/lib/capabilities";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { useLocale, useTranslations } from "@/lib/locale";
@@ -58,26 +58,6 @@ function CapabilityDeclarations({ items, title }: { items: CapabilityEntry[]; ti
   </div>;
 }
 
-function EvalTasks({ tasks, project, onNavigate }: {
-  tasks: CapabilitiesResult["tasks"]; project: string; onNavigate(href: string): void;
-}) {
-  const t = useTranslations("capabilitiesView");
-  return <ul className="capability-tasks" role="list" aria-label={t("groupTitles.tasks")}>
-    {tasks.map(task => {
-      const href = "/?" + new URLSearchParams({ view: "benchmark", project, case: task.name, caseDigest: task.digest });
-      return <li key={`${task.name}@${task.digest}`} className="capability-task" data-capability-task={`${task.name}@${task.digest}`}>
-        <h4 className="capability-task-name"><code>{task.name}</code></h4>
-        <p className="capability-task-description">{task.title !== task.name ? task.title : <span className="text-muted-foreground">{t("noDescription")}</span>}</p>
-        <div className="capability-task-details">
-          <details className="capability-task-digest"><summary>{t("taskDigest")}<span className="sr-only"> · {task.name}</span></summary><code>{task.digest}</code></details>
-          <a href={href} className="capability-task-link" data-capability-task-link={`${task.name}@${task.digest}`} onClick={event => {
-            if (isPlainNavigationClick(event)) { event.preventDefault(); onNavigate(href); }
-          }}>{t("openTask")}<span className="sr-only"> · {task.name}</span><ArrowUpRight aria-hidden="true" /></a>
-        </div>
-      </li>;
-    })}
-  </ul>;
-}
 
 function ConnectionCheck({ project, workspace }: { project: string; workspace: string }) {
   const t = useTranslations("capabilitiesView");
@@ -117,7 +97,7 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
   const capsLoad = useReadResource<CapabilitiesResult>(project && workspace ? "/api/capabilities?" + new URLSearchParams({ project, workspace }) : null, t("readFailed"));
   const caps = capsLoad.value;
   const catalogFocus = useRetryFocus(!!catalogLoading, catalogError);
-  const links = { device: { doc: "tutorials/devices", label: "deviceGuide" }, workspace: { doc: "tutorials/workspace", label: "capabilityGuide" }, tasks: { doc: "reference/benchmark", label: "benchmarkGuide" } };
+  const links = { device: { doc: "tutorials/devices", label: "deviceGuide" }, workspace: { doc: "tutorials/workspace", label: "capabilityGuide" } };
   return <div ref={catalogFocus.target} className="grid min-w-0 grid-cols-1 gap-5" tabIndex={-1} role="region" aria-label={t("overviewLabel")} aria-busy={capsLoad.loading}>
     <header className="space-y-2"><h2 className="text-lg font-semibold">{t("sourcesTitle")}</h2><p className="text-sm leading-relaxed text-muted-foreground">{t("sourcesDescription")}</p></header>
     {catalogError && <Alert variant="destructive"><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0 flex-1"><p>{t("catalogFailed")}</p><details className="mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{catalogError}</pre></details></div>
@@ -128,23 +108,22 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
     {!caps ? !ready || capsLoad.loading ? <Card><CardContent role="status"><h3 className="text-sm font-semibold">{t(!ready ? "loadingWorkspaces" : "loadingTitle")}</h3><p className="mt-2 text-sm text-muted-foreground">{t("loadingDesc")}</p></CardContent></Card>
       : !catalogError && !capsLoad.error ? <Card><CardContent className="space-y-4"><h3 className="text-base font-semibold">{t("emptyTitle")}</h3><p className="text-sm text-muted-foreground">{t("emptyDesc")}</p><div className="flex flex-wrap gap-2">
         <NavigationLink href="/?view=workspaces&create=1" onNavigate={onNavigate} primary>{t("createWorkspace")}</NavigationLink><NavigationLink href="/?view=workspaces" onNavigate={onNavigate}>{t("viewWorkspaces")}</NavigationLink></div></CardContent></Card> : null : <>
-      {(["device", "workspace", "tasks"] as const).map(id => {
+      {(["device", "workspace"] as const).map(id => {
         const source = caps.sources[id], items = caps.groups.find(group => group.id === id)?.items ?? [];
-        const count = id === "tasks" ? caps.tasks.length : items.length;
+        const count = items.length;
         const countLabel = source.status === "error" || source.status === "missing" ? "—" : String(count);
-        const Icon = id === "device" ? Monitor : id === "workspace" ? FileCode2 : ListChecks;
+        const Icon = id === "device" ? Monitor : FileCode2;
         return <Card key={id} className="min-w-0" data-capability-source={id}><CardContent className="min-w-0 space-y-4">
           <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 space-y-2"><h3 className="flex items-center gap-3 text-base font-semibold"><Icon className="size-5 shrink-0 text-primary" />{t(`groupTitles.${id}`)}</h3>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Badge variant="outline">{t(`sourceStates.${source.status}`)}</Badge><span>{countLabel} {t(id === "tasks" ? "taskPackagesUnit" : "capabilitiesUnit")}</span></div></div>
+            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Badge variant="outline">{t(`sourceStates.${source.status}`)}</Badge><span>{countLabel} {t("capabilitiesUnit")}</span></div></div>
             <NavigationLink href={guide(links[id].doc)} onNavigate={onNavigate}><BookOpen />{t(links[id].label)}</NavigationLink></div>
           <p className="text-xs leading-relaxed text-muted-foreground">{t(`sourceDescriptions.${id}`)}</p>
           {id === "device" && caps.deviceSnapshot && <div className="space-y-1 text-xs text-muted-foreground">
             <p>{caps.deviceSnapshot.generatedAt ? <>{t("snapshotAt")} <time dateTime={caps.deviceSnapshot.generatedAt}>{new Date(caps.deviceSnapshot.generatedAt).toLocaleString()}</time></> : t("snapshotTimeUnknown")}</p>
             {caps.deviceSnapshot.drivers.length > 0 && <p className="break-words">{t("recordedDrivers")}: {caps.deviceSnapshot.drivers.map(driver => `${driver.id}${driver.version ? ` (${driver.version})` : ""}`).join(", ")}</p>}</div>}
           {source.status === "error" ? <p className="text-sm text-destructive">{t("sourceFailure")}</p> : count === 0 ? <p className="text-sm text-muted-foreground">{t(`sourceEmpty.${id}`)}</p>
-            : id !== "tasks" ? <CapabilityDeclarations items={items} title={t(`groupTitles.${id}`)} /> : <EvalTasks tasks={caps.tasks} project={project} onNavigate={onNavigate} />}
+            : <CapabilityDeclarations items={items} title={t(`groupTitles.${id}`)} />}
           {source.issueCount > 0 && <p className="text-xs text-muted-foreground">{t("diagnosticsTitle")}: {source.issueCount}</p>}
-          {id === "tasks" && <NavigationLink href={"/?" + new URLSearchParams({ view: "benchmark", project })} onNavigate={onNavigate}>{t("viewBenchmark")}<ArrowUpRight /></NavigationLink>}
         </CardContent></Card>;
       })}
       {caps.issues.length > 0 && <details className="rounded-lg border p-4 text-xs"><summary className="cursor-pointer">{t("diagnosticsTitle")} ({caps.issues.length})</summary><div className="mt-3 space-y-2">{caps.issues.map((issue, index) => <p key={index} className="break-all">{issue.error}</p>)}</div></details>}

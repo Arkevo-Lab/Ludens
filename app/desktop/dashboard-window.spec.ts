@@ -14,7 +14,7 @@ describe('shared Dashboard window', () => {
     for (const url of ['https://example.com', 'javascript:alert(1)', 'file:///tmp/a.html', 'http://user@127.0.0.1:3015/', 'http://localhost:3015/']) {
       expect(isDashboardUrl(url, origin)).toBe(false)
     }
-    expect(isDashboardUrl(origin + '/?view=benchmark', origin)).toBe(true)
+    expect(isDashboardUrl(origin + '/?view=caps', origin)).toBe(true)
     expect(isDashboardUrl(origin + '/?view=perf', origin)).toBe(true)
   })
   it('links the source run and epoch to the exact encoded activity block', () => {

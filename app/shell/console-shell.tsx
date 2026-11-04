@@ -11,7 +11,6 @@ import { ConsoleSidebar, type ConsoleView as View } from "@/shell/console-sideba
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
 import { RunPicker } from "@/features/workspaces/run-picker";
 import { DesktopBridge } from "@/features/pet/desktop-bridge";
-import { BenchmarkCases } from "@/features/benchmark/benchmark-cases";
 import { DocsView } from "@/features/docs/docs-view";
 import { CapabilitiesView } from "@/features/capabilities/capabilities-view";
 import { SettingsView } from "@/features/workspaces/settings-view";
@@ -39,7 +38,7 @@ export default function ConsoleShell() {
       <Metric label={dt("metric.cache")} value={percent(s!.cacheHit)} detail={dt("metric.afterFirst") + percent(s!.warmCacheHit)} />
     </section>
   ) : null;
-  const workspaceScopedView = view === "live" || view === "replay" || view === "perf" || view === "benchmark" || view === "caps" || view === "perception";
+  const workspaceScopedView = view === "live" || view === "replay" || view === "perf" || view === "caps" || view === "perception";
   return (
     <div className="console-shell">
       <DesktopBridge onNavigate={navigateUrl} />
@@ -51,10 +50,7 @@ export default function ConsoleShell() {
               <>
                 <WorkspacePicker projects={projects} value={selection.project} loading={!catalogReady} error={catalogError}
                   onChange={id => navigate({ project: id, workspace: null, run: null, epoch: null,
-                    beforeCall: null, call: null, block: null, image: null, at: null, ...replayEvidencePatch(null),
-                    case: null, caseDigest: null, result: null, baseline: null, verification: null,
-                    baselineVerification: null, report: null, baselineReport: null,
-                    verificationCursor: null, evidenceCursor: null, benchCursor: null })} />
+                    beforeCall: null, call: null, block: null, image: null, at: null, ...replayEvidencePatch(null) })} />
                 <div className="breadcrumb"><i>/</i><strong>{t(`nav.${view}`)}</strong></div>
               </>
             ) : (
@@ -114,9 +110,7 @@ export default function ConsoleShell() {
                   }}
                 >
                   <NativeSelectOption value="">
-                    {data?.manifest.kind === "benchmark" && !cycles.length
-                      ? dt("fullBenchRun")
-                      : dt("latestEpoch")}
+                    {dt("latestEpoch")}
                     {cycles.length ? " · #" + cycles.length : ""}
                   </NativeSelectOption>
                   {view === "replay" && <NativeSelectOption value="all">{dt("allEpochs")}</NativeSelectOption>}
@@ -128,7 +122,7 @@ export default function ConsoleShell() {
                 </NativeSelect>
               </>
             )}
-            {(run || view === "benchmark") && (view === "live" || view === "perf" || view === "benchmark") && <Button
+            {run && (view === "live" || view === "perf") && <Button
               type="button"
               size="sm"
               variant="outline"
@@ -224,7 +218,6 @@ export default function ConsoleShell() {
           ) : runControls && entry !== "ready" ? (
             <WorkspaceRunEmpty state={entry} project={project?.id} workspaceName={workspaceName(project)}
               workspacePath={project?.workspace ?? undefined}
-              benchmarkRun={project?.runs.find(r => r.kind === "benchmark" || r.benchmark)?.id}
               error={catalogError} retrying={catalogLoading} onRetry={retryCatalog} onNavigate={navigateUrl} />
           ) : view === "replay" ? (
             <TimelinePlayer key={scopeKey} project={selection.project} run={run} epoch={selection.epoch || "latest"}
@@ -232,18 +225,6 @@ export default function ConsoleShell() {
               position={query.get("at")} evidence={replayEvidenceFromSearch(search)}
               onPosition={(at, evidence = null) => navigate({ project: selection.project, run, at: String(at), ...replayEvidencePatch(evidence) })}
               onEvidence={evidence => navigate(replayEvidencePatch(evidence))} />
-          ) : view === "benchmark" ? (
-            <BenchmarkCases
-              workspace={selection.project}
-              workspacePath={project?.workspace ?? null}
-              ready={catalogReady}
-              workspaceAvailable={project?.available !== false}
-              catalogError={catalogError} catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog}
-              search={search}
-              refresh={refresh}
-              navigate={navigate}
-              onNavigate={navigateUrl}
-            />
           ) : !data ? (
             <section className="surface empty-state main-empty">
               <span className="empty-symbol">◫</span>
@@ -413,10 +394,7 @@ export default function ConsoleShell() {
                       <div>
                         <dt>Epoch</dt>
                         <dd>
-                          {data.selectedEpoch ??
-                            (data.manifest.benchmark
-                              ? dt("provenance.fullRun")
-                              : dt("provenance.notTaken"))}
+                          {data.selectedEpoch ?? dt("provenance.notTaken")}
                         </dd>
                       </div>
                     </dl>
@@ -431,7 +409,7 @@ export default function ConsoleShell() {
                   ⓘ{" "}
                   {view === "live"
                     ? dt("footer.live")
-                    : dt("footer.bench")}
+                    : dt("footer.perf")}
                 </span>
                 <span>{dt("updatedAt")} {clockTime(data.updatedAt)}</span>
               </footer>

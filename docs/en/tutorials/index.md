@@ -19,4 +19,3 @@ For a first run, complete the [core installation](quickstart.md#install) in **1.
 - For the five-component boundaries, the Shiori control cycle, and OMP session assembly, see [Architecture & boundaries](../reference/architecture.md).
 - For device tool schemas, control leases, and the driver package protocol, see [Baseware design & capability contracts](../reference/baseware.md) and [Driver Bridge protocol](../reference/driver-bridge-protocol.md).
 - For diagnosing runtime events, model-input receipts, or the Dashboard indexing mechanism, see [Logging & call chains](../reference/logging.md).
-- For running or writing Harbor eval tasks, see [Benchmark](../reference/benchmark.md).

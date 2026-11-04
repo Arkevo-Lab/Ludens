@@ -20,7 +20,7 @@ const budgets = { peakRssMiB: 2048, peakHeapUsedMiB: 1024, retainedAfterReleaseM
 /** Synthetic workload: paired model/tool identities with capability/shiori spans per call. */
 const SYNTHETIC_EPOCH = "cycle", SYNTHETIC_CALLS = 3000, SYNTHETIC_STEP_MS = 50;
 const SYNTHETIC_BASE_MS = Date.UTC(2026, 9, 24);
-const generated = !option("--run") && !process.env.LUDENS_BENCH_ARTIFACTS ? realpathSync(mkdtempSync(join(tmpdir(), "ludens-perf-index-"))) : undefined;
+const generated = !option("--run") ? realpathSync(mkdtempSync(join(tmpdir(), "ludens-perf-index-"))) : undefined;
 if (generated) {
   const directory = join(generated, "logs", "synthetic-run");
   mkdirSync(directory, { recursive: true });
@@ -52,14 +52,12 @@ if (generated) {
   }
   push("control", { epoch: SYNTHETIC_EPOCH }, { mode: "manual" });
   writeFileSync(join(directory, "events.jsonl"), rows.join("\n") + "\n");
-  writeFileSync(join(directory, "manifest.json"), JSON.stringify({ kind: "benchmark", runId: "synthetic-run",
-    workspace: generated, benchmark: { name: "ludens/index-memory", digest: `sha256:${"0".repeat(64)}` } }) + "\n");
+  writeFileSync(join(directory, "manifest.json"), JSON.stringify({ runId: "synthetic-run", workspace: generated }) + "\n");
   args.push("--run", directory);
 }
-const artifacts = process.env.LUDENS_BENCH_ARTIFACTS;
-const cachePath = option("--cache-root") ?? (artifacts ? join(artifacts, "index-cache") : undefined) ?? (generated ? join(generated, "index-cache") : undefined);
-const outputPath = option("--output") ?? (artifacts ? join(artifacts, "measurements.json") : undefined) ?? (generated ? join(generated, "measurements.json") : undefined);
-assert.ok(cachePath && outputPath, "--cache-root and --output are required outside a Shiori trial");
+const cachePath = option("--cache-root") ?? (generated ? join(generated, "index-cache") : undefined);
+const outputPath = option("--output") ?? (generated ? join(generated, "measurements.json") : undefined);
+assert.ok(cachePath && outputPath, "--cache-root and --output are required when --run is specified");
 const run = resolve(option("--run")!), cacheRoot = resolve(cachePath), output = resolve(outputPath);
 assert.ok(!cacheRoot.startsWith(run + "/"), "Use an isolated disposable directory");
 process.env.LUDENS_APP_INDEX_ROOT = cacheRoot;
@@ -204,11 +202,6 @@ async function main() {
       process.exitCode = 1;
     }
   }
-  if (artifacts && process.env.LUDENS_BENCH_TRIAL_ID) writeFileSync(join(artifacts, "context.json"), JSON.stringify({
-    trialId: process.env.LUDENS_BENCH_TRIAL_ID, workspace: process.env.LUDENS_WORKSPACE,
-    conditions: { sourceRun: run, sourceBytes: sourceBefore.size, budget: report.budget },
-    subjects: [], artifacts: [], limitations: report.limitations,
-  }) + "\n");
 }
 main().catch(async error => {
   report.error = String(error.stack ?? error); save(); process.stderr.write(report.error + "\n"); process.exitCode = 1;

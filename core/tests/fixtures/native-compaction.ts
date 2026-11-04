@@ -5,7 +5,7 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionMaintenance, type SessionMaintenanceHost } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 import { ModelTrace, installCompactionHttpTrace } from "../../src/core/agent-omp/trace.ts";
-import type { BenchmarkContext } from "../../src/bench/types.ts";
+import type { PerfContext } from "../../src/perf/run-context.ts";
 import { syntheticKey, until } from "../../src/perf/evidence.ts";
 
 export const threshold = 256_000;
@@ -13,7 +13,7 @@ const contextWindow = 512_000;
 type JournalMessage = Parameters<SessionManager["appendMessage"]>[0];
 
 /** OMP preparation, native V2 serialization, parsing, validation, commit and tail replay all remain real. */
-export async function nativeCompaction(ctx: BenchmarkContext, initialEpoch: string) {
+export async function nativeCompaction(ctx: PerfContext, initialEpoch: string) {
   ctx.signal?.throwIfAborted();
   const originalFetch = globalThis.fetch, originalSocket = globalThis.WebSocket;
   const requests: Array<{ signal?: AbortSignal | null; body: Record<string, any>; controller: ReadableStreamDefaultController<Uint8Array>; closed: boolean }> = [];

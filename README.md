@@ -4,7 +4,7 @@
 
 Ludens connects agents to arbitrary PC desktops and console environments, giving them a persistent coding workspace to adapt to unfamiliar interfaces and continuously improve how they act. Instead of relying on static prompts or fixed action spaces, a Ludens agent writes and refines its own resident perception (`perception.py`), control loops (`action.py`), and reusable skills (`skills/`) directly in Python.
 
-**Games** are the first flagship class of complex, real-time multimodal tasks we tackle—spanning local PC applications and console emulators—backed by a unified device control plane, a live observability console, and reproducible Harbor benchmarks.
+**Games** are the first flagship class of complex, real-time multimodal tasks we tackle—spanning local PC applications and console emulators—backed by a unified device control plane, a live observability console, and workspace-native capability evaluation.
 
 [Quick start](#quick-start) · [Supported environments](#supported-environments) · [Architecture](#architecture) · [Documentation](#documentation)
 
@@ -14,7 +14,7 @@ Ludens connects agents to arbitrary PC desktops and console environments, giving
 - **Self-adaptation in a real workspace.** Resident `perception.py` and `action.py` processes keep models, state, and high-frequency sampling in memory across turns without modifying the agent runtime.
 - **Continuous self-improvement.** Agents turn repeated interaction patterns into callable `@capability` functions, compose tools via `ludens_tools.Client`, and persist experience in `skills/` and `memory/`.
 - **Full-trace observability.** Inspect model inputs, tool calls, timing, and linked device actions in the web Dashboard or optional Ludens Pet desktop companion.
-- **Measurable progress.** Evaluate adaptation and skill reuse with Harbor task packages, Shiori execution budgets, and independent verifiers (`ludens bench`).
+- **Measurable progress.** Evaluate adaptation and skill reuse with workspace-native `@capability` / `@eval_capability` / `@eval_env` contracts, Shiori execution budgets, and `ludens eval`.
 
 ## Supported environments
 
@@ -70,8 +70,8 @@ Ludens separates device access, the agent harness, and the workspace code evolve
 | --- | --- |
 | [Baseware](baseware/README.md) | Device drivers, screen/audio observation, control leases, and CLI / API / MCP access. |
 | [Protocol](protocol/README.md) | Zero-dependency contract layer (`@ludens/protocol`): RPC schemas, run-event types, Timeline / Archive formats, and Dashboard DTOs shared by all packages. |
-| [Core](core/README.md) | Agent harness (`@ludens/core`) powered by **Shiori** and **OMP 18.14.0**: session lifecycle, resident perception/action, benchmarks, and logging. |
-| [App](app/README.md) | Unified graphical layer (`@ludens/app`): the local web console for live runs, timeline replay, trace analysis, and benchmark comparison, plus the optional Electron desktop companion with native pet, tray controls, and audio. |
+| [Core](core/README.md) | Agent harness (`@ludens/core`) powered by **Shiori** and **OMP 18.14.0**: session lifecycle, resident perception/action, capability evaluation, and logging. |
+| [App](app/README.md) | Unified graphical layer (`@ludens/app`): the local web console for live runs, timeline replay, and trace analysis, plus the optional Electron desktop companion with native pet, tray controls, and audio. |
 
 Each workspace is a standalone code directory outside the repository (`~/.ludens/workspaces/<name>` by default):
 
@@ -97,7 +97,7 @@ my-task/
 Documentation is maintained in English ([`docs/en/`](docs/en/)) and Chinese ([`docs/zh/`](docs/zh/)):
 
 - **[Tutorials](docs/en/tutorials/index.md)** — [Quickstart](docs/en/tutorials/quickstart.md) · [Devices & Drivers](docs/en/tutorials/devices.md) · [Workspace & Capabilities](docs/en/tutorials/workspace.md) · [Perception & Action](docs/en/tutorials/perception-and-action.md) · [Debugging & Verification](docs/en/tutorials/debugging-and-verification.md)
-- **[Reference](docs/en/reference/index.md)** — [Architecture](docs/en/reference/architecture.md) · [Baseware](docs/en/reference/baseware.md) · [Driver Bridge Protocol](docs/en/reference/driver-bridge-protocol.md) · [Logging](docs/en/reference/logging.md) · [Dashboard UI](docs/en/reference/dashboard-ui.md) · [Benchmark](docs/en/reference/benchmark.md)
+- **[Reference](docs/en/reference/index.md)** — [Architecture](docs/en/reference/architecture.md) · [Baseware](docs/en/reference/baseware.md) · [Driver Bridge Protocol](docs/en/reference/driver-bridge-protocol.md) · [Logging](docs/en/reference/logging.md) · [Dashboard UI](docs/en/reference/dashboard-ui.md)
 - **[Insights](docs/en/insights/index.md)** — Engineering rationales and postmortems ([OMP Compaction](docs/en/insights/omp-compaction.md) · [WS Recovery](docs/en/insights/ws-recovery.md) · [OMP Injection](docs/en/insights/omp-injection.md))
 - **[Development Conventions](AGENTS.md)** — Repository workflow and verification rules.
 

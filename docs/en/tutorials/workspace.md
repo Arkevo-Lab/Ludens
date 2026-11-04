@@ -45,7 +45,7 @@ workspace/
 │       ├── sessions/        # OMP session JSONL files and their same-named resource directories
 │       └── current-session.json # Default session-resume pointer
 └── logs/
-    ├── <run-id>/            # Event, stream, and scoring records for a single Host run or Benchmark trial
+    ├── <run-id>/            # Event and stream records for a single Host run
     └── background/          # launchd background service logs and status
 ```
 

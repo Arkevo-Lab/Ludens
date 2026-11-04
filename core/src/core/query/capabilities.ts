@@ -3,8 +3,7 @@ import { execFile } from "node:child_process";
 import { delimiter, join } from "node:path";
 import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
-import { discoverTasks } from "@ludens/core/bench/catalog";
-import { isObject } from "@ludens/core/bench/contract";
+import { isObject } from "../storage/atomic-json.ts";
 import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
 import { readLatestEvals, resolveCapabilityEval, type CapabilityEnvBinding, type CapabilityEvalBinding, type CapabilityEvalStatus } from "../subsystems/capability-evals.ts";
 
@@ -107,9 +106,8 @@ export interface CapabilitiesResult {
   workspace: string;
   checkedAt: string;
   groups: { id: "device" | "workspace"; items: CapabilityEntry[] }[];
-  tasks: { name: string; digest: string; title: string }[];
   issues: { error: string }[];
-  sources: Record<"device" | "workspace" | "tasks", { status: "available" | "partial" | "missing" | "error"; issueCount: number }>;
+  sources: Record<"device" | "workspace", { status: "available" | "partial" | "missing" | "error"; issueCount: number }>;
   deviceSnapshot: { generatedAt: string | null; drivers: { id: string; version: string | null }[] } | null;
 }
 
@@ -125,20 +123,18 @@ export async function capabilities(project: string, expectedWorkspace: string, r
   signal?.throwIfAborted();
   const workspace = await capabilityWorkspace(project, expectedWorkspace, root);
   signal?.throwIfAborted();
-  const [device, python, tasks] = await Promise.allSettled([
+  const [device, python] = await Promise.allSettled([
     deviceCapabilities(workspace, signal),
     workspaceCapabilities(workspace, signal),
-    discoverTasks(workspace),
   ]);
   signal?.throwIfAborted();
   const issues: CapabilitiesResult["issues"] = [];
   const missingDevice = device.status === "rejected" && device.reason?.code === "ENOENT";
-  for (const [source, result] of [["baseware.json", device], ["Python @capability", python], ["Harbor tasks", tasks]] as const) {
+  for (const [source, result] of [["baseware.json", device], ["Python @capability", python]] as const) {
     if (result.status === "rejected" && !(source === "baseware.json" && missingDevice))
       issues.push({ error: `${source}: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}` });
   }
   if (python.status === "fulfilled") issues.push(...python.value.issues);
-  if (tasks.status === "fulfilled") issues.push(...tasks.value.diagnostics.map(item => ({ error: `${item.path}: ${item.message}` })));
   await capabilityWorkspace(project, expectedWorkspace, root);
   return {
     project, workspace, checkedAt: new Date().toISOString(),
@@ -146,14 +142,11 @@ export async function capabilities(project: string, expectedWorkspace: string, r
       { id: "device", items: device.status === "fulfilled" ? device.value.items : [] },
       { id: "workspace", items: python.status === "fulfilled" ? python.value.items : [] },
     ],
-    tasks: tasks.status === "fulfilled" ? tasks.value.tasks.map(task => ({ name: task.name, digest: task.digest, title: task.title })) : [],
     issues,
     sources: {
       device: { status: missingDevice ? "missing" : device.status === "fulfilled" ? "available" : "error", issueCount: device.status === "rejected" && !missingDevice ? 1 : 0 },
       workspace: { status: python.status === "rejected" ? "error" : python.value.issues.length ? "partial" : "available",
         issueCount: python.status === "rejected" ? 1 : python.value.issues.length },
-      tasks: { status: tasks.status === "rejected" ? "error" : tasks.value.diagnostics.length ? "partial" : "available",
-        issueCount: tasks.status === "rejected" ? 1 : tasks.value.diagnostics.length },
     },
     deviceSnapshot: device.status === "fulfilled" ? { generatedAt: device.value.generatedAt, drivers: device.value.drivers } : null,
   };
@@ -189,7 +182,7 @@ export async function capabilityRuntime(project: string, expectedWorkspace: stri
     if (await realpath(path) !== path) return unavailable("scope-mismatch");
     const manifest: unknown = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
     if (!isObject(manifest) || manifest.runId !== value.runId || manifest.workspaceId !== project ||
-      manifest.workspace !== workspace || manifest.kind === "benchmark") return unavailable("scope-mismatch");
+      manifest.workspace !== workspace) return unavailable("scope-mismatch");
   } catch { return unavailable("scope-mismatch"); }
   await capabilityWorkspace(project, expectedWorkspace, root);
   return { checkedAt: new Date().toISOString(), host: "reachable", runId: value.runId,

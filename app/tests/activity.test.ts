@@ -234,39 +234,6 @@ test("Python raises are diagnostics grouped only by explicit parents, while comm
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("assessment failure is distinct from execution/report errors and missing verdict stays unknown", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-assessment-")));
-  try {
-    const blocks = await activityBlocks(root, [
-      event("benchmark_report", 1, { executionStatus: "completed", reportStatus: "valid", verdict: "failed" }),
-      event("benchmark_end", 2, { executionStatus: "error", reportStatus: "missing", verdict: null }),
-      event("benchmark_report", 3, { executionStatus: "completed", reportStatus: "invalid", verdict: null }),
-      event("benchmark_report", 4, { valid: true }),
-    ]);
-    assert.deepEqual(blocks.map(block => [block.kind, block.status, block.outcome]), [
-      ["system", "complete", "unmet"], ["system", "error", undefined], ["system", "error", undefined], ["system", "complete", undefined],
-    ]);
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
-
-test("Shiori benchmark lifecycle distinguishes execution and verification without scoring rewards", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-verification-")));
-  try {
-    const blocks = await activityBlocks(root, [
-      event("benchmark_start", 1, { executionStatus: "running", verificationStatus: "missing" }),
-      event("benchmark_end", 2, { executionStatus: "completed", verificationStatus: "missing" }),
-      event("benchmark_verification", 3, { executionStatus: "completed", verificationStatus: "completed", rewards: { success: 0 } }),
-      event("benchmark_verification", 4, { executionStatus: "completed", verificationStatus: "error", error: "missing reward" }),
-      event("benchmark_end", 5, { executionStatus: "error", verificationStatus: "missing" }),
-      event("benchmark_end", 6, { executionStatus: "cancelled", verificationStatus: "missing" }),
-    ]);
-    assert.deepEqual(blocks.map(block => [block.kind, block.status, block.outcome]), [
-      ["system", "complete", undefined], ["system", "complete", undefined], ["system", "complete", undefined],
-      ["system", "error", undefined], ["system", "error", undefined], ["system", "complete", undefined],
-    ]);
-    assert.equal(new Set(blocks.map(block => block.id)).size, blocks.length);
-  } finally { await rm(root, { recursive: true, force: true }); }
-});
 
 test("model cancellation closes partial output without inventing a failure or completing an executing tool", async () => {
   const temporary = await mkdtemp(join(tmpdir(), "ludens-activity-abort-"));

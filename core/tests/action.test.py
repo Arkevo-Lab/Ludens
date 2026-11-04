@@ -272,24 +272,9 @@ def quality():
             self.assertEqual(catalog["diagnostics"], [])
             self.assertEqual([x["origin"]["function"] for x in catalog["capabilities"]], ["model"])
             namespace = {"__name__": "program", "__file__": str(root / "program.py")}
-            from ludens_tools.benchmarks import Trial
-            artifacts = root / "artifacts"
-            artifacts.mkdir()
-            input_path = root / "input.json"
-            input_path.write_text("{}")
-            with scope({**current(), "workspace": str(root), "run_id": None, "socket_path": None,
-                        "recording_purpose": "continuous-action"}):
-                exec(compile(source, str(root / "program.py"), "exec"), namespace)
-                self.assertIs(namespace["model"](), namespace["MODEL"])
-                self.assertIs(namespace["Action"]().step(), namespace["MODEL"])
-                trial = Trial("trial", root, artifacts, root, input_path)
-                with patch("ludens_tools._context._trial_observer", trial._observe):
-                    namespace["quality"]()
-                    trial.flush()
-            result = json.loads((artifacts / "context.json").read_text())
-            self.assertNotIn("status", result)
-            self.assertEqual(result["subjects"], [{"id": "python/program.py:Action.step",
-                "revision": hashlib.sha256(source.encode()).hexdigest()}])
+            exec(compile(source, str(root / "program.py"), "exec"), namespace)
+            self.assertIs(namespace["model"](), namespace["MODEL"])
+            self.assertIs(namespace["Action"]().step(), namespace["MODEL"])
 
     def test_action_tick_statistics_do_not_scale_with_frequency(self):
         for hz in (1, 10, 30):

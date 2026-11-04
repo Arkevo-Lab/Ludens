@@ -62,8 +62,7 @@ Open `http://127.0.0.1:3015` in a browser to use the console. The sidebar is gro
 
 - **Run & replay (`?view=live` / `?view=replay`)**: watch model reasoning streams, tool calls, device inputs, and perception frames live, or replay sampled frames and events synchronously on the history timeline. Archive worker, cold-index builder subprocess, and memory budgets: see [Consumption and Metrics](../reference/logging.md#consumption-and-metric-interpretation).
 - **Run performance (`?view=perf`)**: inspect per-request transport latency, cache hit rate, and explicit call-chain profiling (`RunAnalysis`) for the selected run.
-- **Benchmark catalog (`?view=benchmark`)**: browse Harbor evaluation tasks, trial execution history, and baseline score comparisons (`BenchmarkCases`).
-- **Capability catalog (`?view=caps`)**: statically display the selected workspace's device catalog snapshot (`baseware.json`), Python `@capability` declarations (with `@eval_capability` statuses and rewards), and Harbor eval tasks, plus read-only host connection status.
+- **Capability catalog (`?view=caps`)**: statically display the selected workspace's device catalog snapshot (`baseware.json`) and Python `@capability` declarations (with `@eval_capability` statuses and rewards), plus read-only host connection status.
 - **Perception settings (`?view=perception`)**: configure the selected workspace's hot-window seconds, video segment duration, and idle-stop finalization seconds (written to `.ludens/settings.json`, effective after `ludens perception reload`).
 - **Workspaces (`?view=workspaces`)**: search and open registered folders, create a new workspace, add an existing directory, or change the default parent directory in the same `LUDENS_HOME`.
 - **In-console docs (`?view=docs`)**: browse `tutorials/`, `reference/`, and `insights/` inside the console, with cross-article and section-anchor navigation.

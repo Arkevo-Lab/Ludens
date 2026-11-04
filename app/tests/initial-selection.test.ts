@@ -50,12 +50,3 @@ test("an explicitly selected new workspace stays selected before its first run",
   });
 });
 
-test("benchmark-only workspaces retain explicit result links without treating them as latest game runs", () => {
-  const benchmark: Project = { id: "bench", runs: [{ id: "evaluation", kind: "benchmark", model: null, seconds: 60, drivers: [] }] };
-  assert.deepEqual(initialSelection("?view=replay&project=bench&run=evaluation&epoch=all", [benchmark]), {
-    project: "bench", run: "evaluation", epoch: "all",
-  });
-  assert.deepEqual(initialSelection("?view=live&project=bench", [benchmark]), {
-    project: "bench", run: "", epoch: "",
-  });
-});

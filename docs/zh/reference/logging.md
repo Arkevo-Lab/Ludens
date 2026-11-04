@@ -1,6 +1,6 @@
 # 日志与调用链
 
-离线分析器、Dashboard 网页控制台、Ludens Pet 桌宠与 Benchmark 评分器共同消费同一套持久化运行事实。系统的记录准则是：**连续高频能力按需留档数据并定期汇总统计，主动决策与设备变更完整记录事件，内部嵌套调用链按诊断级别追踪**。
+离线分析器、Dashboard 网页控制台与 Ludens Pet 桌宠共同消费同一套持久化运行事实。系统的记录准则是：**连续高频能力按需留档数据并定期汇总统计，主动决策与设备变更完整记录事件，内部嵌套调用链按诊断级别追踪**。
 
 ## 记录模式
 
@@ -48,7 +48,7 @@
 
 每条 JSONL 事件均包含写入者顶层标识（`runId` 或 `serviceId`、递增 `seq`、墙钟 `at`、单调时钟 `atMs`）以及以下四个核心块（定义见 [core/src/core/storage/events.ts](../../../core/src/core/storage/events.ts)）：
 
-- **`source`**：产生该语义的职责组件（`shiori`、`ludens`、`workspace`、`baseware`、`benchmark`、`dashboard`、`pet`）及其具体实现与版本。
+- **`source`**：产生该语义的职责组件（`shiori`、`ludens`、`workspace`、`baseware`、`dashboard`、`pet`）及其具体实现与版本。
 - **`origin`**：源进程首次生成该事实的 `{eventId, clockId, seq, at, atMs}`，跨进程转发与落盘保持不变（`atMs` 仅允许在相同 `clockId` 内相减）。
 - **`trace`**：调用链与业务归属上下文，含 `traceId / spanId / parentSpanId`（调用树关系）、`epoch / modelCallId / requestId / httpId / toolCallId / operationId`（业务实体 ID）、`recordingId / recordingPurpose`（运行归属与常驻用途）及 `inputGeneration`（同 epoch 内动作 worker 重载代次）。
 - **`type` / `data`**：具体事件类型与载荷。
@@ -113,7 +113,7 @@ Dashboard 将日志解析与索引构建完全隔离在 Next.js 请求上下文�
 
 ### 3. 控制台 HTTP 接口与 Ludens Pet 增量跟随
 
-- **`/api/activity`**：提供 `changes`（基于不透明游标的增量块更新，供网页与 Ludens Pet 共用）、`history`（按类别与全文关键词分页检索）与 `block`（单块详情展开）。Ludens Pet 仅消费所跟随工作区最新非 Benchmark 运行的实时 `changes` 增量，并在 `workspace/logs/consumers/` 下记录自身消费水位。
+- **`/api/activity`**：提供 `changes`（基于不透明游标的增量块更新，供网页与 Ludens Pet 共用）、`history`（按类别与全文关键词分页检索）与 `block`（单块详情展开）。Ludens Pet 仅消费所跟随工作区最新运行的实时 `changes` 增量，并在 `workspace/logs/consumers/` 下记录自身消费水位。
 - **`/api/diagnostics`**：专供 `full` 模式诊断事件按 `epoch`、时间窗、`traceId / spanId / actionId` 分页查询（单页上限 500 条），不混入普通 Activity 流或桌宠气泡。
 
 ## 经历回放

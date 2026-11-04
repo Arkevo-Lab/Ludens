@@ -20,15 +20,12 @@ export function RunPicker({ runs, latest, value, onChange }: {
     secondarySummary: latestIdentity?.summary ?? undefined, identity: latestIdentity?.id },
   ...runs.map(run => {
     const identity = runIdentity(run.id);
-    return { value: run.id, label: identity.summary ?? identity.id, identity: identity.summary ? identity.id : undefined,
-      badge: run.kind === "benchmark" ? t("benchmark") : undefined };
+    return { value: run.id, label: identity.summary ?? identity.id, identity: identity.summary ? identity.id : undefined };
   })] : [];
   const selected = value ? runIdentity(value) : latestIdentity;
   const triggerText = value ? selected?.summary ?? value
     : latestIdentity ? `${latestLabel} · ${latestIdentity.summary ?? latestIdentity.id}` : latestLabel;
-  const triggerLabel = value && runs.some(run => run.id === value && run.kind === "benchmark")
-    ? `${triggerText}${dt("benchSuffix")}` : triggerText;
   return <ContextPicker kind="run" options={options} value={value} onChange={onChange} label={dt("runHistoryLabel")} hideLabel
-    trigger={{ text: runs.length ? triggerLabel : t("empty"), title: selected?.id ?? t("empty"), hint: selected?.id ?? t("description") }}
+    trigger={{ text: runs.length ? triggerText : t("empty"), title: selected?.id ?? t("empty"), hint: selected?.id ?? t("description") }}
     copy={{ title: dt("runHistoryLabel"), description: t("description"), close: t("close"), current: t("current"), empty: t("empty") }} />;
 }

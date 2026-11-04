@@ -929,7 +929,7 @@ def read_timeline_record(workspace, sequence):
                 or _key(record["capability"]) != capability_key):
             raise ValueError("Timeline record identity does not match its index")
         return record
-    raise ValueError("Timeline record is unavailable; benchmark references require persistent recorded media")
+    raise ValueError("Timeline record is unavailable; references require persistent recorded media")
 
 def read_timeline(workspace, query=None):
     """Read committed persistent segments without owning or starting a writer."""

@@ -16,7 +16,6 @@ import time
 
 from PIL import Image, ImageChops, ImageDraw, ImageStat
 from ludens_tools._observation_history import ObservationHistory
-from ludens_tools import current_trial
 
 
 def picture(index, channel):
@@ -50,17 +49,10 @@ def main():
     parser.add_argument("--records", type=int, default=2400)
     parser.add_argument("--rate", type=float, default=30)
     arguments = parser.parse_args()
-    trial = current_trial() if os.environ.get("LUDENS_BENCH_TRIAL_ID") else None
     if arguments.output is None:
-        if trial is None:
-            arguments.output = Path(tempfile.mkdtemp(prefix="ludens-perf-video-")) / "recording-workspace"
-        else:
-            arguments.output = trial.artifacts / "recording-workspace"
+        arguments.output = Path(tempfile.mkdtemp(prefix="ludens-perf-video-")) / "recording-workspace"
     if arguments.records < 2 or arguments.rate <= 0:
         parser.error("--records must be at least 2 and --rate must be positive")
-    if trial:
-        trial.conditions(records=arguments.records, sample_hz=arguments.rate, streams=2)
-        trial.limitations("Synthetic images; RSS is sampled. Cold decode measures recorded frames, not a live device.")
     arguments.output.mkdir(parents=True, exist_ok=False)
     os.environ["LUDENS_PERCEPTION_HOT_BYTES"] = "1048576"
     os.environ["LUDENS_PERCEPTION_HOT_SECONDS"] = "1"
@@ -126,10 +118,7 @@ def main():
         "max-decode-error": report["maximumMeanPixelError"] <= VIDEO_STORAGE_BUDGETS["max_decode_error"],
         "peak-rss-mib": report["rssPeakBytes"] <= VIDEO_STORAGE_BUDGETS["peak_rss_mib"] * 1024 * 1024,
     }
-    if trial:
-        trial.artifact("measurements.json", report)
-    else:
-        (arguments.output / "measurements.json").write_text(json.dumps(report, indent=2) + "\n")
+    (arguments.output / "measurements.json").write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps({key: value for key, value in report.items() if key != "samples"}, indent=2))
     failures = [name for name, passed in report["budgetChecks"].items() if not passed]
     if failures:

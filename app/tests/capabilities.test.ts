@@ -47,11 +47,6 @@ test("capability catalog reads the selected run-free workspace and real static P
     await writeFile(join(f.workspace, "json.py"), `open(${JSON.stringify(join(f.base, "SHADOW_EXECUTED"))}, "w").close()\nraise RuntimeError("workspace json imported")\n`);
     await mkdir(join(f.workspace, "ludens_tools"));
     await writeFile(join(f.workspace, "ludens_tools/__init__.py"), `open(${JSON.stringify(join(f.base, "SHADOW_EXECUTED"))}, "w").close()\nraise RuntimeError("workspace package imported")\n`);
-    const task = join(f.workspace, "benchmarks/tasks/custom");
-    await mkdir(join(task, "tests"), { recursive: true }); await mkdir(join(task, "environment"));
-    await writeFile(join(task, "task.toml"), 'schema_version = "1.4"\n[task]\nname = "workspace/custom"\ndescription = "Static task"\n');
-    await writeFile(join(task, "instruction.md"), "Read the capability.");
-    await writeFile(join(task, "tests/test.sh"), `touch '${join(f.base, "MUST_NOT_EXECUTE")}'\n`);
     assert.deepEqual(await catalog(f.root), []);
     const page = await capabilities("ws-capabilities", f.workspace, f.root);
     assert.equal(page.workspace, f.workspace);
@@ -64,8 +59,8 @@ test("capability catalog reads the selected run-free workspace and real static P
     assert.deepEqual(page.deviceSnapshot, { generatedAt: "2026-10-30T00:00:00.000Z", drivers: [{ id: "recorded-driver", version: "recorded-version" }] });
     assert.deepEqual(page.groups[1].items, [{ id: "python/actions.py:clamp", kind: "workspace",
       description: "Clamp a value to the unit interval.", requiresControl: null, readOnly: null,
-      evalStatus: "missing", evalId: null, evalRewards: null, evalEvaluatedAt: null, evalError: null }]);
-    assert.ok(page.tasks.some(item => item.name === "workspace/custom"));
+      evalStatus: "missing", evalId: null, evalRewards: null, evalEvaluatedAt: null, evalError: null,
+      evalEnv: null, evalEnvId: null, observe: false }]);
     await assert.rejects(access(join(f.base, "MUST_NOT_EXECUTE")));
     await assert.rejects(access(join(f.base, "SHADOW_EXECUTED")));
     await assert.rejects(capabilities("missing", f.workspace, f.root), /ENOENT/);

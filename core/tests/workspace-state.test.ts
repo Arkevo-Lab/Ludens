@@ -42,7 +42,7 @@ test("CLI queries and direct run cannot create an identity in an uninitialized d
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("creating a benchmark execution workspace cannot adopt unimported history", async () => {
+test("creating an execution workspace cannot adopt unimported history", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ludens-workspace-legacy-guard-"));
   const workspace = join(directory, "old"), sessions = join(workspace, ".ludens", "shiori", "sessions");
   await mkdir(sessions, { recursive: true });
