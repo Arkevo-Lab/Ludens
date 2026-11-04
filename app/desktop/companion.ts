@@ -80,7 +80,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, 
     resizable: false, maximizable: false, fullscreenable: false,
     skipTaskbar: true, alwaysOnTop: true, show: false,
     ...(process.platform === 'win32' ? { thickFrame: false, type: 'toolbar' } : {}),
-    webPreferences: { preload: join(here, 'companion-preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, autoplayPolicy: 'no-user-gesture-required' },
+    webPreferences: { preload: join(here, 'companion-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false, autoplayPolicy: 'no-user-gesture-required' },
   })
   if (process.platform === 'darwin') pet.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   pet.setIgnoreMouseEvents(true, { forward: true })

@@ -18,6 +18,7 @@ await build({
 await build({
   entryPoints: cjsEntries,
   outdir: 'dist/electron',
+  outExtension: { '.js': '.cjs' },
   bundle: true,
   platform: 'node',
   target: 'node22',

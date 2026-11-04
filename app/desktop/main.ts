@@ -54,7 +54,7 @@ if (values.help) {
       owner = new BrowserWindow({
         title: 'Ludens · Console', width: 1440, height: 940, minWidth: 960, minHeight: 640,
         show: false, backgroundColor: '#202321',
-        webPreferences: { preload: join(here, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false },
+        webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
       })
       owner.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const navigation = (event: Electron.Event, url: string) => { if (!isDashboardUrl(url, dashboard.origin)) event.preventDefault() }
