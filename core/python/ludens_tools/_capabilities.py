@@ -111,7 +111,8 @@ def function_schema(node):
     return description, {"type": "object", "properties": properties, "required": required, "additionalProperties": False}
 
 
-def marked_functions(tree, marker_name="capability"):
+def marked_declarations(tree, marker_name="capability"):
+    """Match ludens_tools decorators on functions and classes at any depth."""
     names = (marker_name,) if isinstance(marker_name, str) else tuple(marker_name)
     decorators, modules = set(), set()
     for node in tree.body:
@@ -125,8 +126,14 @@ def marked_functions(tree, marker_name="capability"):
         return (isinstance(node, ast.Name) and node.id in decorators) or (
             isinstance(node, ast.Attribute) and node.attr in names and isinstance(node.value, ast.Name) and node.value.id in modules)
     return [(node, [item for item in node.decorator_list if is_marker(item)])
-            for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
             and any(is_marker(item) for item in node.decorator_list)]
+
+
+def marked_functions(tree, marker_name="capability"):
+    return [(node, markers) for node, markers in marked_declarations(tree, marker_name)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
 
 
 def workspace_sources(workspace, diagnostics):
@@ -152,15 +159,26 @@ def workspace_sources(workspace, diagnostics):
             yield relative, raw, tree
 
 
-def _eval_declaration(node, markers, tree):
-    """Validate one @eval_capability function locally; return (description, target)."""
+def _eval_declaration(node, markers, tree, relative):
+    """Validate one @eval_capability function locally; return (description, target, env_target)."""
     if len(markers) != 1:
         raise ValueError("Use eval_capability once on each eval function")
     marker = markers[0]
     if not isinstance(marker, ast.Call):
         raise ValueError("eval_capability must be called with its target capability")
-    if len(marker.args) != 1 or marker.keywords:
-        raise ValueError("eval_capability takes exactly one positional argument, the target capability")
+    malformed = ValueError("@eval_capability requires a capability function or 'python/path.py:name' target, "
+                           "and an optional env=@eval_env or 'python/path.py:EnvName'")
+    env_expr = None
+    if not marker.args:
+        raise malformed
+    if len(marker.args) > 2:
+        raise malformed
+    if len(marker.args) == 2:
+        env_expr = marker.args[1]
+    for keyword in marker.keywords:
+        if keyword.arg != "env" or env_expr is not None:
+            raise malformed
+        env_expr = keyword.value
     if isinstance(node, ast.AsyncFunctionDef):
         raise ValueError("Async eval functions are unsupported; use a synchronous function")
     if node not in tree.body:
@@ -186,15 +204,25 @@ def _eval_declaration(node, markers, tree):
         except (ValueError, TypeError):
             raise ValueError("Eval function parameters require literal defaults") from None
     target = marker.args[0]
-    if isinstance(target, ast.Name):
-        return description, target.id
     if isinstance(target, ast.Constant) and isinstance(target.value, str) and target.value.strip():
-        return description, target.value
-    raise ValueError("eval_capability requires a @capability function name or a 'python/<path.py>:<function>' ID string")
+        resolved_target = target.value
+    elif isinstance(target, ast.Name):
+        resolved_target = "python/" + relative + ":" + target.id
+    else:
+        raise ValueError("eval_capability requires a @capability function name or a 'python/<path.py>:<function>' ID string")
+    env_target = None
+    if env_expr is not None:
+        if isinstance(env_expr, ast.Name):
+            env_target = "python/" + relative + ":" + env_expr.id
+        elif isinstance(env_expr, ast.Constant) and isinstance(env_expr.value, str) and env_expr.value.startswith("python/"):
+            env_target = env_expr.value
+        else:
+            raise malformed
+    return description, resolved_target, env_target
 
 
 def discover(workspace):
-    capabilities, diagnostics, pending = [], [], []
+    capabilities, diagnostics, pending, envs = [], [], [], []
     observe_declarations = []  # (relative, node, qualname) in discovery order
     observe_capability = None
     for relative, raw, tree in workspace_sources(workspace, diagnostics):
@@ -203,6 +231,30 @@ def discover(workspace):
             for node, markers in marked_functions(tree, kind):
                 declarations.setdefault(node, {})[kind] = markers
         evals = {node: markers for node, markers in marked_functions(tree, ("eval_capability", "eval"))}
+        code_sha = hashlib.sha256(raw).hexdigest()
+        for node, markers in marked_declarations(tree, "eval_env"):
+            def report(message, node=node):
+                diagnostics.append({"path": relative, "function": node.name, "line": node.lineno, "message": message})
+            if node in declarations or node in evals:
+                report("eval_env cannot be combined with capability, record, observe, or eval_capability decorators")
+                continue
+            if len(markers) != 1:
+                report("Use eval_env once on each declaration")
+                continue
+            marker = markers[0]
+            if isinstance(marker, ast.Call):
+                if marker.args or marker.keywords:
+                    report("@eval_env does not take arguments")
+                    continue
+            if node not in tree.body or not isinstance(node, (ast.ClassDef, ast.FunctionDef)):
+                report("@eval_env is only supported on top-level classes or synchronous functions")
+                continue
+            doc = ast.get_docstring(node)
+            if not doc or not doc.strip():
+                report("@eval_env requires a docstring")
+                continue
+            envs.append({"id": f"python/{relative}:{node.name}", "name": node.name, "description": doc,
+                         "origin": {"path": relative, "function": node.name, "line": node.lineno}, "codeSHA": code_sha})
         parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
         combined = {node for node in evals if node in declarations}
         for node in combined:
@@ -212,10 +264,10 @@ def discover(workspace):
             if node in combined:
                 continue
             try:
-                description, target = _eval_declaration(node, markers, tree)
+                description, target, env_target = _eval_declaration(node, markers, tree, relative)
                 pending.append({"path": relative, "function": node.name, "line": node.lineno,
-                                "codeSHA": hashlib.sha256(raw).hexdigest(), "description": description,
-                                "target": target if target.startswith("python/") else "python/" + relative + ":" + target})
+                                "codeSHA": code_sha, "description": description,
+                                "target": target, "env_target": env_target})
             except ValueError as error:
                 diagnostics.append({"path": relative, "function": node.name, "line": node.lineno, "message": str(error)})
         for node, kinds in declarations.items():
@@ -265,8 +317,9 @@ def discover(workspace):
             if entry["origin"]["path"] == relative and entry["origin"]["function"] == node.name:
                 entry["observe"] = False
         observe_capability = None
-    # Eval targets may reference capabilities discovered in any workspace file.
+    # Eval targets and env bindings may reference declarations in any file.
     indexed = {"python/" + item["origin"]["path"] + ":" + item["origin"]["function"]: item for item in capabilities}
+    env_by_id = {item["id"]: item for item in envs}
     for declaration in pending:
         capability = indexed.get(declaration["target"])
         if capability is None:
@@ -277,10 +330,20 @@ def discover(workspace):
             diagnostics.append({"path": declaration["path"], "function": declaration["function"], "line": declaration["line"],
                                 "message": "Capability " + declaration["target"] + " already has eval " + capability["eval"]["id"]})
             continue
+        env_binding = None
+        if declaration["env_target"] is not None:
+            env_entry = env_by_id.get(declaration["env_target"])
+            if env_entry is None:
+                diagnostics.append({"path": declaration["path"], "function": declaration["function"], "line": declaration["line"],
+                                    "message": "@eval_capability env " + declaration["env_target"] + " does not match a discovered @eval_env"})
+                continue
+            env_binding = {"id": env_entry["id"], "origin": env_entry["origin"],
+                           "codeSHA": env_entry["codeSHA"], "description": env_entry["description"]}
         capability["eval"] = {"id": "python/" + declaration["path"] + ":" + declaration["function"],
                               "origin": {"path": declaration["path"], "function": declaration["function"], "line": declaration["line"]},
-                              "codeSHA": declaration["codeSHA"], "description": declaration["description"]}
-    return {"capabilities": capabilities, "diagnostics": diagnostics, "observeCapability": observe_capability}
+                              "codeSHA": declaration["codeSHA"], "description": declaration["description"], "env": env_binding}
+    envs.sort(key=lambda item: item["id"])
+    return {"capabilities": capabilities, "envs": envs, "diagnostics": diagnostics, "observeCapability": observe_capability}
 
 
 def _load_marked(workspace, relative_path, function_name, marker_attribute, unmarked, *, raw=None):

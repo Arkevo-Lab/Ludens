@@ -1,7 +1,7 @@
 import { installCompanionActivity, type OwnerAccess } from './companion-activity.js'
 import type { LudensActivitySource } from './ludens-source.js'
 import { app, BrowserWindow, ipcMain, Menu, screen } from 'electron'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { writeFile, rename } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -46,7 +46,9 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, 
   const here = dirname(fileURLToPath(import.meta.url))
   const assets = app.isPackaged
     ? join(process.resourcesPath, 'runtime/ui/dist/companion')
-    : resolve(here, '../public/companion')
+    : existsSync(resolve(here, '../public/companion'))
+      ? resolve(here, '../public/companion')
+      : resolve(here, '../../public/companion')
   const statePath = join(app.getPath('userData'), 'companion.json')
   const catalog = JSON.parse(readFileSync(join(assets, 'ludens/manifest.json'), 'utf8')) as { assets: { id: string; label: string; kind: string; category: string }[] }
   let selectedPose: string | null = null
@@ -78,7 +80,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, 
     resizable: false, maximizable: false, fullscreenable: false,
     skipTaskbar: true, alwaysOnTop: true, show: false,
     ...(process.platform === 'win32' ? { thickFrame: false, type: 'toolbar' } : {}),
-    webPreferences: { preload: join(here, 'companion-preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false, autoplayPolicy: 'no-user-gesture-required' },
+    webPreferences: { preload: join(here, 'companion-preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false, autoplayPolicy: 'no-user-gesture-required' },
   })
   if (process.platform === 'darwin') pet.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   pet.setIgnoreMouseEvents(true, { forward: true })

@@ -112,7 +112,7 @@ When an atomic workspace capability can be evaluated offline, you can optionally
 
 1. **Replay labeled `.ludens/timeline/` records or 30 Hz trajectory slices** for perception, parsing, or sequence-detection functions. `Client().observe()` reads single pages from the persisted timeline, while `Client().replay(...)` (and `with record_window() as win:`) slices and automatically paginates multi-second 30 Hz trajectories by time window (`window=win` or `start=...`, `end=...`) or around an anchor record (`around=record_id, before_seconds=2.0, after_seconds=2.0`).
    Replay includes all capability streams unless `capability=...` is specified and returns at most `max_records=256`; increase this limit for longer trajectories.
-2. **Mount a local surrogate environment with `with eval_env(env):` and co-evolve Actor + Critic** for closed-loop action/reaction capabilities such as fishing reels, bug catching, or grid/menu navigation. The environment (**Critic** / world model) intercepts `Client().observe(query)` through `env.observe(query)` and `Client().call("controller/...", args)` through `env.call(id, args)`, advances latent ground-truth state in virtual time, and scores the capability (**Actor** / policy) directly against that state across randomized trials.
+2. **Mount a local surrogate environment and co-evolve Actor + Critic** for closed-loop action/reaction capabilities such as fishing reels, bug catching, or grid/menu navigation. Declare reusable environments with `@eval_env` on a docstringed top-level class (or synchronous factory function) and mount an instance with `with MyEnv(...) as env:` (ad-hoc stubs still work through `with eval_env(env):`). The environment (**Critic** / world model) intercepts `Client().observe(query)` through `env.observe(query)` and `Client().call("controller/...", args)` through `env.call(id, args)`, advances latent ground-truth state in virtual time, and scores the capability (**Actor** / policy) directly against that state across randomized trials.
 
 In nontrivial game interactions, neither the Actor (`@capability`) nor the Critic (`eval_env`) can be built to perfection in a single shot before touching the real environment. Treat them as a **co-evolving pair** powered by 30 Hz `.ludens/timeline/` replays:
 
@@ -138,7 +138,9 @@ def reel_on_bite() -> dict:
                 break
     return {"reeled": reeled, "window": window.to_dict()}
 
+@eval_env
 class BiteEnv:
+    """Surrogate fishing pond with randomized nibbles preceding the bite."""
     def __init__(self, seed: int):
         self.tick = 0
         self.bite_at = random.Random(seed).randrange(3, 10)
@@ -154,13 +156,12 @@ class BiteEnv:
             self.reeled = True
         return {"ok": True}
 
-@eval_capability(reel_on_bite)
+@eval_capability(reel_on_bite, env=BiteEnv)
 def eval_reel_on_bite() -> dict:
     """Grade closed-loop reeling from surrogate ground truth."""
     failed_seeds = []
     for seed in range(20):
-        env = BiteEnv(seed)
-        with eval_env(env):
+        with BiteEnv(seed) as env:  # @eval_env classes mount directly as context managers.
             reel_on_bite()
         if not env.reeled:
             failed_seeds.append(seed)
@@ -168,7 +169,7 @@ def eval_reel_on_bite() -> dict:
     return {"passed": not failed_seeds, "rewards": {"pass_rate": pass_rate}, "details": {"failed_seeds": failed_seeds}}
 ```
 
-The eval must have a docstring and return either a non-empty flat `dict[str, int | float]` of finite rewards or an envelope `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`. When `passed` is `False`, the run records `failed` while preserving `rewards` and `details` for iteration. Discovery is static; evaluation executes only when requested:
+The eval must have a docstring and return either a non-empty flat `dict[str, int | float]` of finite rewards or an envelope `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`. When `passed` is `False`, the run records `failed` while preserving `rewards` and `details` for iteration. This forms the **Capability – Eval – Env** triad: the optional `env` argument on `@eval_capability(fn, env=...)` accepts a same-file `@eval_env` symbol or a `"python/path.py:EnvName"` ID string for an env declared in another module, and `ludens eval list` reports the discovered `envs` catalog (id, description, origin, `codeSHA`). Discovery is static; evaluation executes only when requested:
 
 ```sh
 # List bindings, current statuses, rewards, and discovery diagnostics
@@ -194,12 +195,12 @@ Records are stored in `.ludens/evals/latest.json` and `.ludens/evals/runs/<run-i
 | --- | --- |
 | `missing` | No `@eval_capability` is bound to the capability. |
 | `unverified` | An eval is bound, but no latest run exists. |
-| `stale` | The capability or eval source `codeSHA`, or the bound eval ID, changed after the latest run. |
-| `adapting` | Explicitly marked for eval revision; reruns stay failed/adapting while the eval module's whole-file `evalCodeSHA` is unchanged. |
+| `stale` | The capability, eval, or bound env source `codeSHA`, the bound eval ID, or the bound env ID changed after the latest run. |
+| `adapting` | Explicitly marked for eval revision; reruns stay failed/adapting while the eval module's whole-file `evalCodeSHA` and the bound env module's `envCodeSHA` are unchanged. |
 | `failed` | The latest matching run failed or produced no valid non-empty rewards. |
 | `verified` | The latest matching run passed with valid rewards for the current capability and eval code. |
 
-Both `codeSHA` values hash whole source files, not function AST nodes. This includes module-level `CASES` constants. Any edit to the eval module, including a comment or a capability-only edit in the same file, releases the adaptation gate and makes the previous result `stale`; only a subsequent passing run becomes `verified`. This is a source-change guard, not proof that counterexamples were added: add the failing records to the test set/verifier before trusting the capability again. Changes to external fixtures or imported helpers are not included in this hash; update the eval module when revising those cases.
+All three `codeSHA` values (`capabilityCodeSHA`, `evalCodeSHA`, and the bound env's `envCodeSHA`) hash whole source files, not function AST nodes. This includes module-level `CASES` constants. Any edit to the eval module or its bound `@eval_env` module, including a comment or a capability-only edit in the same file, releases the adaptation gate and makes the previous result `stale`; only a subsequent passing run becomes `verified`. This is a source-change guard, not proof that counterexamples were added: add the failing records to the test set/verifier before trusting the capability again. Changes to external fixtures or imported helpers are not included in these hashes; update the eval module when revising those cases.
 
 `ludens consolidate` supplies a fresh static evaluation catalog to its file-only prompt: capabilities with a bound `@eval_capability` may be retained or promoted into `skills/` only when `verified` (while `unverified`, `stale`, `adapting`, or `failed` entries are pruned), whereas capabilities without a bound eval (`missing`, such as live device-action macros) may still be retained when proven useful in live runs. It does not execute evals or edit capability/eval source during consolidation; needed changes or eval commands are recorded in memory for a later execution turn.
 

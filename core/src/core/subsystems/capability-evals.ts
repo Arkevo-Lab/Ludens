@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { atomicJson } from "../../bench/store.ts";
-import { PythonCapabilities, type PythonCapability, type PythonDiagnostic } from "./python-capabilities.ts";
+import { PythonCapabilities, type PythonCapability, type PythonDiagnostic, type PythonEvalEnv } from "./python-capabilities.ts";
 
 export type CapabilityEvalStatus = "missing" | "unverified" | "stale" | "adapting" | "failed" | "verified";
 
@@ -13,6 +13,8 @@ export interface CapabilityEvalRecord {
   evalId: string;              // "python/path.py:eval_func"
   capabilityCodeSHA: string;
   evalCodeSHA: string;
+  envId?: string | null;       // "python/path.py:EnvName"
+  envCodeSHA?: string | null;
   evaluatedAt: string;         // ISO timestamp
   durationMs: number;
   outcome: "passed" | "failed";
@@ -27,6 +29,14 @@ export interface CapabilityEvalAdaptation {
   records: string[];
   adaptedAt: string;
   evalCodeSHA: string;
+  envCodeSHA?: string | null;
+}
+
+export interface CapabilityEnvBinding {
+  id: string;
+  origin: { path: string; function: string; line: number };
+  codeSHA: string;
+  description: string;
 }
 
 export interface CapabilityEvalBinding {
@@ -34,6 +44,7 @@ export interface CapabilityEvalBinding {
   origin: { path: string; function: string; line: number };
   codeSHA: string;
   description: string;
+  env?: CapabilityEnvBinding | null;
 }
 
 /** The eval-relevant shape shared by discovered Python capabilities. */
@@ -45,10 +56,13 @@ export interface EvaluatedCapability {
 export interface CapabilityEvalView {
   evalStatus: CapabilityEvalStatus;
   evalId: string | null;
+  evalEnvId: string | null;
+  evalEnv: CapabilityEnvBinding | null;
   evalRewards: Record<string, number> | null;
   evalEvaluatedAt: string | null;
   evalError: string | null;
 }
+
 
 export const capabilityEvalId = (capability: Pick<PythonCapability, "origin">) =>
   `python/${capability.origin.path}:${capability.origin.function}`;
@@ -63,12 +77,16 @@ const isObject = (value: unknown): value is Record<string, unknown> =>
 function parseRecord(value: unknown, location: string): CapabilityEvalRecord {
   if (!isObject(value) || typeof value.runId !== "string" || typeof value.capabilityId !== "string"
       || typeof value.evalId !== "string" || typeof value.capabilityCodeSHA !== "string"
-      || typeof value.evalCodeSHA !== "string" || typeof value.evaluatedAt !== "string"
+      || typeof value.evalCodeSHA !== "string"
+      || !(typeof value.envId === "string" || value.envId === null || value.envId === undefined)
+      || !(typeof value.envCodeSHA === "string" || value.envCodeSHA === null || value.envCodeSHA === undefined)
+      || typeof value.evaluatedAt !== "string"
       || typeof value.durationMs !== "number" || (value.outcome !== "passed" && value.outcome !== "failed")
       || (value.rewards !== null && !isObject(value.rewards))) throw new Error(`Invalid capability eval record: ${location}`);
   if (value.adaptation !== undefined && !(isObject(value.adaptation) && typeof value.adaptation.reason === "string"
       && Array.isArray(value.adaptation.records) && value.adaptation.records.every(item => typeof item === "string")
-      && typeof value.adaptation.adaptedAt === "string" && typeof value.adaptation.evalCodeSHA === "string"))
+      && typeof value.adaptation.adaptedAt === "string" && typeof value.adaptation.evalCodeSHA === "string"
+      && (typeof value.adaptation.envCodeSHA === "string" || value.adaptation.envCodeSHA === null || value.adaptation.envCodeSHA === undefined)))
     throw new Error(`Invalid capability eval record: ${location}`);
   return value as unknown as CapabilityEvalRecord;
 }
@@ -105,23 +123,32 @@ export async function writeEvalRecord(workspace: string, record: CapabilityEvalR
 }
 
 
+/** Adaptation holds only while both the eval module and the bound env module are unchanged. */
+export function isStillAdapting(capability: EvaluatedCapability, latestRecord?: CapabilityEvalRecord | null): boolean {
+  if (!latestRecord?.adaptation) return false;
+  return (capability.eval?.codeSHA ?? "") === latestRecord.adaptation.evalCodeSHA
+    && (latestRecord.adaptation.envCodeSHA ?? null) === (capability.eval?.env?.codeSHA ?? null);
+}
+
 /** Join a discovered capability with its latest record into the dashboard/CLI view. */
 export function resolveCapabilityEval(capability: EvaluatedCapability, latestRecord?: CapabilityEvalRecord | null): CapabilityEvalView {
   const evalId = capability.eval?.id ?? null;
-  if (latestRecord?.adaptation && (capability.eval?.codeSHA ?? "") === latestRecord.adaptation.evalCodeSHA) {
-    return {
-      evalStatus: "adapting",
-      evalId,
-      evalRewards: latestRecord.rewards,
-      evalEvaluatedAt: latestRecord.evaluatedAt,
-      evalError: formatAdaptationError(latestRecord.adaptation),
-    };
+  const evalEnv = capability.eval?.env ?? null;
+  const base = { evalId, evalEnvId: evalEnv?.id ?? null, evalEnv };
+  const adaptation = latestRecord?.adaptation;
+  if (adaptation && isStillAdapting(capability, latestRecord)) {
+    return { ...base, evalStatus: "adapting",
+      evalRewards: latestRecord.rewards, evalEvaluatedAt: latestRecord.evaluatedAt,
+      evalError: formatAdaptationError(adaptation) };
   }
-  if (!capability.eval) return { evalStatus: "missing", evalId, evalRewards: null, evalEvaluatedAt: null, evalError: null };
-  if (!latestRecord) return { evalStatus: "unverified", evalId, evalRewards: null, evalEvaluatedAt: null, evalError: null };
-  const view = { evalId, evalRewards: latestRecord.rewards, evalEvaluatedAt: latestRecord.evaluatedAt };
-  if (latestRecord.capabilityCodeSHA !== capability.codeSHA || latestRecord.evalCodeSHA !== capability.eval.codeSHA
-      || latestRecord.evalId !== capability.eval.id)
+  if (!capability.eval) return { ...base, evalStatus: "missing", evalRewards: null, evalEvaluatedAt: null, evalError: null };
+  if (!latestRecord) return { ...base, evalStatus: "unverified", evalRewards: null, evalEvaluatedAt: null, evalError: null };
+  const view = { ...base, evalRewards: latestRecord.rewards, evalEvaluatedAt: latestRecord.evaluatedAt };
+  if (latestRecord.capabilityCodeSHA !== capability.codeSHA
+      || latestRecord.evalId !== capability.eval.id
+      || latestRecord.evalCodeSHA !== capability.eval.codeSHA
+      || (latestRecord.envId ?? null) !== (capability.eval.env?.id ?? null)
+      || (latestRecord.envCodeSHA ?? null) !== (capability.eval.env?.codeSHA ?? null))
     return { ...view, evalStatus: "stale", evalError: null };
   if (latestRecord.outcome !== "passed" || !latestRecord.rewards || Object.keys(latestRecord.rewards).length === 0)
     return { ...view, evalStatus: "failed",
@@ -138,6 +165,7 @@ export interface CapabilityEvalListItem {
 
 export interface CapabilityEvalListing {
   capabilities: (CapabilityEvalListItem & CapabilityEvalView)[];
+  envs: PythonEvalEnv[];
   summary: Record<CapabilityEvalStatus, number>;
   diagnostics: PythonDiagnostic[];
 }
@@ -154,7 +182,7 @@ export async function listCapabilityEvals(workspace: string, options: { signal?:
     return { id, description: capability.description.trim().split("\n")[0] ?? "", recorded: capability.recorded ?? false,
       eval: capability.eval ?? null, ...view };
   });
-  return { capabilities, summary, diagnostics: discovered.diagnostics };
+  return { capabilities, envs: discovered.envs ?? [], summary, diagnostics: discovered.diagnostics };
 }
 
 export interface CapabilityEvalRunResult extends CapabilityEvalRecord {
@@ -187,11 +215,11 @@ export async function runCapabilityEvals(workspace: string, options: { capabilit
   const latest = await readLatestEvals(workspace);
   for (const { capability, id } of targets) {
     const priorAdaptation = latest[id]?.adaptation;
-    const stillAdapting = Boolean(priorAdaptation && (capability.eval?.codeSHA ?? "") === priorAdaptation.evalCodeSHA);
+    const stillAdapting = isStillAdapting(capability, latest[id]);
     if (!capability.eval) {
       if (stillAdapting && priorAdaptation) {
         results.push({ runId: newEvalRunId(), capabilityId: id, evalId: "", capabilityCodeSHA: capability.codeSHA,
-          evalCodeSHA: "", evaluatedAt: new Date().toISOString(), durationMs: 0, outcome: "failed",
+          evalCodeSHA: "", envId: null, envCodeSHA: null, evaluatedAt: new Date().toISOString(), durationMs: 0, outcome: "failed",
           rewards: latest[id]?.rewards ?? null, adaptation: priorAdaptation,
           error: { type: "EvalAdapting", message: `Bind @eval_capability covering adaptation cases before running: ${priorAdaptation.reason}` },
           evalStatus: "adapting" });
@@ -207,6 +235,7 @@ export async function runCapabilityEvals(workspace: string, options: { capabilit
     const execution = await python.evaluate(capability.id, { signal: options.signal });
     const record: CapabilityEvalRecord = { runId, capabilityId: id, evalId: capability.eval.id,
       capabilityCodeSHA: capability.codeSHA, evalCodeSHA: capability.eval.codeSHA,
+      envId: capability.eval.env?.id ?? null, envCodeSHA: capability.eval.env?.codeSHA ?? null,
       evaluatedAt: new Date().toISOString(), durationMs: Math.round(performance.now() - started),
       outcome: execution.isError ? "failed" : "passed", rewards: execution.details.rewards ?? null,
       ...(execution.details.details ? { details: execution.details.details } : {}),
@@ -214,7 +243,7 @@ export async function runCapabilityEvals(workspace: string, options: { capabilit
     if (stillAdapting && priorAdaptation) {
       record.outcome = "failed";
       record.adaptation = priorAdaptation;
-      record.error = { type: "EvalAdapting", message: `Update ${capability.eval.id} test set/verifier before re-running: ${priorAdaptation.reason}` };
+      record.error = { type: "EvalAdapting", message: `Update ${capability.eval.id}${capability.eval.env ? ` or ${capability.eval.env.id}` : ""} test set/verifier before re-running: ${priorAdaptation.reason}` };
     }
     await writeEvalRecord(workspace, record);
     results.push({ ...record, evalStatus: resolveCapabilityEval(capability, record).evalStatus });
@@ -235,10 +264,12 @@ export async function adaptCapabilityEval(workspace: string, options: {
   const now = new Date().toISOString();
   const records = (options.records ?? []).map(item => item.trim()).filter(Boolean);
   const evalCodeSHA = capability.eval?.codeSHA ?? "";
-  const adaptation: CapabilityEvalAdaptation = { reason, records, adaptedAt: now, evalCodeSHA };
+  const adaptation: CapabilityEvalAdaptation = { reason, records, adaptedAt: now, evalCodeSHA,
+    envCodeSHA: capability.eval?.env?.codeSHA ?? null };
   const record: CapabilityEvalRecord = {
     runId: newEvalRunId(), capabilityId: options.capabilityId, evalId: capability.eval?.id ?? "",
     capabilityCodeSHA: capability.codeSHA, evalCodeSHA, evaluatedAt: now, durationMs: 0,
+    envId: capability.eval?.env?.id ?? null, envCodeSHA: capability.eval?.env?.codeSHA ?? null,
     outcome: "failed", rewards: latest[options.capabilityId]?.rewards ?? null,
     ...(records.length ? { details: { adaptationRecords: records } } : {}),
     error: { type: "EvalAdapting", message: reason }, adaptation,
