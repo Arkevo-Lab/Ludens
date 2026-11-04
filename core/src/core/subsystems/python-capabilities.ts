@@ -4,11 +4,20 @@ import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/
 export { pythonModulePaths } from "@ludens/protocol/python";
 import { childTrace, type EventTrace, type RecordEvent } from "../storage/events.ts";
 
+export interface PythonEvalEnv {
+  id: string;
+  name?: string;
+  origin: { path: string; function: string; line: number };
+  codeSHA: string;
+  description: string;
+}
+
 export interface PythonCapabilityEval {
   id: string;
   origin: { path: string; function: string; line: number };
   codeSHA: string;
   description: string;
+  env?: PythonEvalEnv | null;
 }
 
 export interface PythonCapability {
@@ -32,6 +41,7 @@ export interface PythonDiagnostic {
 
 export interface PythonDiscovery {
   capabilities: PythonCapability[];
+  envs?: PythonEvalEnv[];
   diagnostics: PythonDiagnostic[];
   observeCapability?: string | null;
 }

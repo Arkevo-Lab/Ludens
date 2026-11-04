@@ -19,11 +19,16 @@ stripped, timeline reads fall back to committed .ludens/timeline/ records, and e
 run is persisted under .ludens/evals/runs/ with latest.json republished.
 Exit code 0 when every executed eval passes; 1 when any fails or has no binding.
 history lists persisted runs newest-first. adapt marks a capability as adapting:
-re-running an unchanged eval module stays failed/adapting. evalCodeSHA hashes the
-whole file, including module-level CASES; any edit (even capability-only edits in
-the same file) releases this gate, but verification still requires a passing run.
-The hash does not prove counterexample coverage: update the test set/verifier.
-Pair @capability with @eval_capability(fn); ludens bench covers Harbor agent tasks.`;
+re-running an unchanged eval module stays failed/adapting. evalCodeSHA (and the
+bound envCodeSHA for @eval_capability(fn, env=MyEnv)) hash the whole file,
+including module-level CASES; any edit to either module (even capability-only
+edits in the same file) releases this gate, but verification still requires a
+passing run. The hash does not prove counterexample coverage: update the test
+set/verifier. Declare reusable surrogate environments with @eval_env (use them as
+with MyEnv(...) as env: or with eval_env(env):) and bind them with
+@eval_capability(fn, env=MyEnv) or env="python/envs.py:MyEnv".
+Pair @capability with @eval_capability(fn); ludens bench covers Harbor agent tasks.
+`;
 
 export async function evalCommand(args: string[], workspacePath: string) {
   if (!args.length || args[0] === "--help") { console.log(EVAL_HELP); return; }

@@ -85,8 +85,21 @@ def offline_timeline_append(records_sink=None):
     return timeline_append
 
 
+def eval_env(target=None):
+    """Declare a reusable eval environment, or mount one at runtime, offline."""
+    import inspect
+    if target is None:
+        from ._decorators import _declare_eval_env
+        return _declare_eval_env
+    if isinstance(target, type) or inspect.isfunction(target):
+        # Decorator form: stamp a top-level class or function as a first-class env.
+        from ._decorators import _declare_eval_env
+        return _declare_eval_env(target)
+    return _runtime_eval_env(target)
+
+
 @contextmanager
-def eval_env(env):
+def _runtime_eval_env(env):
     """Run closed-loop capabilities against a surrogate environment, offline."""
     base = current()
     recorded = getattr(env, "recorded", None)

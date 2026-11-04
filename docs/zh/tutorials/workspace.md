@@ -112,7 +112,7 @@ def capture_top(exposure: int = 1) -> dict:
 
 1. **重放已标注的 `.ludens/timeline/` 记录或 30 Hz 轨迹切片**，用于感知、解析或序列检测函数。`Client().observe()` 直接按页读取持久化时空轴；`Client().replay(...)`（配合 `with record_window() as win:`）则按时间窗口（`window=win` 或 `start=...`、`end=...`）或围绕锚点记录（`around=record_id, before_seconds=2.0, after_seconds=2.0`）自动分页拉取数秒长的 30 Hz 连续帧序列。
    回放默认包含所有能力流，可用 `capability=...` 筛选；默认最多返回 `max_records=256` 条记录，较长轨迹需增大此上限。
-2. **通过 `with eval_env(env):` 挂载本地代理环境并联合演进 Actor + Critic**，用于钓鱼收线、捕虫或网格/菜单导航等闭环动作/反应能力。环境（**Critic** / 世界模型）通过 `env.observe(query)` 拦截 `Client().observe(query)`，通过 `env.call(id, args)` 拦截 `Client().call("controller/...", args)`，在虚拟时间中推进潜在真值状态，并跨随机试验直接依据该状态为能力（**Actor** / 策略）评分。
+2. **挂载本地代理环境并联合演进 Actor + Critic**，用于钓鱼收线、捕虫或网格/菜单导航等闭环动作/反应能力。用 `@eval_env` 装饰带 docstring 的顶层类（或同步工厂函数）来声明可复用环境，并用 `with MyEnv(...) as env:` 挂载实例（临时桩环境仍可用 `with eval_env(env):`）。环境（**Critic** / 世界模型）通过 `env.observe(query)` 拦截 `Client().observe(query)`，通过 `env.call(id, args)` 拦截 `Client().call("controller/...", args)`，在虚拟时间中推进潜在真值状态，并跨随机试验直接依据该状态为能力（**Actor** / 策略）评分。
 
 在非平凡的游戏交互中，无论 Actor（`@capability`）还是 Critic（`eval_env`）都很难在接触真实环境前一次造到完美。应借助 30 Hz `.ludens/timeline/` 回放将二者作为**联合演进（Actor-Critic Co-Evolution）**的一对组件迭代：
 
@@ -138,7 +138,9 @@ def reel_on_bite() -> dict:
                 break
     return {"reeled": reeled, "window": window.to_dict()}
 
+@eval_env
 class BiteEnv:
+    """Surrogate fishing pond with randomized nibbles preceding the bite."""
     def __init__(self, seed: int):
         self.tick = 0
         self.bite_at = random.Random(seed).randrange(3, 10)
@@ -154,13 +156,12 @@ class BiteEnv:
             self.reeled = True
         return {"ok": True}
 
-@eval_capability(reel_on_bite)
+@eval_capability(reel_on_bite, env=BiteEnv)
 def eval_reel_on_bite() -> dict:
     """Grade closed-loop reeling from surrogate ground truth."""
     failed_seeds = []
     for seed in range(20):
-        env = BiteEnv(seed)
-        with eval_env(env):
+        with BiteEnv(seed) as env:  # @eval_env classes mount directly as context managers.
             reel_on_bite()
         if not env.reeled:
             failed_seeds.append(seed)
@@ -168,7 +169,7 @@ def eval_reel_on_bite() -> dict:
     return {"passed": not failed_seeds, "rewards": {"pass_rate": pass_rate}, "details": {"failed_seeds": failed_seeds}}
 ```
 
-评估函数必须包含 docstring，并返回非空的扁平 `dict[str, int | float]` 有限数值奖励，或信封 `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`。当 `passed` 为 `False` 时，运行会记录 `failed`，同时保留 `rewards` 与 `details` 以便迭代。发现过程只进行静态扫描；只有显式请求时才执行评估：
+评估函数必须包含 docstring，并返回非空的扁平 `dict[str, int | float]` 有限数值奖励，或信封 `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`。当 `passed` 为 `False` 时，运行会记录 `failed`，同时保留 `rewards` 与 `details` 以便迭代。由此构成**能力 – 评估 – 环境（Capability – Eval – Env）三元关系**：`@eval_capability(fn, env=...)` 的可选 `env` 参数接受同文件的 `@eval_env` 符号，或指向其他模块中声明环境的 `"python/path.py:EnvName"` ID 字符串；`ludens eval list` 会报告静态发现的环境目录 `envs`（id、description、origin、`codeSHA`）。发现过程只进行静态扫描；只有显式请求时才执行评估：
 
 ```sh
 # 列出绑定、当前状态、奖励与发现诊断
@@ -194,12 +195,12 @@ ludens eval history
 | --- | --- |
 | `missing` | 能力没有绑定 `@eval_capability`。 |
 | `unverified` | 已绑定评估，但尚无最新运行记录。 |
-| `stale` | 最新运行后，能力或评估源码的 `codeSHA` 发生变化，或绑定的评估 ID 已改变。 |
-| `adapting` | 已显式标记为需要修订评估；只要评估模块的整文件 `evalCodeSHA` 未变，重跑仍为 failed/adapting。 |
+| `stale` | 最新运行后，能力、评估或绑定环境的源码 `codeSHA` 发生变化，或绑定的评估 ID / 环境 ID 已改变。 |
+| `adapting` | 已显式标记为需要修订评估；只要评估模块的整文件 `evalCodeSHA` 与绑定环境模块的 `envCodeSHA` 均未变，重跑仍为 failed/adapting。 |
 | `failed` | 最新匹配运行失败，或未产出合法的非空奖励。 |
 | `verified` | 当前能力与评估代码对应的最新匹配运行已通过，并产出合法奖励。 |
 
-两个 `codeSHA` 都对整个源码文件计算哈希，而非函数 AST 节点，因此包含模块级 `CASES` 常量。评估模块的任何修改（包括注释或同文件内仅修改能力函数）都会解除适应门控，并使旧结果变为 `stale`；只有随后运行通过才会变为 `verified`。这是源码变化保护，不是已加入反例的证明：再次信任能力前，应将失败记录加入题集或验证器。外部 fixture 或导入的辅助模块不在此哈希范围内；修订这些用例时也应更新评估模块。
+三个 `codeSHA`（`capabilityCodeSHA`、`evalCodeSHA` 与绑定环境的 `envCodeSHA`）都对整个源码文件计算哈希，而非函数 AST 节点，因此包含模块级 `CASES` 常量。评估模块或其绑定 `@eval_env` 模块的任何修改（包括注释或同文件内仅修改能力函数）都会解除适应门控，并使旧结果变为 `stale`；只有随后运行通过才会变为 `verified`。这是源码变化保护，不是已加入反例的证明：再次信任能力前，应将失败记录加入题集或验证器。外部 fixture 或导入的辅助模块不在此哈希范围内；修订这些用例时也应更新评估模块。
 
 `ludens consolidate` 会向仅允许文件工具的提示注入最新静态评估目录：对于绑定了 `@eval_capability` 的能力，仅当状态为 `verified` 时才允许保留或提升到 `skills/`（`unverified`、`stale`、`adapting` 或 `failed` 条目会被剪除）；而未绑定评估的能力（`missing`，例如实机动作编排宏）只要在实机运行中验证有效仍可保留。整理期间不会执行评估或编辑能力/评估源码；所需修改或评估命令会记录到 memory，留待后续执行轮次处理。
 

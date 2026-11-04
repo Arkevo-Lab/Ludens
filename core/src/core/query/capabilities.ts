@@ -6,7 +6,7 @@ import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-sta
 import { discoverTasks } from "@ludens/core/bench/catalog";
 import { isObject } from "@ludens/core/bench/contract";
 import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
-import { readLatestEvals, resolveCapabilityEval, type CapabilityEvalBinding, type CapabilityEvalStatus } from "../subsystems/capability-evals.ts";
+import { readLatestEvals, resolveCapabilityEval, type CapabilityEnvBinding, type CapabilityEvalBinding, type CapabilityEvalStatus } from "../subsystems/capability-evals.ts";
 
 export type { CapabilityEvalStatus };
 
@@ -19,6 +19,8 @@ export interface CapabilityEntry {
   observe?: boolean;
   evalStatus?: CapabilityEvalStatus | null;
   evalId?: string | null;
+  evalEnv?: CapabilityEnvBinding | null;
+  evalEnvId?: string | null;
   evalRewards?: Record<string, number> | null;
   evalEvaluatedAt?: string | null;
   evalError?: string | null;
@@ -64,6 +66,15 @@ async function workspaceCapabilities(workspace: string, signal?: AbortSignal) {
   });
   const result: unknown = JSON.parse(stdout);
   if (!isObject(result) || !Array.isArray(result.capabilities) || !Array.isArray(result.diagnostics)) throw new Error("Invalid Python discovery response");
+  const envBinding = (value: unknown): CapabilityEnvBinding | null => {
+    if (value === null || value === undefined) return null;
+    if (!isObject(value) || typeof value.id !== "string" || !isObject(value.origin)
+        || typeof value.origin.path !== "string" || typeof value.origin.function !== "string"
+        || typeof value.origin.line !== "number" || typeof value.codeSHA !== "string"
+        || typeof value.description !== "string") throw new Error("Invalid Python eval env declaration");
+    return { id: value.id, origin: { path: value.origin.path, function: value.origin.function, line: value.origin.line },
+      codeSHA: value.codeSHA, description: value.description };
+  };
   const evalBinding = (value: unknown): CapabilityEvalBinding | null => {
     if (value === null || value === undefined) return null;
     if (!isObject(value) || typeof value.id !== "string" || !isObject(value.origin)
@@ -71,7 +82,7 @@ async function workspaceCapabilities(workspace: string, signal?: AbortSignal) {
         || typeof value.origin.line !== "number" || typeof value.codeSHA !== "string"
         || typeof value.description !== "string") throw new Error("Invalid Python capability declaration");
     return { id: value.id, origin: { path: value.origin.path, function: value.origin.function, line: value.origin.line },
-      codeSHA: value.codeSHA, description: value.description };
+      codeSHA: value.codeSHA, description: value.description, env: envBinding(value.env) };
   };
   const latest = await readLatestEvals(workspace);
   const items: CapabilityEntry[] = result.capabilities.map(item => {

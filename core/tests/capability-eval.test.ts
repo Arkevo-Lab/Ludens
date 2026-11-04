@@ -416,7 +416,8 @@ test("controller list and capabilities query expose evaluation enrichment", asyn
     expect(page.sources.workspace.status).toBe("available");
     expect(page.groups[1].items).toEqual([{ id: "python/actions.py:score", kind: "workspace",
       description: "Score a value into the unit interval.",
-      requiresControl: null, readOnly: null, evalStatus: "verified", evalId: "python/actions.py:eval_score",
+      requiresControl: null, readOnly: null, observe: false,
+      evalStatus: "verified", evalId: "python/actions.py:eval_score", evalEnvId: null, evalEnv: null,
       evalRewards: { samples: 4, coverage: 1, sum: 10 }, evalEvaluatedAt: run.results[0]!.evaluatedAt, evalError: null }]);
   } finally { await rm(directory, { recursive: true, force: true }); await rm(home, { recursive: true, force: true }); }
 });
@@ -514,5 +515,288 @@ def eval_move() -> dict[str, float]:
     const result = await python.evaluate(capabilities[0]!.id);
     expect(result.isError).toBe(false);
     expect(result.details.rewards).toEqual({ moved: 5, sequence: 1 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+const ENV_ACTIONS_SOURCE = `from ludens_tools import Client, capability, eval_capability
+
+@capability
+def poke(slot: int) -> dict:
+    """Poke the controller through whatever env is mounted."""
+    played = Client().call("controller/pad.play", {"slot": slot})
+    return {"data": played}
+
+@eval_capability(poke, env="python/envs.py:SharedEnv")
+def eval_poke() -> dict[str, float]:
+    """Evaluate poke against the shared cross-file env."""
+    from envs import SharedEnv
+    with SharedEnv(seed=3) as env:
+        outcome = poke(slot=2)
+    assert outcome["data"]["echo"]["slot"] == 2, outcome
+    return {"acted": float(env.ticks)}
+`;
+
+const ENV_SHARED_SOURCE = `from ludens_tools import Client, eval_env
+
+@eval_env
+class SharedEnv:
+    """Surrogate env shared across capability evals."""
+    def __init__(self, seed: int = 0):
+        self.seed = seed
+        self.recorded = []
+        self.ticks = 0
+    def observe(self, query):
+        self.ticks += 1
+        return []
+    def call(self, id, args):
+        self.ticks += 1
+        return {"ok": True, "echo": dict(args)}
+`;
+
+test("@eval_env static discovery catalogs envs and binds the capability-eval-env triad", async () => {
+  const directory = await workspace();
+  try {
+    await writeFile(join(directory, "envs.py"), `from ludens_tools import eval_env
+
+@eval_env
+class SharedEnv:
+    """Surrogate env shared across capability evals."""
+
+@eval_env
+def make_env(seed: int = 0):
+    """Factory env for parameterized surrogates."""
+    return None
+
+@eval_env
+async def async_env():
+    """Async env."""
+
+@eval_env
+class NoDoc:
+    pass
+
+@eval_env(SharedEnv)
+class WithArgs:
+    """Env with decorator args."""
+
+class Outer:
+    @eval_env
+    class Nested:
+        """Nested env."""
+
+`);
+    await writeFile(join(directory, "actions.py"), `from ludens_tools import capability, eval_capability, eval_env
+from envs import SharedEnv
+
+@capability
+def score(value: float) -> float:
+    """Score."""
+    return value
+
+@capability
+def plain(value: float) -> float:
+    """No env binding."""
+    return value
+
+@capability
+def cross(value: float) -> float:
+    """Bound to a cross-file env by ID string."""
+    return value
+
+@eval_env
+class LocalEnv:
+    """Same-file env."""
+
+@eval_capability(score, env=LocalEnv)
+def eval_score():
+    """Bind by local symbol."""
+    return {}
+
+@eval_capability(plain, "python/envs.py:SharedEnv")
+def eval_plain():
+    """Bind by second positional ID string."""
+    return {}
+
+@eval_capability(cross, env="python/envs.py:SharedEnv")
+def eval_cross():
+    """Bind by keyword ID string."""
+    return {}
+`);
+    const found = await new PythonCapabilities(directory).discover();
+    expect(found.envs!.map(item => item.id)).toEqual([
+      "python/actions.py:LocalEnv", "python/envs.py:SharedEnv", "python/envs.py:make_env"]);
+    expect(found.envs!.find(item => item.id === "python/envs.py:SharedEnv")).toMatchObject({
+      name: "SharedEnv", description: "Surrogate env shared across capability evals.",
+      origin: { path: "envs.py", function: "SharedEnv" } });
+    const byFunction = new Map(found.capabilities.map(item => [item.origin.function, item]));
+    expect(byFunction.get("score")!.eval!.env).toMatchObject({ id: "python/actions.py:LocalEnv" });
+    expect(byFunction.get("plain")!.eval!.env).toMatchObject({ id: "python/envs.py:SharedEnv" });
+    expect(byFunction.get("cross")!.eval!.env).toMatchObject({ id: "python/envs.py:SharedEnv",
+      origin: { path: "envs.py", function: "SharedEnv" } });
+    const messages = found.diagnostics.map(item => `${item.function}: ${item.message}`).sort();
+    expect(messages.some(item => item.startsWith("async_env: @eval_env is only supported on top-level classes or synchronous functions"))).toBe(true);
+    expect(messages.some(item => item.startsWith("NoDoc: @eval_env requires a docstring"))).toBe(true);
+    expect(messages.some(item => item.startsWith("WithArgs: @eval_env does not take arguments"))).toBe(true);
+    expect(messages.some(item => item.startsWith("Nested: @eval_env is only supported on top-level classes or synchronous functions"))).toBe(true);
+    const listed = await listCapabilityEvals(directory);
+    expect(listed.envs.map(item => item.id)).toEqual(found.envs!.map(item => item.id));
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("@eval_capability env diagnostics reject missing or non-@eval_env targets", async () => {
+  const directory = await workspace();
+  try {
+    await writeFile(join(directory, "actions.py"), `from ludens_tools import capability, eval_capability
+
+class Undecorated:
+    """An ordinary class, not an @eval_env."""
+
+@capability
+def score(value: float) -> float:
+    """Score."""
+    return value
+
+@capability
+def gone(value: float) -> float:
+    """Bound to a missing env."""
+    return value
+
+@capability
+def plain(value: float) -> float:
+    """Bound without env."""
+    return value
+
+@eval_capability(score, env=Undecorated)
+def eval_score():
+    """Env target is not @eval_env."""
+    return {}
+
+@eval_capability(gone, env="python/envs.py:Missing")
+def eval_gone():
+    """Env target does not exist."""
+    return {}
+
+@eval_capability(plain, env=42)
+def eval_plain():
+    """Env argument is malformed."""
+    return {}
+`);
+    const found = await new PythonCapabilities(directory).discover();
+    const messages = found.diagnostics.map(item => `${item.function}: ${item.message}`);
+    expect(messages.some(item => item.startsWith("eval_score: @eval_capability env python/actions.py:Undecorated does not match a discovered @eval_env"))).toBe(true);
+    expect(messages.some(item => item.startsWith("eval_gone: @eval_capability env python/envs.py:Missing does not match a discovered @eval_env"))).toBe(true);
+    expect(messages.some(item => item.startsWith("eval_plain: @eval_capability requires a capability function"))).toBe(true);
+    expect(found.capabilities.every(item => item.eval?.env == null || item.eval === null)).toBe(true);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("with MyEnv(...) as env runs through a first-class @eval_env class", async () => {
+  const directory = await workspace();
+  try {
+    await writeFile(join(directory, "envs.py"), `from ludens_tools import Client, capability, eval_capability, eval_env
+
+@eval_env
+class PokeEnv:
+    """Surrogate env mounted directly as a context manager."""
+    def __init__(self, seed: int = 0):
+        self.seed = seed
+        self.recorded = []
+        self.ticks = 0
+    def observe(self, query):
+        self.ticks += 1
+        return []
+    def call(self, id, args):
+        self.ticks += 1
+        return {"ok": True, "echo": dict(args)}
+
+@capability
+def poke(slot: int) -> dict:
+    """Poke through the mounted env."""
+    played = Client().call("controller/pad.play", {"slot": slot})
+    return {"data": played}
+
+@eval_capability(poke, env=PokeEnv)
+def eval_poke() -> dict[str, float]:
+    """Evaluate poke with with-syntax and legacy eval_env mounting."""
+    with PokeEnv(seed=1) as env:
+        outcome = poke(slot=4)
+        assert env is not None and outcome["data"]["echo"]["slot"] == 4, outcome
+        ticks = env.ticks
+    legacy = PokeEnv(seed=2)
+    with eval_env(legacy):
+        poke(slot=5)
+    return {"acted": float(ticks), "legacy": float(legacy.ticks)}
+`);
+    const python = new PythonCapabilities(directory);
+    const { capabilities } = await python.discover();
+    const result = await python.evaluate(capabilities[0]!.id);
+    expect(result.isError).toBe(false);
+    expect(result.details.rewards).toEqual({ acted: 1, legacy: 1 });
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("cross-file @eval_env edits mark the bound capability stale in eval list and capabilities query", async () => {
+  const directory = await workspace(), home = await realpath(await mkdtemp(join(tmpdir(), "ludens-eval-env-home-")));
+  try {
+    delete process.env.LUDENS_SOCKET;
+    await writeFile(join(directory, "envs.py"), ENV_SHARED_SOURCE);
+    await writeFile(join(directory, "actions.py"), ENV_ACTIONS_SOURCE);
+    const run = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:poke" });
+    expect(run.results[0]).toMatchObject({ outcome: "passed", evalStatus: "verified",
+      envId: "python/envs.py:SharedEnv" });
+    expect(run.results[0]!.envCodeSHA).toBeTruthy();
+
+    // Editing only the env module invalidates the recorded envCodeSHA.
+    await writeFile(join(directory, "envs.py"), ENV_SHARED_SOURCE + "\n# env revision after verification\n");
+    let listed = await listCapabilityEvals(directory);
+    const item = listed.capabilities.find(entry => entry.id === "python/actions.py:poke")!;
+    expect(item.evalStatus).toBe("stale");
+    expect(item.evalEnvId).toBe("python/envs.py:SharedEnv");
+    expect(listed.summary.stale).toBe(1);
+
+    await writeFile(join(directory, "baseware.json"), JSON.stringify({ schemaVersion: 2, generatedAt: "2026-11-02T00:00:00.000Z",
+      drivers: [], controllers: [] }));
+    const identity = await ensureWorkspaceIdentity(directory);
+    await registerWorkspace(directory, home);
+    const page = await capabilities(identity.id, directory, home);
+    expect(page.issues).toEqual([]);
+    expect(page.groups[1].items.find(entry => entry.id === "python/actions.py:poke")!.evalStatus).toBe("stale");
+  } finally { await rm(directory, { recursive: true, force: true }); await rm(home, { recursive: true, force: true }); }
+});
+
+test("editing a cross-file @eval_env releases the adapting gate", async () => {
+  const directory = await workspace();
+  try {
+    delete process.env.LUDENS_SOCKET;
+    await writeFile(join(directory, "envs.py"), ENV_SHARED_SOURCE);
+    await writeFile(join(directory, "actions.py"), ENV_ACTIONS_SOURCE);
+    const verified = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:poke" });
+    expect(verified.results[0]!.evalStatus).toBe("verified");
+
+    const adaptLog = console.log;
+    console.log = () => {};
+    try {
+      await evalCommand(["adapt", "python/actions.py:poke", "--reason", "Env misses late bites"], directory);
+    } finally { console.log = adaptLog; }
+    let listed = await listCapabilityEvals(directory);
+    const item = () => listed.capabilities.find(entry => entry.id === "python/actions.py:poke")!;
+    expect(item().evalStatus).toBe("adapting");
+
+    // Re-running the unchanged eval and env stays adapting.
+    const unchanged = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:poke" });
+    expect(unchanged.results[0]).toMatchObject({ outcome: "failed", evalStatus: "adapting" });
+    listed = await listCapabilityEvals(directory);
+    expect(item().evalStatus).toBe("adapting");
+
+    // Revising only the bound @eval_env module changes envCodeSHA and releases the gate.
+    await writeFile(join(directory, "envs.py"), ENV_SHARED_SOURCE.replace("self.ticks += 1\n        return []", "self.ticks += 2\n        return []"));
+    listed = await listCapabilityEvals(directory);
+    expect(item().evalStatus).toBe("stale");
+    const rerun = await runCapabilityEvals(directory, { capabilityId: "python/actions.py:poke" });
+    expect(rerun.outcome).toBe("passed");
+    expect(rerun.results[0]).toMatchObject({ outcome: "passed", evalStatus: "verified" });
+    listed = await listCapabilityEvals(directory);
+    expect(item().evalStatus).toBe("verified");
+    expect(listed.summary.adapting).toBe(0);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
