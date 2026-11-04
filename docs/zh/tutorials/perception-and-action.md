@@ -1,6 +1,6 @@
 # 常驻感知与动作循环
 
-在实时交互环境中，高频采样与高频动作由工作区内的两个独立常驻 Python 进程承担：`perception.py:Perception` 负责持续采集环境状态并写入 `.ludens/timeline/`，`action.py:Action` 负责在 `auto` 周期内持续读取时空轴并下发控制输入。能力装饰器与时空轴信封约定见 [工作区与能力编程](workspace.md)。
+在实时交互环境中，常驻 `perception.py:Perception` 进程运行连续状态机，负责高频采样与进程内闭环控制，并将观测写入 `.ludens/timeline/`。各能力无需 IPC 即可共享内存、发出动作并在状态间转换；独立的 `action.py:Action` 自动循环仍可用于绑定 epoch 的控制程序。能力装饰器与时空轴信封约定见 [工作区与能力编程](workspace.md)。
 
 下文中的 CLI 命令均在**目标工作区目录**下执行，假定仓库 `core/bin` 与 `baseware/bin` 已加入 `PATH`。跨目录操作时，在子命令前传入 `ludens --workspace /absolute/path/to/workspace`。
 
@@ -11,16 +11,52 @@
 `perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [core/templates/perception.py](../../../core/templates/perception.py)）：
 
 - `start(self, context)`：进程启动或 `reload` 时执行一次，可在此加载深度学习权重、初始化状态或后台采样线程。`context` 包含 `workspace`、`runDir` 与 `generation`。
-- `sample(self)`：需标注 `@record` 与 `@capability`，由调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
+- `sample(self)`：需标注 `@observe`、`@record` 与 `@capability`；其中 `@observe` 将其选为工作区的主观测能力。调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用当前状态。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
 - `close(self)`：在 `reload`、`stop` 或 Host 退出时调用，用于释放自建资源。
+
+常驻进程在单个 Python 进程内运行连续状态机。当前能力可返回可选的 `effect`（`{"id": "controller/...", "arguments": {...}}`，或此类对象的列表）来请求闭环动作，也可返回可选的 `transition`（`"method_name"` 或 `{"to": "method_name", "arguments": {...}}`）来选择下一 tick 调用的能力。转换目标可解析为同一实例、模块或工作区中的能力，全程不跨进程，因此实例属性与模块全局变量可作为跨 tick 的共享内存上下文。
+
+没有 `Perception` 类时，`perception.py` 也可定义任意名称的顶层 `@observe @record @capability` 函数。实时与离线时空轴默认读取唯一的 `@observe` 通道，包括其他工作区模块中的已记录能力；`@observe` 不会自动调度其他模块。没有标记时，默认通道仍为 `python/perception.py:Perception.sample`。重复标记会为每个冲突声明生成诊断，并阻止常驻进程开始运行。
+
+宿主进入 `auto` 时将控制 epoch 授予常驻进程，感知重载时保留该租约，交还控制时撤销租约但不停止观测。手动模式下没有租约时会跳过 controller effect；本地 `python/` effect 仍在进程内执行。常驻进程的 `state`、`transition` 和 `lease` RPC 分别查看当前能力、选择其下一组参数、更新 epoch/input generation。跨模块目标使用 `python/path.py:function`；后续不带路径的函数名会在当前活动模块中解析。只有 `@record` 状态会发布观测，活动状态变化不会改变默认观测通道。
+
+```python
+from ludens_tools import capability, observe, record
+
+class Perception:
+    def start(self, context):
+        self.tracking = False
+
+    @observe
+    @record
+    @capability
+    def sample(self):
+        """Observe the environment and enter tracking when a target appears."""
+        return {
+            "text": "target acquired",
+            "effect": {"id": "controller/pad.play", "arguments": {"button": "a"}},
+            "transition": {"to": "track", "arguments": {"target": "marker"}},
+        }
+
+    @capability
+    def track(self, target: str):
+        """Track the target using state shared with sample in this process."""
+        self.tracking = True
+        return {"text": f"tracking {target}"}
+
+    def close(self):
+        pass
+```
 
 新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 `perception.py`（如采集逻辑或模型权重）后，执行 `ludens perception reload` 即可热替换进程并保留历史时空轴。
 
 ### 2. 感知管理与历史查询命令（`ludens observe`）
 
 ```sh
-# 生命周期与自动注入策略管理
+# 生命周期、状态机控制与自动注入策略管理
 ludens perception status
+ludens perception state
+ludens perception transition track --args '{"target":"marker"}'
 ludens perception reload
 ludens perception stop
 ludens perception inject          # 查看当前自动注入策略（on / off）
@@ -36,7 +72,7 @@ ludens observe --capability '*' --start 2026-10-27T01:00:00Z --limit 8
 ```
 
 - **采样与自动注入解耦**：`ludens perception inject off` 仅停止在每轮 prompt 开始时向模型自动追加新观测和采样器状态；后台 `sample()`、视频录制与显式 `observe` 查询均照常运行，轮内观察始终由模型显式 `observe` 完成，工具结果不会被追加任何观察。`ludens perception stop` 则会彻底停止采样进程与时空轴 writer，直至下次 `reload`。
-- **查询维度与分页**：默认读取主通道 `python/perception.py:Perception.sample` 的最新记录；`--capability` 可筛选其他 `@record` 能力或传 `'*'` 查询全轴；`--at` 查询 `recordedAt` 不晚于指定时刻的最后一条记录；`--start` / `--end` 按 `recordedAt` 闭区间升序分页（默认 `8` 条，上限 `64` 条，通过返回的 `nextAfter` 传给 `--after` 翻页）。
+- **查询维度与分页**：默认读取由 `@observe` 选定的主通道（模板中的 `Perception.sample`）的最新记录；`--capability` 可筛选其他 `@record` 能力或传 `'*'` 查询全轴；`--at` 查询 `recordedAt` 不晚于指定时刻的最后一条记录；`--start` / `--end` 按 `recordedAt` 闭区间升序分页（默认 `8` 条，上限 `64` 条，通过返回的 `nextAfter` 传给 `--after` 翻页）。
 - **终端图像交付**：在 Agent 的 `bash` 工具中加 `--images` 可通过 OMP 终端图像通道直接将图片送入模型（单页上限 32 张 / 40 MiB）。
 
 ### 3. 查询返回结构与错误码

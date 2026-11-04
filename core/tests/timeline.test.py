@@ -21,7 +21,7 @@ import unittest
 from unittest.mock import patch
 import uuid
 
-from ludens_tools import Client, record_window
+from ludens_tools import Client, capability, record, record_window, observe
 from ludens_tools._capabilities import discover, load_function, call_local
 from ludens_tools._context import scope
 from ludens_tools._observation_history import (ObservationHistory, observation_result, MAIN_CAPABILITY,
@@ -270,6 +270,136 @@ def invalid():
             self.assertTrue(all(row["identity"]["codeSHA"] == hashlib.sha256(source.encode()).hexdigest() for row in records))
             self.assertEqual(records[3]["capability"], "python/sensing.py:Reader.sample")
             self.assertEqual(records[-1]["runId"], "run-one")
+
+    def test_observe_decorator_requires_capability_and_combines_in_any_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            recorded = []
+
+            def append(**message):
+                recorded.append(message)
+                return {"timeline": {"sequence": len(recorded)}}
+
+            context = {"workspace": str(root), "run_id": "run-one", "socket_path": None, "epoch": None,
+                       "trace": {}, "timeout": None, "generation": "g", "timeline_append": append}
+            with scope(context):
+                @observe
+                def solo():
+                    return {"data": 1}
+                with self.assertRaisesRegex(ValueError, "@observe requires @capability"):
+                    solo()
+
+                @record
+                @observe
+                @capability
+                def channel() -> dict:
+                    """The unique observation channel."""
+                    return {"data": {"seen": True},
+                            "effect": {"id": "controller/arm.move", "arguments": {"x": 1}},
+                            "transition": {"to": "reel", "args": {"speed": 2}}}
+                self.assertTrue(channel.__ludens_observe__)
+                self.assertTrue(channel.__ludens_capability__)
+                self.assertTrue(channel.__ludens_recorded__)
+                self.assertTrue(channel.__ludens_declaration__["observe"])
+                self.assertTrue(channel.__ludens_identity__["id"].endswith("channel"))
+                self.assertEqual(channel(), {"timeline": {"sequence": 1}})
+                self.assertEqual(recorded[0]["sample"]["effect"], {"id": "controller/arm.move", "arguments": {"x": 1}})
+                self.assertEqual(recorded[0]["sample"]["transition"], {"to": "reel", "args": {"speed": 2}})
+
+                @observe()
+                @capability
+                def parens() -> dict:
+                    """The parenthesised decorator form."""
+                    return {"data": 2}
+                self.assertTrue(parens.__ludens_observe__)
+                self.assertEqual(parens(), {"data": 2})
+
+                @observe
+                @capability
+                @record
+                def reordered() -> dict:
+                    """Decorator order does not matter."""
+                    return {"data": 3}
+                self.assertTrue(reordered.__ludens_observe__ and reordered.__ludens_recorded__ and reordered.__ludens_capability__)
+                reordered()
+                self.assertEqual(len(recorded), 2)
+
+    def test_discover_reports_one_workspace_observe_capability(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "perception.py").write_text('''from ludens_tools import capability, record, observe
+@record
+@capability
+def helper() -> dict:
+    """An ordinary recorded capability."""
+    return {"data": True}
+class Perception:
+    @observe
+    @record
+    @capability
+    def sample(self): return {"data": 1}
+''')
+            catalog = discover(root)
+            self.assertEqual(catalog["diagnostics"], [])
+            self.assertEqual(catalog["observeCapability"], "python/perception.py:Perception.sample")
+            entries = {entry["origin"]["function"]: entry for entry in catalog["capabilities"]}
+            self.assertEqual(list(entries), ["helper"])
+            self.assertIs(entries["helper"]["observe"], False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "observe.py").write_text('''from ludens_tools import capability, record, observe
+@observe
+@record
+@capability
+def inspect() -> dict:
+    """A top-level observation capability."""
+    return {"data": 1}
+''')
+            catalog = discover(root)
+            self.assertEqual(catalog["diagnostics"], [])
+            self.assertEqual(catalog["observeCapability"], "python/observe.py:inspect")
+            self.assertIs(catalog["capabilities"][0]["observe"], True)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "perception.py").write_text('''from ludens_tools import capability, record, observe
+class Perception:
+    @observe
+    @record
+    @capability
+    def sample(self): return {"data": 1}
+''')
+            (root / "extra.py").write_text('''from ludens_tools import capability, record, observe
+@observe
+@record
+@capability
+def inspect() -> dict:
+    """A second observation channel in the same workspace."""
+    return {"data": 2}
+''')
+            catalog = discover(root)
+            self.assertIsNone(catalog["observeCapability"])
+            duplicates = [item for item in catalog["diagnostics"]
+                          if item["message"] == "Only one @observe capability may be declared in a workspace"]
+            self.assertEqual({(item["path"], item["function"]) for item in duplicates},
+                             {("extra.py", "inspect"), ("perception.py", "sample")})
+            entry = next(item for item in catalog["capabilities"] if item["origin"]["function"] == "inspect")
+            self.assertIs(entry["observe"], False)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / "stray.py").write_text('''from ludens_tools import capability, record, observe
+@observe
+def broken():
+    """An invalid standalone observation declaration."""
+    return {}
+''')
+            catalog = discover(root)
+            self.assertEqual(catalog["capabilities"], [])
+            self.assertIsNone(catalog["observeCapability"])
+            self.assertTrue(any(item["message"] == "@observe requires @capability on the same function"
+                                for item in catalog["diagnostics"]))
 
     def test_rejects_invalid_envelopes_without_committing_a_record(self):
         with tempfile.TemporaryDirectory() as directory:

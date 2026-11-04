@@ -93,6 +93,8 @@ def capture_top(exposure: int = 1) -> dict:
 
 `@capability` 既可用于顶层同步函数，也可用于类方法（如 `Perception.sample`、`Action.step`）。静态发现会扫描工作区代码（跳过 `logs/`、`.ludens/`、`.git/` 与虚拟环境），要求被标记函数具备 **docstring** 与**显式参数类型注解**（支持标量、`list`、`dict[str, ...]` 与 `Optional`），并将顶层同步函数及 `Perception.sample` / `Action.step` 纳入 `ludens controller list` 目录。实现细节见 [_capabilities.py](../../../core/python/ludens_tools/_capabilities.py)。
 
+`@observe` 用于选择工作区的主观测能力。它必须与同一函数上的 `@capability` 配对（也可同时搭配 `@record`），且整个工作区最多只能声明一个 `@observe` 能力。发现过程会将重复声明报告为诊断，而不会选择有歧义的主通道。
+
 不同调用入口的执行位置与数据边界对比：
 
 | 调用方式 | 执行进程 | 参数与返回值 | 适用场景 |
@@ -232,6 +234,8 @@ def detect_scene() -> dict:
 | `sampledAt` | `str`（ISO 时间戳） | 已知的源采样时刻（不填则仅保留记录完成时刻 `recordedAt`）。 |
 | `sources` | `list` | 衍生自其他观测或内层记录的来源引用列表。 |
 | `space` | `dict` | 设备或算法定义的坐标系描述。 |
+| `effect` | `dict` 或 `list[dict]` | 可选的进程内动作请求，每项包含能力/控制器 `id` 与可选的 `arguments`（或 `args`）对象。 |
+| `transition` | `str` 或 `dict` | 连续状态机的可选下一状态：目标能力名称，或 `{"to": "...", "arguments": {...}}`（也接受 `args`）。 |
 
 在 `ludens eval run` 中，`@record` 仍会校验此信封，但只在内存中附加合成的 `timeline: {recordId, sequence}`，不会持久化记录或归档媒体。在 `eval_env(env)` 内，追加的信封还会收集到 `env.recorded`（若环境不允许新增属性，请预先将其初始化为列表）。这些记录不会加入 `Client().observe()` 的历史。可选的 `env.list()` 与 `env.help(id)` 回调提供模拟目录信息。驱动调用保留常规参数契约：省略参数时使用 `{}`，非字典参数会被拒绝。
 

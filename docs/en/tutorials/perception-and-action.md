@@ -1,6 +1,6 @@
 # Resident Perception and Action Loops
 
-In realtime interactive environments, high-frequency sampling and high-frequency actions are handled by two independent resident Python processes inside the workspace: `perception.py:Perception` continuously collects environment state and writes it to `.ludens/timeline/`, while `action.py:Action` continuously reads the timeline and issues control inputs during an `auto` period. The capability decorators and timeline envelope conventions are covered in [Workspace and Capability Programming](workspace.md).
+In realtime interactive environments, the resident `perception.py:Perception` process runs a continuous state machine for high-frequency sampling and in-process closed-loop control, writing observations to `.ludens/timeline/`. Capabilities can share memory, emit effects, and transition between states without IPC; the separate `action.py:Action` auto loop remains available for epoch-bound control programs. The capability decorators and timeline envelope conventions are covered in [Workspace and Capability Programming](workspace.md).
 
 All CLI commands below run in the **target workspace directory**, assuming the repo's `core/bin` and `baseware/bin` are on `PATH`. For cross-directory operation, pass `ludens --workspace /absolute/path/to/workspace` before the subcommand.
 
@@ -11,16 +11,52 @@ All CLI commands below run in the **target workspace directory**, assuming the r
 The `Perception` class in `perception.py` runs in a dedicated resident Python process (template: [core/templates/perception.py](../../../core/templates/perception.py)):
 
 - `start(self, context)`: runs once when the process starts or on `reload`; load deep-learning weights, initialize state, or start background sampling threads here. `context` contains `workspace`, `runDir`, and `generation`.
-- `sample(self)`: must be annotated with `@record` and `@capability`, and is called continuously by the scheduler at the host-configured rate `LUDENS_PERCEPTION_SAMPLE_HZ` (default `30.0` Hz, which also serves as the nominal frame rate for recording; `Perception.sample_hz` class attributes are ignored — see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md)). If a single sample takes longer than one period, the next sample is deferred rather than overlapping concurrently or catching up with a backlog.
+- `sample(self)`: must be annotated with `@observe`, `@record`, and `@capability`; `@observe` selects it as the workspace's main observation capability. The scheduler calls the active state continuously at the host-configured rate `LUDENS_PERCEPTION_SAMPLE_HZ` (default `30.0` Hz, which also serves as the nominal frame rate for recording; `Perception.sample_hz` class attributes are ignored — see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md)). If a single sample takes longer than one period, the next sample is deferred rather than overlapping concurrently or catching up with a backlog.
 - `close(self)`: called on `reload`, `stop`, or Host exit to release self-owned resources.
+
+The resident runs a continuous state machine in one Python process. Any active capability may return an optional `effect` (`{"id": "controller/...", "arguments": {...}}`, or a list of such objects) to request closed-loop actuation, and an optional `transition` (`"method_name"` or `{"to": "method_name", "arguments": {...}}`) to select the capability called on the next tick. Transition targets resolve to capabilities on the same instance, module, or workspace without crossing a process boundary, so instance attributes and module globals provide shared-memory context across ticks.
+
+Without a `Perception` class, `perception.py` may instead define a top-level `@observe @record @capability` function with any name. Default live and offline timeline reads select the unique `@observe` channel, including a recorded capability in another workspace module; `@observe` does not schedule that other module automatically. With no marker, the default remains `python/perception.py:Perception.sample`. Duplicate markers produce diagnostics for every conflicting declaration and prevent the resident from starting.
+
+The host grants the resident its control epoch on entering `auto`, preserves that lease across perception reloads, and revokes it on handback without stopping observation. Controller effects are skipped in manual mode without a lease; local `python/` effects still execute in-process. The resident RPCs `state`, `transition`, and `lease` inspect the active capability, select its next arguments, and update the epoch/input generation respectively. Use `python/path.py:function` for a cross-module target; subsequent bare function names resolve in that active module. Only `@record` states publish observations, and the default observation channel does not change when the active state changes.
+
+```python
+from ludens_tools import capability, observe, record
+
+class Perception:
+    def start(self, context):
+        self.tracking = False
+
+    @observe
+    @record
+    @capability
+    def sample(self):
+        """Observe the environment and enter tracking when a target appears."""
+        return {
+            "text": "target acquired",
+            "effect": {"id": "controller/pad.play", "arguments": {"button": "a"}},
+            "transition": {"to": "track", "arguments": {"target": "marker"}},
+        }
+
+    @capability
+    def track(self, target: str):
+        """Track the target using state shared with sample in this process."""
+        self.tracking = True
+        return {"text": f"tracking {target}"}
+
+    def close(self):
+        pass
+```
 
 A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. After editing `perception.py` (such as capture logic or model weights), run `ludens perception reload` to hot-swap the process while keeping the historical timeline.
 
 ### 2. Perception Management and History Query Commands (`ludens observe`)
 
 ```sh
-# Lifecycle and auto-inject policy management
+# Lifecycle, state-machine control, and auto-inject policy management
 ludens perception status
+ludens perception state
+ludens perception transition track --args '{"target":"marker"}'
 ludens perception reload
 ludens perception stop
 ludens perception inject          # Show current auto-inject policy (on / off)
@@ -36,7 +72,7 @@ ludens observe --capability '*' --start 2026-10-27T01:00:00Z --limit 8
 ```
 
 - **Sampling decoupled from auto-injection**: `ludens perception inject off` only stops auto-appending new observations and sampler state to the model at each prompt start; background `sample()`, video recording, and explicit `observe` queries keep running, mid-turn observation is always performed explicitly via `observe`, and tool results are never appended with observations. `ludens perception stop` halts the sampling process and timeline writer entirely until the next `reload`.
-- **Query dimensions and pagination**: reads the latest record of the main channel `python/perception.py:Perception.sample` by default; `--capability` filters by another `@record` capability or takes `'*'` to query the whole timeline; `--at` returns the last record with `recordedAt` no later than the given time; `--start` / `--end` paginate in ascending `recordedAt` order over a closed interval (default `8` records, max `64`; pass the returned `nextAfter` to `--after` for the next page).
+- **Query dimensions and pagination**: reads the latest record of the main channel selected by `@observe` (the `Perception.sample` template) by default; `--capability` filters by another `@record` capability or takes `'*'` to query the whole timeline; `--at` returns the last record with `recordedAt` no later than the given time; `--start` / `--end` paginate in ascending `recordedAt` order over a closed interval (default `8` records, max `64`; pass the returned `nextAfter` to `--after` for the next page).
 - **Terminal image delivery**: adding `--images` in the agent's `bash` tool delivers images straight into the model through the OMP terminal image channel (max 32 images / 40 MiB per page).
 
 ### 3. Query Result Shape and Error Codes

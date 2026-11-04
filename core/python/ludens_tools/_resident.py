@@ -5,6 +5,7 @@ import importlib.abc
 import importlib.machinery
 import inspect
 import json
+import os
 from pathlib import Path
 import sys
 import threading
@@ -12,8 +13,11 @@ import time
 import types
 import uuid
 
-from ._context import scope
+from ._capabilities import load_function
+from ._context import current, scope
+from ._observation_history import validate_effect, validate_transition
 from ._recording import RecordingWindow
+from .client import Client
 
 
 class WorkspaceSourceLoader(importlib.machinery.SourceFileLoader):
@@ -43,8 +47,25 @@ class WorkspaceImports(importlib.abc.MetaPathFinder):
         return spec
 
 
+class _TopLevelEntry:
+    """Adapt a top-level @observe @record @capability function to the resident entry."""
+
+    def __init__(self, function):
+        self._function = function
+
+    def start(self, context):
+        pass
+
+    def close(self):
+        pass
+
+    def __getattr__(self, name):
+        if name == "sample" or name == self._function.__name__:
+            return self._function
+        raise AttributeError(name)
+
+
 def load_instance(message, role, class_name, method_name, *, recorded=False):
-    """Load exactly the supplied source and track imported workspace revisions."""
     workspace = Path(message["workspace"]).resolve()
     source = message.get("source")
     if message.get("sourceError"):
@@ -72,23 +93,159 @@ def load_instance(message, role, class_name, method_name, *, recorded=False):
     sys.modules[role] = module
     remember(Path(module.__file__), module.__ludens_source_bytes__)
     exec(compile(source, module.__file__, "exec"), module.__dict__)
-    instance = getattr(module, class_name)()
-    for name in ("start", method_name, "close"):
-        if not callable(getattr(instance, name, None)):
-            raise TypeError(f"{class_name} must implement {name}()")
-    method = getattr(instance, method_name)
-    if not getattr(method, "__ludens_capability__", False):
-        raise TypeError(f"{class_name}.{method_name} must use @capability")
-    if recorded and not getattr(method, "__ludens_recorded__", False):
-        raise TypeError(f"{class_name}.{method_name} must use @capability and @record")
-    if method.__ludens_identity__["id"] != f"python/{role}.py:{class_name}.{method_name}":
-        raise TypeError(f"The entry method must be defined as {role}.py:{class_name}.{method_name}")
+    klass = getattr(module, class_name, None)
+    if klass is not None:
+        instance = klass()
+        for name in ("start", method_name, "close"):
+            if not callable(getattr(instance, name, None)):
+                raise TypeError(f"{class_name} must implement {name}()")
+        method = getattr(instance, method_name)
+        if not getattr(method, "__ludens_capability__", False):
+            raise TypeError(f"{class_name}.{method_name} must use @capability")
+        if recorded and not getattr(method, "__ludens_recorded__", False):
+            raise TypeError(f"{class_name}.{method_name} must use @capability and @record")
+        if method.__ludens_identity__["id"] != f"python/{role}.py:{class_name}.{method_name}":
+            raise TypeError(f"The entry method must be defined as {role}.py:{class_name}.{method_name}")
+    else:
+        # Select the decorated observation entry, not a hardcoded function name.
+        functions = [value for value in vars(module).values()
+                     if callable(value) and getattr(value, "__ludens_observe__", False)
+                     and getattr(value, "__module__", None) == module.__name__]
+        if len(functions) != 1:
+            raise ValueError("Declare exactly one top-level @observe capability in perception.py")
+        function = functions[0]
+        if not getattr(function, "__ludens_capability__", False):
+            raise TypeError("@observe requires @capability on the same function")
+        if recorded and not getattr(function, "__ludens_recorded__", False):
+            raise TypeError("The observation entry must use @capability and @record")
+        instance, method = _TopLevelEntry(function), function
     if inspect.iscoroutinefunction(method):
         raise TypeError(f"{class_name}.{method_name} must be synchronous; use def, not async def")
     return instance
 
 
-def run_continuously(method, hz, context, stopped, send, *, role, halt_on_error=False, video_metrics=None):
+class StateMachine:
+    """One-process continuous state machine over the resident's own capabilities.
+
+    Every state runs inside this process, so instance attributes and workspace
+    module globals are zero-copy shared context across perception and action.
+    """
+
+    def __init__(self, instance, module, method, context):
+        self.instance = instance
+        self.module = module
+        self.workspace = context.get("workspace")
+        self.lock = threading.Lock()
+        self.active_callable = method
+        self.active_arguments = {}
+        identity = getattr(method, "__ludens_identity__", None)
+        self.active_state = identity["id"] if isinstance(identity, dict) else getattr(method, "__name__", None)
+        self.epoch = context.get("epoch")
+        self.input_generation = context.get("trace", {}).get("inputGeneration")
+        self.actuation_enabled = context.get("actuate", context.get("actuation_enabled"))
+
+    def state(self):
+        with self.lock:
+            return {"state": self.active_state, "arguments": dict(self.active_arguments), "epoch": self.epoch}
+
+    def set_lease(self, epoch, input_generation):
+        """Adopt the host-authorized control lease without restarting."""
+        with self.lock:
+            self.epoch = epoch
+            self.input_generation = input_generation
+            return {"epoch": self.epoch, "inputGeneration": self.input_generation}
+
+    def transition_to(self, to, arguments):
+        """Move straight to another capability; returns the updated state."""
+        if not isinstance(to, str) or not to:
+            raise ValueError("A transition requires a nonempty target capability")
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict) or not all(isinstance(key, str) for key in arguments):
+            raise TypeError("Transition arguments must be an object with string keys")
+        return self._set_state(self._resolve(to), arguments, to)
+
+    def tick(self):
+        """Run the active state once, then execute its effects and transition."""
+        with self.lock:
+            active_callable, active_arguments = self.active_callable, self.active_arguments
+        result = active_callable(**active_arguments)
+        if not isinstance(result, dict):
+            return result
+        effect, transition = result.get("effect"), result.get("transition")
+        # Envelope validation applies even when the capability is not @recorded.
+        if effect is not None:
+            validate_effect(effect)
+        if transition is not None:
+            validate_transition(transition)
+        if effect is not None:
+            self._execute_effect(effect)
+        if transition is not None:
+            self._apply_transition(transition)
+        return result
+
+    def _set_state(self, target, arguments, fallback):
+        with self.lock:
+            self.active_callable = target
+            self.active_arguments = dict(arguments)
+            identity = getattr(target, "__ludens_identity__", None)
+            self.active_state = identity["id"] if isinstance(identity, dict) else fallback
+            return {"state": self.active_state, "arguments": dict(self.active_arguments), "epoch": self.epoch}
+
+    def _resolve(self, name):
+        active_module = sys.modules.get(getattr(self.active_callable, "__module__", ""))
+        for owner in (self.instance, active_module, self.module):
+            if owner is not None:
+                candidate = getattr(owner, name, None)
+                if callable(candidate) and getattr(candidate, "__ludens_capability__", False):
+                    return candidate
+        if isinstance(name, str) and name.startswith("python/"):
+            relative, separator, function = name.removeprefix("python/").rpartition(":")
+            if separator and relative.endswith(".py") and function.isidentifier():
+                return load_function(self.workspace, relative, function)
+        raise ValueError(f"Unknown transition target capability: {name}")
+
+    def _execute_effect(self, effect):
+        context = current()
+        socket_path = context.get("socket_path") or os.environ.get("LUDENS_SOCKET")
+        with self.lock:
+            epoch, input_generation = self.epoch, self.input_generation
+        for item in ([effect] if isinstance(effect, dict) else effect):
+            target = item["id"]
+            arguments = item["arguments"] if item.get("arguments") is not None else (item.get("args") or {})
+            # Actuation needs the control lease, a reachable host socket, or
+            # an in-process python/ capability.
+            if not target.startswith("python/") and epoch is None and self.actuation_enabled is False:
+                continue
+            if not (target.startswith("python/") or epoch is not None or socket_path):
+                continue
+            trace = dict(context.get("trace", {}))
+            trace.pop("inputGeneration", None)
+            if input_generation:
+                trace["inputGeneration"] = input_generation
+            # The lease epoch and inputGeneration must win over the tick's own.
+            with scope({**context, "trace": trace, "epoch": epoch}):
+                try:
+                    Client().call(target, arguments)
+                except Exception as error:
+                    if "STALE_EPOCH" in str(error) or "STALE_INPUT_GENERATION" in str(error):
+                        with self.lock:
+                            if self.epoch == epoch:
+                                self.epoch = None
+                                self.input_generation = None
+                        continue
+                    raise
+
+    def _apply_transition(self, transition):
+        if isinstance(transition, str):
+            self._set_state(self._resolve(transition), {}, transition)
+            return
+        to = transition["to"]
+        arguments = transition["arguments"] if transition.get("arguments") is not None else (transition.get("args") or {})
+        self._set_state(self._resolve(to), arguments, to)
+
+
+def run_continuously(method, hz, context, stopped, send, *, role, halt_on_error=False, video_metrics=None, tick=None):
     """Run serial steps without overlap or catch-up, retaining bounded diagnostics."""
     previous_status = None
     purpose = f"continuous-{role}"
@@ -111,7 +268,8 @@ def run_continuously(method, hz, context, stopped, send, *, role, halt_on_error=
                 trace["parentSpanId"] = context["trace"]["spanId"]
             try:
                 with scope({**context, "trace": trace}):
-                    method()  # @record owns persistence; ordinary returns stay local.
+                    step = tick if tick is not None else method
+                    step()  # @record owns persistence; ordinary returns stay local.
                 status = ("ready", None)
             except Exception as error:
                 state = "unimplemented" if isinstance(error, NotImplementedError) else "error"

@@ -41,6 +41,7 @@ export interface ObservationQuery {
 export interface PerceptionRecord extends PerceptionSnapshot {
   text: string; media: Observation[];
   data?: unknown; space?: unknown;
+  effect?: unknown; transition?: unknown;
 }
 export interface TimelineAppend {
   sample: unknown; identity: { id: string; codeSHA?: string; origin?: unknown };
@@ -82,6 +83,8 @@ export class PerceptionRuntime {
   private readonly clock: Clock;
   // Only identities for explicitly delivered images, keyed by the CLI's record marker.
   private deliveredMedia = new Map<string, TimelineMedia>();
+  private observeCapability = "python/perception.py:Perception.sample";
+  private lease: { epoch: string | null; inputGeneration: string | null } = { epoch: null, inputGeneration: null };
 
   constructor(private readonly options: {
     workspace: string; runDir: string; env?: NodeJS.ProcessEnv; record: RecordEvent; clock?: Clock;
@@ -120,6 +123,36 @@ export class PerceptionRuntime {
     const result = this.reading.then(() => this.read(signal, parent, query));
     this.reading = result.catch(() => {});
     return result;
+  }
+
+  async stateMachine(signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
+    const worker = this.worker;
+    if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
+    const reply = await this.request(worker, { action: "state" }, 5000, signal);
+    if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
+    return reply.result as { state: string; arguments: Record<string, unknown>; epoch: string | null };
+  }
+
+  async transitionState(to: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
+    const worker = this.worker;
+    if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
+    const reply = await this.request(worker, { action: "transition", to, arguments: args }, 5000, signal);
+    if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
+    return reply.result as { state: string; arguments: Record<string, unknown>; epoch: string | null };
+  }
+
+  setLease(epoch: string | null, inputGeneration: string | null = null, signal?: AbortSignal): Promise<unknown> {
+    const operation = this.transition.then(async () => {
+      signal?.throwIfAborted();
+      this.lease = { epoch, inputGeneration };
+      const worker = this.worker;
+      if (!worker || worker.expectedExit) return this.lease;
+      const reply = await this.request(worker, { action: "lease", ...this.lease }, 5000, signal);
+      if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
+      return reply.result;
+    });
+    this.transition = operation.catch(() => {});
+    return operation;
   }
 
   async append(input: TimelineAppend, signal: AbortSignal): Promise<unknown> {
@@ -171,7 +204,7 @@ export class PerceptionRuntime {
       if (!reply.ok) return this.finish(failure("QUERY_FAILED",
         `${reply.error?.type}: ${reply.error?.message}`), started, trace);
       const value = reply.result as { records: Array<PerceptionSnapshot & {
-        text: string; data?: unknown; space?: unknown;
+        text: string; data?: unknown; space?: unknown; effect?: unknown; transition?: unknown;
         media: { path?: string; mediaType: string; data?: string; timeline?: Observation["timeline"] }[];
       }>; query: ObservationQuery; hasMore: boolean; nextAfter?: number; unchanged?: boolean; sequence?: number; availability?: PerceptionRead["availability"] };
       const records: PerceptionRecord[] = value.records.map(({ media, ...record }) => ({
@@ -186,7 +219,8 @@ export class PerceptionRuntime {
       query = value.query;
       const latest = query.at === undefined && query.start === undefined && query.end === undefined
         && query.after === undefined && query.id === undefined;
-      const mainLatest = latest && (!query.capability || query.capability === "python/perception.py:Perception.sample");
+      const mainLatest = latest && (!query.capability || query.capability === this.observeCapability
+        || query.capability === "python/perception.py:Perception.sample");
       // Explicit history survives sampler failure/reload; current perception must
       // never present a previous generation's record as a fresh observation.
       const currentRecords = mainLatest ? records.filter(record => record.generation === worker.generation) : records;
@@ -273,10 +307,11 @@ export class PerceptionRuntime {
     try {
       const reply = await this.request(worker, { action: "start", workspace: this.workspace,
         runDir: this.options.runDir, generation, source: source?.toString("utf8"), sourceError, trace: backgroundTrace,
-        diagnostics: this.options.diagnostics ?? "normal" },
+        diagnostics: this.options.diagnostics ?? "normal", ...this.lease },
       this.options.startTimeoutMs ?? 30_000);
       if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
-      const result = reply.result as { sampleHz?: number; history: PerceptionStatus["history"]; state: PerceptionStatus["state"]; error?: string };
+      const result = reply.result as { sampleHz?: number; history: PerceptionStatus["history"]; state: PerceptionStatus["state"]; error?: string; observeCapability: string };
+      this.observeCapability = result.observeCapability;
       this.setStatus({ ...this.current, sampleHz: result.sampleHz, history: this.current.history ?? result.history,
         ...(this.current.state === "loading" ? { state: result.state, error: result.error } : {}) }, trace);
     } catch (error) {
@@ -354,6 +389,8 @@ export function perceptionInput(read: PerceptionRead) {
     sampling: record.sampling, text: record.text,
     ...(record.data === undefined ? {} : { data: record.data }),
     ...(record.space === undefined ? {} : { space: record.space }),
+    ...(record.effect === undefined ? {} : { effect: record.effect }),
+    ...(record.transition === undefined ? {} : { transition: record.transition }),
     media: record.media.map(({ id, mediaType }) => ({ id, mediaType })),
   })), hasMore: read.hasMore,
     ...(read.unchanged === undefined ? {} : { unchanged: read.unchanged }),

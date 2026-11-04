@@ -10,12 +10,13 @@ import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
+import { pythonExecutable } from "@ludens/protocol/python";
 
 test("observe wire schema accepts unused fields and real OMP calls deliver requested historical pixels", async () => {
   const workspace = await mkdtemp(join(tmpdir(), "ludens-observe-schema-")), runDir = join(workspace, "logs", "run");
   const path = join(workspace, "historical.png");
   await writeFile(path, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==", "base64"));
-  const seed = Bun.spawn(["python3", "-B", "-c", `import json, sys
+  const seed = Bun.spawn([pythonExecutable(), "-B", "-c", `import json, sys
 from unittest.mock import patch
 from ludens_tools._observation_history import ObservationHistory, timestamp
 history = ObservationHistory(sys.argv[1])

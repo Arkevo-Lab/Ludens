@@ -99,9 +99,15 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       throw new Error("Usage: ludens perception inject [on|off] (automatic context only; recording continues)");
     }
     if (!runtime.perception) throw new Error("Perception is not configured");
-    const usage = "Usage: ludens perception status|reload|stop|observe | inject [on|off]; stop ends recording, inject off only disables automatic context";
+    const usage = "Usage: ludens perception status|state|reload|stop|observe | transition <target> [--args '<JSON object>' | --file <arguments.json>] | inject [on|off]; stop ends recording, inject off only disables automatic context";
+    if (argv[0] === "transition") {
+      if (argv.length !== 2 || !argv[1]) throw new Error(usage);
+      const args = (request.arguments ?? {}) as Record<string, unknown>;
+      return runtime.perception.transitionState(argv[1], args, signal);
+    }
     if (argv.length !== 1) throw new Error(usage);
     if (argv[0] === "status") return runtime.perception.status();
+    if (argv[0] === "state") return runtime.perception.stateMachine(signal);
     if (argv[0] === "reload") return runtime.perception.reload(trace);
     if (argv[0] === "stop") { await runtime.perception.stop(); return runtime.perception.status(); }
     if (argv[0] === "observe") return runtime.perception.observe(signal, trace, request.query);

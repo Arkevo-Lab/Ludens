@@ -19,6 +19,7 @@ export interface PythonCapability {
   origin: { path: string; function: string; line: number };
   codeSHA: string;
   recorded?: boolean;
+  observe?: boolean;
   eval: PythonCapabilityEval | null;
 }
 
@@ -32,6 +33,7 @@ export interface PythonDiagnostic {
 export interface PythonDiscovery {
   capabilities: PythonCapability[];
   diagnostics: PythonDiagnostic[];
+  observeCapability?: string | null;
 }
 
 export interface PythonInvocationOptions {

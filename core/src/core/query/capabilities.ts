@@ -16,6 +16,7 @@ export interface CapabilityEntry {
   description: string;
   requiresControl: boolean | null;
   readOnly: boolean | null;
+  observe?: boolean;
   evalStatus?: CapabilityEvalStatus | null;
   evalId?: string | null;
   evalRewards?: Record<string, number> | null;
@@ -79,6 +80,7 @@ async function workspaceCapabilities(workspace: string, signal?: AbortSignal) {
     const id = `python/${item.origin.path}:${item.origin.function}`;
     return { id, kind: "workspace",
       description: item.description, requiresControl: null, readOnly: null,
+      ...(typeof item.observe === "boolean" ? { observe: item.observe } : {}),
       ...resolveCapabilityEval({ codeSHA: typeof item.codeSHA === "string" ? item.codeSHA : "",
         eval: evalBinding(item.eval) }, latest[id]) } as CapabilityEntry;
   });

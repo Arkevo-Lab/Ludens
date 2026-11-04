@@ -110,6 +110,28 @@ class Client:
             return env.help(capability_id)
         return self._request("help", id=capability_id)
 
+    def state(self) -> Any:
+        """Inspect the active capability and arguments of the resident perception state machine."""
+        context = self._context()
+        return request(context["socket_path"], {
+            "kind": "perception", "argv": ["state"],
+            **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
+        }, context["timeout"])
+
+    def transition(self, to: str, arguments: dict[str, Any] | None = None) -> Any:
+        """Transition the resident perception state machine to another capability."""
+        if not isinstance(to, str) or not to:
+            raise ValueError("A transition requires a nonempty target capability")
+        if arguments is None:
+            arguments = {}
+        if not isinstance(arguments, dict) or not all(isinstance(key, str) for key in arguments):
+            raise TypeError("Transition arguments must be a JSON object")
+        context = self._context()
+        return request(context["socket_path"], {
+            "kind": "perception", "argv": ["transition", to], "arguments": arguments,
+            **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
+        }, context["timeout"])
+
     def observe(self, query: dict[str, Any] | None = None) -> Any:
         """Read timeline history without sampling; returns the same envelope as ludens observe."""
         context = self._context()

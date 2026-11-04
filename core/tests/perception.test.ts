@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PerceptionRuntime, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/core/subsystems/perception.ts";
+import { createTestRuntime } from "./runtime-fixture.ts";
 
 async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv } = {}) {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-perception-")));
@@ -334,6 +335,98 @@ console.log(JSON.stringify(await runtime.reload())); process.exit(0);`);
       if (!closed) await Bun.sleep(10);
     }
     expect(closed).toBe(String(status.pid));
+  } finally { await f.cleanup(); }
+});
+
+
+test("decorated observation channels bind default reads and control leases survive reload", async () => {
+  const f = await fixture();
+  const host = createTestRuntime({ controllers: [] });
+  host.attach({ perception: f.runtime });
+  try {
+    await f.load(`from ludens_tools import capability, observe, record
+from ludens_tools._context import current
+@observe
+@record
+@capability
+def inspect() -> dict:
+    """A named observation entry."""
+    assert current()["epoch"] is None
+    assert "epoch" not in current()["trace"]
+    return {"text": "custom observation"}
+`);
+    expect((await f.observe()).records[0]?.capability).toBe("python/perception.py:inspect");
+    await host.start();
+    expect((await f.runtime.stateMachine()).epoch).toBe(host.status().epoch);
+    await f.runtime.reload();
+    await f.wait(() => f.runtime.status().state !== "loading");
+    expect((await f.runtime.stateMachine()).epoch).toBe(host.status().epoch);
+    expect(f.runtime.status().state).toBe("ready");
+    await host.stop();
+    expect((await f.runtime.stateMachine()).epoch).toBeNull();
+    await writeFile(join(f.workspace, "sensing.py"), `from ludens_tools import capability, observe, record
+@observe
+@record
+@capability
+def sense() -> dict:
+    """An observation channel in another module."""
+    return {"text": "external observation"}
+`);
+    await f.load(source('        from sensing import sense\n        sense()\n        return {"text": "entry"}'));
+    expect((await f.observe()).records[0]?.capability).toBe("python/sensing.py:sense");
+    const previous = (await f.observe()).records[0]!;
+    await f.load(source('        raise RuntimeError("unavailable")'));
+    expect((await f.observe()).ok).toBe(false);
+    expect((await f.observe({ id: previous.id })).records[0]?.text).toBe("external observation");
+  } finally {
+    await host.close();
+    await f.cleanup();
+  }
+});
+
+test("observe envelopes preserve effects and drive in-process state transitions", async () => {
+  const f = await fixture({ env: { LUDENS_PERCEPTION_SAMPLE_HZ: "5" } });
+  try {
+    await f.load(`from ludens_tools import capability, observe, record
+class Perception:
+    def start(self, context):
+        self.shared = {"ticks": 0}
+    @observe
+    @record
+    @capability
+    def sample(self):
+        self.shared["ticks"] += 1
+        return {"text": "observed", "data": self.shared,
+                "effect": {"id": "controller/test.noop", "arguments": {"value": 1}},
+                "transition": {"to": "hold", "arguments": {"mode": "automatic"}}}
+    @capability
+    def hold(self, mode: str):
+        return {"text": mode, "data": self.shared}
+    def close(self):
+        pass
+`);
+    let state = await f.runtime.stateMachine();
+    const deadline = Date.now() + 4000;
+    // The resident Python loop runs on a real scheduler outside Bun's timer control.
+    while (state.state !== "python/perception.py:Perception.hold" && Date.now() < deadline) {
+      await Bun.sleep(20);
+      state = await f.runtime.stateMachine();
+    }
+    expect(state).toMatchObject({ state: "python/perception.py:Perception.hold", arguments: { mode: "automatic" }, epoch: null });
+    const transitioned = await f.runtime.transitionState("hold", { mode: "manual" });
+    expect(transitioned).toMatchObject({ state: "python/perception.py:Perception.hold", arguments: { mode: "manual" } });
+    await f.runtime.setLease("epoch-1", "generation-1");
+    expect((await f.runtime.stateMachine()).epoch).toBe("epoch-1");
+    await f.runtime.setLease(null);
+    const read = await f.observe({ capability: "python/perception.py:Perception.sample" });
+    expect(read.records[0]).toMatchObject({
+      effect: { id: "controller/test.noop", arguments: { value: 1 } },
+      transition: { to: "hold", arguments: { mode: "automatic" } },
+    });
+    expect(perceptionInput(read).records[0]).toMatchObject({
+      effect: { id: "controller/test.noop", arguments: { value: 1 } },
+      transition: { to: "hold", arguments: { mode: "automatic" } },
+    });
   } finally { await f.cleanup(); }
 });
 
