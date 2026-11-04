@@ -57,10 +57,18 @@ test("capability catalog reads the selected run-free workspace and real static P
     assert.equal(page.sources.device.status, "available");
     assert.ok(Number.isFinite(Date.parse(page.checkedAt)));
     assert.deepEqual(page.deviceSnapshot, { generatedAt: "2026-10-30T00:00:00.000Z", drivers: [{ id: "recorded-driver", version: "recorded-version" }] });
-    assert.deepEqual(page.groups[1].items, [{ id: "python/actions.py:clamp", kind: "workspace",
-      description: "Clamp a value to the unit interval.", requiresControl: null, readOnly: null,
-      evalStatus: "missing", evalId: null, evalRewards: null, evalEvaluatedAt: null, evalError: null,
-      evalEnv: null, evalEnvId: null, observe: false }]);
+    assert.equal(page.groups[1].items.length, 1);
+    assert.equal(page.groups[1].items[0].id, "python/actions.py:clamp");
+    assert.equal(page.groups[1].items[0].kind, "workspace");
+    assert.equal(page.groups[1].items[0].description, "Clamp a value to the unit interval.");
+    assert.equal(page.groups[1].items[0].evalStatus, "missing");
+    assert.equal(page.groups[1].items[0].evalId, null);
+    assert.equal(page.groups[1].items[0].evalEnv, null);
+    assert.equal(page.groups[1].items[0].evalEnvId, null);
+    assert.equal(page.groups[1].items[0].observe, false);
+    assert.deepEqual(page.groups[1].items[0].origin, { path: "actions.py", function: "clamp", line: 5 });
+    assert.deepEqual(page.envs, []);
+    assert.deepEqual(page.evalSummary, { missing: 1, unverified: 0, stale: 0, adapting: 0, failed: 0, verified: 0 });
     await assert.rejects(access(join(f.base, "MUST_NOT_EXECUTE")));
     await assert.rejects(access(join(f.base, "SHADOW_EXECUTED")));
     await assert.rejects(capabilities("missing", f.workspace, f.root), /ENOENT/);
@@ -112,20 +120,27 @@ def eval_clamp() -> dict[str, float]:
     const stale = await workspaceItem();
     assert.equal(stale.evalStatus, "stale");
     assert.equal(stale.evalId, evalId);
+    assert.deepEqual(stale.staleReasons, ["capability", "eval"]);
     assert.deepEqual(stale.evalRewards, { accuracy: 1, samples: 3 });
 
     await writeFile(source, declared);
+    const adaptingRecord = { runId: "eval-run-2", capabilityId, evalId, capabilityCodeSHA: codeSHA, evalCodeSHA: codeSHA,
+      evaluatedAt, durationMs: 4, outcome: "failed", rewards: { accuracy: 0.5, samples: 4 },
+      adaptation: { reason: "False positive on dark transition", records: ["rec-1"], adaptedAt: evaluatedAt, evalCodeSHA: codeSHA },
+      error: { type: "EvalAdapting", message: "False positive on dark transition" } };
     await json(join(f.workspace, ".ludens/evals/latest.json"), { version: 1, capabilities: {
-      [capabilityId]: { runId: "eval-run-2", capabilityId, evalId, capabilityCodeSHA: codeSHA, evalCodeSHA: codeSHA,
-        evaluatedAt, durationMs: 4, outcome: "failed", rewards: { accuracy: 0.5, samples: 4 },
-        adaptation: { reason: "False positive on dark transition", records: ["rec-1"], adaptedAt: evaluatedAt, evalCodeSHA: codeSHA },
-        error: { type: "EvalAdapting", message: "False positive on dark transition" } },
+      [capabilityId]: adaptingRecord,
     } });
-    const adapting = await workspaceItem();
+    await json(join(f.workspace, ".ludens/evals/runs/eval-run-2.json"), adaptingRecord);
+    const adaptingPage = await capabilities("ws-capabilities", f.workspace, f.root);
+    const adapting = adaptingPage.groups[1].items[0];
     assert.equal(adapting.evalStatus, "adapting");
     assert.equal(adapting.evalId, evalId);
     assert.deepEqual(adapting.evalRewards, { accuracy: 0.5, samples: 4 });
     assert.equal(adapting.evalError, "EvalAdapting: False positive on dark transition (records: rec-1)");
+    assert.equal(adapting.history?.length, 1);
+    assert.equal(adapting.history?.[0].runId, "eval-run-2");
+    assert.deepEqual(adaptingPage.evalSummary, { missing: 0, unverified: 0, stale: 0, adapting: 1, failed: 0, verified: 0 });
   } finally { clearCatalogCache(); await f.cleanup(); }
 });
 
