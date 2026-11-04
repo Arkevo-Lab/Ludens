@@ -1,5 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from 'electron'
-import { mkdirSync, realpathSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
@@ -112,7 +112,10 @@ if (values.help) {
       } })
       pet.configureActivity(source)
       void source.start(workspace)
-      const icon = nativeImage.createFromPath(resolve(here, '../public/companion/ludens/icons/icon-tray.png')).resize({ width: 20, height: 20 })
+      const companionAssets = existsSync(resolve(here, '../public/companion'))
+        ? resolve(here, '../public/companion')
+        : resolve(here, '../../public/companion')
+      const icon = nativeImage.createFromPath(resolve(companionAssets, 'ludens/icons/icon-tray.png')).resize({ width: 20, height: 20 })
       tray = new Tray(icon)
       tray.setToolTip('Ludens Pet · Ludens')
       tray.on('click', showOwner)
