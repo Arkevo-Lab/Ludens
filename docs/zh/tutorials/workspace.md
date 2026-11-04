@@ -45,7 +45,7 @@ workspace/
 │       ├── sessions/        # OMP 会话 JSONL 及其同名资源目录
 │       └── current-session.json # 默认续接会话指针
 └── logs/
-    ├── <run-id>/            # 单次 Host 运行或 Benchmark 试验的事件、流与评分记录
+    ├── <run-id>/            # 单次 Host 运行的事件与流记录
     └── background/          # launchd 后台服务日志与状态
 ```
 

@@ -79,7 +79,7 @@ async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project
         const manifest: Manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
         if (manifest.workspaceId && !archiveIds.has(manifest.workspaceId)) throw new Error("运行记录与工作区身份不一致");
         return { id, ...(manifest.kind ? { kind: manifest.kind } : {}), model: manifest.model,
-          seconds: manifest.seconds, drivers: manifest.drivers, ...(manifest.benchmark ? { benchmark: manifest.benchmark } : {}) };
+          seconds: manifest.seconds, drivers: manifest.drivers };
       } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
     }));
     project.runs = runs.filter(item => item !== null);
@@ -160,14 +160,6 @@ export function canControl(
     selectedEpoch === status.epoch
   );
 }
-export function selectRunEvents(manifest: Manifest, events: Event[], epoch?: string) {
-  const selected = selectCycle(events, epoch);
-  // Offline fixtures have trace epochs, but do not claim a Runtime takeover.
-  // Their original run is still inspectable as a whole, without inventing cycles.
-  if (manifest.kind === "benchmark" && !selected.cycles.length && !epoch)
-    return { ...selected, events };
-  return selected;
-}
 const prepareRun = (index: LogIndex, signal?: AbortSignal) => prepareArchive(index, { kind: "run", signal,
   step: signal => refreshRunProjection(index, { maxEvents: 2000, ingest: false, signal }),
   progress: () => runProgress(index) });
@@ -187,7 +179,7 @@ export async function getRun(
   const latest = latestGameRun(projects.find((p) => p.id === project))?.id;
   let live: LiveStatus | null = null;
   // Only the newest manifest may designate a live socket. Archived runs never contact hosts.
-  if (latest === run && manifest.kind !== "benchmark" && manifest.workspaceId === project)
+  if (latest === run && manifest.workspaceId === project)
     live = await hostRequest(manifest.socket, {
       kind: "status",
       argv: [],
@@ -227,7 +219,7 @@ export async function controlState(project: string, run: string, epoch: string, 
   const path = await resolveRun(project, run, root);
   const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as Manifest;
   const latest = latestGameRun((await catalog(root)).find(item => item.id === project))?.id;
-  const live = latest === run && manifest.kind !== "benchmark" && manifest.workspaceId === project
+  const live = latest === run && manifest.workspaceId === project
     ? await hostRequest(manifest.socket, { kind: "status", argv: [] }).catch(() => null) : null;
   return { manifest, live, selectedEpoch: epoch,
     controlAllowed: !!latest && !!canControl(latest, run, live, epoch) };

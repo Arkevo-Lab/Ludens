@@ -133,7 +133,7 @@ def main():
 if __name__ == "__main__":
     # This is a package-internal script, not a directory of top-level user
     # modules. Leaving its folder on sys.path shadows namespace packages such
-    # as workspace/benchmarks/ with ludens_tools/benchmarks.py.
+    # as workspace/programs/ with ludens_tools modules of the same name.
     package_directory = Path(__file__).resolve().parent
     sys.path[:] = [entry for entry in sys.path if Path(entry).resolve() != package_directory]
     sys.exit(main())

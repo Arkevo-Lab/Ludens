@@ -7,7 +7,7 @@ Ludens (RSA, Recursive Self-Adaptation) decouples device drivers, the Agent exec
 | Component | Process Shape and Core Responsibilities |
 | --- | --- |
 | `baseware/` | **Standalone device service**: loads built-in or external Drivers, provides a unified Controller capability catalog, control-lease (`epoch`) arbitration, input cancellation, and device fact logs; exposed via CLI, TS/Python APIs, and MCP. |
-| `core/` | **Adaptive Harness** (`@ludens/core`): manages workspace configuration and lifecycle, capability discovery and routing, resident perception (`perception.py`) and resident action (`action.py`) Python subprocesses, Harbor evaluation, and run-log archiving. |
+| `core/` | **Adaptive Harness** (`@ludens/core`): manages workspace configuration and lifecycle, capability discovery and routing, resident perception (`perception.py`) and resident action (`action.py`) Python subprocesses, workspace-native capability evaluation (`ludens eval`), and run-log archiving. |
 | **Shiori** | **Sole execution kernel (role name)**: implemented by the Ludens Host Runtime; uniformly governs control cycles, time/request budgets, signal cancellation, and exit cleanup. Agent mode mounts **OMP 18.14.0**; plain evaluation programs, Verifiers, and Metrics share the same lifecycle without starting a model. |
 | `app/` | **Local console service (`@ludens/app`, web)**: builds and queries log indexes through a dedicated Node Worker, serving realtime activity streams, spacetime video replay, run statistics, doc browsing, the capability catalog, and human-handover entry points. |
 | `app/desktop/` | **Optional desktop companion (Ludens Pet)**: Electron desktop shell; the main window reuses the same Dashboard view, while the native transparent pet window and audio engine incrementally consume the same activity log. |
@@ -40,14 +40,14 @@ The repository is organized as a Bun workspace with `@ludens/protocol` as the ze
 
 | Package / Directory | Layer and Responsibility |
 | --- | --- |
-| `protocol/` (`@ludens/protocol`) | **Contract foundation**: RPC schemas, run-event types, Timeline / Archive formats, Benchmark DTOs, and Dashboard activity projections; consumed by every other package via workspace imports only. |
+| `protocol/` (`@ludens/protocol`) | **Contract foundation**: RPC schemas, run-event types, Timeline / Archive formats, and Dashboard activity projections; consumed by every other package via workspace imports only. |
 | `core/src/core/shiori/` | **Control kernel**: `epoch` control leases, time/request budgets, program execution, and cancellation; no dependency on OMP, CLI, or sockets. |
-| `core/src/core/storage/` | **Workspace and fact storage**: `.ludens/` identity and state, `logs/<run-id>/` event streams and archives, Benchmark trial/verification storage. |
+| `core/src/core/storage/` | **Workspace and fact storage**: `.ludens/` identity and state, `logs/<run-id>/` event streams and archives. |
 | `core/src/core/subsystems/` | **Workspace resident and device subsystems**: Python perception/action workers, `@capability` discovery, Baseware device sessions. |
 | `core/src/core/agent-omp/` | **OMP AgentRunner implementation**: OMP session assembly, the Ludens extension, and model-trace recording behind a narrow `ExtensionHost` interface. |
 | `core/src/core/query/` | **Query and projection engine**: log/run/operation indexes, cold builds, activity/replay/telemetry projections consumed by the Dashboard and Ludens Pet. |
-| `core/src/daemon/`, `core/src/bench/`, `core/src/perf/`, `core/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, Harbor evaluation runner (`bench`), subsystem performance baselines (`perf`), and the pure CLI front end. |
-| `app/shell/` + `app/features/` + `app/perf/` | **Console views and app perf** (loop workbench in `shell/`, `index-memory` baseline in `perf/`): the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `benchmark`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `app/components/ui/`. |
+| `core/src/daemon/`, `core/src/perf/`, `core/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, subsystem performance baselines (`perf`), and the pure CLI front end. |
+| `app/shell/` + `app/features/` + `app/perf/` | **Console views and app perf** (loop workbench in `shell/`, `index-memory` baseline in `perf/`): the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `app/components/ui/`. |
 
 
 ## Devices and Unified Capabilities
@@ -112,8 +112,8 @@ Inside an `auto` control cycle, the outer loop runs as follows:
 
 Ludens consists of a TypeScript host (`core/src/`) plus a Python toolkit (`core/python/ludens_tools/`):
 
-- **TypeScript side**: owns the Shiori runtime, control leases, OMP session extensions, cross-process RPC, and CLI / Benchmark orchestration.
-- **Python side**: owns `@capability` static discovery and dynamic execution, the resident `Perception` / `Action` loops, PyAV video-segment encoding, on-demand cold-frame decoding, and `current_trial()` evaluation evidence registration. Continuous perception ingests Baseware's spooled media references (`_StreamMediaRef`) directly from disk without inline Base64 IPC round-trips, automatically binds device observation `sources` provenance onto the timeline record, and short-circuits unchanged latest-frame `Client().observe()` polls via `ifNoneMatchSequence`. Video encode/decode happens inside the resident perception process without introducing a separate streaming service.
+- **TypeScript side**: owns the Shiori runtime, control leases, OMP session extensions, cross-process RPC, and CLI orchestration.
+- **Python side**: owns `@capability` static discovery and dynamic execution, the resident `Perception` / `Action` loops, PyAV video-segment encoding, and on-demand cold-frame decoding. Continuous perception ingests Baseware's spooled media references (`_StreamMediaRef`) directly from disk without inline Base64 IPC round-trips, automatically binds device observation `sources` provenance onto the timeline record, and short-circuits unchanged latest-frame `Client().observe()` polls via `ifNoneMatchSequence`. Video encode/decode happens inside the resident perception process without introducing a separate streaming service.
 
 ## Capability Persistence Boundaries
 
@@ -129,7 +129,7 @@ The state stores inside a workspace each have their own role and never redundant
 | --- | --- |
 | `.ludens/timeline/` | **Sole originals of capability observations and media**: maintained by the single-writer resident perception process; holds `@record` record metadata, segmented fMP4 video (`video/`, five minutes per segment by default, finalized after ten seconds idle), and SHA-256-deduplicated non-video media (`objects/`). |
 | `.ludens/archive/` | **Structured text archive of models and tools**: deduplicated cross-request and cross-run by content hash into `objects/<sha256>.json.gz` plus streaming payloads; all embedded media reference `.ludens/timeline/` by reference. |
-| `logs/<run-id>/` | **Single-run event stream**: holds `manifest.json`, `events.jsonl`, `streams/`, and Benchmark `trial.json` / `verifier/`; links Baseware, Archive, and Timeline via `eventSources` and content references. |
+| `logs/<run-id>/` | **Single-run event stream**: holds `manifest.json`, `events.jsonl`, and `streams/`; links Baseware, Archive, and Timeline via `eventSources` and content references. |
 | `.ludens/shiori/` | **OMP-native session store**: holds `sessions/*.jsonl` and the current resume pointer, managed by the OMP SessionManager. |
 | `.ludens/skill-versions/` | **Skill and memory snapshots**: content versions recorded during runs remain inside the workspace and move with its directory. |
 

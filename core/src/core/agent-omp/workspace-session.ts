@@ -190,8 +190,7 @@ export async function importLegacyWorkspaceState(workspace: string, options: {
   if (selected) await writeCurrentSession(state, selected);
   const result = { version: 1, workspaceId: state.id, source, previousWorkspace: canonicalPrevious,
     sessions: sessions.length, copiedFiles: copies.length, importedAt: new Date().toISOString(),
-    limitations: ["Only sessions and skill snapshots are imported; old run provenance, event-source paths and recording references are not rewritten, and external media are not copied. Old recordings may be unavailable after moving the workspace.",
-      "Legacy benchmark records are not rewritten; path-owned trials still require their original workspace path."] };
+    limitations: ["Only sessions and skill snapshots are imported; old run provenance, event-source paths and recording references are not rewritten, and external media are not copied. Old recordings may be unavailable after moving the workspace."] };
   await writeFile(receipt, JSON.stringify(result, null, 2) + "\n", { flag: "wx" });
   return result;
 }

@@ -718,7 +718,7 @@ test("control identity reads never create or migrate a cold archive index", asyn
     const workspace = join(root, "workspace"), run = join(workspace, "logs", "run"), index = join(run, ".dashboard-index");
     await registerFixture(root, "game", workspace);
     await mkdir(index, { recursive: true });
-    await writeFile(join(run, "manifest.json"), JSON.stringify({ runId: "run", kind: "benchmark", drivers: [] }));
+    await writeFile(join(run, "manifest.json"), JSON.stringify({ runId: "run", drivers: [] }));
     await writeFile(join(index, ".writing"), "old interrupted cache");
     const result = await controlState("game", "run", "epoch", root);
     assert.equal(result.controlAllowed, false);

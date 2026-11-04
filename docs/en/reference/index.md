@@ -1,6 +1,6 @@
 # Reference · Components and Contracts
 
-This directory defines the Ludens system architecture, process responsibility boundaries, device control protocols, run-log archive formats, and Harbor evaluation contracts. The repository source implementation is the sole authority for all contracts.
+This directory defines the Ludens system architecture, process responsibility boundaries, device control protocols, and run-log archive formats. The repository source implementation is the sole authority for all contracts.
 
 ## Architecture Layers and Reference Map
 
@@ -9,14 +9,12 @@ This directory defines the Ludens system architecture, process responsibility bo
 | **System topology and control loop** | Five-component boundaries, the Shiori execution kernel, OMP session assembly, control `epoch`, and cross-process store ownership | [Architecture and Boundaries](architecture.md) | `core/src/core/shiori/runtime.ts` · `core/src/core/agent-omp/session.ts` |
 | **Device services and capability catalog** | CUA-native tool structure, the `ExecutionResult` envelope, `requiresControl` arbitration, external driver package discovery and loading | [Baseware Philosophy and Capability Contracts](baseware.md) | `baseware/src/contracts.ts` · `baseware/src/catalog.ts` |
 | **Emulator wire communication** | TCP single-client line protocol, the `HELLO / OWN / APPLY / CAPTURE / TOUCH` instruction set and error codes | [Driver Bridge Protocol](driver-bridge-protocol.md) | `baseware/src/drivers/bridge.ts` · each emulator satellite repo's Provider |
-| **Subsystem performance baselines** | `test` / `perf` / `bench` tier boundary, and the `control-handoff`, `perception-lifecycle`, `video-storage` (core) and `index-memory` (app) budgets | [Console debugging & verification](../tutorials/debugging-and-verification.md) | `core/src/perf/` · `app/perf/` |
+| **Subsystem performance baselines** | `test` / `perf` tier boundary, and the `control-handoff`, `perception-lifecycle`, `video-storage` (core) and `index-memory` (app) budgets | [Console debugging & verification](../tutorials/debugging-and-verification.md) | `core/src/perf/` · `app/perf/` |
 | **Observability and console consumption** | `normal / full` recording modes, `.ludens/timeline/` and `.ludens/archive/` storage, Trace pairing, Dashboard hot/cold indexes and replay | [Logging and Call Chains](logging.md) | `core/src/core/storage/events.ts` · `protocol/src/log-archive.ts` · `core/src/core/query/` |
 | **Console interface** | shadcn/ui primitives, Tailwind theme tokens and style layers, form and interaction conventions | [Dashboard UI](dashboard-ui.md) | `app/components/ui/` · `app/app/globals.css` |
-| **Evaluation and independent scoring** | Harbor 1.4 Native Profile, `task.toml / dataset.toml`, `current_trial()`, `reward.json`, and the built-in `ludens/capability-reuse` task | [Benchmark](benchmark.md) | `core/src/bench/` · `core/benchmarks/` |
 
 ## Reading Guide
 
 - **Adding a new emulator or hardware driver**: read [Driver packages and launch descriptors](baseware.md#driver-packages-and-launch-description) in Baseware Philosophy and Capability Contracts first, then implement the emulator-side TCP bridge and TypeScript Provider against the [Driver Bridge Protocol](driver-bridge-protocol.md).
 - **Understanding how the Agent perceives the environment and issues actions**: read [Session and Loop](architecture.md#session-and-loop), [Workspace and Capability Programming](../tutorials/workspace.md), and [Resident Perception and Action Loops](../tutorials/perception-and-action.md).
 - **Consuming run logs, debugging model context, or modifying the Dashboard**: read [Logging and Call Chains](logging.md).
-- **Writing new evaluation tasks or reviewing scoring results**: read [Benchmark](benchmark.md).

@@ -188,7 +188,7 @@ export async function perceptionRuntime(
     if (await realpath(path) !== path) return unavailable("scope-mismatch");
     const manifest = object(JSON.parse(await readFile(join(path, "manifest.json"), "utf8")));
     if (!manifest || manifest.workspaceId !== project || manifest.workspace !== workspace ||
-        manifest.runId !== status.runId || manifest.kind === "benchmark") return unavailable("scope-mismatch");
+        manifest.runId !== status.runId) return unavailable("scope-mismatch");
   } catch { return unavailable("scope-mismatch"); }
   await workspaceOf(project, expectedWorkspace, root);
   const base: PerceptionRuntimeSnapshot = {

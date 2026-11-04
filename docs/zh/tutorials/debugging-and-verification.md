@@ -62,8 +62,7 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 
 - **运行与回放（`?view=live` / `?view=replay`）**：实时查看模型推理流、工具调用、设备输入与感知画面，或在历史时间轴上同步回放采样帧与事件。归档 worker、冷索引构建子进程与内存预算详见 [消费与指标解释](../reference/logging.md#消费与指标解释)。
 - **运行性能（`?view=perf`）**：查看当前所选运行的单次请求传输等待、缓存命中率与显式调用链剖析（`RunAnalysis`）。
-- **评测目录（`?view=benchmark`）**：查看 Harbor 评测任务、试验执行历史与基线评分对比（`BenchmarkCases`）。
-- **能力目录（`?view=caps`）**：静态展示当前选中工作区的设备目录快照（`baseware.json`）、Python `@capability` 声明（含 `@eval_capability` 状态与指标）及 Harbor 评测任务，并显示宿主连接状态。
+- **能力目录（`?view=caps`）**：静态展示当前选中工作区的设备目录快照（`baseware.json`）与 Python `@capability` 声明（含 `@eval_capability` 状态与指标），并显示宿主连接状态。
 - **感知配置（`?view=perception`）**：配置所选工作区的热窗口秒数、视频分段时长与停采空闲收尾秒数（写入 `.ludens/settings.json`，执行 `ludens perception reload` 后生效）。
 - **工作区管理（`?view=workspaces`）**：创建新工作区（名称与可选目录）、登记已有目录、只移除索引，以及设置默认父目录；读取同一 `LUDENS_HOME` 下的配置与 `registry/<id>.json`。
 - **站内文档（`?view=docs`）**：直接在控制台内浏览 `tutorials/`、`reference/` 与 `insights/`，支持跨篇与章节锚点跳转。

@@ -337,7 +337,7 @@ export async function selectIndexedCycle(index: LogIndex, manifest: Manifest, ep
   const complete = cycles.filter((cycle): cycle is NonNullable<typeof cycle> => !!cycle);
   if (epoch !== undefined && !complete.some(cycle => cycle.epoch === epoch)) throw new Error("所选周期不属于当前运行");
   return { cycles: complete, selectedEpoch: epoch ?? complete.at(-1)?.epoch ?? null,
-    wholeRun: manifest.kind === "benchmark" && !complete.length && !epoch };
+    wholeRun: false };
 }
 
 type SpanMeasurements = { started: number; outcomes: SpanStats["outcomes"]; durations: number[] };

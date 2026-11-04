@@ -105,7 +105,7 @@ test("foreign or missing run manifests and malformed host responses cannot becom
   const f = await fixture();
   try {
     await f.listen();
-    for (const patch of [{ runId: "different" }, { workspaceId: "foreign" }, { workspace: "/other" }, { kind: "benchmark" }]) {
+    for (const patch of [{ runId: "different" }, { workspaceId: "foreign" }, { workspace: "/other" }]) {
       await writeFile(join(f.run, "manifest.json"), JSON.stringify({ ...f.manifest, ...patch }));
       assert.equal((await perceptionRuntime("selected", f.workspace, f.home)).reason, "scope-mismatch");
     }

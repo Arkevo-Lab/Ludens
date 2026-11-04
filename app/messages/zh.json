@@ -3,7 +3,6 @@
     "live": "运行",
     "replay": "回放",
     "perf": "性能",
-    "benchmark": "Benchmark",
     "caps": "能力",
     "perception": "感知",
     "workspaces": "工作区",
@@ -27,13 +26,9 @@
       "title": "运行性能",
       "description": "追踪单次请求的传输等待、缓存命中与显式调用链。"
     },
-    "benchmark": {
-      "title": "评测目录",
-      "description": "重复评测能力，查看指标、条件与原始证据。"
-    },
     "caps": {
       "title": "能力与评测",
-      "description": "查看当前工作区的设备接口快照、Python @capability 与评测任务。"
+      "description": "查看当前工作区的设备接口快照与 Python @capability 声明。"
     },
     "perception": {
       "title": "感知录制设置",
@@ -351,11 +346,10 @@
     "loadingTitle": "正在读取能力",
     "loadingDesc": "正在从当前工作区的 baseware.json 与 Python @capability 声明读取…",
     "emptyTitle": "选择要查看的工作区",
-    "emptyDesc": "请创建或选择已登记的工作区，以查看其设备能力快照、Python @capability 声明与评测任务。",
+    "emptyDesc": "请创建或选择已登记的工作区，以查看其设备能力快照与 Python @capability 声明。",
     "diagnosticsTitle": "读取诊断",
     "overviewLabel": "能力概览",
     "capabilitiesUnit": "项能力",
-    "taskPackagesUnit": "个任务包",
     "capabilityCol": "能力",
     "descriptionCol": "说明",
     "controlCol": "控制要求",
@@ -369,10 +363,6 @@
       "missing": "未配置",
       "failed": "失败"
     },
-    "taskCol": "任务",
-    "versionCol": "版本摘要",
-    "taskDigest": "内容摘要",
-    "openTask": "在 Benchmark 中查看任务",
     "catalogFailed": "无法刷新工作区列表。",
     "retryCatalog": "重试工作区列表",
     "retryRead": "重试读取",
@@ -383,7 +373,7 @@
     "showingCached": "正在显示上次读取的能力目录。",
     "readOnlyRefreshHint": "只读刷新当前工作区的能力与评测目录。",
     "title": "能力目录",
-    "description": "查看当前工作区的设备接口快照、Python @capability 声明与评测任务。",
+    "description": "查看当前工作区的设备接口快照与 Python @capability 声明。",
     "verifiedTitle": "已检查驱动包声明",
     "verifiedBoundary": "驱动包声明已通过验证；尚未测试设备、游戏或单项能力能否执行。",
     "declaredVersion": "声明版本",
@@ -392,15 +382,13 @@
     "viewWorkspaces": "管理工作区",
     "deviceGuide": "设备准备指南",
     "capabilityGuide": "能力编写指南",
-    "benchmarkGuide": "评测任务指南",
     "existingWorkspaceHint": "已有工作区？请按照设备指南配置其 ludens.json；新建工作区不会改变原有配置。",
     "creationRechecks": "创建时会再次检查驱动包，可能下载或导入代码，但不会启动服务。",
     "sourcesTitle": "工作区来源",
     "sourcesDescription": "各来源独立读取；数量表示已记录或已声明的条目，不代表执行成功。",
     "groupTitles": {
       "device": "设备目录快照",
-      "workspace": "工作区能力声明",
-      "tasks": "评测任务"
+      "workspace": "工作区能力声明"
     },
     "sourceStates": {
       "available": "已读取",
@@ -410,13 +398,11 @@
     },
     "sourceDescriptions": {
       "device": "宿主连接时保存于 baseware.json；这份快照不能确认当前连接状态。",
-      "workspace": "静态扫描 Python 源码中的 @capability 声明，不执行工作区代码。",
-      "tasks": "仓库和工作区内发现的任务包；发现任务不会运行评测，也不代表取得了分数。"
+      "workspace": "静态扫描 Python 源码中的 @capability 声明，不执行工作区代码。"
     },
     "sourceEmpty": {
       "device": "尚无设备能力记录。请准备设备、从终端启动工作区，再刷新快照。",
-      "workspace": "尚未声明 Python 能力，可在工作区源码中添加带文档的 @capability 函数。",
-      "tasks": "尚未发现评测任务包，可按任务指南添加。"
+      "workspace": "尚未声明 Python 能力，可在工作区源码中添加带文档的 @capability 函数。"
     },
     "sourceFailure": "此来源读取失败，请查看诊断后刷新；其他来源仍可查看。",
     "snapshotAt": "快照生成于",
@@ -434,8 +420,7 @@
     "runtimeUnavailable": "无法确认所选工作区的宿主状态；设备和游戏是否可用仍未知。",
     "runtimeReadFailed": "未能读取宿主状态。",
     "runtimeStale": "最新检查失败，当前显示较早的宿主观测。",
-    "hostRunLabel": "宿主运行",
-    "viewBenchmark": "打开 Benchmark"
+    "hostRunLabel": "宿主运行"
   },
   "petSettings": {
     "title": "Ludens Pet",
@@ -933,16 +918,11 @@
       "title": "这个工作区还没有游戏运行记录",
       "description": "在终端启动此工作区并开启接管后，新的运行画面与记录会自动显示在这里。"
     },
-    "benchmark-only": {
-      "title": "这个工作区还没有游戏运行记录",
-      "description": "已有 Benchmark 评测记录，可以先查看评测结果，或在终端启动游戏运行。"
-    },
     "noGameRuns": "暂无游戏运行",
     "workspaces": "管理工作区",
     "switchWorkspace": "选择其他工作区",
     "capabilities": "查看能力目录",
     "quickstart": "查看快速开始",
-    "benchmark": "查看 Benchmark",
     "retry": "重新读取",
     "retrying": "正在重试…"
   },
@@ -965,7 +945,6 @@
     "keepLast": "保留上次读取结果",
     "picker": {
       "workspace": "工作区",
-      "benchAcross": "评测目录 · 跨工作区",
       "docsSource": "文档来源",
       "globalSettings": "全局设置",
       "workspacesAdmin": "工作区管理",
@@ -978,9 +957,7 @@
     },
     "runHistoryLabel": "运行记录",
     "latestRun": "最新运行",
-    "benchSuffix": " · 评测",
     "epochLabel": "接管周期",
-    "fullBenchRun": "完整基准运行",
     "latestEpoch": "最新周期",
     "allEpochs": "全部周期",
     "refreshHint": "只控制界面刷新，不影响 Agent",
@@ -1047,7 +1024,6 @@
     "callsEmpty": {
       "compacting": "正在压缩历史，等待主循环请求。",
       "noEpochCalls": "本周期尚无模型请求。",
-      "noBenchCalls": "此基准没有主循环模型请求。",
       "noTakeover": "尚未开启接管周期。"
     },
     "telemetry": {
@@ -1072,7 +1048,7 @@
     "updatedAt": "更新于",
     "footer": {
       "live": "日志记录执行事实，任务进展以画面为准。",
-      "bench": "包含关系的耗时不相加 · 模型统计不含独立压缩请求"
+      "perf": "包含关系的耗时不相加 · 模型统计不含独立压缩请求"
     }
   },
   "timelinePlayer": {
@@ -1170,202 +1146,6 @@
       "tool": "工具",
       "log": "日志"
     }
-  },
-  "benchmarkCases": {
-    "trialStatus": {
-      "running": "尚未记录结束",
-      "completed": "执行完成",
-      "error": "执行异常",
-      "cancelled": "已取消"
-    },
-    "loadFailed": "读取失败",
-    "verificationStatus": {
-      "running": "评分中",
-      "completed": "评分完成",
-      "error": "评分异常"
-    },
-    "notScored": "尚未评分",
-    "unavailable": " · 不可用",
-    "viewEvidenceRun": "查看证据所在运行 ↗",
-    "readingAttachment": "正在读取附件…",
-    "attachmentTruncated": "仅展示前 256 KiB；原件保持完整。",
-    "copied": "已复制",
-    "copyFailed": "复制失败，请手动选择命令",
-    "catalogUnavailable": "暂时无法读取评测",
-    "catalogLoading": "正在读取评测",
-    "catalogDescription": "读取任务目录和一页执行摘要。",
-    "keepLastPage": "保留上次读取的这一页",
-    "diagnostics": "目录或历史读取诊断",
-    "noWorkspace": "暂无工作区",
-    "pageNote": "每页展示 25 次执行 · 浏览评测不影响 Agent 或 Ludens Pet 关注目标",
-    "catalogAria": "评测目录",
-    "taskPackages": "个任务包",
-    "allHistory": "全部执行历史",
-    "repoTask": "仓库任务",
-    "workspaceTask": "工作区任务",
-    "envUnmet": "环境要求未满足",
-    "copyRunCommand": "复制运行命令",
-    "noBindings": "没有执行配置。在此任务来源的 benchmarks/runs 中添加 task 字段匹配的 JSON 配置，或在终端用 --config 选择配置。",
-    "envUnsupportedPrefix": "当前环境不支持：",
-    "listSeparator": "、",
-    "historyTitle": "执行历史",
-    "historySubtitle": "次执行 · 评分修订不增加执行次数",
-    "colTime": "执行时间 / 任务",
-    "colStatus": "执行状态",
-    "colVerification": "评分版本",
-    "colActions": "操作",
-    "selectedRun": "已选运行",
-    "setBaseline": "设为基线",
-    "viewRun": "查看运行 ↗",
-    "noHistory": "此页没有执行记录。历史任务即使已不在目录中，也可通过固定运行链接查看。",
-    "latestPage": "最新一页",
-    "olderRuns": "更早的 25 次执行 →",
-    "detailAria": "执行与评分详情",
-    "readingSelected": "正在读取所选执行和评分…",
-    "selectExecution": "选择一次执行查看评分与证据。",
-    "pinVersions": "固定本次与基线版本",
-    "stillRunning": "尚无执行结束记录；它可能仍在运行或已中断。",
-    "executionPrefix": "执行：",
-    "scoringPrefix": "评分：",
-    "execution": "执行",
-    "scoring": "评分",
-    "unsubmitted": "未提交",
-    "taskVersion": "任务版本",
-    "reportTitle": "评分版本",
-    "rescoreNote": "重评仅读取已落盘产物，不重跑被测程序；得分为 0 属于正常测量值而非系统错误。",
-    "noVerifications": "尚无评分记录。",
-    "latestScorePage": "最新评分页",
-    "olderScores": "更早的评分 →",
-    "copyReverify": "复制重评命令",
-    "baselinePrefix": "比较基线：",
-    "remove": "移除",
-    "baselineFailedPrefix": "基线读取失败：",
-    "readingBaseline": "正在读取基线…",
-    "diffPrefix": "不同项：",
-    "diffSuffix": "。差值仅表示数值变化，请结合这些差异解读。",
-    "sameExecution": "这是同一次执行的评分比较，不是两个独立试验。",
-    "subjectsChanged": "被测代码或模型版本有变化；任务和条件差异仍独立检查。",
-    "colDimension": "维度",
-    "colCurrent": "本次",
-    "colBaseline": "基线",
-    "colDelta": "差值",
-    "noScores": "没有可用评分。",
-    "emptyReward": "有效空 reward；它不构成任务成功结论。",
-    "evidenceTitle": "评分证据与附件",
-    "viewOriginalRun": "查看原始运行 ↗",
-    "noEvidence": "未登记证据引用。",
-    "firstEvidencePage": "第一页证据",
-    "moreEvidence": "更多证据 →",
-    "viewParentRun": "查看发起评测的运行 ↗",
-    "limitationsTitle": "适用范围与限制",
-    "provenanceTitle": "条件、被测版本与来源",
-    "baselineTitle": "基线",
-    "chooseWorkspace": "请创建或选择工作区，查看其中的评测。",
-    "workspaceLoading": "正在读取工作区",
-    "workspaceLoadingDescription": "先确认已登记的工作区位置，再读取评测。",
-    "workspaceUnavailable": "工作区位置不可用",
-    "workspaceUnavailableDescription": "请在工作区管理中检查或重新关联位置；已保存的运行链接仍可单独尝试读取。",
-    "manageWorkspaces": "管理工作区",
-    "readQuickstart": "阅读快速开始",
-    "retryWorkspaceCatalog": "重试工作区列表",
-    "workspaceReadFailed": "无法读取工作区列表",
-    "workspaceReadFailedCached": "正在使用上次读取的工作区信息，请重试以确认当前登记状态。",
-    "workspaceReadFailedDescription": "工作区列表读取失败，不代表没有工作区。",
-    "retrying": "正在读取…",
-    "refreshHistory": "刷新任务与历史",
-    "readFailedCached": "保留上次读取的数据，重试可检查是否有更新。",
-    "readFailedDescription": "可以重试读取，或清除选择返回历史；这些操作不会启动评测。",
-    "catalogReadFailedDescription": "请重试任务与历史读取；读取失败不代表工作区为空。",
-    "technicalDetails": "技术详情",
-    "firstTaskTitle": "添加第一个评测任务",
-    "firstTaskDescription": "定义要执行的任务、评分方式和需要保留的证据；任务指南说明任务包与执行配置的结构。",
-    "readTaskGuide": "阅读任务指南",
-    "viewCapabilities": "查看能力目录",
-    "inspectTaskCatalog": "在终端检查任务发现结果",
-    "copyListCommand": "复制列表命令",
-    "copyTaskHelpCommand": "复制任务帮助命令",
-    "missingTaskPackages": "未发现任务包；仍可查看已有运行历史和固定链接中的证据。",
-    "tasksUnavailable": "部分任务包无法读取；请先检查诊断信息，不应将其视为没有任务。",
-    "terminalRunNote": "复制不会执行任务；请检查命令，准备好后在终端中运行。",
-    "allTaskVersions": "历史包含此任务的所有版本",
-    "clearTaskFilter": "清除任务筛选",
-    "chooseFirstTask": "选择任务，准备运行",
-    "refreshSelected": "重新读取所选运行",
-    "refreshBaseline": "重新读取基线",
-    "refreshAttachment": "重新读取附件",
-    "clearSelected": "清除运行选择",
-    "clearBaseline": "清除基线",
-    "invalidSelected": "此运行链接无效，请清除选择或从历史中选择运行。",
-    "invalidBaseline": "此基线链接无效，请清除后从历史中选择另一条基线。",
-    "selectedUnavailable": "无法读取所选运行",
-    "baselineUnavailable": "无法读取基线",
-    "steps": {
-      "addTask": {
-        "title": "添加任务",
-        "description": "添加任务包及与之匹配的执行配置。"
-      },
-      "runTerminal": {
-        "title": "在终端运行",
-        "description": "选择任务并检查命令，准备好后手动运行。"
-      },
-      "inspectEvidence": {
-        "title": "查看证据",
-        "description": "回到这里查看运行、评分版本与记录的证据。"
-      }
-    },
-    "historyEmpty": {
-      "no-tasks": {
-        "title": "尚无运行记录",
-        "description": "任务执行后，已保存的运行会显示在这里。"
-      },
-      "no-runs": {
-        "title": "可以准备第一次运行了",
-        "description": "选择任务以查看执行配置；复制命令不会启动任务。"
-      },
-      "filter-empty": {
-        "title": "没有符合任务筛选的运行",
-        "description": "清除筛选可浏览其他任务；当前筛选包含所选任务的所有已记录版本。"
-      },
-      "page-empty": {
-        "title": "此较早页面没有运行记录",
-        "description": "返回最新页会保留任务筛选和所选证据。"
-      },
-      "unreadable": {
-        "title": "部分运行记录无法读取",
-        "description": "请检查历史诊断并刷新；记录无法读取不代表没有运行。"
-      },
-      "tasks-unavailable": {
-        "title": "需要检查任务发现结果",
-        "description": "当前未列出运行；添加或运行任务前，请先处理任务诊断。"
-      }
-    },
-    "taskCatalogTitle": "任务包",
-    "taskCatalogDescription": "从仓库和工作区发现的任务。选择任务只筛选历史，不会执行评测。",
-    "taskChoiceHint": "任务筛选会保留已选运行和比较基线。",
-    "taskMetadataPending": "正在读取当前历史页，保留上次载入的任务包。",
-    "taskMetadataStale": "当前历史页读取失败，任务包显示的是上次载入的记录。",
-    "selectedTaskTitle": "所选任务",
-    "taskNameLabel": "任务标识",
-    "taskSourceLabel": "来源",
-    "taskVersionLabel": "声明版本",
-    "taskSchemaLabel": "任务格式版本",
-    "taskVersionMissing": "未声明",
-    "taskPathLabel": "任务包路径",
-    "taskDigestLabel": "完整版本摘要",
-    "taskAmbiguousTitle": "请选择任务版本",
-    "taskAmbiguousDescription": "当前任务名对应多个已发现版本。请在任务包中选择具体版本以查看其配置；历史仍包含这个任务的所有版本。",
-    "taskMissingTitle": "所选任务包不可用",
-    "taskMissingDescription": "已载入目录中没有找到这个任务名或版本。已保存的运行和独立选择的证据仍可查看。",
-    "historyLoadingTitle": "正在读取当前历史页…",
-    "historyLoadingDescription": "筛选记录读取期间，仍可继续选择任务。",
-    "selectRunTitle": "选择一次运行，查看执行与评分",
-    "selectRunDescription": "点击上方历史中的运行时间。任务筛选和比较基线与此选择相互独立。",
-    "resultSelectionHint": "切换任务筛选时，仍会保留当前选定的运行。",
-    "catalogScopeChanged": "任务目录对应的工作区位置已变化。请刷新工作区列表后重试。",
-    "taskPickerLabel": "选择任务",
-    "taskPickerAmbiguous": "请选择任务版本",
-    "taskPickerMissing": "选中的任务不可用",
-    "viewExecutionHistory": "查看执行历史"
   },
   "runVisuals": {
     "transport": {
@@ -1675,7 +1455,6 @@
     "description": "根据完整 ID 选择已记录的运行。时间摘要使用 Asia/Shanghai 时区。",
     "close": "关闭",
     "current": "当前",
-    "benchmark": "Benchmark",
     "empty": "暂无运行记录"
   },
   "workspacePicker": {

@@ -10,12 +10,11 @@ import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { workspaceRunLinks, type WorkspaceRunEntry } from "@/lib/workspace-run-entry";
 import { workspaceUpCommand } from "@/features/workspaces/workspace-create-model";
 
-export function WorkspaceRunEmpty({ state, project, workspaceName, workspacePath, benchmarkRun, error, retrying, onRetry, onNavigate }: {
+export function WorkspaceRunEmpty({ state, project, workspaceName, workspacePath, error, retrying, onRetry, onNavigate }: {
   state: Exclude<WorkspaceRunEntry, "ready">;
   project?: string;
   workspaceName?: string;
   workspacePath?: string;
-  benchmarkRun?: string;
   error: string;
   retrying: boolean;
   onRetry(control: HTMLButtonElement): void;
@@ -24,9 +23,9 @@ export function WorkspaceRunEmpty({ state, project, workspaceName, workspacePath
   const t = useTranslations("workspaceRunEmpty");
   const { locale } = useLocale();
   const headingId = useId();
-  const links = workspaceRunLinks(project, locale, benchmarkRun);
+  const links = workspaceRunLinks(project, locale);
   const loading = state === "loading-catalog";
-  const copy = state === "no-run" && benchmarkRun ? "benchmark-only" : state;
+  const copy = state;
   const action = (href: string, label: string, primary = false) => (
     <Button asChild variant={primary ? "default" : "outline"} className="h-auto min-h-9 whitespace-normal py-2">
       <a href={href} onClick={event => {
@@ -55,12 +54,9 @@ export function WorkspaceRunEmpty({ state, project, workspaceName, workspacePath
           {state === "catalog-error" ? <Button type="button" aria-disabled={retrying} className="aria-disabled:opacity-50"
             onClick={event => { if (!retrying) onRetry(event.currentTarget); }}>
             <RefreshCw className={retrying ? "animate-spin" : undefined} />{t(retrying ? "retrying" : "retry")}
-          </Button> : state === "no-run" && links.benchmark
-            ? action(links.benchmark, t("benchmark"), true)
-            : state === "no-run" && links.capabilities
+          </Button> : state === "no-run" && links.capabilities
               ? action(links.capabilities, t("capabilities"), true)
               : action(links.workspaces, t("workspaces"), true)}
-          {state === "no-run" && links.benchmark && links.capabilities && action(links.capabilities, t("capabilities"))}
           {state !== "catalog-error" && action(links.quickstart, t("quickstart"))}
           {state === "no-run" && action(links.workspaces, t("switchWorkspace"))}
         </div>}

@@ -32,7 +32,7 @@ export function resolveLiveSelection(options: {
   };
 }
 
-/** Start from a clean URL so evidence, replay and benchmark parameters cannot leak. */
+/** Start from a clean URL so evidence and replay parameters cannot leak. */
 export function latestLiveUrl(project: string) {
   return "/?" + new URLSearchParams({ view: "live", project });
 }

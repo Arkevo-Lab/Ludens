@@ -146,7 +146,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
           </button>)}
         </div>
         {!rows.length && <p className="run-analysis-no-requests">{data.activeCompaction ? dt("callsEmpty.compacting")
-          : data.selectedEpoch ? dt("callsEmpty.noEpochCalls") : data.manifest.benchmark ? dt("callsEmpty.noBenchCalls") : dt("callsEmpty.noTakeover")}</p>}
+          : data.selectedEpoch ? dt("callsEmpty.noEpochCalls") : dt("callsEmpty.noTakeover")}</p>}
         {data.paging.hasMore && data.paging.beforeCall !== null && <div className="run-analysis-pagination">
           <Button type="button" size="sm" variant="outline" onClick={onLoadMore}>{dt("loadMore")}</Button>
         </div>}

@@ -35,7 +35,7 @@ const order = [
   "tutorials/index", "tutorials/quickstart", "tutorials/devices", "tutorials/workspace",
   "tutorials/perception-and-action", "tutorials/debugging-and-verification",
   "reference/index", "reference/architecture", "reference/baseware",
-  "reference/driver-bridge-protocol", "reference/logging", "reference/dashboard-ui", "reference/benchmark",
+  "reference/driver-bridge-protocol", "reference/logging", "reference/dashboard-ui",
   "insights/index", "insights/omp-compaction", "insights/ws-recovery", "insights/omp-injection", "insights/perception-parameters",
 ];
 const rank = (key: string) => { const idx = order.indexOf(key); return idx < 0 ? 999 : idx; };

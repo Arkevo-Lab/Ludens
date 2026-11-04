@@ -65,7 +65,7 @@ test("offline, invalid, and foreign-run replies never establish device availabil
     const offline = await capabilityRuntime("selected", f.workspace, f.home);
     assert.equal(offline.host, "unavailable"); assert.equal(offline.reason, "not-running"); assert.equal(offline.controlConnected, null);
     await f.listen();
-    for (const patch of [{ workspaceId: "foreign" }, { workspace: "/foreign" }, { runId: "other" }, { kind: "benchmark" }]) {
+    for (const patch of [{ workspaceId: "foreign" }, { workspace: "/foreign" }, { runId: "other" }]) {
       await writeFile(join(f.run, "manifest.json"), JSON.stringify({ ...f.manifest, ...patch }));
       const result = await capabilityRuntime("selected", f.workspace, f.home);
       assert.equal(result.reason, "scope-mismatch"); assert.equal(result.controlConnected, null);

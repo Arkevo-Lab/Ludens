@@ -43,13 +43,13 @@ To ensure reliable recovery, we decoupled the connection-recovery state machine 
 
 Network edge cases that take five or six hours to trigger cannot be debugged by running an eight-hour live session after every code change.
 
-During implementation we built an offline transport-layer test suite ([core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)) and a companion benchmark ([ws-recovery.ts](../../../core/tests/ws-recovery.test.ts)): in-process fixtures stub the WebSocket and HTTP layers beneath `streamOpenAICodexResponses`, and a virtual clock advances the 60 s cooldown without live model calls:
+During implementation we built an offline transport-layer test suite ([core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)) and a companion performance suite ([ws-recovery.ts](../../../core/tests/ws-recovery.test.ts)): in-process fixtures stub the WebSocket and HTTP layers beneath `streamOpenAICodexResponses`, and a virtual clock advances the 60 s cooldown without live model calls:
 
 ```sh
 (cd core && bun run omp:test:transport)
 (cd core && bun run typecheck)
 
-# Generate benchmark records viewable with event and scoring evidence in the Dashboard:
+# Generate run records viewable in the Dashboard:
 cd core && bun test tests/ws-recovery.test.ts
 ```
 

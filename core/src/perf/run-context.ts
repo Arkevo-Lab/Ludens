@@ -1,10 +1,20 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { EventLog } from "../core/storage/events.ts";
-import type { BenchmarkContext } from "../bench/types.ts";
 
 /** Perf suites reuse the Shiori-local program context: a workspace, a run directory and one event writer. */
-export type PerfContext = BenchmarkContext;
+export interface PerfContext {
+  runDir: string;
+  workspace: string;
+  log: EventLog;
+  metadata: Record<string, unknown>;
+  model: string;
+  seconds: number;
+  maxRequests: number;
+  seed: number;
+  signal?: AbortSignal;
+  budget: { deadlineMs: number; signal: AbortSignal };
+}
 
 export interface PerfContextOptions {
   seed?: number; seconds?: number; signal?: AbortSignal; model?: string;

@@ -2,7 +2,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
-import { atomicJson } from "../../bench/store.ts";
+import { atomicJson } from "../storage/atomic-json.ts";
 import { PythonCapabilities, type PythonCapability, type PythonDiagnostic, type PythonEvalEnv } from "./python-capabilities.ts";
 
 export type CapabilityEvalStatus = "missing" | "unverified" | "stale" | "adapting" | "failed" | "verified";

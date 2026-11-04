@@ -1,7 +1,6 @@
 import type { Project } from "./types";
 
-export const latestGameRun = (project: Project | undefined) =>
-  project?.runs.find((run) => run.kind !== "benchmark" && !run.benchmark);
+export const latestGameRun = (project: Project | undefined) => project?.runs[0];
 
 export function initialSelection(search: string, projects: Project[]) {
   const query = new URLSearchParams(search);

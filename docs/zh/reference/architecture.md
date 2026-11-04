@@ -7,7 +7,7 @@ Ludens（RSA，Recursive Self-Adaptation）将设备驱动、Agent 执行运行�
 | 组件 | 进程形态与核心职责 |
 | --- | --- |
 | `baseware/` | **独立设备服务**：加载内置或外部 Driver，提供统一 Controller 能力目录、控制权租约（`epoch`）仲裁、输入取消与设备事实日志，对外暴露 CLI、TS/Python API 与 MCP 接口。 |
-| `core/` | **自适应 Harness**（`@ludens/core`）：管理工作区配置与生命周期、能力发现与路由、常驻感知（`perception.py`）与常驻动作（`action.py`）Python 子进程、Harbor 评测以及运行日志归档。 |
+| `core/` | **自适应 Harness**（`@ludens/core`）：管理工作区配置与生命周期、能力发现与路由、常驻感知（`perception.py`）与常驻动作（`action.py`）Python 子进程、工作区内生的能力评估（`ludens eval`）以及运行日志归档。 |
 | **Shiori** | **唯一执行内核（职责名）**：由 Ludens Host Runtime 实现，统一管控控制周期、时间/请求预算、信号取消与退出清理。Agent 模式挂载 **OMP 18.14.0**；普通评测程序、Verifier 与 Metric 共用同一生命周期而不启动模型。 |
 | `app/` | **本地控制台服务（`@ludens/app`，Web）**：通过独立 Node Worker 构建与查询日志索引，提供实时活动流、时空轴视频回放、运行统计、文档浏览、能力目录与人工交还入口。 |
 | `app/desktop/` | **可选桌面伴侣（Ludens Pet）**：Electron 桌面壳，主窗口复用同一 Dashboard 视图，原生透明桌宠窗口与音频引擎增量消费同一套活动日志。 |
@@ -40,14 +40,14 @@ flowchart LR
 
 | 包 / 目录 | 分层与职责 |
 | --- | --- |
-| `protocol/`（`@ludens/protocol`） | **契约基座**：RPC Schema、运行事件类型、Timeline / Archive 格式、Benchmark DTO 与 Dashboard 活动投影；其余包只通过 workspace 导入消费。 |
+| `protocol/`（`@ludens/protocol`） | **契约基座**：RPC Schema、运行事件类型、Timeline / Archive 格式与 Dashboard 活动投影；其余包只通过 workspace 导入消费。 |
 | `core/src/core/shiori/` | **控制内核**：`epoch` 控制租约、时间/请求预算、程序执行与取消；不依赖 OMP、CLI 或 Socket。 |
-| `core/src/core/storage/` | **工作区与事实存储**：`.ludens/` 身份与状态、`logs/<run-id>/` 事件流与归档、Benchmark Trial/Verification 存储。 |
+| `core/src/core/storage/` | **工作区与事实存储**：`.ludens/` 身份与状态、`logs/<run-id>/` 事件流与归档。 |
 | `core/src/core/subsystems/` | **工作区常驻与设备子系统**：Python 感知/动作 Worker、`@capability` 发现、Baseware 设备会话。 |
 | `core/src/core/agent-omp/` | **OMP AgentRunner 实现**：OMP 会话组装、Ludens 扩展与模型 Trace 记录，通过窄接口 `ExtensionHost` 暴露宿主能力。 |
 | `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、冷构建、活动/回放/遥测投影，供 Dashboard 与 Ludens Pet 消费。 |
-| `core/src/daemon/`、`core/src/bench/`、`core/src/perf/`、`core/src/cli/` | **外壳层**：Unix Socket RPC 守护进程与服务编排、Harbor 评测执行器（`bench`）、子系统性能基线（`perf`）、纯 CLI 前端。 |
-| `app/shell/` + `app/features/` + `app/perf/` | **控制台视图与应用性能基线**（循环工作台位于 `shell/`，`index-memory` 基线位于 `perf/`）：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`benchmark`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
+| `core/src/daemon/`、`core/src/perf/`、`core/src/cli/` | **外壳层**：Unix Socket RPC 守护进程与服务编排、子系统性能基线（`perf`）、纯 CLI 前端。 |
+| `app/shell/` + `app/features/` + `app/perf/` | **控制台视图与应用性能基线**（循环工作台位于 `shell/`，`index-memory` 基线位于 `perf/`）：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
 
 
 ## 设备与统一能力
@@ -112,8 +112,8 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 
 Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python/ludens_tools/`）共同组成：
 
-- **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、跨进程 RPC 与 CLI / Benchmark 编排。
-- **Python 侧**：负责 `@capability` 静态发现与动态执行、常驻 `Perception` / `Action` 循环、PyAV 视频段编码、冷帧按需解码以及 `current_trial()` 评测证据登记。常驻感知通过媒体流引用（`_StreamMediaRef`）直接从磁盘摄取 Baseware 缓冲的原始字节，省去跨进程内联 Base64 往返，自动将设备观测 `sources` 时空溯源绑定至时间线记录，并通过 `ifNoneMatchSequence` 对未发生帧变化的最新帧 `Client().observe()` 轮询执行零编码短路。视频编解码直接在常驻感知进程内完成，不额外引入独立的流媒体服务。
+- **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、跨进程 RPC 与 CLI 编排。
+- **Python 侧**：负责 `@capability` 静态发现与动态执行、常驻 `Perception` / `Action` 循环、PyAV 视频段编码与冷帧按需解码。常驻感知通过媒体流引用（`_StreamMediaRef`）直接从磁盘摄取 Baseware 缓冲的原始字节，省去跨进程内联 Base64 往返，自动将设备观测 `sources` 时空溯源绑定至时间线记录，并通过 `ifNoneMatchSequence` 对未发生帧变化的最新帧 `Client().observe()` 轮询执行零编码短路。视频编解码直接在常驻感知进程内完成，不额外引入独立的流媒体服务。
 
 ## 能力持久化边界
 
@@ -129,7 +129,7 @@ Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python
 | --- | --- |
 | `.ludens/timeline/` | **能力观测与媒体唯一原件**：由常驻感知进程单一写入者维护，存放 `@record` 记录元数据、分段 fMP4 视频（`video/`，默认 5 分钟一段、空闲 10 秒收尾）与 SHA-256 去重非视频媒体（`objects/`）。 |
 | `.ludens/archive/` | **模型与工具结构化文本归档**：跨请求、跨 run 按内容哈希去重存储 `objects/<sha256>.json.gz` 与流式载荷，内含媒体一律通过引用指向 `.ludens/timeline/`。 |
-| `logs/<run-id>/` | **单次运行事件流**：存放 `manifest.json`、`events.jsonl`、`streams/` 与 Benchmark `trial.json` / `verifier/`，通过 `eventSources` 与内容引用关联 Baseware、Archive 与 Timeline。 |
+| `logs/<run-id>/` | **单次运行事件流**：存放 `manifest.json`、`events.jsonl` 与 `streams/`，通过 `eventSources` 与内容引用关联 Baseware、Archive 与 Timeline。 |
 | `.ludens/shiori/` | **OMP 原生会话存储**：存放 `sessions/*.jsonl` 与当前续接指针，由 OMP SessionManager 管理。 |
 | `.ludens/skill-versions/` | **技能与记忆快照**：运行中记录的内容版本留在工作区内，随目录一起移动。 |
 

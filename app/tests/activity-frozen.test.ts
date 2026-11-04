@@ -22,7 +22,7 @@ test("getActivity keeps snapshots and cursor deltas readable while a published g
   try {
     await mkdir(path, { recursive: true });
     await registerFixture(root, "fixture", workspace);
-    await writeFile(join(path, "manifest.json"), JSON.stringify({ kind: "benchmark", model: "fixture", drivers: [] }));
+    await writeFile(join(path, "manifest.json"), JSON.stringify({ model: "fixture", drivers: [] }));
     await writeFile(join(path, "events.jsonl"), [event(1, "control", { mode: "auto" }),
       event(2, "tool_start", { toolName: "read", intent: "first intent" })].map(row => JSON.stringify(row)).join("\n") + "\n");
     const first = await awaitArchive(() => getActivity("fixture", "run"));

@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 
-export const consoleViewIds = ["live", "replay", "perf", "benchmark", "caps", "perception", "workspaces", "docs", "settings", "dev"] as const;
+export const consoleViewIds = ["live", "replay", "perf", "caps", "perception", "workspaces", "docs", "settings", "dev"] as const;
 export type ConsoleView = typeof consoleViewIds[number];
 const navSections: Array<{ label: string; ids: ConsoleView[] }> = [
-  { label: "navSectionWorkspace", ids: ["live", "replay", "perf", "benchmark", "caps", "perception"] },
+  { label: "navSectionWorkspace", ids: ["live", "replay", "perf", "caps", "perception"] },
   { label: "navSectionGlobal", ids: ["workspaces", "docs"] },
   { label: "navSectionDev", ids: ["dev"] },
 ];
@@ -50,8 +50,6 @@ function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
         </>
       ) : kind === "perf" ? (
         <path d="M4 19V11M10 19V5M16 19V8M22 19V2" strokeWidth="3" />
-      ) : kind === "benchmark" ? (
-        <><circle cx="12" cy="12" r="8.5" /><circle cx="12" cy="12" r="4" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22" /></>
       ) : kind === "dev" ? (
         <>
           <path d="m4 17 5-5-5-5" /><path d="M12 19h8" />

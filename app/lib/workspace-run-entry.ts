@@ -16,12 +16,11 @@ export function workspaceRunEntry({ catalogReady, catalogError, project, run }: 
 }
 
 /** Start these recovery journeys without stale run, epoch or evidence parameters. */
-export function workspaceRunLinks(project: string | undefined, locale: "en" | "zh", benchmarkRun?: string) {
+export function workspaceRunLinks(project: string | undefined, locale: "en" | "zh") {
   const link = (params: Record<string, string>) => "/?" + new URLSearchParams(params);
   return {
     workspaces: link({ view: "workspaces" }),
     capabilities: project ? link({ view: "caps", project }) : undefined,
     quickstart: link({ view: "docs", doc: "tutorials/quickstart", docLang: locale }),
-    benchmark: project && benchmarkRun ? link({ view: "benchmark", project }) : undefined,
   };
 }

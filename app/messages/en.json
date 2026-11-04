@@ -3,7 +3,6 @@
     "live": "Live",
     "replay": "Replay",
     "perf": "Performance",
-    "benchmark": "Benchmark",
     "caps": "Capabilities",
     "perception": "Perception",
     "workspaces": "Workspaces",
@@ -27,13 +26,9 @@
       "title": "Run performance",
       "description": "Track per-request transport wait, cache hit rate, and explicit call chains."
     },
-    "benchmark": {
-      "title": "Eval catalog",
-      "description": "Evaluate capabilities repeatedly and inspect metrics, conditions, and raw evidence."
-    },
     "caps": {
       "title": "Capabilities & Evals",
-      "description": "Device interface snapshots, Python @capability and eval tasks for the current workspace."
+      "description": "Device interface snapshots and Python @capability declarations for the current workspace."
     },
     "perception": {
       "title": "Perception Recording",
@@ -351,11 +346,10 @@
     "loadingTitle": "Reading capabilities",
     "loadingDesc": "Reading baseware.json and Python @capability declarations in the current workspace…",
     "emptyTitle": "Choose a workspace to inspect",
-    "emptyDesc": "Create or select a registered workspace to inspect its device snapshot, Python @capability declarations, and eval tasks.",
+    "emptyDesc": "Create or select a registered workspace to inspect its device snapshot and Python @capability declarations.",
     "diagnosticsTitle": "Diagnostics",
     "overviewLabel": "Capability overview",
     "capabilitiesUnit": "capabilities",
-    "taskPackagesUnit": "task packages",
     "capabilityCol": "Capability",
     "descriptionCol": "Description",
     "controlCol": "Control requirements",
@@ -369,10 +363,6 @@
       "missing": "Missing",
       "failed": "Failed"
     },
-    "taskCol": "Task",
-    "versionCol": "Version digest",
-    "taskDigest": "Content digest",
-    "openTask": "Open task in Benchmark",
     "catalogFailed": "Could not refresh the workspace list.",
     "retryCatalog": "Retry workspace list",
     "retryRead": "Retry read",
@@ -383,7 +373,7 @@
     "showingCached": "Showing the last loaded capabilities.",
     "readOnlyRefreshHint": "Refresh reads the selected workspace's capability and evaluation catalog.",
     "title": "Capabilities",
-    "description": "Inspect the selected workspace's device snapshot, Python @capability declarations, and eval tasks.",
+    "description": "Inspect the selected workspace's device snapshot and Python @capability declarations.",
     "verifiedTitle": "Package declaration checked",
     "verifiedBoundary": "The package declaration passed validation. Its device, game, and individual capabilities have not been tested.",
     "declaredVersion": "Declared version",
@@ -392,15 +382,13 @@
     "viewWorkspaces": "Manage workspaces",
     "deviceGuide": "Device setup guide",
     "capabilityGuide": "Capability guide",
-    "benchmarkGuide": "Eval task guide",
     "existingWorkspaceHint": "Already have a workspace? Configure its ludens.json using the device guide; creating another workspace does not change the existing one.",
     "creationRechecks": "Creation checks the package again and may download or import it. It does not start services.",
     "sourcesTitle": "Workspace sources",
     "sourcesDescription": "Each source is read independently. Counts describe recorded or declared items, not successful execution.",
     "groupTitles": {
       "device": "Device snapshot",
-      "workspace": "Workspace declarations",
-      "tasks": "Eval tasks"
+      "workspace": "Workspace declarations"
     },
     "sourceStates": {
       "available": "Read",
@@ -410,13 +398,11 @@
     },
     "sourceDescriptions": {
       "device": "Saved in baseware.json when a host connects. This snapshot does not confirm the current connection.",
-      "workspace": "Python @capability declarations found by a static source scan. No workspace code is executed.",
-      "tasks": "Task packages found in the repository and workspace. Discovery does not run an evaluation or establish a score."
+      "workspace": "Python @capability declarations found by a static source scan. No workspace code is executed."
     },
     "sourceEmpty": {
       "device": "No device capabilities recorded here yet. Prepare the device and start the workspace from a terminal, then refresh this snapshot.",
-      "workspace": "No Python capabilities declared yet. Add a documented @capability function to workspace source.",
-      "tasks": "No eval task packages found. The task guide explains how to add one."
+      "workspace": "No Python capabilities declared yet. Add a documented @capability function to workspace source."
     },
     "sourceFailure": "This source could not be read. Review the diagnostics and refresh; other sources remain available.",
     "snapshotAt": "Snapshot generated",
@@ -434,8 +420,7 @@
     "runtimeUnavailable": "The selected workspace's host could not be confirmed. Device and game availability remain unknown.",
     "runtimeReadFailed": "Could not read host status.",
     "runtimeStale": "Showing an earlier host observation; the latest check failed.",
-    "hostRunLabel": "Host run",
-    "viewBenchmark": "Open Benchmark"
+    "hostRunLabel": "Host run"
   },
   "petSettings": {
     "title": "Ludens Pet",
@@ -933,16 +918,11 @@
       "title": "No game runs in this workspace yet",
       "description": "Start this workspace from a terminal and enable takeover. New runs will appear here automatically."
     },
-    "benchmark-only": {
-      "title": "No game runs in this workspace yet",
-      "description": "This workspace has benchmark results. Open Benchmark to inspect them, or start a game run from a terminal."
-    },
     "noGameRuns": "No game runs yet",
     "workspaces": "Manage workspaces",
     "switchWorkspace": "Choose another workspace",
     "capabilities": "View capabilities",
     "quickstart": "Open quickstart",
-    "benchmark": "Open Benchmark",
     "retry": "Retry loading",
     "retrying": "Retrying…"
   },
@@ -965,7 +945,6 @@
     "keepLast": "Keeping last result",
     "picker": {
       "workspace": "Workspace",
-      "benchAcross": "Eval catalog · all workspaces",
       "docsSource": "Docs source",
       "globalSettings": "Global settings",
       "workspacesAdmin": "Workspace admin",
@@ -978,9 +957,7 @@
     },
     "runHistoryLabel": "Run history",
     "latestRun": "Latest run",
-    "benchSuffix": " · benchmark",
     "epochLabel": "Takeover epoch",
-    "fullBenchRun": "Full benchmark run",
     "latestEpoch": "Latest epoch",
     "allEpochs": "All epochs",
     "refreshHint": "Only toggles UI refresh, never affects the agent",
@@ -1047,7 +1024,6 @@
     "callsEmpty": {
       "compacting": "Compacting history, waiting for main-loop request.",
       "noEpochCalls": "No model requests in this epoch.",
-      "noBenchCalls": "This benchmark has no main-loop model requests.",
       "noTakeover": "No takeover epoch started yet."
     },
     "telemetry": {
@@ -1072,7 +1048,7 @@
     "updatedAt": "Updated",
     "footer": {
       "live": "Logs record facts; follow the frames for progress.",
-      "bench": "Nested costs don't add up · model stats exclude standalone compaction"
+      "perf": "Nested costs don't add up · model stats exclude standalone compaction"
     }
   },
   "timelinePlayer": {
@@ -1170,202 +1146,6 @@
       "tool": "Tool",
       "log": "Log"
     }
-  },
-  "benchmarkCases": {
-    "trialStatus": {
-      "running": "Run end not recorded",
-      "completed": "Run complete",
-      "error": "Run failed",
-      "cancelled": "Cancelled"
-    },
-    "loadFailed": "Failed to load",
-    "verificationStatus": {
-      "running": "Scoring",
-      "completed": "Scored",
-      "error": "Scoring failed"
-    },
-    "notScored": "Not scored",
-    "unavailable": " · Unavailable",
-    "viewEvidenceRun": "View run where evidence lives ↗",
-    "readingAttachment": "Loading attachment…",
-    "attachmentTruncated": "Only the first 256 KiB shown; the original is intact.",
-    "copied": "Copied",
-    "copyFailed": "Copy failed; select the command manually",
-    "catalogUnavailable": "Benchmarks temporarily unavailable",
-    "catalogLoading": "Loading benchmarks",
-    "catalogDescription": "Reading the task catalog and one page of execution summaries.",
-    "keepLastPage": "Keeping the last loaded page",
-    "diagnostics": "Catalog or history read diagnostics",
-    "noWorkspace": "No workspace",
-    "pageNote": "25 runs per page · browsing benchmarks never disturbs the Agent or Ludens Pet focus",
-    "catalogAria": "Benchmark catalog",
-    "taskPackages": "task packages",
-    "allHistory": "All execution history",
-    "repoTask": "Repo task",
-    "workspaceTask": "Workspace task",
-    "envUnmet": "Environment requirements unmet",
-    "copyRunCommand": "Copy run command",
-    "noBindings": "No execution config. Add a JSON config under this task source's benchmarks/runs matching the task field, or pick a config with --config in the terminal.",
-    "envUnsupportedPrefix": "Current environment unsupported: ",
-    "listSeparator": ", ",
-    "historyTitle": "Execution history",
-    "historySubtitle": "runs · rescoring never adds runs",
-    "colTime": "Run time / task",
-    "colStatus": "Run status",
-    "colVerification": "Score version",
-    "colActions": "Actions",
-    "selectedRun": "Selected run",
-    "setBaseline": "Set as baseline",
-    "viewRun": "View run ↗",
-    "noHistory": "No execution records on this page. Historic tasks remain viewable via pinned run links even when gone from the catalog.",
-    "latestPage": "Latest page",
-    "olderRuns": "Older 25 runs →",
-    "detailAria": "Execution & scoring details",
-    "readingSelected": "Loading the selected run and score…",
-    "selectExecution": "Pick one run to see its score and evidence.",
-    "pinVersions": "Pin these and baseline versions",
-    "stillRunning": "No run-end record yet; it may still be running or was interrupted.",
-    "executionPrefix": "Run: ",
-    "scoringPrefix": "Score: ",
-    "execution": "Run",
-    "scoring": "Score",
-    "unsubmitted": "Unsubmitted",
-    "taskVersion": "Task version",
-    "reportTitle": "Score versions",
-    "rescoreNote": "Rescoring only reads persisted artifacts, never reruns the subject; a score of 0 is a normal measurement, not a system error.",
-    "noVerifications": "No score records.",
-    "latestScorePage": "Latest score page",
-    "olderScores": "Older scores →",
-    "copyReverify": "Copy rescore command",
-    "baselinePrefix": "Baseline: ",
-    "remove": "Remove",
-    "baselineFailedPrefix": "Baseline load failed: ",
-    "readingBaseline": "Loading baseline…",
-    "diffPrefix": "Differences: ",
-    "diffSuffix": ". Deltas are numeric changes only; interpret them with the diffs.",
-    "sameExecution": "This compares scores of the same run, not two independent trials.",
-    "subjectsChanged": "Subject code or model version changed; task and condition differences still need independent checks.",
-    "colDimension": "Dimension",
-    "colCurrent": "Current",
-    "colBaseline": "Baseline",
-    "colDelta": "Delta",
-    "noScores": "No scores available.",
-    "emptyReward": "Valid empty reward; it is not a task-success verdict.",
-    "evidenceTitle": "Scoring evidence & attachments",
-    "viewOriginalRun": "View original run ↗",
-    "noEvidence": "No evidence references registered.",
-    "firstEvidencePage": "First evidence page",
-    "moreEvidence": "More evidence →",
-    "viewParentRun": "View the run that launched this benchmark ↗",
-    "limitationsTitle": "Scope & limitations",
-    "provenanceTitle": "Conditions, subject versions & provenance",
-    "baselineTitle": "Baseline",
-    "chooseWorkspace": "Create or select a workspace to browse its benchmarks.",
-    "workspaceLoading": "Reading workspaces",
-    "workspaceLoadingDescription": "Checking registered workspace locations before reading benchmarks.",
-    "workspaceUnavailable": "Workspace location unavailable",
-    "workspaceUnavailableDescription": "Check or reconnect this workspace in Workspaces. A saved run link can still be checked separately.",
-    "manageWorkspaces": "Manage workspaces",
-    "readQuickstart": "Read quickstart",
-    "retryWorkspaceCatalog": "Retry workspace list",
-    "workspaceReadFailed": "Could not read the workspace list",
-    "workspaceReadFailedCached": "Showing the last known workspace. Retry to confirm the current registration.",
-    "workspaceReadFailedDescription": "The workspace list could not be read. This does not mean no workspaces exist.",
-    "retrying": "Reading…",
-    "refreshHistory": "Refresh tasks & history",
-    "readFailedCached": "Keeping the last loaded data. Retry the read to check for changes.",
-    "readFailedDescription": "Retry this read, or clear the selection to return to the history. No workload is started.",
-    "catalogReadFailedDescription": "Retry tasks and history. A failed read does not mean this workspace is empty.",
-    "technicalDetails": "Technical details",
-    "firstTaskTitle": "Add your first eval task",
-    "firstTaskDescription": "Define what to run, how to score it, and the evidence to keep. The task guide explains the package and execution config.",
-    "readTaskGuide": "Read task guide",
-    "viewCapabilities": "View capabilities",
-    "inspectTaskCatalog": "Inspect task discovery in the terminal",
-    "copyListCommand": "Copy list command",
-    "copyTaskHelpCommand": "Copy task help command",
-    "missingTaskPackages": "No task packages were found. Saved run history and pinned evidence can still be inspected.",
-    "tasksUnavailable": "Some task packages could not be read. Check the diagnostics before treating the catalog as empty.",
-    "terminalRunNote": "Copying does not run the task. Review the command and execute it in your terminal when ready.",
-    "allTaskVersions": "History includes all task versions",
-    "clearTaskFilter": "Clear task filter",
-    "chooseFirstTask": "Choose a task to prepare a run",
-    "refreshSelected": "Read selected run again",
-    "refreshBaseline": "Read baseline again",
-    "refreshAttachment": "Read attachment again",
-    "clearSelected": "Clear run selection",
-    "clearBaseline": "Clear baseline",
-    "invalidSelected": "This run link is invalid. Clear the selection or choose a run from the history.",
-    "invalidBaseline": "This baseline link is invalid. Clear it and choose another baseline from the history.",
-    "selectedUnavailable": "Selected run could not be read",
-    "baselineUnavailable": "Baseline could not be read",
-    "steps": {
-      "addTask": {
-        "title": "Add task",
-        "description": "Add a task package and a matching execution config."
-      },
-      "runTerminal": {
-        "title": "Run in terminal",
-        "description": "Choose a task, inspect its command, and run it when ready."
-      },
-      "inspectEvidence": {
-        "title": "Inspect evidence",
-        "description": "Return here for the run, score versions, and recorded evidence."
-      }
-    },
-    "historyEmpty": {
-      "no-tasks": {
-        "title": "No runs yet",
-        "description": "Saved executions will appear here after a task has run."
-      },
-      "no-runs": {
-        "title": "Ready to prepare a first run",
-        "description": "Choose a task to inspect its execution config. Copying a command does not start it."
-      },
-      "filter-empty": {
-        "title": "No runs match this task filter",
-        "description": "Clear the filter to browse other tasks. This includes every recorded version of the selected task."
-      },
-      "page-empty": {
-        "title": "No runs on this older page",
-        "description": "Return to the latest page without changing the task filter or selected evidence."
-      },
-      "unreadable": {
-        "title": "Some run records could not be read",
-        "description": "Check the history diagnostics and refresh. Unreadable records are not evidence that no runs exist."
-      },
-      "tasks-unavailable": {
-        "title": "Task discovery needs attention",
-        "description": "No runs are listed. Resolve the task diagnostics before adding or running a task."
-      }
-    },
-    "taskCatalogTitle": "Task packages",
-    "taskCatalogDescription": "Discovered in the repository and workspace. Choosing a task filters history; it does not run an evaluation.",
-    "taskChoiceHint": "Task filters keep your selected run and baseline.",
-    "taskMetadataPending": "Keeping the last loaded task packages while this history page is read.",
-    "taskMetadataStale": "Showing the last loaded task packages. The current history page could not be read.",
-    "selectedTaskTitle": "Selected task",
-    "taskNameLabel": "Task identifier",
-    "taskSourceLabel": "Source",
-    "taskVersionLabel": "Declared version",
-    "taskSchemaLabel": "Task schema",
-    "taskVersionMissing": "Not declared",
-    "taskPathLabel": "Package path",
-    "taskDigestLabel": "Full version digest",
-    "taskAmbiguousTitle": "Choose a task version",
-    "taskAmbiguousDescription": "Several discovered versions match this task name. Select a version from Task packages to inspect its configuration. History includes all versions of this task.",
-    "taskMissingTitle": "Selected task package is unavailable",
-    "taskMissingDescription": "This task name or version was not found in the loaded directory. Saved runs and independently selected evidence remain available.",
-    "historyLoadingTitle": "Reading this history page…",
-    "historyLoadingDescription": "Task choices remain available while the selected filter is read.",
-    "selectRunTitle": "Select a run to inspect its execution and scoring",
-    "selectRunDescription": "Choose a run time in the history above. Task filters and the comparison baseline are independent of this selection.",
-    "resultSelectionHint": "This selected run stays visible when the task filter changes.",
-    "catalogScopeChanged": "This task catalog belongs to a different workspace location. Refresh the workspace list and try again.",
-    "taskPickerLabel": "Select task",
-    "taskPickerAmbiguous": "Choose a task version",
-    "taskPickerMissing": "Selected task unavailable",
-    "viewExecutionHistory": "View execution history"
   },
   "runVisuals": {
     "transport": {
@@ -1675,7 +1455,6 @@
     "description": "Choose a recorded run by its full ID. Timestamp summaries use the Asia/Shanghai time zone.",
     "close": "Close",
     "current": "Current",
-    "benchmark": "Benchmark",
     "empty": "No recorded runs"
   },
   "workspacePicker": {

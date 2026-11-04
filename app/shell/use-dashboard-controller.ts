@@ -194,7 +194,7 @@ export function useDashboardController() {
     };
   }, [catalogRevision]);
   useEffect(() => {
-    if (view === "workspaces" || view === "settings" || view === "dev" || view === "benchmark" || view === "replay" || view === "docs" || view === "caps" || view === "perception" || !selection.project || !run) return;
+    if (view === "workspaces" || view === "settings" || view === "dev" || view === "replay" || view === "docs" || view === "caps" || view === "perception" || !selection.project || !run) return;
     const params = new URLSearchParams({
       project: selection.project,
       run,

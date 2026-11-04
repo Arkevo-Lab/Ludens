@@ -240,12 +240,10 @@ export async function activityBlocks(path: string, events: Event[], workspace?: 
 function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
   const { data } = event;
     const raised = event.type === "python_call_end" && data.outcome === "error";
-    const assessment = ["benchmark_end", "benchmark_verification", "benchmark_report", "benchmark_supervisor_end"].includes(event.type);
-    const unmet = assessment && data.executionStatus === "completed" && data.reportStatus === "valid" && data.verdict === "failed";
-    const failed = !raised && ((assessment && (data.executionStatus === "error" || data.verificationStatus === "error" || data.reportStatus === "invalid"))
-      || data.outcome === "error" || (["perception_status", "action_status"].includes(event.type) && data.state === "error") || (data.outcome !== "cancelled" && !data.aborted
+    const failed = !raised && (data.outcome === "error"
+      || (["perception_status", "action_status"].includes(event.type) && data.state === "error") || (data.outcome !== "cancelled" && !data.aborted
       && (event.type.endsWith("_error") || ["perception_fault", "action_fault"].includes(event.type) || (event.type === "event_source_gap" && data.phase === "start") || data.isError === true || data.stopReason === "error")));
-    const system = failed || assessment || event.type === "benchmark_start" || event.type === "control" || ["perception_status", "perception_fault", "perception_fault_end", "action_status", "action_fault", "action_fault_end"].includes(event.type)
+    const system = failed || event.type === "control" || ["perception_status", "perception_fault", "perception_fault_end", "action_status", "action_fault", "action_fault_end"].includes(event.type)
     || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
     || event.type.startsWith("background_") || event.type.includes("compaction") || event.type === "run_end";
   // Action halts on its first failure; action_status is the visible notification.
@@ -253,7 +251,7 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
   const actionDetail = event.type === "action_fault" || event.type === "action_fault_end";
   return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`, kind: system && !actionDetail ? "system" : "diagnostic",
     at: event.at, title: event.type, ...provenance(event), status: failed ? "error" : "complete",
-    ...(raised ? { outcome: "raised" as const } : {}), ...(unmet ? { outcome: "unmet" as const } : {}) };
+    ...(raised ? { outcome: "raised" as const } : {}) };
 }
 async function overlayEvents(path: string, events: Event[], blocks: Map<string, LogBlock>, index?: LogIndex, workspace = index?.archiveWorkspace) {
   const pythonMembers = new Map<string, { group: string; root: boolean }>();
@@ -744,7 +742,7 @@ export async function getActivity(project: string, run?: string, epoch?: string,
   // Pointer snapshots refer to immutable versions. A long history search does
   // not hold the writer lock or delay Pet's next incremental page.
   const result = { ...await queryActivity(index, selectedState.scope, query, signal), state: selectedState.state };
-  const live = latest === runId && manifest.kind !== "benchmark"
+  const live = latest === runId
     ? await hostRequest(manifest.socket, { kind: "status", argv: [] }).catch(() => null) : null;
   const selectedCurrent = live?.runId === runId && (live.mode === "manual" || live.epoch === result.scope.epoch);
   const connected = selectedCurrent && live?.connected;
