@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowUpRight,
+  BarChart3,
   BookOpen,
   Boxes,
   CheckCircle2,
@@ -14,6 +15,9 @@ import {
   FlaskConical,
   History,
   Monitor,
+  Sparkles,
+  Timer,
+  TrendingUp,
 } from "lucide-react";
 import type {
   CapabilityEntry,
@@ -51,8 +55,58 @@ const EVAL_STATUS_ORDER: CapabilityEvalStatus[] = [
   "missing",
 ];
 
+const STATUS_STROKE_COLORS: Record<CapabilityEvalStatus, string> = {
+  verified: "#16a34a",
+  adapting: "#7c3aed",
+  stale: "#d97706",
+  failed: "#dc2626",
+  unverified: "#64748b",
+  missing: "#94a3b8",
+};
+
+const SERIES_PALETTE = [
+  "#16a34a",
+  "#2563eb",
+  "#d97706",
+  "#7c3aed",
+  "#0d9488",
+  "#db2777",
+];
+
 function shortSha(sha?: string | null) {
   return sha ? sha.slice(0, 8) : null;
+}
+
+function shortCapabilityLabel(id: string) {
+  const colon = id.lastIndexOf(":");
+  if (colon >= 0 && colon < id.length - 1) return id.slice(colon + 1);
+  return id.replace(/^python\//, "");
+}
+
+function isRatioRewardKey(key: string, value: number) {
+  if (!Number.isFinite(value) || value < 0 || value > 1) return false;
+  if (/_passed$|_cases$|^samples$|^sum$|^count$|_frames$/i.test(key)) return false;
+  return /rate|accuracy|coverage|ratio|score|tracking|precision|recall|f1/i.test(key)
+    || (!Number.isInteger(value) && value >= 0 && value <= 1);
+}
+
+function extractPrimaryReward(rewards?: Record<string, number> | null): { key: string; value: number; normalized: number; isRatio: boolean } | null {
+  if (!rewards) return null;
+  const entries = Object.entries(rewards).filter(([, v]) => typeof v === "number" && Number.isFinite(v));
+  if (!entries.length) return null;
+  const preferredKeys = ["pass_rate", "accuracy", "coverage", "score"];
+  for (const key of preferredKeys) {
+    const val = rewards[key];
+    if (typeof val === "number" && Number.isFinite(val)) {
+      return { key, value: val, normalized: Math.max(0, Math.min(1, val)), isRatio: isRatioRewardKey(key, val) };
+    }
+  }
+  const ratioEntry = entries.find(([k, v]) => isRatioRewardKey(k, v));
+  if (ratioEntry) {
+    return { key: ratioEntry[0], value: ratioEntry[1], normalized: Math.max(0, Math.min(1, ratioEntry[1])), isRatio: true };
+  }
+  const [firstKey, firstVal] = entries[0];
+  return { key: firstKey, value: firstVal, normalized: firstVal > 0 ? 1 : 0, isRatio: false };
 }
 
 function formatRewardValue(value: number) {
@@ -167,6 +221,406 @@ function TriadSummaryBar({
         </div>
       )}
     </section>
+  );
+}
+
+function TriadAnalyticsDeck({
+  capabilities,
+  envs,
+  summary,
+}: {
+  capabilities: CapabilityEntry[];
+  envs: CapabilityEnvEntry[];
+  summary: Record<CapabilityEvalStatus, number>;
+}) {
+  const t = useTranslations("capabilitiesView");
+  const [focusedCapId, setFocusedCapId] = useState<string | null>(null);
+  const total = capabilities.length;
+  if (total === 0) return null;
+
+  const verifiedCount = summary.verified ?? 0;
+  const verifiedPct = Math.round((verifiedCount / total) * 100);
+  const observedCount = capabilities.filter(c => c.observe).length;
+  const boundEvalCount = capabilities.filter(c => c.evalId).length;
+  const boundEnvCount = capabilities.filter(c => c.evalEnvId).length;
+
+  // Donut segments (r = 42, C = 263.89)
+  const radius = 42;
+  const circumference = 2 * Math.PI * radius;
+  let accumulatedFraction = 0;
+  const donutSegments = EVAL_STATUS_ORDER.map(status => {
+    const count = summary[status] ?? 0;
+    const fraction = count / total;
+    const dash = fraction * circumference;
+    const offset = -accumulatedFraction * circumference;
+    accumulatedFraction += fraction;
+    return { status, count, dash, offset, color: STATUS_STROKE_COLORS[status] };
+  }).filter(seg => seg.count > 0);
+
+  // Trajectory series (chronological oldest -> newest per capability)
+  const trajectorySeries = capabilities
+    .map((cap, idx) => {
+      const chronological = [...(cap.history ?? [])].reverse();
+      const points = chronological
+        .map(run => {
+          const primary = extractPrimaryReward(run.rewards);
+          if (!primary) return null;
+          return {
+            runId: run.runId,
+            evaluatedAt: run.evaluatedAt,
+            outcome: run.adaptation ? "adapting" : run.outcome,
+            durationMs: run.durationMs,
+            metricKey: primary.key,
+            rawValue: primary.value,
+            normalized: primary.normalized,
+          };
+        })
+        .filter((p): p is NonNullable<typeof p> => p !== null);
+      return {
+        id: cap.id,
+        label: shortCapabilityLabel(cap.id),
+        color: SERIES_PALETTE[idx % SERIES_PALETTE.length],
+        points,
+      };
+    })
+    .filter(s => s.points.length > 0);
+
+  const allRuns = capabilities.flatMap(c => c.history ?? []);
+  const passedRuns = allRuns.filter(r => r.outcome === "passed" && !r.adaptation).length;
+  const historicalPassRate = allRuns.length > 0 ? Math.round((passedRuns / allRuns.length) * 100) : 0;
+  const latestPrimaries = capabilities
+    .map(c => extractPrimaryReward(c.evalRewards))
+    .filter((p): p is NonNullable<typeof p> => p !== null);
+  const avgLatestScore = latestPrimaries.length > 0
+    ? Math.round((latestPrimaries.reduce((acc, p) => acc + p.normalized, 0) / latestPrimaries.length) * 100)
+    : 0;
+
+  // Duration profile
+  const durationRows = capabilities
+    .map((cap, idx) => {
+      const durations = (cap.history ?? [])
+        .map(r => r.durationMs)
+        .filter((d): d is number => typeof d === "number" && d > 0);
+      const latestMs = cap.latestRecord?.durationMs ?? durations[0] ?? 0;
+      const minMs = durations.length > 0 ? Math.min(...durations) : latestMs;
+      const maxMs = durations.length > 0 ? Math.max(...durations) : latestMs;
+      const metricsCount = Object.keys(cap.evalRewards ?? {}).length;
+      const runsCount = cap.history?.length ?? (cap.latestRecord ? 1 : 0);
+      return {
+        id: cap.id,
+        label: shortCapabilityLabel(cap.id),
+        status: cap.evalStatus ?? "missing",
+        color: SERIES_PALETTE[idx % SERIES_PALETTE.length],
+        latestMs,
+        minMs,
+        maxMs,
+        metricsCount,
+        runsCount,
+      };
+    })
+    .sort((a, b) => b.latestMs - a.latestMs || b.metricsCount - a.metricsCount);
+
+  const maxDurationMs = Math.max(100, ...durationRows.map(r => Math.max(r.latestMs, r.maxMs)));
+
+  return (
+    <section className="triad-analytics-deck" aria-label={t("analyticsSectionLabel")} data-capability-analytics>
+      {/* Chart 1: Triad Verification Donut & 3-Layer Coverage */}
+      <article className="triad-chart-card" data-triad-chart="health">
+        <header className="triad-chart-header">
+          <div className="triad-chart-title">
+            <Sparkles className="size-4 text-primary" aria-hidden="true" />
+            <h4>{t("healthChartTitle")}</h4>
+          </div>
+          <span className="triad-chart-pill">{verifiedCount}/{total} {t("healthChartVerifiedRate")}</span>
+        </header>
+        <div className="triad-health-body">
+          <div className="triad-donut-wrap">
+            <svg viewBox="0 0 110 110" className="triad-donut-svg" role="img" aria-label={t("healthChartTitle")}>
+              <circle cx="55" cy="55" r={radius} fill="none" stroke="var(--border)" strokeWidth="10" />
+              {donutSegments.map(seg => (
+                <circle
+                  key={seg.status}
+                  cx="55"
+                  cy="55"
+                  r={radius}
+                  fill="none"
+                  stroke={seg.color}
+                  strokeWidth="10"
+                  strokeDasharray={`${seg.dash} ${circumference}`}
+                  strokeDashoffset={seg.offset}
+                  strokeLinecap={donutSegments.length === 1 ? "round" : "butt"}
+                  transform="rotate(-90 55 55)"
+                />
+              ))}
+              <text x="55" y="53" textAnchor="middle" className="triad-donut-value">{verifiedPct}%</text>
+              <text x="55" y="68" textAnchor="middle" className="triad-donut-sub">{t("healthChartVerifiedRate")}</text>
+            </svg>
+          </div>
+          <div className="triad-coverage-bars">
+            <div className="triad-coverage-item">
+              <div className="triad-coverage-head">
+                <span>{t("coverageCapabilityObserve")}</span>
+                <b>{observedCount}/{total}</b>
+              </div>
+              <div className="triad-coverage-track">
+                <div className="triad-coverage-fill" data-layer="capability" style={{ width: `${Math.round((observedCount / total) * 100)}%` }} />
+              </div>
+            </div>
+            <div className="triad-coverage-item">
+              <div className="triad-coverage-head">
+                <span>{t("coverageEvalBound")}</span>
+                <b>{boundEvalCount}/{total}</b>
+              </div>
+              <div className="triad-coverage-track">
+                <div className="triad-coverage-fill" data-layer="eval" style={{ width: `${Math.round((boundEvalCount / total) * 100)}%` }} />
+              </div>
+            </div>
+            <div className="triad-coverage-item">
+              <div className="triad-coverage-head">
+                <span>{t("coverageEnvClosedLoop")}</span>
+                <b>{boundEnvCount}/{Math.max(1, boundEvalCount)} · {envs.length} env</b>
+              </div>
+              <div className="triad-coverage-track">
+                <div className="triad-coverage-fill" data-layer="env" style={{ width: `${Math.round((boundEnvCount / Math.max(1, boundEvalCount)) * 100)}%` }} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      {/* Chart 2: Chronological Reward Evolution Trajectory */}
+      <article className="triad-chart-card" data-triad-chart="trajectory">
+        <header className="triad-chart-header">
+          <div className="triad-chart-title">
+            <TrendingUp className="size-4 text-primary" aria-hidden="true" />
+            <div>
+              <h4>{t("trajectoryChartTitle")}</h4>
+              <p className="triad-chart-subtitle">{t("trajectoryChartSubtitle")}</p>
+            </div>
+          </div>
+        </header>
+        {trajectorySeries.length === 0 ? (
+          <p className="triad-chart-empty">{t("trajectoryEmpty")}</p>
+        ) : (
+          <>
+            <div className="triad-series-legend" role="toolbar" aria-label={t("trajectoryChartTitle")}>
+              <button
+                type="button"
+                className="triad-series-chip"
+                data-active={focusedCapId === null || undefined}
+                onClick={() => setFocusedCapId(null)}
+              >
+                <span>{t("filterAll")}</span>
+              </button>
+              {trajectorySeries.map(series => (
+                <button
+                  key={series.id}
+                  type="button"
+                  className="triad-series-chip"
+                  data-active={focusedCapId === series.id || undefined}
+                  onClick={() => setFocusedCapId(focusedCapId === series.id ? null : series.id)}
+                >
+                  <i style={{ background: series.color }} aria-hidden="true" />
+                  <span>{series.label}</span>
+                  <b>{Math.round(series.points[series.points.length - 1]!.normalized * 100)}%</b>
+                </button>
+              ))}
+            </div>
+            <svg viewBox="0 0 380 132" className="triad-trajectory-svg" role="img" aria-label={t("trajectoryChartTitle")}>
+              {[0, 0.5, 1].map(level => {
+                const y = 108 - level * 88;
+                return (
+                  <g key={level}>
+                    <line x1="34" x2="366" y1={y} y2={y} className="triad-chart-grid" />
+                    <text x="28" y={y + 3.5} textAnchor="end" className="triad-chart-axis-text">
+                      {Math.round(level * 100)}%
+                    </text>
+                  </g>
+                );
+              })}
+              {trajectorySeries.map(series => {
+                const dimmed = focusedCapId !== null && focusedCapId !== series.id;
+                const count = series.points.length;
+                const coords = series.points.map((pt, i) => {
+                  const x = count === 1 ? 200 : 42 + (i / (count - 1)) * 316;
+                  const y = 108 - pt.normalized * 88;
+                  return { x, y, pt };
+                });
+                const linePath = coords.length === 1
+                  ? `M 42 ${coords[0]!.y} L 358 ${coords[0]!.y}`
+                  : coords.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(" ");
+                const areaPath = coords.length > 1
+                  ? `${linePath} L ${coords[coords.length - 1]!.x.toFixed(1)} 108 L ${coords[0]!.x.toFixed(1)} 108 Z`
+                  : null;
+                return (
+                  <g key={series.id} opacity={dimmed ? 0.18 : 1} data-trajectory-series={series.id}>
+                    {areaPath && (focusedCapId === series.id || trajectorySeries.length === 1) && (
+                      <path d={areaPath} fill={series.color} fillOpacity="0.12" />
+                    )}
+                    <path
+                      d={linePath}
+                      fill="none"
+                      stroke={series.color}
+                      strokeWidth={focusedCapId === series.id ? "2.6" : "2"}
+                      strokeDasharray={coords.length === 1 ? "4 4" : undefined}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    {coords.map((c, i) => (
+                      <g key={`${series.id}-${c.pt.runId}-${i}`}>
+                        <circle
+                          cx={c.x}
+                          cy={c.y}
+                          r={c.pt.outcome === "passed" ? 3.6 : 4.2}
+                          fill={c.pt.outcome === "passed" ? series.color : "var(--card)"}
+                          stroke={c.pt.outcome === "failed" ? "#dc2626" : c.pt.outcome === "adapting" ? "#7c3aed" : series.color}
+                          strokeWidth="2"
+                        >
+                          <title>{`${series.label} · ${c.pt.metricKey}: ${formatRewardValue(c.pt.rawValue)} (${c.pt.outcome})`}</title>
+                        </circle>
+                      </g>
+                    ))}
+                  </g>
+                );
+              })}
+            </svg>
+            <footer className="triad-chart-footer">
+              <span>{t("trajectoryTotalRuns").replace("{count}", String(allRuns.length))}</span>
+              <span>·</span>
+              <span>{t("trajectoryHistoricalPass").replace("{rate}", String(historicalPassRate))}</span>
+              <span>·</span>
+              <span>{t("trajectoryAvgReward").replace("{score}", String(avgLatestScore))}</span>
+            </footer>
+          </>
+        )}
+      </article>
+
+      {/* Chart 3: Evaluation Runtime & Assertion Density */}
+      <article className="triad-chart-card" data-triad-chart="duration">
+        <header className="triad-chart-header">
+          <div className="triad-chart-title">
+            <BarChart3 className="size-4 text-primary" aria-hidden="true" />
+            <div>
+              <h4>{t("durationChartTitle")}</h4>
+              <p className="triad-chart-subtitle">{t("durationChartSubtitle")}</p>
+            </div>
+          </div>
+        </header>
+        {durationRows.every(r => r.latestMs === 0 && r.metricsCount === 0) ? (
+          <p className="triad-chart-empty">{t("durationEmpty")}</p>
+        ) : (
+          <ul className="triad-duration-bars" role="list">
+            {durationRows.map(row => {
+              const latestPct = Math.max(3, Math.round((row.latestMs / maxDurationMs) * 100));
+              const minPct = Math.round((row.minMs / maxDurationMs) * 100);
+              const maxPct = Math.round((row.maxMs / maxDurationMs) * 100);
+              return (
+                <li key={row.id} className="triad-duration-row" data-duration-row={row.id}>
+                  <div className="triad-duration-meta">
+                    <code className="triad-duration-name">{row.label}</code>
+                    <div className="triad-duration-badges">
+                      {row.metricsCount > 0 && (
+                        <span className="triad-duration-tag">{t("durationMetricsCount").replace("{count}", String(row.metricsCount))}</span>
+                      )}
+                      {row.runsCount > 0 && (
+                        <span className="triad-duration-tag">{t("durationRunsCount").replace("{count}", String(row.runsCount))}</span>
+                      )}
+                      <strong className="triad-duration-val">{formatDuration(row.latestMs) ?? "—"}</strong>
+                    </div>
+                  </div>
+                  <div className="triad-duration-track">
+                    {row.maxMs > row.minMs && (
+                      <div
+                        className="triad-duration-range"
+                        style={{ left: `${minPct}%`, width: `${Math.max(2, maxPct - minPct)}%` }}
+                        title={`${formatDuration(row.minMs)} – ${formatDuration(row.maxMs)}`}
+                      />
+                    )}
+                    <div
+                      className="triad-duration-fill"
+                      data-status={row.status}
+                      style={{ width: `${row.latestMs > 0 ? latestPct : 0}%`, background: row.color }}
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </article>
+    </section>
+  );
+}
+
+function CapabilitySparkline({ item }: { item: CapabilityEntry }) {
+  const t = useTranslations("capabilitiesView");
+  const history = item.history ?? [];
+  if (history.length === 0) return null;
+  const chronological = [...history].reverse();
+  const points = chronological
+    .map(run => {
+      const primary = extractPrimaryReward(run.rewards);
+      return {
+        runId: run.runId,
+        outcome: run.adaptation ? "adapting" : run.outcome,
+        normalized: primary ? primary.normalized : run.outcome === "passed" ? 1 : 0,
+        rawValue: primary?.value ?? (run.outcome === "passed" ? 1 : 0),
+        metricKey: primary?.key ?? "outcome",
+        isRatio: primary?.isRatio ?? true,
+      };
+    });
+  const first = points[0]!;
+  const latest = points[points.length - 1]!;
+  const deltaPct = Math.round((latest.normalized - first.normalized) * 100);
+  const coords = points.map((pt, i) => {
+    const x = points.length === 1 ? 90 : 8 + (i / (points.length - 1)) * 164;
+    const y = 34 - pt.normalized * 26;
+    return { x, y, pt };
+  });
+  const linePath = coords.length === 1
+    ? `M 8 ${coords[0]!.y} L 172 ${coords[0]!.y}`
+    : coords.map((c, i) => `${i === 0 ? "M" : "L"} ${c.x.toFixed(1)} ${c.y.toFixed(1)}`).join(" ");
+  const areaPath = `${linePath} L ${coords[coords.length - 1]?.x ?? 172} 38 L ${coords[0]?.x ?? 8} 38 Z`;
+
+  return (
+    <div className="triad-sparkline-strip" data-capability-sparkline={item.id}>
+      <div className="triad-sparkline-info">
+        <div className="triad-sparkline-head">
+          <TrendingUp className="size-3.5 text-primary" aria-hidden="true" />
+          <span className="triad-sparkline-title">{t("sparklineLabel")}</span>
+          <code className="triad-sparkline-key">{latest.metricKey}</code>
+          {points.length > 1 && deltaPct !== 0 && (
+            <span className="triad-sparkline-delta" data-positive={deltaPct > 0 || undefined}>
+              {deltaPct > 0 ? `+${deltaPct}%` : `${deltaPct}%`}
+            </span>
+          )}
+        </div>
+        <div className="triad-outcome-dots" aria-label={t("sparklineRuns").replace("{count}", String(points.length))}>
+          {points.map((pt, idx) => (
+            <span
+              key={`${pt.runId}-${idx}`}
+              className="triad-outcome-dot"
+              data-outcome={pt.outcome}
+              title={`${pt.runId}: ${pt.metricKey}=${formatRewardValue(pt.rawValue)} (${pt.outcome})`}
+            />
+          ))}
+          <small className="triad-outcome-count">{t("sparklineRuns").replace("{count}", String(points.length))}</small>
+        </div>
+      </div>
+      <svg viewBox="0 0 180 40" className="triad-sparkline-svg" aria-hidden="true">
+        <path d={areaPath} fill="var(--primary)" fillOpacity="0.1" />
+        <path d={linePath} fill="none" stroke="var(--primary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        {coords.map((c, idx) => (
+          <circle
+            key={`${c.pt.runId}-${idx}`}
+            cx={c.x}
+            cy={c.y}
+            r={idx === coords.length - 1 ? 3.4 : 2.4}
+            fill={c.pt.outcome === "passed" ? "#16a34a" : c.pt.outcome === "adapting" ? "#7c3aed" : "#dc2626"}
+          />
+        ))}
+      </svg>
+    </div>
   );
 }
 
@@ -412,12 +866,21 @@ function WorkspaceTriadDeclarations({
               <div className="triad-metrics-row">
                 {item.evalRewards && Object.keys(item.evalRewards).length > 0 && (
                   <div className="capability-eval-rewards" data-capability-eval-rewards>
-                    {Object.entries(item.evalRewards).map(([key, value]) => (
-                      <span key={key}>
-                        <small>{key}</small>
-                        <b>{formatRewardValue(value)}</b>
-                      </span>
-                    ))}
+                    {Object.entries(item.evalRewards).map(([key, value]) => {
+                      const ratio = isRatioRewardKey(key, value);
+                      const pct = ratio ? Math.round(Math.max(0, Math.min(1, value)) * 100) : null;
+                      return (
+                        <span key={key} data-reward-ratio={ratio || undefined}>
+                          <small>{key}</small>
+                          <b>{formatRewardValue(value)}</b>
+                          {pct !== null && (
+                            <i className="triad-reward-meter" aria-hidden="true">
+                              <em style={{ width: `${pct}%` }} data-high={pct >= 95 || undefined} />
+                            </i>
+                          )}
+                        </span>
+                      );
+                    })}
                   </div>
                 )}
                 {item.evalEvaluatedAt && (
@@ -429,6 +892,8 @@ function WorkspaceTriadDeclarations({
                 )}
               </div>
             )}
+
+            <CapabilitySparkline item={item} />
 
             {adaptation && (
               <div className="triad-adaptation-box" data-capability-adaptation={item.id}>
@@ -588,6 +1053,12 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
         summary={evalSummary}
         selectedStatus={statusFilter}
         onSelectStatus={setStatusFilter}
+      />
+
+      <TriadAnalyticsDeck
+        capabilities={workspaceItems}
+        envs={envs}
+        summary={evalSummary}
       />
 
       <Card className="min-w-0" data-capability-source="workspace">

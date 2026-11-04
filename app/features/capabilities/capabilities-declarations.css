@@ -17,9 +17,12 @@
   .capability-eval-id { display:flex; flex-wrap:wrap; gap:4px 8px; margin:0; color:var(--muted-foreground); font-size:12px; }
   .capability-eval-id code { overflow-wrap:anywhere; color:var(--foreground); font-family:var(--font-mono); }
   .capability-eval-rewards { display:flex; flex-wrap:wrap; gap:6px; }
-  .capability-eval-rewards span { display:inline-flex; align-items:baseline; gap:6px; padding:2px 8px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-inset,var(--muted)); font:11.5px/1.5 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
+  .capability-eval-rewards span { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-inset,var(--muted)); font:11.5px/1.5 ui-monospace,monospace; font-variant-numeric:tabular-nums; }
   .capability-eval-rewards span small { color:var(--muted-foreground); font-size:11px; }
   .capability-eval-rewards span b { color:var(--foreground); font-weight:600; }
+  .triad-reward-meter { display:inline-block; width:38px; height:5px; border-radius:999px; background:color-mix(in srgb,var(--foreground) 12%,transparent); overflow:hidden; }
+  .triad-reward-meter > em { display:block; height:100%; border-radius:999px; background:var(--primary); }
+  .triad-reward-meter > em[data-high] { background:var(--success,#16a34a); }
   .capability-eval-error { margin:4px 0 0; color:var(--destructive); font-size:12px; line-height:1.5; }
   .capability-declaration-control { display:flex; flex-wrap:wrap; gap:4px 8px; font-size:12px; line-height:1.6; }
   .capability-declaration-control dt { color:var(--muted-foreground); }
@@ -115,10 +118,77 @@
   .triad-env-bound-chip { padding:1px 6px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--card); font:11px/1.4 var(--font-mono); color:var(--foreground); }
   .triad-env-context-note { color:var(--muted-foreground); font-style:italic; }
 
+  /* ── Triad Visual Telemetry & Charts ────────────────────────── */
+  .triad-analytics-deck { display:grid; grid-template-columns:minmax(260px,0.95fr) minmax(320px,1.35fr) minmax(280px,1.1fr); gap:12px; align-items:stretch; }
+  .triad-chart-card { display:flex; flex-direction:column; gap:12px; padding:15px 16px; border:1px solid var(--border); border-radius:var(--radius); background:var(--card); min-width:0; }
+  .triad-chart-header { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; }
+  .triad-chart-title { display:flex; align-items:flex-start; gap:8px; min-width:0; }
+  .triad-chart-title h4 { margin:0; font:600 13px/1.35 ui-sans-serif,sans-serif; color:var(--foreground); }
+  .triad-chart-subtitle { margin:2px 0 0; font-size:11px; line-height:1.4; color:var(--muted-foreground); }
+  .triad-chart-pill { padding:2px 8px; border:1px solid color-mix(in srgb,var(--success,#16a34a) 35%,var(--border)); border-radius:999px; background:color-mix(in srgb,var(--success,#16a34a) 10%,transparent); color:var(--success,#16a34a); font:600 11px/1.35 var(--font-mono); white-space:nowrap; }
+  .triad-chart-empty { margin:auto 0; font-size:12px; color:var(--muted-foreground); text-align:center; padding:18px 8px; }
+
+  .triad-health-body { display:grid; grid-template-columns:108px minmax(0,1fr); align-items:center; gap:14px; margin:auto 0; }
+  .triad-donut-wrap { display:flex; align-items:center; justify-content:center; }
+  .triad-donut-svg { width:104px; height:104px; overflow:visible; }
+  .triad-donut-value { fill:var(--foreground); font:700 18px/1 var(--font-mono); }
+  .triad-donut-sub { fill:var(--muted-foreground); font:600 8.5px/1 ui-sans-serif,sans-serif; text-transform:uppercase; letter-spacing:0.06em; }
+  .triad-coverage-bars { display:flex; flex-direction:column; gap:10px; min-width:0; }
+  .triad-coverage-item { display:flex; flex-direction:column; gap:4px; }
+  .triad-coverage-head { display:flex; align-items:center; justify-content:space-between; gap:6px; font-size:11.5px; color:var(--muted-foreground); }
+  .triad-coverage-head b { font:600 11px/1.3 var(--font-mono); color:var(--foreground); font-variant-numeric:tabular-nums; }
+  .triad-coverage-track { height:6px; border-radius:999px; background:color-mix(in srgb,var(--foreground) 10%,transparent); overflow:hidden; }
+  .triad-coverage-fill { height:100%; border-radius:999px; transition:width 240ms ease; }
+  .triad-coverage-fill[data-layer="capability"] { background:#2563eb; }
+  .triad-coverage-fill[data-layer="eval"] { background:#16a34a; }
+  .triad-coverage-fill[data-layer="env"] { background:#7c3aed; }
+
+  .triad-series-legend { display:flex; flex-wrap:wrap; gap:5px; }
+  .triad-series-chip { display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border:1px solid var(--border); border-radius:999px; background:var(--surface-inset,var(--muted)); color:var(--muted-foreground); font-size:11px; line-height:1.35; cursor:pointer; transition:border-color 120ms ease,color 120ms ease; }
+  .triad-series-chip:hover { color:var(--foreground); }
+  .triad-series-chip[data-active] { border-color:var(--primary); color:var(--foreground); background:color-mix(in srgb,var(--primary) 10%,var(--card)); }
+  .triad-series-chip i { width:7px; height:7px; border-radius:999px; flex-shrink:0; }
+  .triad-series-chip b { font-family:var(--font-mono); font-size:10.5px; color:var(--foreground); }
+  .triad-trajectory-svg { width:100%; height:132px; overflow:visible; }
+  .triad-chart-grid { stroke:var(--border); stroke-dasharray:3 3; stroke-width:1; }
+  .triad-chart-axis-text { fill:var(--muted-foreground); font:500 9.5px/1 var(--font-mono); }
+  .triad-chart-footer { display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:auto; padding-top:6px; border-top:1px solid var(--border); font:11px/1.4 var(--font-mono); color:var(--muted-foreground); }
+
+  .triad-duration-bars { margin:0; padding:0; list-style:none; display:flex; flex-direction:column; gap:9px; justify-content:center; }
+  .triad-duration-row { display:flex; flex-direction:column; gap:4px; }
+  .triad-duration-meta { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px; }
+  .triad-duration-name { font:600 11.5px/1.35 var(--font-mono); color:var(--foreground); }
+  .triad-duration-badges { display:inline-flex; align-items:center; gap:5px; }
+  .triad-duration-tag { padding:1px 5px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-inset,var(--muted)); font:10px/1.3 var(--font-mono); color:var(--muted-foreground); }
+  .triad-duration-val { font:600 11.5px/1.3 var(--font-mono); color:var(--foreground); font-variant-numeric:tabular-nums; min-width:44px; text-align:right; }
+  .triad-duration-track { position:relative; height:7px; border-radius:999px; background:color-mix(in srgb,var(--foreground) 9%,transparent); overflow:hidden; }
+  .triad-duration-range { position:absolute; top:0; bottom:0; border-radius:999px; background:color-mix(in srgb,var(--foreground) 18%,transparent); }
+  .triad-duration-fill { position:relative; height:100%; border-radius:999px; transition:width 240ms ease; }
+
+  .triad-sparkline-strip { display:grid; grid-template-columns:minmax(0,1fr) 180px; align-items:center; gap:12px; padding:8px 12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--card); }
+  .triad-sparkline-info { display:flex; flex-direction:column; gap:5px; min-width:0; }
+  .triad-sparkline-head { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-size:11.5px; }
+  .triad-sparkline-title { font-weight:500; color:var(--muted-foreground); }
+  .triad-sparkline-key { padding:1px 5px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-inset,var(--muted)); font:10.5px/1.3 var(--font-mono); color:var(--foreground); }
+  .triad-sparkline-delta { padding:1px 6px; border-radius:999px; font:600 10.5px/1.3 var(--font-mono); background:color-mix(in srgb,var(--destructive) 12%,transparent); color:var(--destructive); }
+  .triad-sparkline-delta[data-positive] { background:color-mix(in srgb,var(--success,#16a34a) 12%,transparent); color:var(--success,#16a34a); }
+  .triad-outcome-dots { display:flex; flex-wrap:wrap; align-items:center; gap:4px; }
+  .triad-outcome-dot { width:10px; height:6px; border-radius:2px; background:var(--muted-foreground); }
+  .triad-outcome-dot[data-outcome="passed"] { background:var(--success,#16a34a); }
+  .triad-outcome-dot[data-outcome="failed"] { background:var(--destructive,#dc2626); }
+  .triad-outcome-dot[data-outcome="adapting"] { background:var(--primary,#7c3aed); }
+  .triad-outcome-count { margin-left:4px; font:11px/1.3 var(--font-mono); color:var(--muted-foreground); }
+  .triad-sparkline-svg { width:180px; height:40px; overflow:visible; }
+
+  @media (max-width: 1120px) {
+    .triad-analytics-deck { grid-template-columns:1fr; }
+  }
   @media (max-width: 860px) {
     .triad-pillars { grid-template-columns:1fr; }
     .triad-topology { grid-template-columns:minmax(0,1fr); }
     .triad-arrow { display:none; }
     .triad-history-shas { margin-left:0; }
+    .triad-sparkline-strip { grid-template-columns:1fr; }
+    .triad-sparkline-svg { width:100%; }
   }
 }
