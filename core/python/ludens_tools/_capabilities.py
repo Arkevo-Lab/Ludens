@@ -374,6 +374,12 @@ def _load_marked(workspace, relative_path, function_name, marker_attribute, unma
         module = imported_module()
         if module is None:
             raw = source.read_bytes() if raw is None else raw
+            # Explicit capability loads bypass importlib finders; retain their
+            # exact loaded bytes in the resident generation manifest as well.
+            for finder in sys.meta_path:
+                remember = getattr(finder, "remember_workspace_source", None)
+                if remember is not None:
+                    remember(source, raw)
             spec = importlib.util.spec_from_file_location(module_name, source)
             module = importlib.util.module_from_spec(spec)
             module.__ludens_source_sha__ = hashlib.sha256(raw).hexdigest()

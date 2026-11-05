@@ -241,18 +241,15 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
   const { data } = event;
     const raised = event.type === "python_call_end" && data.outcome === "error";
     const failed = !raised && (data.outcome === "error"
-      || (["perception_status", "action_status"].includes(event.type) && data.state === "error") || (data.outcome !== "cancelled" && !data.aborted
-      && (event.type.endsWith("_error") || ["perception_fault", "action_fault"].includes(event.type) || (event.type === "event_source_gap" && data.phase === "start") || data.isError === true || data.stopReason === "error")));
-    const system = failed || event.type === "control" || ["perception_status", "perception_fault", "perception_fault_end", "action_status", "action_fault", "action_fault_end"].includes(event.type)
+      || (event.type === "perception_status" && data.state === "error") || (data.outcome !== "cancelled" && !data.aborted
+      && (event.type.endsWith("_error") || event.type === "perception_fault" || (event.type === "event_source_gap" && data.phase === "start") || data.isError === true || data.stopReason === "error")));
+    const system = failed || event.type === "control" || ["perception_status", "perception_fault", "perception_fault_end"].includes(event.type)
     || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
     || event.type.startsWith("background_") || event.type.includes("compaction") || event.type === "run_end";
-  // Action halts on its first failure; action_status is the visible notification.
-  // Keep detailed fault intervals available without repeating the same Pet bubble.
-  const actionDetail = event.type === "action_fault" || event.type === "action_fault_end";
   if (event.type === "user_message" && typeof data?.text === "string") return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`,
     kind: "text" as const, at: event.at, title: data.mode === "steer" ? "Steer" : data.mode === "follow_up" ? "Follow-up" : "User",
     ...provenance(event), status: "complete" as const };
-  return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`, kind: system && !actionDetail ? "system" : "diagnostic",
+  return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`, kind: system ? "system" : "diagnostic",
     at: event.at, title: event.type, ...provenance(event), status: failed ? "error" : "complete",
     ...(raised ? { outcome: "raised" as const } : {}) };
 }

@@ -52,7 +52,7 @@ When creating a workspace, append `--pet` to the chosen `ludens init --name <nam
 
 You can also use `ludens up --pet` or `ludens up --no-pet` to override just the current start without writing back to `ludens.json`; the two flags are mutually exclusive. Neither `pet: false` nor `--no-pet` shuts down an already-running shared pet — quit it from its tray menu.
 
-The pet needs a working Dashboard and shares the same console and logs as the browser. By default `dashboard: true` starts the Dashboard on demand; with `false` you must start it yourself. For standalone startup or debugging, see [Ludens Pet desktop companion](debugging-and-verification.md).
+The pet needs a working Dashboard and shares the same console and logs as the browser. By default `dashboard: true` starts the Dashboard on demand; with `false` you must start it yourself. For standalone startup or debugging, see [Ludens Pet desktop companion](debugging-and-verification.md#3-ludens-pet-desktop-companion).
 
 ## Starting and stopping workspaces
 
@@ -87,7 +87,6 @@ Quick reference for common workspace and control commands:
 | `ludens services` | Shows the PID, status, and latest exit code of the launchd tasks bound to the current workspace. |
 | `ludens auto on [--message 'text']` | Starts a new control cycle (new `epoch`, resetting time and request budgets) and issues inference to the model. `--message` is attached once on the first round of that takeover only, never re-injected in later rounds. |
 | `ludens auto off` | Immediately revokes device operation rights and cancels in-flight Ludens-managed calls; the emulator keeps running. Wait for the current cycle to finish cleaning up before `auto on` again. |
-| `ludens action status / reload / stop` | Manages the workspace `action.py` resident action process. Under `manual`, `reload` only marks readiness; under `auto`, `stop` or `reload` clears all current device inputs for this workspace (including concurrent CLI inputs). A successful release keeps the current `epoch`, OMP session, and remaining budget. See [Resident perception & action loop](perception-and-action.md#resident-actions). |
 | `ludens down --keep-emulator` | Hands back control and stops Host and Baseware, keeping the emulator window and game state; suitable for re-running `ludens up` after editing `ludens.json` (e.g. budgets or model). |
 | `ludens down [--dashboard] [--pet]` | Stops this workspace's managed Host, Baseware, and emulator (**save in-game progress first**). The shared Dashboard and a running Ludens Pet are kept by default; append `--dashboard` (only from the workspace that started it) or `--pet` to shut down the corresponding shared service too. |
 

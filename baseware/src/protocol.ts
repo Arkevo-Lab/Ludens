@@ -1,6 +1,6 @@
 export interface Trace extends Record<string, unknown> {
   traceId?: string; spanId?: string; parentSpanId?: string;
-  recordingId?: string; recordingPurpose?: "continuous-perception" | "continuous-action";
+  recordingId?: string; recordingPurpose?: "continuous-perception";
   inputGeneration?: string;
 }
 export interface EventSource { component: string; implementation?: string; implementationVersion?: string }

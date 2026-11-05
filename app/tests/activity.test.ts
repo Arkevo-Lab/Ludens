@@ -161,23 +161,23 @@ test("system and diagnostic blocks preserve structured event data with the exist
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });
 
-test("action worker lifecycle reports failure once while fault detail and continuous statistics remain diagnostic", async () => {
-  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-action-activity-")));
+test("perception lifecycle and faults remain visible while continuous statistics stay diagnostic", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-perception-activity-")));
   try {
     const blocks = await activityBlocks(root, [
-      event("action_status", 1, { state: "ready", generation: "first" }),
-      event("action_stats", 2, { generation: "first", step: { completed: 150 } }),
-      event("action_fault", 3, { generation: "first", error: "Step failed" }),
-      event("action_status", 4, { state: "error", generation: "first", error: "Step failed" }),
-      event("action_fault_end", 5, { generation: "first", reason: "stopped" }),
-      event("action_status", 6, { state: "stopped", generation: "first" }),
+      event("perception_status", 1, { state: "ready", generation: "first" }),
+      event("perception_stats", 2, { generation: "first", sample: { completed: 150 } }),
+      event("perception_fault", 3, { generation: "first", error: "Sample failed" }),
+      event("perception_status", 4, { state: "error", generation: "first", error: "Sample failed" }),
+      event("perception_fault_end", 5, { generation: "first", reason: "recovered" }),
+      event("perception_status", 6, { state: "stopped", generation: "first" }),
     ]);
     assert.deepEqual(blocks.map(block => [block.title, block.kind, block.status]), [
-      ["action_status", "system", "complete"], ["action_stats", "diagnostic", "complete"],
-      ["action_fault", "diagnostic", "error"], ["action_status", "system", "error"],
-      ["action_fault_end", "diagnostic", "complete"], ["action_status", "system", "complete"],
+      ["perception_status", "system", "complete"], ["perception_stats", "diagnostic", "complete"],
+      ["perception_fault", "system", "error"], ["perception_status", "system", "error"],
+      ["perception_fault_end", "system", "complete"], ["perception_status", "system", "complete"],
     ]);
-    assert.deepEqual(blocks[1].data?.step, { completed: 150 }, "statistics remain available for inspection");
+    assert.deepEqual(blocks[1].data?.sample, { completed: 150 }, "statistics remain available for inspection");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

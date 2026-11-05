@@ -1,6 +1,5 @@
-"""Resident action uses ordinary capabilities and the existing timeline writer."""
+"""Resident perception state machine uses ordinary capabilities and the timeline writer."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -79,47 +78,6 @@ class Worker:
             self.stderr.close()
 
 
-PERCEPTION = '''from ludens_tools import capability, record
-class Perception:
-    def start(self, context): self.count = 0
-    @record
-    @capability
-    def sample(self):
-        self.count += 1
-        return {"data": {"frame": self.count}}
-    def close(self): pass
-'''
-
-ACTION = '''from pathlib import Path
-import json
-from ludens_tools import Client, capability, record
-from ludens_tools._context import current
-from helper import identify
-@record
-@capability
-def decision(count: int, source: dict) -> dict:
-    """Record the decision and the perception it used."""
-    return {"data": {"count": count, "version": identify()}, "sources": [source]}
-class Action:
-    step_hz = 2.0
-    def start(self, context):
-        self.count = 0
-        self.model = object()
-        self.client = Client(trace={"traceId": "custom"})
-    @capability
-    def step(self):
-        self.count += 1
-        view = self.client.observe()
-        decision(self.count, view["records"][0]["timeline"])
-        Path("steps").write_text(str(self.count))
-        if self.count == 3:
-            raise RuntimeError("failed after a recorded decision")
-        return self.model
-    def close(self):
-        Path("closed").write_text(json.dumps({"count": self.count, "trace": current()["trace"]}))
-'''
-
-
 STATE_MACHINE = '''from ludens_tools import capability, record, observe
 class Perception:
     def start(self, context):
@@ -156,7 +114,7 @@ def inspect():
     return {"data": {"entry": "function"}, "transition": "python/helper.py:assist"}
 '''
 
-class ActionTests(unittest.TestCase):
+class PerceptionTests(unittest.TestCase):
     def test_manual_history_query_omits_absent_epoch(self):
         # A socket path keeps observe on the live request path; without one it
         # reads the committed timeline offline instead of building a message.
@@ -164,88 +122,6 @@ class ActionTests(unittest.TestCase):
             self.assertEqual(Client("/tmp/ludens-manual.sock").observe({"after": 1}), {"records": []})
         self.assertNotIn("epoch", rpc.call_args.args[1])
         self.assertEqual(rpc.call_args.args[1]["query"], {"after": 1})
-
-    def test_step_hz_attribute_is_ignored_and_env_configures_the_rate(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            action = None
-            try:
-                action = Worker(root, "action", "from ludens_tools import capability\nclass Action:\n"
-                                                 "    step_hz = 2.0\n"
-                                                 "    def start(self, context): pass\n"
-                                                 "    @capability\n    def step(self): return None\n"
-                                                 "    def close(self): pass\n",
-                                extra_env={"LUDENS_ACTION_STEP_HZ": "5"})
-                self.assertTrue(action.started["ok"])
-                self.assertEqual(action.started["result"]["stepHz"], 5)
-            finally:
-                if action:
-                    action.close()
-
-    def test_two_residents_share_history_and_action_failure_never_retries(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            helper = 'from ludens_tools import capability\n@capability\ndef identify(): return "loaded-v1"\n'
-            (root / "helper.py").write_text(helper)
-            perception = Worker(root, "perception", PERCEPTION)
-            perception.wait(lambda: any(x.get("event") == "sample" for x in perception.messages))
-            socket_path = str(root / "host.sock")
-            received = []
-
-            class Handler(socketserver.StreamRequestHandler):
-                def handle(self):
-                    message = json.loads(self.rfile.readline())
-                    received.append(message)
-                    if message["kind"] == "perception":
-                        response = perception.request(action="observe", query=message["query"])
-                    elif message["kind"] == "timeline":
-                        response = perception.request(**{k: v for k, v in message.items() if k not in ("kind", "argv")})
-                    else:
-                        raise AssertionError("Unexpected per-call logging RPC")
-                    self.wfile.write((json.dumps({"ok": response["ok"], "value": response.get("result"),
-                        "error": response.get("error")}) + "\n").encode())
-
-            server = socketserver.ThreadingUnixStreamServer(socket_path, Handler)
-            serving = threading.Thread(target=server.serve_forever, daemon=True)
-            serving.start()
-            action = None
-            try:
-                action = Worker(root, "action", ACTION, socket_path=socket_path)
-                self.assertTrue(action.started["ok"])
-                self.assertEqual(action.started["result"]["stepHz"], 30)
-                action.wait(lambda: any(x.get("state") == "error" for x in action.messages))
-                time.sleep(.1)
-                self.assertEqual((root / "steps").read_text(), "3")
-                rows = perception.request(action="observe", query={"capability": "python/action.py:decision", "after": 0})["result"]["records"]
-                self.assertEqual([x["data"]["count"] for x in rows], [1, 2, 3])
-                self.assertTrue(all(x["data"]["version"] == "loaded-v1" for x in rows))
-                self.assertTrue(all(x["trace"]["epoch"] == "fixed-epoch" for x in rows))
-                self.assertTrue(all(x["trace"]["inputGeneration"] == "generation-one" for x in rows))
-                for message in received:
-                    self.assertEqual(message["trace"]["recordingPurpose"], "continuous-action")
-                    self.assertEqual(message["trace"]["inputGeneration"], "generation-one")
-                self.assertEqual(len(received), 6)
-                self.assertEqual(perception.request(action="observe")["result"]["records"][0]["capability"], "python/perception.py:Perception.sample")
-                stats = [x for x in action.messages if x.get("type") == "action_stats"]
-                self.assertEqual(len(stats), 1)
-                self.assertEqual(stats[0]["data"]["step"]["recorded"], 3)
-                self.assertEqual(stats[0]["data"]["step"]["failed"], 1)
-                self.assertFalse(any(x.get("type", "").startswith("python_call") for x in action.messages))
-                manifest = json.loads((root / "logs/run/action/generation-one/sources.json").read_text())
-                self.assertEqual(manifest["helper.py"], hashlib.sha256(helper.encode()).hexdigest())
-                self.assertEqual(manifest["action.py"], hashlib.sha256(ACTION.encode()).hexdigest())
-                before = len(perception.messages)
-                action.close()
-                self.assertEqual(json.loads((root / "closed").read_text())["count"], 3)
-                self.assertIsNone(perception.process.poll())
-                perception.wait(lambda: len(perception.messages) > before)
-            finally:
-                if action and action.process.poll() is None:
-                    action.close()
-                server.shutdown()
-                server.server_close()
-                serving.join(timeout=1)
-                perception.close()
 
     def test_capability_methods_preserve_objects_without_becoming_cli_entries(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -256,15 +132,15 @@ MODEL = object()
 def model():
     """Reuse an in-memory object."""
     return MODEL
-class Action:
+class Perception:
     @capability
-    def step(self): return MODEL
+    def sample(self): return MODEL
     @record
     @capability
     def saved(self): return {"data": True}
 def quality():
-    """Measure the actual local action capability."""
-    value = Action().step()
+    """Measure the actual local perception capability."""
+    value = Perception().sample()
     return {"metrics": {"same_model": {"value": int(value is MODEL), "unit": "flag"}}}
 '''
             (root / "program.py").write_text(source)
@@ -274,30 +150,30 @@ def quality():
             namespace = {"__name__": "program", "__file__": str(root / "program.py")}
             exec(compile(source, str(root / "program.py"), "exec"), namespace)
             self.assertIs(namespace["model"](), namespace["MODEL"])
-            self.assertIs(namespace["Action"]().step(), namespace["MODEL"])
+            self.assertIs(namespace["Perception"]().sample(), namespace["MODEL"])
 
-    def test_action_tick_statistics_do_not_scale_with_frequency(self):
+    def test_perception_tick_statistics_do_not_scale_with_frequency(self):
         for hz in (1, 10, 30):
             with self.subTest(hz=hz):
                 clock, events = [0.0], []
                 parent = {**current(), "workspace": str(Path.cwd()), "socket_path": "not-used.sock", "run_id": "run",
-                    "epoch": "one", "trace": {"recordingPurpose": "continuous-action", "inputGeneration": "old"},
-                    "recording_purpose": "continuous-action", "diagnostics": "normal"}
+                    "epoch": "one", "trace": {"recordingPurpose": "continuous-perception", "inputGeneration": "old"},
+                    "recording_purpose": "continuous-perception", "diagnostics": "normal"}
                 window = RecordingWindow(events.append, parent["trace"], "old", hz,
-                    clock=lambda: clock[0], role="action")
+                    clock=lambda: clock[0], role="perception")
                 parent.update(recording_observer=window.observe)
                 @capability
-                def step(): return object()
+                def sample(): return object()
                 with scope(parent), patch("ludens_tools._context.request") as rpc:
                     for index in range(hz * 10):
-                        step()
+                        sample()
                         window.sampled(1, True)
                         clock[0] = (index + 1) / hz
                         window.flush()
                     window.flush(reason="stopped")
                 rpc.assert_not_called()
-                self.assertEqual([x["type"] for x in events], ["action_stats"] * 2)
-                self.assertEqual(sum(x["data"]["step"]["completed"] for x in events), hz * 10)
+                self.assertEqual([x["type"] for x in events], ["perception_stats"] * 2)
+                self.assertEqual(sum(x["data"]["sample"]["completed"] for x in events), hz * 10)
 
     def test_state_machine_shares_context_executes_effects_and_answers_rpc(self):
         with tempfile.TemporaryDirectory() as directory:

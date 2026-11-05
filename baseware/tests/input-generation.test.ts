@@ -11,7 +11,7 @@ const owner = { id: "rsa-host" };
 const epoch = "epoch-a";
 const signal = () => new AbortController().signal;
 const trace = (generation = "worker-a"): Trace => ({ recordingId: "run-a", epoch,
-  inputGeneration: generation, recordingPurpose: "continuous-action" });
+  inputGeneration: generation, recordingPurpose: "continuous-perception" });
 const result = (): ToolExecutionResult => ({ id: crypto.randomUUID(), status: "completed", exitCode: 0,
   stdout: "", stderr: "", result: { content: [] }, timing: { clock: "fixture", requestedAtMs: 1, receivedAtMs: 2 } });
 async function until(check: () => boolean) {
@@ -194,7 +194,7 @@ test("reset does not extend the parent lease deadline", async () => {
   expect(f.state().nativeOwner).toBeUndefined();
 });
 
-test("continuous action reads keep interval logging and generation attribution at all rates", async () => {
+test("continuous perception reads keep interval logging and generation attribution at all rates", async () => {
   for (const hz of [1, 10, 30]) {
     const f = await fixture();
     await f.generation("worker-a");
@@ -204,7 +204,7 @@ test("continuous action reads keep interval logging and generation attribution a
     await f.core.close();
     const stats = f.events.filter(event => event.type === "device_sampling_stats");
     expect(stats).toHaveLength(1);
-    expect(stats[0]).toMatchObject({ trace: { inputGeneration: "worker-a", recordingPurpose: "continuous-action" },
+    expect(stats[0]).toMatchObject({ trace: { inputGeneration: "worker-a", recordingPurpose: "continuous-perception" },
       data: { controllers: [{ controllerId: "camera", calls: hz * 30 }] } });
   }
 });

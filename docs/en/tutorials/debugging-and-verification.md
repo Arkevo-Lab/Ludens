@@ -42,7 +42,7 @@ cd /absolute/path/to/workspace
 ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 ```
 
-Once terminal 2 prints `"ready": true`, run `ludens auto on` in a third terminal inside that workspace. To test device and workspace capabilities without starting an OMP model session, pass `ludens run --device-only`. By default both sides derive the Unix socket address from the workspace path; override explicitly with `BASEWARE_SOCKET` / `--baseware-socket` and `LUDENS_SOCKET`.
+First register a workspace using the current layout with `ludens workspace open <path>`; older workspaces require the [import procedure](quickstart.md#registering-and-migrating-existing-workspaces). Once terminal 2 prints `"ready": true`, run `ludens auto on` in a third terminal inside that workspace. To test device and workspace capabilities without starting an OMP model session, pass `ludens run --device-only`. By default both sides derive the Unix socket address from the workspace path; override explicitly with `BASEWARE_SOCKET` / `--baseware-socket` and `LUDENS_SOCKET`. Stop the services before moving the directory; this process address is independent of the persistent identity in `.ludens/workspace.json`.
 
 ### 2. Dashboard Web Console
 

@@ -102,8 +102,7 @@ class RecordingWindow:
             self.event(f"{self.role}_stats", {
                 "window": {"startedAt": self.started_at, "endedAt": ended_at,
                            "durationMs": (ended - self.started) * 1000},
-                ("stepHz" if self.role == "action" else "sampleHz"): self.sample_hz,
-                ("step" if self.role == "action" else "sample"): self.sample,
+                "sampleHz": self.sample_hz, "sample": self.sample,
                 "capabilities": list(self.capabilities.values()),
                 "faults": [self._fault_data(fault) for fault in self.faults.values()],
                 **({"video": video} if video is not None else {}),

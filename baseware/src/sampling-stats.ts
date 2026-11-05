@@ -4,8 +4,7 @@ type Counts = { calls: number; errors: number; durationMs: number; minDurationMs
 type Interval = { trace: Trace; startedAt: number; controllers: Map<string, Counts> };
 type Fault = { trace: Trace; controllerId: string; category: string; firstAt: number; lastAt: number;
   count: number; firstError: string; lastError: string; lastSuccessAt?: number };
-const scopeKey = (trace: Trace) => JSON.stringify([trace.recordingId ?? null, trace.epoch ?? null,
-  trace.recordingPurpose === "continuous-action" ? "continuous-action" : null, trace.inputGeneration ?? null]);
+const scopeKey = (trace: Trace) => JSON.stringify([trace.recordingId ?? null, trace.epoch ?? null, trace.inputGeneration ?? null]);
 
 /** Bounded by active controllers/recordings, never by the number of samples. */
 export class SamplingStats {
@@ -24,7 +23,7 @@ export class SamplingStats {
     if (!counts) interval.controllers.set(controllerId, counts = { calls: 0, errors: 0, durationMs: 0, minDurationMs: Infinity, maxDurationMs: 0 });
     counts.calls++; counts.errors += error === undefined ? 0 : 1; counts.durationMs += durationMs;
     counts.minDurationMs = Math.min(counts.minDurationMs, durationMs); counts.maxDurationMs = Math.max(counts.maxDurationMs, durationMs);
-    if (trace.recordingPurpose !== "continuous-perception" && trace.recordingPurpose !== "continuous-action") return;
+    if (trace.recordingPurpose !== "continuous-perception") return;
     if (error === undefined) {
       for (const [faultKey, fault] of this.faults) if (faultKey.startsWith(key + ":") && fault.controllerId === controllerId) fault.lastSuccessAt = now;
       return;

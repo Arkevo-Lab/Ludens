@@ -2,7 +2,6 @@ import { delimiter, resolve } from "node:path";
 import { Runtime, type DeviceSession, type SharedBudget } from "./runtime.ts";
 import { WorkspaceController } from "../subsystems/controller.ts";
 import { PerceptionRuntime } from "../subsystems/perception.ts";
-import { ActionRuntime } from "../subsystems/action.ts";
 import type { EventLog, RecordEvent } from "../storage/events.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
 
@@ -11,7 +10,7 @@ export async function createHostRuntime(options: {
   devices: DeviceSession; workspace: string; runDir: string; state: WorkspaceState;
   log: EventLog; record?: RecordEvent; ludensSocket: string; basewareSocket: string;
   seconds: number; model?: string; maxRequests: number; resume?: string; compactionThreshold?: number;
-  action?: boolean; budget?: SharedBudget;
+  budget?: SharedBudget;
 }) {
   const { devices, workspace, runDir, state, log, ludensSocket, basewareSocket } = options;
   const record = options.record ?? log.record;
@@ -24,14 +23,20 @@ export async function createHostRuntime(options: {
   };
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, record, env }) });
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, env, record, registerMedia: log.registerMedia,
-    diagnostics: log.diagnostics, clock: log.clock }) });
-  if (options.action !== false) runtime.attach({ action: new ActionRuntime({ workspace, runDir, env, record, diagnostics: log.diagnostics,
-    isAuto: epoch => runtime.status().mode === "auto" && runtime.status().epoch === epoch,
-    setInputGeneration: (epoch, generation) => {
-      if (!devices.setInputGeneration) throw new Error("Device session does not support input generations");
-      return devices.setInputGeneration(epoch, generation);
-    }, onCleanupError: error => { void runtime.stop(error.message); },
-  }) });
+    diagnostics: log.diagnostics, clock: log.clock,
+    onCleanupError: error => { void runtime.stop(error.message); },
+    setInputGeneration: devices.setInputGeneration
+      ? async (epoch, generation) => {
+        // Host handback owns the full device release. A concurrent per-generation
+        // cleanup may arrive after that epoch has already been revoked.
+        if (generation === null && runtime.status().epoch !== epoch) return;
+        try { await devices.setInputGeneration!(epoch, generation); }
+        catch (error) {
+          if (generation === null && runtime.status().epoch !== epoch) return;
+          throw error;
+        }
+      }
+      : undefined }) });
   try {
     if (options.model) {
       const { createOmpAgent } = await import("../agent-omp/session.ts");

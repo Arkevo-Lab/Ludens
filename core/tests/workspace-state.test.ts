@@ -30,7 +30,7 @@ test("CLI queries and direct run cannot create an identity in an uninitialized d
   const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
   for (const key of ["LUDENS_SOCKET", "LUDENS_WORKSPACE", "BASEWARE_SOCKET", "BASEWARE_EPOCH"]) delete env[key];
   try {
-    for (const args of [["status"], ["controller", "list"], ["perception", "status"], ["action", "status"], ["run", "--device-only"]]) {
+    for (const args of [["status"], ["controller", "list"], ["perception", "status"], ["run", "--device-only"]]) {
       const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "--workspace", workspace, ...args],
         { cwd: workspace, env, stdout: "pipe", stderr: "pipe" });
       const [code, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

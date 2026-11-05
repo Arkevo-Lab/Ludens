@@ -4,7 +4,6 @@ import { parseArgs } from "node:util";
 import { resolveDriver, defaultDriverCacheRoot } from "@ludens/baseware/drivers/loader.ts";
 import workspaceGuide from "../../templates/AGENTS.md" with { type: "text" };
 import perceptionTemplate from "../../templates/perception.py" with { type: "text" };
-import actionTemplate from "../../templates/action.py" with { type: "text" };
 import { ensureWorkspaceIdentity, readGlobalConfig, registerWorkspace, validateWorkspaceRegistration } from "@ludens/protocol/ludens";
 import { parseConfig, launchPlan, WorkspaceLauncher } from "../daemon/launcher.ts";
 
@@ -65,7 +64,6 @@ export async function workspaceCommand(command: string, args: string[], selected
     await writeFile(join(workspace, "ludens.json"), `${JSON.stringify(config, null, 2)}\n`, { flag: "wx" });
     await writeFile(join(workspace, "AGENTS.md"), workspaceGuide, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
     await writeFile(join(workspace, "perception.py"), perceptionTemplate, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
-    await writeFile(join(workspace, "action.py"), actionTemplate, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
     await ensureWorkspaceIdentity(workspace);
     const entry = await registerWorkspace(workspace);
     console.log(JSON.stringify({ ...entry, configPath: join(workspace, "ludens.json") }, null, 2));

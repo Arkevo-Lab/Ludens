@@ -39,6 +39,10 @@ class WorkspaceImports(importlib.abc.MetaPathFinder):
         self.workspace = workspace
         self.remember = remember
 
+    def remember_workspace_source(self, path, raw):
+        if path.is_relative_to(self.workspace):
+            self.remember(path, raw)
+
     def find_spec(self, fullname, path=None, target=None):
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
         if (spec and spec.origin and spec.origin.endswith(".py")
@@ -245,7 +249,7 @@ class StateMachine:
         self._set_state(self._resolve(to), arguments, to)
 
 
-def run_continuously(method, hz, context, stopped, send, *, role, halt_on_error=False, video_metrics=None, tick=None):
+def run_continuously(method, hz, context, stopped, send, *, role, video_metrics=None, tick=None):
     """Run serial steps without overlap or catch-up, retaining bounded diagnostics."""
     previous_status = None
     purpose = f"continuous-{role}"
@@ -276,13 +280,10 @@ def run_continuously(method, hz, context, stopped, send, *, role, halt_on_error=
                 status = (state, f"{type(error).__name__}: {error}")
             if previous_status != status:
                 send({"event": "status", "state": status[0], "error": status[1],
-                      "transient": not halt_on_error})
+                      "transient": True})
             previous_status = status
             recording.sampled((time.monotonic() - started) * 1000, status[0] == "ready")
             recording.flush(video=video_metrics() if video_metrics else None)
-            if halt_on_error and status[0] != "ready":
-                reason = "failed"
-                break
             stopped.wait(max(0, 1 / hz - (time.monotonic() - started)))
     finally:
         recording.flush(reason=reason, video=video_metrics() if video_metrics else None)

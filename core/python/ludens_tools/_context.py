@@ -65,8 +65,8 @@ def scope(context):
 
 
 def continuous(context):
-    return (context.get("recording_purpose") in ("continuous-perception", "continuous-action")
-            or context.get("trace", {}).get("recordingPurpose") in ("continuous-perception", "continuous-action"))
+    return (context.get("recording_purpose") == "continuous-perception"
+            or context.get("trace", {}).get("recordingPurpose") == "continuous-perception")
 
 def offline_timeline_append(records_sink=None):
     """Build a timeline_append for offline/simulated runs; no host socket needed."""

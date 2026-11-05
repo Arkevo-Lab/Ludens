@@ -17,7 +17,6 @@ dependencies = [
 
 [project.scripts]
 ludens-perception = "ludens_tools._perception:main"
-ludens-action = "ludens_tools._action:main"
 ludens-python-bridge = "ludens_tools._bridge:main"
 
 [dependency-groups]

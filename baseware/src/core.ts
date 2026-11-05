@@ -333,7 +333,7 @@ export class BasewareCore {
     const trace = operationTrace({ ...parent, ...(epoch ? { epoch } : {}) }, operationId);
     const controller = this.capabilities.controllers.find(c => c.tool.name === id);
     const readOnly = controller?.tool.annotations?.readOnlyHint === true;
-    const continuous = trace.recordingPurpose === "continuous-perception" || trace.recordingPurpose === "continuous-action";
+    const continuous = trace.recordingPurpose === "continuous-perception";
     if (continuous && this.diagnostics === "normal" && trace.parentSpanId) trace.parentOmitted = true;
     const metadata: EventMetadata = readOnly ? { channel: "diagnostic" } : {};
     const detailed = !readOnly || this.diagnostics === "full";
@@ -349,7 +349,7 @@ export class BasewareCore {
       if (!controller) throw new Error(`Unknown controller: ${id}`);
       if (trace.inputGeneration !== undefined && (typeof trace.inputGeneration !== "string" || !trace.inputGeneration
         || trace.inputGeneration !== this.inputGeneration || this.mode !== "auto" || epoch !== this.epoch)) {
-        throw new Error("STALE_INPUT_GENERATION: resident action program was replaced or stopped");
+        throw new Error("STALE_INPUT_GENERATION: resident perception state machine was replaced or stopped");
       }
       if (controller.requiresControl) {
         if (this.mode !== "auto" || !epoch || epoch !== this.epoch) throw new Error("STALE_EPOCH: acquire control and use its original epoch");

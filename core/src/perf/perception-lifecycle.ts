@@ -79,19 +79,22 @@ export async function measurePerceptionLifecycle(ctx: PerfContext): Promise<Reco
     startsBeforeReload = (await readFile(join(ctx.workspace, "initializations.txt"), "utf8")).trim().split("\n").length;
     archiveUnchanged = await readFile(archived, "utf8") === original
       && original !== await readFile(join(ctx.workspace, "sample.txt"), "utf8");
-    await writeFile(join(ctx.workspace, "helper.py"), "def transform(value):\n    return value + 5\n");
     await writeFile(join(ctx.workspace, "weights.json"), '{"value":20}');
     beforeReload = await read("edits-pending");
-    await reload();
+    await writeFile(join(ctx.workspace, "helper.py"), "def transform(value):\n    return value + 5\n");
+    const reloadedDeadline = Date.now() + 5000;
+    while (perception.status().generation === beforeReload.records[0]?.generation && Date.now() < reloadedDeadline) await Bun.sleep(25);
     reloaded = await read("reloaded");
     historical = await perception.observe(signal, {}, { at: first.records[0]!.recordedAt });
     record("benchmark_perception_step", { stage: "historical", queryId: historical.queryId });
     await writeFile(join(ctx.workspace, "perception.py"), implementation.replace(
       "self.sequence += 1", 'raise RuntimeError("fixture perception failure")'));
-    await reload();
+    const failedDeadline = Date.now() + 5000;
+    while (perception.status().state !== "error" && Date.now() < failedDeadline) await Bun.sleep(25);
     failed = await read("failed");
     await writeFile(join(ctx.workspace, "perception.py"), implementation);
-    await reload();
+    const repairedDeadline = Date.now() + 5000;
+    while (perception.status().state !== "ready" && Date.now() < repairedDeadline) await Bun.sleep(25);
     repaired = await read("repaired");
   } finally {
     await perception.stop();
@@ -130,7 +133,7 @@ export function verifyPerceptionLifecycle(m: any): { checks: Record<string, bool
 
     "empty-bootstrap": s.unimplemented.state === "unimplemented" && !r.missing.ok && !!r.missing.error?.message && !r.missing.records.length,
     "persistent-model": m.startsBeforeReload === 1 && v1.pid === v2.pid && v1.version === 11 && v2.version === 11 && v2.sequence > v1.sequence,
-    "explicit-reload": held.version === 11 && fresh.version === 25 && r.beforeReload.records[0].generation !== r.reloaded.records[0].generation && m.closed.includes(held.pid),
+    "auto-reload": held.version === 11 && fresh.version === 25 && r.beforeReload.records[0].generation !== r.reloaded.records[0].generation && m.closed.includes(held.pid),
     "repair": s.failed.state === "error" && !r.failed.ok && !!r.failed.error && s.repaired.state === "ready" && r.repaired.ok && fixed.version === 25 && s.failed.generation !== s.repaired.generation,
     "temporal-history": r.historical.records[0]?.id === r.first.records[0]?.id && r.historical.records[0]?.text === r.first.records[0]?.text && r.historical.records[0]?.generation !== r.reloaded.records[0]?.generation,
     "immutable-evidence": m.archiveUnchanged && r.first.records[0]?.id !== r.second.records[0]?.id && r.first.records[0]?.media[0]?.id !== r.second.records[0]?.media[0]?.id,
@@ -141,7 +144,7 @@ export function verifyPerceptionLifecycle(m: any): { checks: Record<string, bool
     "budget.warm-ms": m.warmMs <= perceptionLifecycleBudgets.warmMs,
     "budget.warm-faster-than-cold": m.warmMs < m.coldMs,
     "budget.stopped-cleanly": Array.isArray(m.closed) && m.closed.length >= 1,
-    "budget.reload-changed-generation": checks["explicit-reload"] === true,
+    "budget.reload-changed-generation": checks["auto-reload"] === true,
     "budget.failure-isolated": checks["repair"] === true,
     "budget.timeline-immutability": checks["immutable-evidence"] === true && checks["temporal-history"] === true,
   };

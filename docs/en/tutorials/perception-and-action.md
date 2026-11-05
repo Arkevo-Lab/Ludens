@@ -1,6 +1,6 @@
-# Resident Perception and Action Loops
+# Resident Perception-and-Action State Machine
 
-In realtime interactive environments, the resident `perception.py:Perception` process runs a continuous state machine for high-frequency sampling and in-process closed-loop control, writing observations to `.ludens/timeline/`. Capabilities can share memory, emit effects, and transition between states without IPC; the separate `action.py:Action` auto loop remains available for epoch-bound control programs. The capability decorators and timeline envelope conventions are covered in [Workspace and Capability Programming](workspace.md).
+In realtime interactive environments, the resident `perception.py:Perception` process runs a continuous state machine for high-frequency sampling and in-process closed-loop control, writing observations to `.ludens/timeline/`. Capabilities can share memory, emit effects, and transition between states without IPC, so epoch-bound control programs run in the same process. The capability decorators and timeline envelope conventions are covered in [Workspace and Capability Programming](workspace.md).
 
 All CLI commands below run in the **target workspace directory**, assuming the repo's `core/bin` and `baseware/bin` are on `PATH`. For cross-directory operation, pass `ludens --workspace /absolute/path/to/workspace` before the subcommand.
 
@@ -15,6 +15,8 @@ The `Perception` class in `perception.py` runs in a dedicated resident Python pr
 - `close(self)`: called on `reload`, `stop`, or Host exit to release self-owned resources.
 
 The resident runs a continuous state machine in one Python process. Any active capability may return an optional `effect` (`{"id": "controller/...", "arguments": {...}}`, or a list of such objects) to request closed-loop actuation, and an optional `transition` (`"method_name"` or `{"to": "method_name", "arguments": {...}}`) to select the capability called on the next tick. Transition targets resolve to capabilities on the same instance, module, or workspace without crossing a process boundary, so instance attributes and module globals provide shared-memory context across ticks.
+
+**Automatic reload on source edits**: edits to `perception.py` or its imported workspace `.py` modules automatically reload the resident process (non-Python assets never trigger a reload); explicit history queries survive the reload and the new generation preserves prior generations. For an explicit restart without editing sources, run `ludens perception reload`.
 
 Without a `Perception` class, `perception.py` may instead define a top-level `@observe @record @capability` function with any name. Default live and offline timeline reads select the unique `@observe` channel, including a recorded capability in another workspace module; `@observe` does not schedule that other module automatically. With no marker, the default remains `python/perception.py:Perception.sample`. Duplicate markers produce diagnostics for every conflicting declaration and prevent the resident from starting.
 
@@ -34,7 +36,7 @@ class Perception:
         """Observe the environment and enter tracking when a target appears."""
         return {
             "text": "target acquired",
-            "effect": {"id": "controller/pad.play", "arguments": {"button": "a"}},
+            "effect": {"id": "controller/pad.play", "arguments": {"inputs": [{"atMs": 0, "durationMs": 120, "key": "a"}]}},
             "transition": {"to": "track", "arguments": {"target": "marker"}},
         }
 
@@ -48,7 +50,7 @@ class Perception:
         pass
 ```
 
-A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. After editing `perception.py` (such as capture logic or model weights), run `ludens perception reload` to hot-swap the process while keeping the historical timeline.
+A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. Editing Python source reloads the resident automatically while retaining persistent history. Changes to weights or other non-Python assets require `ludens perception reload`. A stopped resident stays stopped after edits until explicitly reloaded.
 
 ### 2. Perception Management and History Query Commands (`ludens observe`)
 
@@ -91,12 +93,11 @@ CLI `ludens observe`, Python `Client().observe(query)`, and the OMP-native `obse
 
 The host process supports the following environment variables for timeline windows and video encoding parameters (the effective values are visible in the `history` field of `ludens perception status`):
 
-Sampling and stepping rates default only when the corresponding variable is unset. Empty or whitespace-only values, non-numeric values, zero, negative numbers, NaN, and infinity fail worker startup with a variable-specific validation error; surrounding whitespace on a valid number is accepted.
+The sampling rate defaults only when its environment variable is unset. Empty or whitespace-only values, non-numeric values, zero, negative numbers, NaN, and infinity fail worker startup with a variable-specific validation error; surrounding whitespace on a valid number is accepted.
 
 | Environment variable | Default | Description |
 | --- | --- | --- |
 | `LUDENS_PERCEPTION_SAMPLE_HZ` | `30` | Target continuous sampling frequency and nominal video frame rate for `Perception.sample()` (positive finite number). |
-| `LUDENS_ACTION_STEP_HZ` | `30` | Target continuous loop frequency for `Action.step()` during `auto` control (positive finite number). |
 | `LUDENS_PERCEPTION_PERSIST` | `1` | When set to `0` (or `false`), only the in-memory/temporary hot window is kept and is cleared when the process stops or on `reload`. |
 | `LUDENS_PERCEPTION_HOT_SECONDS` | `600` | Seconds retained per channel in the hot window (10 minutes); originals in the window are deliverable directly from memory; overridable by workspace settings. |
 | `LUDENS_PERCEPTION_HOT_BYTES` | `1073741824` | Global byte budget for the hot window (1 GiB); the largest channel shrinks first under pressure. |
@@ -117,18 +118,6 @@ After saving, copy the page’s workspace-specific `env -u LUDENS_SOCKET ludens 
 
 Video uses fragmented MP4 (`+frag_keyframe+empty_moov`), with roughly one keyframe interval every two seconds of sampled volume. In an unfinalized segment, fully persisted fragments are readable; the newest not-yet-persisted frames are explicitly reported as unreadable rather than substituted with neighboring frames. Each segment's `.mp4.json` publishes readable progress of complete fragments via `readableBytes`, `lastReadablePts` (microsecond PTS), `durationSeconds`, and `frames`, updated to final values on finalization. Dashboard playback reads in fixed byte ranges and loads new fragments after playing past the current range; when no frame is readable yet it waits for progress updates instead of treating the error state as a successful fragment. The hot window expires by time and shrinks the largest channel first when over budget; queries in non-persistent mode report evicted history gaps, and `ludens perception status`'s `history.budgetEvictions` updates live with the current process.
 
-## Resident Actions
+## Lease Authority and Input Generations
 
-The `Action` class in `action.py` runs in a dedicated resident Python process during an `auto` control period (template: [core/templates/action.py](../../../core/templates/action.py)):
-
-- **Method contract**: `start(self, context)` initializes once on takeover or reload (`context` contains `workspace`, `runDir`, `generation`, `epoch`); `step(self)` is annotated with `@capability` (add `@record` if decisions should be archived to the timeline) and runs in a loop at the host-configured rate `LUDENS_ACTION_STEP_HZ` (default `30.0` Hz; `Action.step_hz` class attributes are ignored); `close(self)` releases resources.
-- **Reading perception and issuing actions**: inside `Action`, use `self.device = Client()` to call `self.device.observe()` for the latest or historical perception records, and `self.device.call("controller/...", {...})` to issue device commands. After an async `pad.play` submission there is no need to block synchronously within a single step; later `step()` calls can observe and decide concurrently.
-- **Lifecycle management**:
-
-```sh
-ludens action status
-ludens action reload
-ludens action stop
-```
-
-- **Control-ownership and input-reset boundary**: the action process is strictly bound to the `epoch` and `inputGeneration` from its start. On human handoff (`auto off`), budget exhaustion, or device disconnect, the action process terminates and releases device input. When `ludens action stop`, `ludens action reload`, or an uncaught exception from `step()` occurs during `auto`, the system **stops the action loop and resets all current device inputs of this workspace (including concurrent CLI-submitted keys/touches in the same period)**; after the release completes it keeps the current control `epoch`, the OMP session, and the remaining budget; if the release cannot be confirmed, control is handed back. After fixing the code, run `ludens action reload` to re-enable actions, and if control was already handed back, run `ludens auto on` again.
+The unified resident state machine adopts the current host control `epoch` on takeover. `PerceptionRuntime` grants its `inputGeneration` before starting replacement code and clears it before waiting for old Python shutdown. Reload and `stop()` release current device inputs, including concurrent CLI inputs, and reject calls from the old generation while preserving the control `epoch`, OMP session, and remaining budget. If input cleanup fails, the Host hands control back. Human handoff (`auto off`), budget exhaustion, or device disconnect revokes the lease while perception may continue without device effects. After `stop()`, use an explicit `ludens perception reload` to restart; after handback, use `ludens auto on` to grant device control again.

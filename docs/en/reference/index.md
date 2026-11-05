@@ -16,5 +16,5 @@ This directory defines the Ludens system architecture, process responsibility bo
 ## Reading Guide
 
 - **Adding a new emulator or hardware driver**: read [Driver packages and launch descriptors](baseware.md#driver-packages-and-launch-description) in Baseware Philosophy and Capability Contracts first, then implement the emulator-side TCP bridge and TypeScript Provider against the [Driver Bridge Protocol](driver-bridge-protocol.md).
-- **Understanding how the Agent perceives the environment and issues actions**: read [Session and Loop](architecture.md#session-and-loop), [Workspace and Capability Programming](../tutorials/workspace.md), and [Resident Perception and Action Loops](../tutorials/perception-and-action.md).
+- **Understanding how the Agent perceives the environment and issues actions**: read [Session and Loop](architecture.md#session-and-loop), [Workspace and Capability Programming](../tutorials/workspace.md), and [Resident Perception-and-Action State Machine](../tutorials/perception-and-action.md).
 - **Consuming run logs, debugging model context, or modifying the Dashboard**: read [Logging and Call Chains](logging.md).
