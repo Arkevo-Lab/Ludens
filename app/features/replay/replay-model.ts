@@ -40,6 +40,24 @@ export function replayFramesAt(frames: ReplayFrame[], at: number, capability = "
   return [...latest.values()].sort((a, b) => a.capability.localeCompare(b.capability));
 }
 
+/**
+ * Stage display helper: returns the latest frame at or before `at` per capability,
+ * and when the playhead is before a capability's very first frame in the window,
+ * falls back to that capability's earliest frame so the stage previews frame 0 instead of a blank screen.
+ */
+export function replayStageFramesAt(frames: ReplayFrame[], at: number, capability = "") {
+  const current = replayFramesAt(frames, at, capability);
+  const covered = new Set(current.map(frame => frame.capability));
+  const earliest = new Map<string, ReplayFrame>();
+  for (const frame of frames) {
+    if (covered.has(frame.capability) || (capability && frame.capability !== capability)) continue;
+    const previous = earliest.get(frame.capability);
+    if (!previous || frame.at < previous.at || (frame.at === previous.at && frame.sequence < previous.sequence))
+      earliest.set(frame.capability, frame);
+  }
+  return [...current, ...earliest.values()].sort((a, b) => a.capability.localeCompare(b.capability));
+}
+
 export function adjacentReplayFrame(frames: ReplayFrame[], at: number, direction: -1 | 1, capability = "") {
   let closest: ReplayFrame | undefined;
   for (const frame of frames) {

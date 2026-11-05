@@ -109,7 +109,7 @@ export function ReplayEvidencePanel({ scope, selection, onClose, onLoaded, focus
     hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3,
   });
   return <section ref={focusRef} tabIndex={-1} aria-labelledby={headingId} aria-busy={loading}
-    className="replay-evidence-panel min-w-0 rounded-md border bg-card outline-none focus-visible:ring-2 focus-visible:ring-ring">
+    className="replay-evidence-panel min-w-0 bg-card outline-none">
     <header className="replay-evidence-header">
       <h2 id={headingId} className="min-w-0 text-sm font-semibold">{t("panelTitle")}</h2>
       <Button type="button" variant="outline" size="sm" className="shrink-0" aria-label={timeline("closeDetails")} onClick={onClose}>
