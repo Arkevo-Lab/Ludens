@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { replayVideoReady, selectVideoSource, videoResourceKey, videoPosition, videoNeedsSeek, videoSyncState, type VideoSource } from "../features/replay/replay-video-model";
+import { replayVideoReady, selectVideoSource, videoResourceKey, videoPosition, videoSyncState, type VideoSource } from "../features/replay/replay-video-model";
 
 test("pending playback retains a readable snapshot, then switches at its boundary or after a failed load", () => {
   const first: VideoSource = { assetId: "segment", url: "/video?bytes=100", originAt: 1000,
@@ -33,13 +33,9 @@ test("readable pending frames can advance the common clock; unflushed or failed 
     currentTime: 0.5, readyState: 4, seeking: false, ended: false, playing: true, clockReady: true }).play, true);
 });
 
-test("video time follows the common axis and sparse segment tails hold the final frame", () => {
+test("video time follows the common axis", () => {
   assert.equal(videoPosition(1500, 1000), 0.5);
   assert.equal(videoPosition(500, 1000), 0);
-  assert.equal(videoNeedsSeek(0.51, 0.5, false), false);
-  assert.equal(videoNeedsSeek(0.55, 0.5, false), true);
-  assert.equal(videoNeedsSeek(0.55, 0.5, true), false);
-  assert.equal(videoNeedsSeek(1, 0.5, true), true);
 });
 
 test("1Hz playback follows the clock between samples and an ended seek cannot gate the next clip", () => {
@@ -75,12 +71,53 @@ test("the real sparse clip tail recovers to its recorded PTS and advances across
   assert.equal(held.ready, true); assert.equal(held.play, false); // Clock may reach the next recorded segment.
 });
 
+test("continuous playback tolerates the captured 225ms drift without seeking", () => {
+  const state = { at: 17287, originAt: 0, sampledAt: 17062, duration: 300,
+    currentTime: 17.062, readyState: 4, seeking: false, ended: false, playing: true, clockReady: true };
+  assert.deepEqual(videoSyncState(state), { target: 17.287, seek: false, ready: true, play: true });
+});
+
+test("ordinary mid-stream waiting does not trigger a precise seek", () => {
+  const state = { at: 5000, originAt: 0, sampledAt: 4950, duration: 300,
+    currentTime: 4.96, readyState: 1, seeking: false, ended: false, playing: true, clockReady: false };
+  assert.deepEqual(videoSyncState(state), { target: 4.95, seek: false, ready: false, play: false });
+});
+
+test("explicit navigation seeks precisely even during playback", () => {
+  const state = { at: 5000, originAt: 0, sampledAt: 4950, duration: 300,
+    currentTime: 4.99, readyState: 4, seeking: false, ended: false, playing: true, clockReady: true, explicitSeek: true };
+  assert.deepEqual(videoSyncState(state), { target: 5, seek: true, ready: false, play: true });
+});
+
+test("only large drift sustained for one second forces a playback resync", () => {
+  const state = { at: 5000, originAt: 0, sampledAt: 4950, duration: 300,
+    currentTime: 3.8, readyState: 4, seeking: false, ended: false, playing: true, clockReady: true };
+  assert.equal(videoSyncState({ ...state, driftMs: 999 }).seek, false);
+  assert.equal(videoSyncState({ ...state, driftMs: 1000 }).seek, true);
+  assert.equal(videoSyncState({ ...state, driftMs: 2000, clockReady: false }).seek, false);
+  assert.equal(videoSyncState({ ...state, driftMs: 2000, playing: false }).seek, true);
+});
+
+test("a real waiting event gates the clock even with enough buffered data", () => {
+  const state = { at: 20500, originAt: 0, sampledAt: 20000, duration: 300,
+    currentTime: 19.394281, readyState: 4, seeking: false, ended: false, playing: true, clockReady: true,
+    waiting: true, driftMs: 2000 };
+  assert.deepEqual(videoSyncState(state), { target: 20.5, seek: false, ready: false, play: true });
+  assert.deepEqual(videoSyncState({ ...state, waiting: false, clockReady: false }), { target: 20.5, seek: false, ready: true, play: false });
+});
+
+test("paused exact positioning does not seek again when metadata temporarily returns", () => {
+  const state = { at: 82086, originAt: 0, sampledAt: 82085.799, duration: 300,
+    currentTime: 82.086, readyState: 1, seeking: false, ended: false, playing: false, clockReady: false };
+  assert.deepEqual(videoSyncState(state), { target: 82.086, seek: false, ready: false, play: false });
+});
+
 test("buffering is not a user pause, while backward seeks and explicit pauses still work", () => {
   const state = { at: 500, originAt: 0, sampledAt: 500, duration: 10,
     currentTime: 0.55, readyState: 2, seeking: false, ended: false, playing: true, clockReady: false };
   assert.equal(videoSyncState(state).seek, false); // No jump from 200ms to 15ms seek tolerance.
   assert.equal(videoSyncState({ ...state, playing: false }).seek, true);
   const waiting = videoSyncState({ ...state, currentTime: 0.5, readyState: 1 });
-  assert.equal(waiting.ready, false); assert.equal(waiting.play, true);
-  assert.equal(videoSyncState({ ...state, currentTime: 10, ended: true }).seek, true);
+  assert.equal(waiting.ready, false); assert.equal(waiting.play, false);
+  assert.equal(videoSyncState({ ...state, currentTime: 10, ended: true, explicitSeek: true }).seek, true);
 });

@@ -63,7 +63,7 @@ const wallTime = (at: number) => new Date(at).toLocaleTimeString("zh-CN", {
 const statusKey: Record<string, string> = { completed: "completed", success: "completed", error: "failed", failed: "failed",
   cancelled: "cancelled", pending: "pending", running: "running" };
 
-type VideoPlayback = { at: number; playing: boolean; clockReady: boolean; speed: number; onReady(slot: string, url: string, ready: boolean): void };
+type VideoPlayback = { at: number; playing: boolean; clockReady: boolean; speed: number; revision: number; onReady(slot: string, url: string, ready: boolean): void };
 function ReplayMedia({ media, label, sampledAt, image, playback, slot }: { media: ReplayFrame["media"][number]; label: string; image?: BufferedImage;
   sampledAt: number; playback: VideoPlayback; slot: string }) {
   const t = useTranslations("timelinePlayer");
@@ -186,6 +186,7 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
   const [refreshing, setRefreshing] = useState(false);
   const [at, setAt] = useState<number>(0);
   const atRef = useRef(at);
+  const [clockRevision, setClockRevision] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [capability, setCapability] = useState("");
@@ -206,7 +207,11 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
   const hasOverview = useRef(false);
   const previousEpoch = useRef<string | null>(null);
   const positionApplied = useRef<string | null | undefined>(undefined);
-  const move = useCallback((next: number) => { atRef.current = next; setAt(next); }, []);
+  const move = useCallback((next: number) => { atRef.current = next; setAt(next); setClockRevision(value => value + 1); }, []);
+  const commitPosition = useCallback((next: number, selection: ReplayEvidenceSelection | null = null) => {
+    positionApplied.current = String(Math.round(next));
+    onPosition(Math.round(next), selection);
+  }, [onPosition]);
 
   useEffect(() => {
     if (!project || !run) return;
@@ -375,7 +380,7 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
       cached.current = []; setWindows([]); setRetry(current => current + 1);
     }
     setShareState(""); move(value);
-    if (commit) onPosition(Math.round(value), selection);
+    if (commit) commitPosition(value, selection);
   };
   const step = async (direction: -1 | 1) => {
     if (!overview) return;
@@ -390,7 +395,7 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
         const result = await readWindow(scope, target.startAt, target.endAt, controller.signal);
         if (controller.signal.aborted) return;
         const next = adjacentReplayFrame(result.frames, at, direction, capability);
-        if (next) { move(next.at); storeWindow(result); onPosition(next.at, null); return; }
+        if (next) { move(next.at); storeWindow(result); commitPosition(next.at); return; }
         edge = direction === 1 ? target.endAt : target.startAt;
       }
     } catch (error) { if (!controller.signal.aborted) setWindowError(String(error)); }
@@ -424,7 +429,7 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
       if (position == null && overview && detail.summary) seek(detail.summary.startAt, true, evidence);
     }} />;
   const share = async () => {
-    onPosition(Math.round(at), evidence);
+    commitPosition(at, evidence);
     const url = new URL(window.location.href);
     url.searchParams.set("view", "replay"); url.searchParams.set("at", String(Math.round(at)));
     url.searchParams.set("project", project); url.searchParams.set("run", run);
@@ -468,7 +473,7 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
         {shownFrames.length ? shownFrames.map(frame => <article className="replay-frame" key={frame.capability} data-frame-id={frame.id}>
           <div className="replay-frame-meta"><Button type="button" variant="ghost" size="xs" onClick={event => selectFrame(frame, event.currentTarget)}>
             {frame.capability} · #{frame.sequence} ↗</Button><span>{t("sampled")} {wallTime(frame.at)}{ready ? " · " + (Math.max(0, at - frame.at) / 1000).toFixed(1) + " " + t("secondsAgo") : t("previousFrame")}</span></div>
-          <FrameMedia key={refresh + ":" + retry} frame={frame} images={displayed?.images ?? new Map()} playback={{ at, playing, clockReady: ready, speed, onReady: onVideoReady }} />
+          <FrameMedia key={refresh + ":" + retry} frame={frame} images={displayed?.images ?? new Map()} playback={{ at, playing, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }} />
         </article>) : <div className="replay-loading">{!ready ? t("loadingFrames") : capability ? t("noFramesFiltered") : t("noFramesAll")}<small>{t("playbackContinues")}</small></div>}
         {!ready && <span className="replay-buffering" role="status">{windowError ? t("segmentFailed") : t("buffering")}</span>}
       </div>
@@ -479,8 +484,8 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
         {/* The media scrubber keeps native pointer/key commit semantics and millisecond steps. */}
         <input className="replay-seek accent-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring" type="range" min={overview.startAt} max={Math.max(overview.endAt, overview.startAt + 1)} step="1" value={at}
           disabled={duration <= 0} aria-label={t("seekLabel")} aria-valuetext={replayDuration(at - overview.startAt) + " / " + replayDuration(duration)}
-          onChange={event => seek(Number(event.target.value), false)} onPointerUp={() => onPosition(Math.round(atRef.current), null)}
-          onKeyUp={() => onPosition(Math.round(atRef.current), null)} />
+          onChange={event => seek(Number(event.target.value), false)} onPointerUp={() => commitPosition(atRef.current)}
+          onKeyUp={() => commitPosition(atRef.current)} />
         <div className="replay-control-row"><div className="replay-transport">
           <Button type="button" size="sm" className="min-w-[90px]" aria-label={playing ? t("pauseReplay") : t("playReplay")} disabled={duration <= 0 || !!windowError}
             onClick={() => { stepRequest.current?.abort(); setStepping(false); if (at >= overview.endAt) move(overview.startAt); setPlaying(value => !value); }}>
