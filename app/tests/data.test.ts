@@ -725,3 +725,24 @@ test("control identity reads never create or migrate a cold archive index", asyn
     assert.equal(await readFile(join(index, ".writing"), "utf8"), "old interrupted cache");
   } finally { clearCatalogCache(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("catalog extracts startedAt and endedAt from run events.jsonl when present", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-catalog-bounds-")));
+  try {
+    const workspace = join(root, "workspace"), run = join(workspace, "logs", "2026-11-05T11-46-06.227Z");
+    await registerFixture(root, "game", workspace);
+    await mkdir(run, { recursive: true });
+    await writeFile(join(run, "manifest.json"), JSON.stringify({ model: "test", seconds: 600, drivers: [] }));
+    await writeFile(
+      join(run, "events.jsonl"),
+      [
+        JSON.stringify({ seq: 1, at: "2026-11-05T11:46:06.234Z", type: "run_start", data: {} }),
+        JSON.stringify({ seq: 2, at: "2026-11-05T12:03:26.660Z", type: "run_end", data: {} }),
+      ].join("\n") + "\n",
+    );
+    clearCatalogCache();
+    const projects = await catalog(root);
+    assert.equal(projects[0].runs[0].startedAt, "2026-11-05T11:46:06.234Z");
+    assert.equal(projects[0].runs[0].endedAt, "2026-11-05T12:03:26.660Z");
+  } finally { clearCatalogCache(); await rm(root, { recursive: true, force: true }); }
+});

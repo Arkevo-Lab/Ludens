@@ -1,7 +1,6 @@
 "use client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ArrowRight, History } from "lucide-react";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
@@ -75,53 +74,20 @@ export default function ConsoleShell() {
               </Button>
             )}
             {runControls && (
-              <>
-                <RunPicker runs={project?.runs ?? []} latest={latest}
-                  value={!refresh && !selection.run ? run : selection.run}
-                  onChange={value =>
-                    !value && view === "live" ? returnToLatest() : navigate({
-                      run: value,
-                      epoch: null,
-                      beforeCall: null,
-                      call: null,
-                      block: null,
-                      image: null,
-                      at: null, ...replayEvidencePatch(null),
-                    })
-                  }
-                />
-                <NativeSelect
-                  aria-label={dt("epochLabel")}
-                  className="max-w-48 text-xs"
-                  disabled={!run}
-                  value={!refresh && !selection.epoch ? data?.selectedEpoch ?? "" : selection.epoch}
-                  onChange={(e) => {
-                    setPausedSelection(null);
-                    if (!e.target.value && !selection.epoch) setSnapshotRevision(value => value + 1);
-                    navigate({
-                      project: selection.project,
-                      run,
-                      epoch: e.target.value,
-                      beforeCall: null,
-                      call: null,
-                      block: null,
-                      image: null,
-                      at: null, ...replayEvidencePatch(null),
-                    });
-                  }}
-                >
-                  <NativeSelectOption value="">
-                    {dt("latestEpoch")}
-                    {cycles.length ? " · #" + cycles.length : ""}
-                  </NativeSelectOption>
-                  {view === "replay" && <NativeSelectOption value="all">{dt("allEpochs")}</NativeSelectOption>}
-                  {[...cycles].reverse().map((c, i) => (
-                    <NativeSelectOption key={c.epoch} value={c.epoch}>
-                      #{cycles.length - i} · {clockTime(c.startedAt)}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
-              </>
+              <RunPicker runs={project?.runs ?? []} latest={latest}
+                value={!refresh && !selection.run ? run : selection.run}
+                onChange={value =>
+                  !value && view === "live" ? returnToLatest() : navigate({
+                    run: value,
+                    epoch: null,
+                    beforeCall: null,
+                    call: null,
+                    block: null,
+                    image: null,
+                    at: null, ...replayEvidencePatch(null),
+                  })
+                }
+              />
             )}
             {run && (view === "live" || view === "perf") && <Button
               type="button"
@@ -221,7 +187,7 @@ export default function ConsoleShell() {
               workspacePath={project?.workspace ?? undefined}
               error={catalogError} retrying={catalogLoading} onRetry={retryCatalog} onNavigate={navigateUrl} />
           ) : view === "replay" ? (
-            <TimelinePlayer key={scopeKey} project={selection.project} run={run} epoch={selection.epoch || "latest"}
+            <TimelinePlayer key={scopeKey} project={selection.project} run={run} epoch={selection.epoch || "all"}
               onOverview={onReplayOverview} archiveRevision={archiveRevision}
               position={query.get("at")} evidence={replayEvidenceFromSearch(search)}
               onPosition={(at, evidence = null) => navigate({ project: selection.project, run, at: String(at), ...replayEvidencePatch(evidence) })}

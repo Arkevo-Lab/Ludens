@@ -2,7 +2,7 @@
 
 import { ContextPicker, type ContextOption } from "@/features/workspaces/context-picker";
 import { useTranslations } from "@/lib/locale";
-import { runIdentity } from "@/lib/run-identity";
+import { runWindowSummary } from "@/lib/run-identity";
 import type { RunInfo } from "@/lib/types";
 
 export function RunPicker({ runs, latest, value, onChange }: {
@@ -15,15 +15,16 @@ export function RunPicker({ runs, latest, value, onChange }: {
   const dt = useTranslations("dashboard");
   const et = useTranslations("workspaceRunEmpty");
   const latestLabel = latest ? dt("latestRun") : et("noGameRuns");
-  const latestIdentity = latest ? runIdentity(latest.id) : null;
+  const latestIdentity = latest ? runWindowSummary(latest) : null;
   const options: ContextOption[] = runs.length ? [{ value: "", label: latestLabel,
     secondarySummary: latestIdentity?.summary ?? undefined, identity: latestIdentity?.id },
   ...runs.map(run => {
-    const identity = runIdentity(run.id);
+    const identity = runWindowSummary(run);
     return { value: run.id, label: identity.summary ?? identity.id, identity: identity.summary ? identity.id : undefined };
   })] : [];
-  const selected = value ? runIdentity(value) : latestIdentity;
-  const triggerText = value ? selected?.summary ?? value
+  const selectedRun = value ? runs.find(r => r.id === value) ?? { id: value } : null;
+  const selected = selectedRun ? runWindowSummary(selectedRun) : latestIdentity;
+  const triggerText = value ? `${dt("runHistoryLabel")} · ${selected?.summary ?? value}`
     : latestIdentity ? `${latestLabel} · ${latestIdentity.summary ?? latestIdentity.id}` : latestLabel;
   return <ContextPicker kind="run" options={options} value={value} onChange={onChange} label={dt("runHistoryLabel")} hideLabel
     trigger={{ text: runs.length ? triggerText : t("empty"), title: selected?.id ?? t("empty"), hint: selected?.id ?? t("description") }}
