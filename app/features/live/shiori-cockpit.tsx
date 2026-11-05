@@ -4,10 +4,8 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import {
   ArrowDown,
   Bot,
-  Check,
   ChevronDown,
   ChevronRight,
-  Copy,
   CornerDownLeft,
   Eye,
   EyeOff,
@@ -15,11 +13,8 @@ import {
   PanelRight,
   Play,
   Plus,
-  RefreshCw,
   RotateCcw,
-  Sparkles,
   Square,
-  Terminal,
   X,
   Zap,
 } from "lucide-react";
@@ -836,6 +831,23 @@ export function ShioriComposer({
     }
   };
 
+  const runComposerAction = async (command: RuntimeControlAction, feedbackLabel: string) => {
+    if (submitting || !project || !workspace) return;
+    setSubmitting(true);
+    setError(null);
+    setMenuOpen(false);
+    try {
+      const res = await sendRuntimeControl(project, workspace, command);
+      applyReturnedStatus(res);
+      setLastSent(feedbackLabel);
+      onUpdated();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -874,6 +886,46 @@ export function ShioriComposer({
               <small>{preset.prompt}</small>
             </button>
           ))}
+          <div className="codex-preset-popover-title mt-1 border-t border-border pt-2">
+            {t("dockToolsTitle")}
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            className="codex-preset-item"
+            disabled={submitting || isAuto || consolidating}
+            onClick={() =>
+              void runComposerAction(
+                {
+                  action: "consolidate",
+                  runId: data.run,
+                  expectedEpoch: effectiveHost?.epoch ?? null,
+                },
+                t("consolidateBtn"),
+              )
+            }
+          >
+            <span>✨ {t("consolidateBtn")}</span>
+            <small>Memory Consolidation</small>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="codex-preset-item"
+            disabled={submitting}
+            onClick={() =>
+              void runComposerAction(
+                {
+                  action: "perception_reload",
+                  runId: data.run,
+                },
+                t("reloadPerceptionHint"),
+              )
+            }
+          >
+            <span>↻ {t("reloadPerceptionHint")}</span>
+            <small>perception.py</small>
+          </button>
         </div>
       )}
 
@@ -967,6 +1019,27 @@ export function ShioriComposer({
               {modelShort}
             </span>
 
+            {isAuto && (
+              <button
+                type="button"
+                className="codex-subtle-pill text-destructive"
+                disabled={submitting}
+                title={t("handbackStop")}
+                onClick={() =>
+                  void runComposerAction(
+                    {
+                      action: "auto_off",
+                      runId: data.run,
+                      expectedEpoch: effectiveHost?.epoch ?? undefined,
+                    },
+                    t("handbackStop"),
+                  )
+                }
+              >
+                <Square className="size-3 fill-current" aria-hidden="true" />
+              </button>
+            )}
+
             <button
               type="button"
               className="codex-send-circle"
@@ -1054,10 +1127,6 @@ export function ShioriWorkbench({
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [dockOpen, setDockOpen] = useState(true);
   const [atBottom, setAtBottom] = useState(true);
-  const [busyTool, setBusyTool] = useState<string | null>(null);
-  const [toolError, setToolError] = useState<string | null>(null);
-  const [showStandbyHelper, setShowStandbyHelper] = useState(false);
-  const [copiedCmd, setCopiedCmd] = useState(false);
   const [perceptionOverride, setPerceptionOverride] = useState<boolean | null>(null);
   const [hostStatusOverride, setHostStatusOverride] = useState<Record<string, unknown> | null>(null);
   const [inspectedTurn, setInspectedTurn] = useState<{
@@ -1160,44 +1229,6 @@ export function ShioriWorkbench({
           },
     );
     setDockOpen(true);
-  };
-
-  const runHostTool = async (key: string, command: RuntimeControlAction) => {
-    if (!project || !workspace || busyTool) return;
-    setBusyTool(key);
-    setToolError(null);
-    setShowStandbyHelper(false);
-    try {
-      const res = await sendRuntimeControl(project, workspace, command);
-      const status = asRecord(asRecord(res)?.status);
-      if (status) {
-        setHostStatusOverride(status);
-        const contextRec = asRecord(status.context);
-        if (typeof contextRec?.perceptionInjection === "boolean") {
-          setPerceptionOverride(contextRec.perceptionInjection);
-        }
-      }
-      onUpdated();
-    } catch (cause) {
-      if (isHostOfflineError(cause)) {
-        setShowStandbyHelper(true);
-      } else {
-        setToolError(cause instanceof Error ? cause.message : String(cause));
-      }
-    } finally {
-      setBusyTool(null);
-    }
-  };
-
-  const launchCmd = `ludens run --workspace ${workspace || "<workspace>"}`;
-  const copyLaunchCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(launchCmd);
-      setCopiedCmd(true);
-      setTimeout(() => setCopiedCmd(false), 2000);
-    } catch {
-      // Ignore clipboard failure
-    }
   };
 
   const inspectedCall = inspectedTurn?.callId
@@ -1457,108 +1488,7 @@ export function ShioriWorkbench({
                 : observationSlot}
             </div>
 
-            {/* 2. Compact Runtime Host Operations (3 non-redundant actions) */}
-            <div className="codex-dock-section">
-              <div className="flex items-center justify-between">
-                <h3 className="codex-dock-heading">{t("dockToolsTitle")}</h3>
-                <span className="font-mono text-[11px] text-muted-foreground">
-                  {isAuto ? "AUTO" : consolidating ? "MEMORY" : "IDLE"}
-                </span>
-              </div>
-
-              {toolError && (
-                <p className="codex-tool-err" role="alert">
-                  {toolError}
-                </p>
-              )}
-
-              {showStandbyHelper && (
-                <div className="codex-standby-card" role="status">
-                  <p>{t("hostStandbyHint")}</p>
-                  <div className="codex-standby-cmd">
-                    <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    <code>{launchCmd}</code>
-                    <button
-                      type="button"
-                      className="codex-copy-btn"
-                      onClick={() => void copyLaunchCommand()}
-                    >
-                      {copiedCmd ? (
-                        <>
-                          <Check className="size-3" aria-hidden="true" />
-                          <span>{t("copiedLaunchCmd")}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="size-3" aria-hidden="true" />
-                          <span>{t("copyLaunchCmd")}</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <div className="codex-host-ops-grid">
-                <button
-                  type="button"
-                  className="codex-host-op-btn"
-                  data-tone={isAuto ? "danger" : "primary"}
-                  disabled={busyTool !== null}
-                  onClick={() =>
-                    void runHostTool(
-                      isAuto ? "auto_off" : "auto_on",
-                      isAuto
-                        ? { action: "auto_off", runId: data.run, expectedEpoch: live?.epoch ?? undefined }
-                        : { action: "auto_on", runId: data.run, expectedEpoch: live?.epoch ?? null },
-                    )
-                  }
-                >
-                  {isAuto ? (
-                    <Square className="size-3.5 text-destructive shrink-0" aria-hidden="true" />
-                  ) : (
-                    <Play className="size-3.5 text-primary shrink-0" aria-hidden="true" />
-                  )}
-                  <span>{isAuto ? t("handbackStop") : t("startAutoLoop")}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="codex-host-op-btn"
-                  disabled={busyTool !== null || isAuto || consolidating}
-                  onClick={() =>
-                    void runHostTool("consolidate", {
-                      action: "consolidate",
-                      runId: data.run,
-                      expectedEpoch: live?.epoch ?? null,
-                    })
-                  }
-                >
-                  <Sparkles className="size-3.5 text-primary shrink-0" aria-hidden="true" />
-                  <span>{t("consolidateBtn")}</span>
-                </button>
-
-                <button
-                  type="button"
-                  className="codex-host-op-btn"
-                  disabled={busyTool !== null}
-                  onClick={() =>
-                    void runHostTool("perception_reload", {
-                      action: "perception_reload",
-                      runId: data.run,
-                    })
-                  }
-                >
-                  <RefreshCw
-                    className={`size-3.5 shrink-0${busyTool === "perception_reload" ? " animate-spin" : ""}`}
-                    aria-hidden="true"
-                  />
-                  <span>{t("reloadPerceptionHint")}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 3. Compact Loop Budget & Session Telemetry */}
+            {/* 2. Compact Loop Budget & Session Telemetry */}
             {summary && (
               <div className="codex-dock-section">
                 <div className="flex items-center justify-between">
