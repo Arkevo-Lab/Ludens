@@ -177,7 +177,7 @@ export default function ConsoleShell() {
               </div>
             </AlertDescription></Alert>
           )}
-          {view === "live" && entry === "ready" && (context || latestRequested) && <section
+          {view === "live" && entry === "ready" && ((context && context.kind !== "latest") || latestRequested) && <section
             className={"live-context-banner "
               + ((context?.kind ?? "latest") === "latest" ? "border-border bg-card" : "border-primary/40 bg-primary/5")}
             aria-labelledby="live-context-title"
@@ -273,8 +273,15 @@ export default function ConsoleShell() {
                     <ObservationPanel
                       priority
                       data={data}
-                      call={call}
-                      selectedImage={selectedImage}
+                      call={
+                        call?.inputObservations.length
+                          ? call
+                          : [...data.calls].reverse().find(c => c.inputObservations.length > 0) ?? call
+                      }
+                      selectedImage={
+                        selectedImage ??
+                        (!call?.inputObservations.length ? data.observations.at(-1)?.id : undefined)
+                      }
                       onImage={(id) => navigate({ ...pinned, image: id })}
                     />
                   }

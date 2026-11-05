@@ -38,6 +38,7 @@ import { activityContentView, printable } from "@/features/live/activity-feed-mo
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
 import { clockTime } from "@/features/live/run-visuals";
 import type { RunData } from "@/lib/types";
+import "@/features/live/activity-feed.css";
 
 export type RuntimeControlAction =
   | { action: "status" }
@@ -146,9 +147,52 @@ type StreamSegment =
  * - User bubbles (`user_message`)
  * - Collapsed intermediate step groups (`上 N 条消息 / 执行步骤 >`) paired with Shiori's readable prose response
  */
-function buildCodexSegments(blocks: ActivityBlock[]): StreamSegment[] {
+function buildCodexSegments(rawBlocks: ActivityBlock[]): StreamSegment[] {
+  const blocks = rawBlocks.filter(block => block.kind !== "diagnostic");
   const segments: StreamSegment[] = [];
   let pendingSteps: ActivityBlock[] = [];
+
+  const synthesizeAutonomousNarrative = (steps: ActivityBlock[]): { block: ActivityBlock; text: string } | null => {
+    // 1. Prefer a substantial thinking block (>= 60 chars beyond a short **heading**)
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (steps[i].kind === "thinking") {
+        const text = extractReadableText(steps[i]);
+        const stripped = text.replace(/^\*\*[^*\n]+\*\*\s*/, "").trim();
+        if (stripped.length >= 40 || text.length >= 90) {
+          return { block: steps[i], text };
+        }
+      }
+    }
+
+    // 2. Otherwise combine the latest **Thinking Heading** with recent tool.intent descriptions
+    const latestThinking = [...steps].reverse().find(s => s.kind === "thinking");
+    const intents = steps
+      .filter(s => s.kind === "tool" && typeof s.tool?.intent === "string" && s.tool.intent.trim())
+      .map(s => s.tool!.intent!.trim());
+    const uniqueIntents = [...new Set(intents)].slice(-3);
+
+    if (latestThinking && uniqueIntents.length > 0) {
+      const heading = extractReadableText(latestThinking);
+      return {
+        block: latestThinking,
+        text: `${heading} — ${uniqueIntents.join("；")}.`,
+      };
+    }
+    if (uniqueIntents.length > 0) {
+      const lastTool = [...steps].reverse().find(s => s.kind === "tool") ?? steps[steps.length - 1];
+      return {
+        block: lastTool,
+        text: uniqueIntents.join("；") + ".",
+      };
+    }
+    if (latestThinking) {
+      return {
+        block: latestThinking,
+        text: extractReadableText(latestThinking),
+      };
+    }
+    return null;
+  };
 
   const flushTurn = (explicitResponse?: ActivityBlock) => {
     if (explicitResponse) {
@@ -164,24 +208,15 @@ function buildCodexSegments(blocks: ActivityBlock[]): StreamSegment[] {
     }
     if (pendingSteps.length === 0) return;
 
-    // Promote the latest substantial thinking block in this batch as Shiori's visible narrative prose
-    let promotedIdx = -1;
-    for (let i = pendingSteps.length - 1; i >= 0; i--) {
-      if (pendingSteps[i].kind === "thinking") {
-        promotedIdx = i;
-        break;
-      }
-    }
-
-    if (promotedIdx >= 0) {
-      const responseBlock = pendingSteps[promotedIdx];
-      const otherSteps = pendingSteps.filter((_, idx) => idx !== promotedIdx);
+    const synthesized = synthesizeAutonomousNarrative(pendingSteps);
+    if (synthesized) {
+      const otherSteps = pendingSteps.filter(item => item.id !== synthesized.block.id);
       segments.push({
         kind: "turn",
-        id: responseBlock.id,
+        id: synthesized.block.id,
         steps: otherSteps,
-        responseBlock,
-        responseText: extractReadableText(responseBlock),
+        responseBlock: synthesized.block,
+        responseText: synthesized.text,
       });
     } else {
       segments.push({
@@ -215,11 +250,11 @@ function buildCodexSegments(blocks: ActivityBlock[]): StreamSegment[] {
     }
 
     pendingSteps.push(block);
-    // Keep turn groups bite-sized so long autonomous runs read like natural multi-turn messages
+    // Group autonomous loop steps into readable ~6-step conversational turns
     if (
-      pendingSteps.length >= 8 &&
+      pendingSteps.length >= 6 &&
       block.kind === "tool" &&
-      pendingSteps.some(item => item.kind === "thinking")
+      (pendingSteps.some(item => item.kind === "thinking") || Boolean(block.tool?.intent))
     ) {
       flushTurn();
     }
@@ -230,16 +265,23 @@ function buildCodexSegments(blocks: ActivityBlock[]): StreamSegment[] {
 }
 
 function renderInlineFormatting(text: string): ReactNode[] {
-  const parts = text.split(/(`[^`]+`)/g);
-  return parts.map((part, idx) => {
-    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+  const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
+  return tokens.map((token, idx) => {
+    if (token.startsWith("`") && token.endsWith("`") && token.length > 2) {
       return (
         <code key={idx} className="codex-inline-code">
-          {part.slice(1, -1)}
+          {token.slice(1, -1)}
         </code>
       );
     }
-    return part;
+    if (token.startsWith("**") && token.endsWith("**") && token.length > 4) {
+      return (
+        <strong key={idx} className="font-semibold text-foreground">
+          {token.slice(2, -2)}
+        </strong>
+      );
+    }
+    return token;
   });
 }
 
