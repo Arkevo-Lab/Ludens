@@ -361,9 +361,8 @@ test("init and dry-run preserve existing workspace files and never invoke servic
     expect(repeated.stderr).toContain("EEXIST");
     expect(await readFile(join(workspace, "ludens.json"), "utf8")).toBe(configBefore);
     expect(await readFile(join(workspace, "AGENTS.md"), "utf8")).toBe("My existing workspace instructions\n");
-    expect((await readdir(workspace)).sort()).toEqual([".ludens", "AGENTS.md", "action.py", "ludens.json", "perception.py"]);
+    expect((await readdir(workspace)).sort()).toEqual([".ludens", "AGENTS.md", "ludens.json", "perception.py"]);
     expect(await readFile(join(workspace, "perception.py"), "utf8")).toContain("NotImplementedError");
-    expect(await readFile(join(workspace, "action.py"), "utf8")).toContain("NotImplementedError");
     const desktop = join(directory, "Desktop workspace");
     expect((await run("--workspace", desktop, "init", "--driver", "cua", "--cua-command", "./tools/cua-driver", "--pet")).code).toBe(0);
     const desktopPreview = await run("--workspace", desktop, "up", "--dry-run");

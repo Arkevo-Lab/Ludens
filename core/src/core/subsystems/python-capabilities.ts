@@ -86,7 +86,7 @@ export class PythonCapabilities {
   }
 
   private emit(type: string, data: unknown, trace: EventTrace) {
-    const continuous = trace.recordingPurpose === "continuous-perception" || trace.recordingPurpose === "continuous-action";
+    const continuous = trace.recordingPurpose === "continuous-perception";
     if (!continuous || this.diagnostics === "full") this.record?.(type, data, trace,
       continuous ? { channel: "diagnostic" } : undefined);
   }

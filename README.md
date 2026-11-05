@@ -2,7 +2,7 @@
 
 **A multimodal agent harness for complex tasks through self-adaptation and self-improvement.**
 
-Ludens connects agents to arbitrary PC desktops and console environments, giving them a persistent coding workspace to adapt to unfamiliar interfaces and continuously improve how they act. Instead of relying on static prompts or fixed action spaces, a Ludens agent writes and refines its own resident perception (`perception.py`), control loops (`action.py`), and reusable skills (`skills/`) directly in Python.
+Ludens connects agents to arbitrary PC desktops and console environments, giving them a persistent coding workspace to adapt to unfamiliar interfaces and continuously improve how they act. Instead of relying on static prompts or fixed action spaces, a Ludens agent writes and refines its own resident perception-and-action state machine (`perception.py`), and reusable skills (`skills/`) directly in Python.
 
 **Games** are the first flagship class of complex, real-time multimodal tasks we tackle—spanning local PC applications and console emulators—backed by a unified device control plane, a live observability console, and workspace-native capability evaluation.
 
@@ -11,7 +11,7 @@ Ludens connects agents to arbitrary PC desktops and console environments, giving
 ## Why Ludens
 
 - **Plug into any PC or console environment.** Discover device controls and workspace Python capabilities through a unified `ludens controller` interface, with parameters inspected on demand.
-- **Self-adaptation in a real workspace.** Resident `perception.py` and `action.py` processes keep models, state, and high-frequency sampling in memory across turns without modifying the agent runtime.
+- **Self-adaptation in a real workspace.** The resident `perception.py` process keeps models, state, and high-frequency sampling in memory across turns without modifying the agent runtime.
 - **Continuous self-improvement.** Agents turn repeated interaction patterns into callable `@capability` functions, compose tools via `ludens_tools.Client`, and persist experience in `skills/` and `memory/`.
 - **Full-trace observability.** Inspect model inputs, tool calls, timing, and linked device actions in the web Dashboard or optional Ludens Pet desktop companion.
 - **Measurable progress.** Evaluate adaptation and skill reuse with workspace-native `@capability` / `@eval_capability` / `@eval_env` contracts, Shiori execution budgets, and `ludens eval`.
@@ -79,8 +79,7 @@ Each workspace is a standalone code directory outside the repository (`~/.ludens
 my-task/
 ├── ludens.json          # Workspace & driver launch configuration
 ├── baseware.json     # Generated device capability reference
-├── perception.py     # Resident, agent-authored perception process
-├── action.py         # Resident control loop while auto is active
+├── perception.py     # Resident, agent-authored perception-and-action state machine
 ├── skills/           # Reusable @capability functions and scripts
 ├── memory/           # Task goals, state, and learned knowledge
 └── .ludens/ & logs/     # Session identity, timeline archives, and run logs

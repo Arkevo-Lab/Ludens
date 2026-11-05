@@ -12,7 +12,6 @@ ludens consolidate [--seconds <n>]
 ludens perception status | state | reload | stop
 ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
 ludens perception inject [on|off]
-ludens action status | reload | stop
 ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
 ludens controller list | <id> --help | <id> [--args '<JSON object>' | --file <arguments.json>]
 
@@ -50,16 +49,6 @@ inject on restores automatic attachment; inject without arguments shows the poli
 The policy survives perception reload and control cycles in this host; a new host defaults to on.
 stop ends the sampling process and timeline writer, including video recording. Use inject off to reduce context instead.
 Empty or failed perception supplies no default images.`;
-
-export const ACTION_HELP = `ludens action status | reload | stop
-Loads workspace/action.py:Action in its own persistent Python process during auto control.
-Implement start(context), @capability step(), close(); steps at LUDENS_ACTION_STEP_HZ (default 30 Hz).
-Use asynchronous play to keep observing while inputs run. @record optionally retains a result
-in the existing timeline; Client().observe() reads it without resampling.
-Reload starts a new instance in the current epoch, or arms it for the next takeover while manual.
-Stop disables this program until reload. Errors halt the loop; repair and reload explicitly.
-Stop/reload clears this workspace's current device inputs, including concurrent CLI inputs.
-It preserves the control epoch, remaining budget and OMP session. Human handback ends the worker.`;
 
 async function observe(argv: string[], socket: string) {
   if (argv.includes("--help")) { console.log(OBSERVE_HELP); return; }
@@ -143,8 +132,7 @@ export async function cli(argv: string[], socket: string) {
     console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
     return;
   }
-  if (kind === "action" && (!rest.length || rest[0] === "--help")) { console.log(ACTION_HELP); return; }
-  if (!["status", "auto", "steer", "consolidate", "perception", "action"].includes(kind)) throw new Error("Unknown command; see ludens --help");
+  if (!["status", "auto", "steer", "consolidate", "perception"].includes(kind)) throw new Error("Unknown command; see ludens --help");
   const control = kind === "auto" || kind === "steer" || kind === "consolidate" ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null } : undefined;
   const value = await send(socket, {
     kind, argv: rest, epoch: process.env.BASEWARE_EPOCH,

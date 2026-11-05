@@ -10,7 +10,7 @@ from ludens_tools._sampling import env_sample_hz
 
 class SamplingTests(unittest.TestCase):
     def test_environment_rate_boundaries(self):
-        for name in ("LUDENS_PERCEPTION_SAMPLE_HZ", "LUDENS_ACTION_STEP_HZ"):
+        for name in ("LUDENS_PERCEPTION_SAMPLE_HZ",):
             with self.subTest(name=name), patch.dict(os.environ):
                 os.environ.pop(name, None)
                 self.assertEqual(env_sample_hz(name), 30.0)

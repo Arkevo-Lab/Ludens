@@ -14,7 +14,6 @@ import { runProvenance } from "../core/storage/provenance.ts";
 import { readCurrentSession, resolveWorkspaceAddress, resolveWorkspaceState } from "../core/storage/workspace-state.ts";
 import { validateSessionWorkspace } from "../core/agent-omp/workspace-session.ts";
 import perceptionTemplate from "../../templates/perception.py" with { type: "text" };
-import actionTemplate from "../../templates/action.py" with { type: "text" };
 import { WORKSPACE_HELP, workspaceCommand } from "./workspace.ts";
 import { LOG_HELP, logCommand } from "./log-archive.ts";
 import { ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
@@ -119,7 +118,6 @@ async function main() {
     await mkdir(join(workspace, "memory"), { recursive: true });
     await mkdir(runDir, { recursive: true });
     await writeFile(join(workspace, "perception.py"), perceptionTemplate, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
-    await writeFile(join(workspace, "action.py"), actionTemplate, { flag: "wx" }).catch(error => { if (error.code !== "EEXIST") throw error; });
     const clock = { id: runId, now: () => performance.now() };
     log = new EventLog(runDir, clock, workspace, diagnostics);
     log.record("run_start", { workspace, workspaceId: state.id, diagnostics });
@@ -144,7 +142,7 @@ async function main() {
       logging: { diagnostics, basewareDiagnostics: devices.diagnostics }, eventSources: devices.eventSources,
       shiori: values["device-only"] ? null : { implementation: "omp", implementationVersion: "18.14.0" },
       provenance: await runProvenance(workspace), model: values["device-only"] ? null : model,
-      seconds, maxRequests, resume, perception: { entry: "perception.py:Perception" }, action: { entry: "action.py:Action" }, compactionThreshold: compactionThreshold ?? null }, null, 2));
+      seconds, maxRequests, resume, perception: { entry: "perception.py:Perception" }, compactionThreshold: compactionThreshold ?? null }, null, 2));
     ready = true;
     await runtime.perception!.reload();
     console.log(JSON.stringify({ ready: true, socket, workspace, stateDir: state.dir, runDir, ...runtime.status() }, null, 2));

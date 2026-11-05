@@ -3,7 +3,6 @@ import type { Catalog } from "@ludens/baseware/protocol";
 import type { DiagnosticsMode, EventTrace, RecordEvent } from "../storage/events.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
 import type { WorkspaceController } from "../subsystems/controller.ts";
-import type { ActionRuntime } from "../subsystems/action.ts";
 import { executeProgram, type Program } from "./program.ts";
 
 export interface AgentRunner {
@@ -58,20 +57,18 @@ export class Runtime {
   private _agent?: AgentRunner;
   private _controller?: WorkspaceController;
   private _perception?: PerceptionRuntime;
-  private _action?: ActionRuntime;
   /** Subsystems are injected through attach(); direct external assignment is not allowed. */
   get agent() { return this._agent; }
   get controller() { return this._controller; }
   get perception() { return this._perception; }
-  get action() { return this._action; }
 
   /** Attach workspace subsystems. Later calls replace only the given parts; an explicit undefined clears one. */
-  attach(subsystems: { agent?: AgentRunner; controller?: WorkspaceController; perception?: PerceptionRuntime; action?: ActionRuntime }) {
+  attach(subsystems: { agent?: AgentRunner; controller?: WorkspaceController; perception?: PerceptionRuntime }) {
     if ("agent" in subsystems) this._agent = subsystems.agent;
     if ("controller" in subsystems) this._controller = subsystems.controller;
     if ("perception" in subsystems) this._perception = subsystems.perception;
-    if ("action" in subsystems) this._action = subsystems.action;
   }
+
 
   constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000) {
     if (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647) throw new Error("Invalid Shiori time budget");
@@ -81,7 +78,7 @@ export class Runtime {
   status() {
     // The host can outlive many takeovers; its log clock is not this cycle's budget.
     const remainingSeconds = this.mode === "auto" ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null;
-    return { runId: this.runId, maxSeconds: this.maxSeconds, remainingSeconds, mode: this.mode, epoch: this.mode === "auto" ? this.epoch : null, connected: this.connected, reason: this.reason, agent: !!this._agent, thinking: !!this.running, consolidating: this.consolidating, queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 }, perception: this._perception?.status(), action: this._action?.status(), context: { perceptionInjection: this.perceptionInjection }, logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" } };
+    return { runId: this.runId, maxSeconds: this.maxSeconds, remainingSeconds, mode: this.mode, epoch: this.mode === "auto" ? this.epoch : null, connected: this.connected, reason: this.reason, agent: !!this._agent, thinking: !!this.running, consolidating: this.consolidating, queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 }, perception: this._perception?.status(), context: { perceptionInjection: this.perceptionInjection }, logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" } };
   }
 
   perceptionInjectionEnabled(): boolean { return this.perceptionInjection; }
@@ -97,8 +94,8 @@ export class Runtime {
   list() { if (!this.devices) throw new Error("This Shiori execution has no device"); return this.devices.catalog; }
 
   checkInputGeneration(epoch: string | undefined, trace: EventTrace = {}) {
-    if (trace.inputGeneration !== undefined && !this._action?.accepts(epoch, trace.inputGeneration))
-      throw new Error("STALE_INPUT_GENERATION: reload the action program under the current control epoch");
+    if (trace.inputGeneration !== undefined && !this._perception?.accepts(epoch, trace.inputGeneration))
+      throw new Error("STALE_INPUT_GENERATION: reload perception under the current control epoch");
   }
 
   async callController(id: string, args: unknown, epoch: string | undefined, signal: AbortSignal, trace: EventTrace = {}) {
@@ -156,8 +153,7 @@ export class Runtime {
     if (control.signal.aborted) return this.status();
     try {
       if (this.ownsDevice) {
-        await this._action?.activate(epoch);
-        if (!control.signal.aborted) await this._perception?.setLease(epoch, null, control.signal);
+        if (!control.signal.aborted) await this._perception?.setLease(epoch, this._perception?.status().generation ?? null, control.signal);
       }
     }
     catch (error) { await this.stop(String(error)); throw error; }
@@ -268,8 +264,6 @@ export class Runtime {
     this.budget?.signal.removeEventListener("abort", this.budgetEnded);
     // Revoking the device never waits for model cancellation.
     this.abortAgent();
-    const actionStopped = this._action?.deactivate();
-    void actionStopped?.catch(error => this.record("error", String(error), { epoch: this.epoch }));
     const perceptionRevoked = this._perception?.setLease(null);
     void perceptionRevoked?.catch(error => this.record("error", String(error), { epoch: this.epoch }));
     this.stopping = (async () => {
@@ -286,7 +280,6 @@ export class Runtime {
       // Handback is confirmed or the connection has failed closed. Drain
       // cancelled workspace calls before another epoch can start.
       await Promise.allSettled(this.calls);
-      await actionStopped?.catch(() => {});
       await perceptionRevoked?.catch(() => {});
       this.mode = "manual";
       this.record("control", this.status(), { epoch: this.epoch });
@@ -306,8 +299,7 @@ export class Runtime {
       await this.running;
       await this._agent?.close();
     } finally {
-      try { await this._action?.deactivate(); }
-      finally { await this._perception?.stop(); }
+      await this._perception?.stop();
     }
   }
 }

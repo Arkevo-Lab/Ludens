@@ -1,6 +1,6 @@
-# 常驻感知与动作循环
+# 常驻感知与动作状态机
 
-在实时交互环境中，常驻 `perception.py:Perception` 进程运行连续状态机，负责高频采样与进程内闭环控制，并将观测写入 `.ludens/timeline/`。各能力无需 IPC 即可共享内存、发出动作并在状态间转换；独立的 `action.py:Action` 自动循环仍可用于绑定 epoch 的控制程序。能力装饰器与时空轴信封约定见 [工作区与能力编程](workspace.md)。
+在实时交互环境中，常驻 `perception.py:Perception` 进程运行连续状态机，负责高频采样与进程内闭环控制，并将观测写入 `.ludens/timeline/`。各能力无需 IPC 即可共享内存、发出动作并在状态间转换，因此绑定 epoch 的控制程序运行在同一进程内。能力装饰器与时空轴信封约定见 [工作区与能力编程](workspace.md)。
 
 下文中的 CLI 命令均在**目标工作区目录**下执行，假定仓库 `core/bin` 与 `baseware/bin` 已加入 `PATH`。跨目录操作时，在子命令前传入 `ludens --workspace /absolute/path/to/workspace`。
 
@@ -14,7 +14,7 @@
 - `sample(self)`：需标注 `@observe`、`@record` 与 `@capability`；其中 `@observe` 将其选为工作区的主观测能力。调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用当前状态。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
 - `close(self)`：在 `reload`、`stop` 或 Host 退出时调用，用于释放自建资源。
 
-常驻进程在单个 Python 进程内运行连续状态机。当前能力可返回可选的 `effect`（`{"id": "controller/...", "arguments": {...}}`，或此类对象的列表）来请求闭环动作，也可返回可选的 `transition`（`"method_name"` 或 `{"to": "method_name", "arguments": {...}}`）来选择下一 tick 调用的能力。转换目标可解析为同一实例、模块或工作区中的能力，全程不跨进程，因此实例属性与模块全局变量可作为跨 tick 的共享内存上下文。
+- **源码修改自动重载**：修改 `perception.py` 或其导入的工作区 `.py` 模块会自动重载常驻进程（非 Python 资源不会触发重载）；显式历史查询在重载后仍然可用，新 generation 会保留历史 generation。如需在不改源码的情况下显式重启，可执行 `ludens perception reload`。
 
 没有 `Perception` 类时，`perception.py` 也可定义任意名称的顶层 `@observe @record @capability` 函数。实时与离线时空轴默认读取唯一的 `@observe` 通道，包括其他工作区模块中的已记录能力；`@observe` 不会自动调度其他模块。没有标记时，默认通道仍为 `python/perception.py:Perception.sample`。重复标记会为每个冲突声明生成诊断，并阻止常驻进程开始运行。
 
@@ -48,7 +48,7 @@ class Perception:
         pass
 ```
 
-新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 `perception.py`（如采集逻辑或模型权重）后，执行 `ludens perception reload` 即可热替换进程并保留历史时空轴。
+新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 `perception.py`（如采集逻辑或模型权重）后，常驻进程会自动重载并保留历史时空轴；`ludens perception reload` 仍可用于显式重启。
 
 ### 2. 感知管理与历史查询命令（`ludens observe`）
 
@@ -96,7 +96,6 @@ CLI `ludens observe`、Python `Client().observe(query)` 与 OMP 原生 `observe`
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
 | `LUDENS_PERCEPTION_SAMPLE_HZ` | `30` | `Perception.sample()` 的连续采样目标频率与录像名义帧率（有限正数）。 |
-| `LUDENS_ACTION_STEP_HZ` | `30` | `auto` 控制期间 `Action.step()` 的连续执行目标步频（有限正数）。 |
 | `LUDENS_PERCEPTION_PERSIST` | `1` | 设为 `0`（或 `false`）时仅保留内存/临时热窗口，进程停止或 `reload` 即清空。 |
 | `LUDENS_PERCEPTION_HOT_SECONDS` | `600` | 每通道热窗口保留秒数（10 分钟），窗口内原图可直接内存交付；可被工作区设置覆盖。 |
 | `LUDENS_PERCEPTION_HOT_BYTES` | `1073741824` | 热窗口全局字节预算（1 GiB），压力下优先收缩占用最大的通道。 |
@@ -117,18 +116,6 @@ CLI `ludens observe`、Python `Client().observe(query)` 与 OMP 原生 `observe`
 
 视频使用 fragmented MP4（`+frag_keyframe+empty_moov`），约每两秒采样量形成一个关键帧间隔。未收尾段中已完整落盘的片段可供读取，最新尚未落盘的帧明确返回不可读，不用邻帧替代。每段 `.mp4.json` 用 `readableBytes`、`lastReadablePts`（微秒 PTS）、`durationSeconds` 与 `frames` 发布完整片段的可读进度，收尾后更新为最终值。Dashboard 回放按固定字节范围读取，播放超出当前范围后加载新增片段；暂无可读帧时等待进度更新，错误状态不当作成功片段。热窗口按时间过期，字节超限时从占用最大的通道收缩；非持久模式的查询会报告被淘汰的历史缺口，`ludens perception status` 的 `history.budgetEvictions` 随当前进程实时更新。
 
-## 常驻动作
+## 租约归属与输入 generation
 
-`action.py` 中的 `Action` 类在 `auto` 控制周期内运行于独立的常驻 Python 进程（模板见 [core/templates/action.py](../../../core/templates/action.py)）：
-
-- **方法契约**：`start(self, context)` 在接管或重载时初始化一次（`context` 含 `workspace`、`runDir`、`generation`、`epoch`）；`step(self)` 标注 `@capability`（如需将决策留档至时空轴可加 `@record`），按宿主配置的频率 `LUDENS_ACTION_STEP_HZ`（默认 `30.0` Hz；忽略工作区类上的 `step_hz` 属性）循环执行；`close(self)` 释放资源。
-- **读取感知与执行动作**：在 `Action` 中通过 `self.device = Client()` 调用 `self.device.observe()` 读取最新或历史感知记录，并调用 `self.device.call("controller/...", {...})` 下发设备指令。异步 `pad.play` 提交后无需在单步内同步阻塞等待，后续 `step()` 可边观测边决策。
-- **生命周期管理**：
-
-```sh
-ludens action status
-ludens action reload
-ludens action stop
-```
-
-- **控制权与输入重置边界**：动作进程严格绑定启动时的 `epoch` 与 `inputGeneration`。当人工交还（`auto off`）、预算耗尽或设备断连时，动作进程终止并释放设备输入。在 `auto` 期间执行 `ludens action stop`、`ludens action reload` 或 `step()` 抛出未捕获异常时，系统会**停止动作循环并重置本工作区的全部当前设备输入（包括同轮并发 CLI 提交的按键/触点）**，等待释放完成后保留当前控制 `epoch`、OMP 会话与剩余预算；如果无法确认释放，则交还控制。修复代码后执行 `ludens action reload` 重新启用动作，若已交还控制还需再次 `ludens auto on`。
+统一常驻状态机严格绑定启动时的 `epoch` 与 `inputGeneration`。`PerceptionRuntime` 拥有 `inputGeneration` 归属权：授予租约、在自动重载时替换 generation、在 `stop()` 时清空设备输入 generation，从而拒绝旧实例残余调用，同时保留当前控制 `epoch`、OMP 会话与剩余预算。当人工交还（`auto off`）、预算耗尽或设备断连时，租约被撤销并释放设备输入；修复代码后，下一次自动重载或显式 `ludens perception reload` 会重新启用控制，若已交还控制还需再次 `ludens auto on`。

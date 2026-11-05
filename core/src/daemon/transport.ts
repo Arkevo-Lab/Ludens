@@ -62,15 +62,6 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
   // to the still-running program, even when its parent epoch has not changed.
   if (kind !== "workspace_event" && kind !== "timeline") runtime.checkInputGeneration(epoch, request.trace);
   if (kind === "status") return runtime.status();
-  if (kind === "action") {
-    if (!runtime.action) throw new Error("Action runtime is not configured");
-    const status = runtime.status();
-    if (epoch !== undefined && (status.mode !== "auto" || status.epoch !== epoch)) throw new Error("STALE_EPOCH: use the current control epoch");
-    if (argv.length === 1 && argv[0] === "status") return runtime.action.status();
-    if (argv.length === 1 && argv[0] === "reload") return runtime.action.reload(status.epoch ?? undefined);
-    if (argv.length === 1 && argv[0] === "stop") return runtime.action.stop();
-    throw new Error("Usage: ludens action status|reload|stop");
-  }
   if (kind === "timeline") {
     if (!runtime.perception) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
     if (request.action === "derive") {
@@ -129,7 +120,7 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
   if (kind === "controller") {
     // One span owns the public call, including rejected calls. The Python
     // runner reuses it; the entry function and nested calls have child spans.
-    const continuous = request.trace?.recordingPurpose === "continuous-perception" || request.trace?.recordingPurpose === "continuous-action";
+    const continuous = request.trace?.recordingPurpose === "continuous-perception";
     const parent = { ...request.trace, recordingId: runtime.status().runId, ...(epoch ? { epoch } : {}) };
     const trace = continuous && runtime.diagnostics === "normal" ? parent : childTrace(parent);
     const record = (type: string, data: unknown) => {

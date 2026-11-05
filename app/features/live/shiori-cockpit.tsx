@@ -908,24 +908,6 @@ export function ShioriComposer({
             <span>✨ {t("consolidateBtn")}</span>
             <small>{t("consolidateDesc")}</small>
           </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="codex-preset-item"
-            disabled={submitting}
-            onClick={() =>
-              void runComposerAction(
-                {
-                  action: "perception_reload",
-                  runId: data.run,
-                },
-                t("reloadPerceptionHint"),
-              )
-            }
-          >
-            <span>↻ {t("reloadPerceptionHint")}</span>
-            <small>{t("reloadPerceptionDesc")}</small>
-          </button>
         </div>
       )}
 

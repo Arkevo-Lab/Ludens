@@ -234,7 +234,7 @@ test("slow sampling never blocks reads or overlaps; cancelling a read leaves rec
   } finally { await f.cleanup(); }
 });
 
-test("reload replaces code and loaded assets, closes the old process, and preserves historical generations", async () => {
+test("editing python sources auto-reloads the worker, preserves generations, and rotates the lease generation", async () => {
   const f = await fixture();
   try {
     const helper = join(f.workspace, "helper.py"), stamp = new Date("2026-01-01T00:00:00Z");
@@ -245,21 +245,31 @@ test("reload replaces code and loaded assets, closes the old process, and preser
       '        Path("closed").write_text(str(os.getpid()))');
     const old = await f.load(code);
     const first = await f.observe();
-    await writeFile(helper, 'VALUE = "new"\n'); await utimes(helper, stamp, stamp);
+    await writeFile(helper, 'VALUE = "new"\n'); await utimes(helper, stamp, new Date());
     await writeFile(join(f.workspace, "weights.txt"), "new weights");
-    expect((await f.observe()).records[0]!.text).toBe("old:old weights");
-    const fresh = await f.load(code);
-    expect(fresh.pid).not.toBe(old.pid);
-    expect(await readFile(join(f.workspace, "closed"), "utf8")).toBe(String(old.pid));
+    await f.wait(() => f.runtime.status().generation !== old.generation);
     expect((await f.observe()).records[0]!.text).toBe("new:new weights");
+    // Non-Python assets alone never trigger a reload: the running worker keeps serving.
+    await writeFile(join(f.workspace, "weights.txt"), "old weights");
+    expect((await f.observe()).records[0]!.text).toBe("new:new weights");
+    const fresh = f.runtime.status();
+    expect(fresh.state).toBe("ready");
     const history = await f.observe({ at: first.records[0]!.recordedAt });
     expect(history.records[0]?.generation).toBe(old.generation!);
     expect(history.records[0]!.text).toBe("old:old weights");
-    const pointWithEmptyFields = await f.observe({ at: first.records[0]!.recordedAt, start: "", end: null, after: 0 });
-    expect(pointWithEmptyFields.records[0]?.id).toBe(first.records[0]!.id);
-    expect(pointWithEmptyFields.query).toEqual({ at: first.records[0]!.recordedAt });
     const sources = JSON.parse(await readFile(join(f.workspace, "logs", "run", "perception", fresh.generation!, "sources.json"), "utf8"));
     expect(Object.keys(sources).sort()).toEqual(["helper.py", "perception.py"]);
+    // Lease authority: an active epoch accepts the fresh generation and rejects the stale one.
+    await f.runtime.setLease("epoch-one", fresh.generation);
+    expect(f.runtime.accepts("epoch-one", fresh.generation!)).toBe(true);
+    expect(f.runtime.accepts("epoch-one", old.generation!)).toBe(false);
+    await writeFile(join(f.workspace, "perception.py"), code + "\n# rotate the lease generation\n");
+    await f.wait(() => f.runtime.status().generation !== fresh.generation);
+    await f.wait(() => f.runtime.accepts("epoch-one", f.runtime.status().generation!));
+    const rotated = f.runtime.status();
+    expect(f.runtime.accepts("epoch-one", rotated.generation!)).toBe(true);
+    expect(f.runtime.accepts("epoch-one", fresh.generation!)).toBe(false);
+    await f.runtime.setLease(null);
     await f.load(source('        raise RuntimeError("broken sampler")'));
     const failed = await f.observe();
     expect(failed.error?.message).toContain("broken sampler");

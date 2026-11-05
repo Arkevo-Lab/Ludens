@@ -17,8 +17,8 @@
 
 为避免 30Hz 常驻循环刷爆事件流，连续采样与动作循环采用 **5 秒固定窗口统计 + 故障区间（Fault Span）合并**：
 
-- **5 秒窗口统计**：常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`；常驻动作每 5 秒写入 `action_stats`（含 `stepHz` 与窗口 `step` 增量）。进程正常停止时自动补写尾段统计。
-- **故障区间合并**：连续感知首次出错时立即写入 `perception_fault` / `device_sampling_error`，后续同类重试错误仅累加区间内的 `fault.count`，即便成功与失败交替出现也不会每帧反复开关故障事件。待观察到恢复成功且历经至少一个完整 5 秒窗口无同类错误（或进程正常停止）时，闭合该故障区间。常驻动作首次异常则写入 `action_fault` 并立即停止动作循环，待停止或重载收尾时写入 `action_fault_end`。
+- **5 秒窗口统计**：常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`。进程正常停止时自动补写尾段统计。
+- **故障区间合并**：连续感知首次出错时立即写入 `perception_fault` / `device_sampling_error`，后续同类重试错误仅累加区间内的 `fault.count`，即便成功与失败交替出现也不会每帧反复开关故障事件。待观察到恢复成功且历经至少一个完整 5 秒窗口无同类错误（或进程正常停止）时，闭合该故障区间。
 
 ## 文件与事件身份
 
@@ -70,7 +70,7 @@
 | `python_call_start / python_call_end` | 工作区 `@capability` 装饰器函数的实际执行 Span，记录 PID、源码哈希、终态与耗时（不强制序列化原生 Python 入参/返回对象）。`normal` 下省略的常驻父层会在子事件标记 `parentOmitted: true`。 |
 | `command / execution / execution_error` | Baseware 设备操作请求与终态；同次调用产出的媒体摘要直接内嵌于 `execution.observations`。 |
 | `action_start / action_end` | 已提交异步手柄动作（`pad.play`）的独立硬件执行生命周期，携带 `actionId` 并沿用提交时的 `trace / epoch`，不会挂到后续的 `pad.wait / status` 请求下。 |
-| `action_status / action_fault / action_fault_end / action_stats` | 常驻 `action.py` 进程的生命周期、故障区间与 5 秒统计；生命周期状态进入 Activity 与桌宠，故障详情与统计归入诊断分类。 |
+| `perception_status / perception_fault / perception_fault_end / perception_stats` | 常驻 `perception.py` 进程的生命周期、故障区间与 5 秒统计；生命周期状态进入 Activity 与桌宠，故障详情与统计归入诊断分类。 |
 | `background_start / background_result` | OMP 原生异步 `bash` 任务（`async`）或命名服务（`service`）的启动与完成通知，按 `jobId` 或 `service name + PID` 配对并保留启动时的 `trace / epoch`。 |
 
 **Python 异常链归并规则**：`python_call_end.outcome = "error"` 仅代表该层函数抛出异常（外层调用方可能已 `try/except` 捕获）。分析器与 Dashboard 按显式 Python 父子关系将相邻未捕获的异常归并为一条异常链（`localPythonExceptionGroups`），一旦祖先调用成功返回即截断，不会用内部捕获的异常覆写外层工具的成功状态。

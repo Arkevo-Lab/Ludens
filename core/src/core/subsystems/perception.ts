@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { watch, type FSWatcher } from "node:fs";
 import { basename, delimiter, join, resolve } from "node:path";
 import type { Clock, Observation } from "@ludens/baseware/contracts";
 import { childTrace, type EventTrace, type RecordEvent, type RegisterMedia, type DiagnosticsMode, type EventMetadata } from "../storage/events.ts";
@@ -73,7 +74,7 @@ export interface PerceptionRead {
     earliest: { sequence: number; recordedAt: string } | null;
     latest: { sequence: number; recordedAt: string } | null; expired: boolean };
 }
-/** One workspace process owns perception. Only explicit reload replaces it. */
+/** One workspace process owns the unified resident perception-and-action state machine. Source edits auto-reload it. */
 export class PerceptionRuntime {
   private current: PerceptionStatus = { state: "unimplemented", generation: null };
   private worker?: PythonWorker;
@@ -85,11 +86,17 @@ export class PerceptionRuntime {
   private deliveredMedia = new Map<string, TimelineMedia>();
   private observeCapability = "python/perception.py:Perception.sample";
   private lease: { epoch: string | null; inputGeneration: string | null } = { epoch: null, inputGeneration: null };
+  private active = false;
+  private loadedSources = new Map<string, string | null>();
+  private watcher?: FSWatcher;
+  private watcherTimer?: NodeJS.Timeout;
+  private refreshing?: Promise<void>;
 
   constructor(private readonly options: {
     workspace: string; runDir: string; env?: NodeJS.ProcessEnv; record: RecordEvent; clock?: Clock;
     registerMedia?: RegisterMedia; diagnostics?: DiagnosticsMode;
     startTimeoutMs?: number; observeTimeoutMs?: number;
+    setInputGeneration?: (epoch: string, generation: string | null) => Promise<void>;
   }) {
     this.workspace = resolve(options.workspace);
     this.clock = options.clock ?? { id: basename(options.runDir), now: () => performance.now() };
@@ -104,6 +111,10 @@ export class PerceptionRuntime {
     return { ...this.current };
   }
 
+  accepts(epoch: string | undefined, inputGeneration: string): boolean {
+    return !!epoch && this.lease.epoch === epoch && this.lease.inputGeneration === inputGeneration;
+  }
+
   reload(trace: EventTrace = {}): Promise<PerceptionStatus> {
     const operation = this.transition.then(() => this.replace(trace));
     this.transition = operation.catch(() => {});
@@ -112,6 +123,12 @@ export class PerceptionRuntime {
 
   stop(): Promise<void> {
     const operation = this.transition.then(async () => {
+      if (this.lease.epoch !== null && this.options.setInputGeneration) {
+        try { await this.options.setInputGeneration(this.lease.epoch, null); } catch { /* lease already gone */ }
+      }
+      this.lease.inputGeneration = null;
+      this.active = false;
+      this.closeWatcher();
       await this.closeWorker();
       this.setStatus({ ...this.current, state: "stopped", pid: undefined, error: undefined });
     });
@@ -120,12 +137,18 @@ export class PerceptionRuntime {
   }
 
   observe(signal: AbortSignal, parent: EventTrace = {}, query: ObservationQuery = {}): Promise<PerceptionRead> {
-    const result = this.reading.then(() => this.read(signal, parent, query));
+    const result = this.reading.then(async () => {
+      const latest = query.at === undefined && query.start === undefined && query.end === undefined
+        && query.after === undefined && query.id === undefined;
+      if (latest && this.active) await this.ensureFresh(parent);
+      return this.read(signal, parent, query);
+    });
     this.reading = result.catch(() => {});
     return result;
   }
 
   async stateMachine(signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
+    if (this.active) await this.ensureFresh();
     const worker = this.worker;
     if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
     const reply = await this.request(worker, { action: "state" }, 5000, signal);
@@ -134,6 +157,7 @@ export class PerceptionRuntime {
   }
 
   async transitionState(to: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
+    if (this.active) await this.ensureFresh();
     const worker = this.worker;
     if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
     const reply = await this.request(worker, { action: "transition", to, arguments: args }, 5000, signal);
@@ -144,7 +168,16 @@ export class PerceptionRuntime {
   setLease(epoch: string | null, inputGeneration: string | null = null, signal?: AbortSignal): Promise<unknown> {
     const operation = this.transition.then(async () => {
       signal?.throwIfAborted();
-      this.lease = { epoch, inputGeneration };
+      const effectiveGeneration = epoch ? (inputGeneration ?? this.current.generation) : null;
+      const previous = this.lease;
+      this.lease = { epoch, inputGeneration: effectiveGeneration };
+      if ((previous.epoch !== epoch || previous.inputGeneration !== effectiveGeneration) && this.options.setInputGeneration) {
+        if (epoch === null) {
+          if (previous.epoch !== null) await this.options.setInputGeneration(previous.epoch, null);
+        } else {
+          await this.options.setInputGeneration(epoch, effectiveGeneration);
+        }
+      }
       const worker = this.worker;
       if (!worker || worker.expectedExit) return this.lease;
       const reply = await this.request(worker, { action: "lease", ...this.lease }, 5000, signal);
@@ -318,7 +351,98 @@ export class PerceptionRuntime {
       await this.closeWorker();
       this.setStatus({ ...this.current, state: "error", pid: undefined, error: String(error) }, trace);
     }
+    await this.snapshotSources(codeSHA ?? null, generation);
+    if (this.lease.epoch !== null) {
+      const leaseEpoch = this.lease.epoch;
+      this.lease = { epoch: leaseEpoch, inputGeneration: generation };
+      if (this.options.setInputGeneration) {
+        try { await this.options.setInputGeneration(leaseEpoch, generation); } catch { /* lease already gone */ }
+      }
+    }
+    this.active = true;
+    this.startWatcher();
     return this.status();
+  }
+
+  private async snapshotSources(codeSHA: string | null, generation: string): Promise<void> {
+    const next = new Map<string, string | null>();
+    next.set("perception.py", codeSHA);
+    try {
+      const raw = await readFile(join(this.options.runDir, "perception", generation, "sources.json"), "utf8");
+      const manifest = JSON.parse(raw) as Record<string, string>;
+      for (const [relPath, sha] of Object.entries(manifest)) {
+        if (relPath.endsWith(".py") && typeof sha === "string") next.set(relPath, sha);
+      }
+    } catch { /* worker may have failed before writing sources.json */ }
+    this.loadedSources = next;
+  }
+
+  private async digestSource(relPath: string): Promise<string | null> {
+    try {
+      const raw = await readFile(join(this.workspace, relPath));
+      return createHash("sha256").update(raw).digest("hex");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
+  }
+
+  private async hasSourceChanges(): Promise<boolean> {
+    if (!this.active || this.current.state === "loading") return false;
+    const generation = this.current.generation;
+    if (generation) {
+      try {
+        const raw = await readFile(join(this.options.runDir, "perception", generation, "sources.json"), "utf8");
+        const manifest = JSON.parse(raw) as Record<string, string>;
+        for (const [relPath, sha] of Object.entries(manifest)) {
+          if (relPath.endsWith(".py") && typeof sha === "string" && !this.loadedSources.has(relPath))
+            this.loadedSources.set(relPath, sha);
+        }
+      } catch { /* sources.json not yet written */ }
+    }
+    for (const [relPath, expectedSha] of this.loadedSources) {
+      let actualSha: string | null = null;
+      try { actualSha = await this.digestSource(relPath); }
+      catch { return false; }
+      if (actualSha !== expectedSha) return true;
+    }
+    return false;
+  }
+  private async ensureFresh(trace: EventTrace = {}): Promise<void> {
+    if (this.refreshing) return this.refreshing;
+    let changed = false;
+    try { changed = await this.hasSourceChanges(); } catch { return; }
+    if (!changed) return;
+    this.refreshing = (async () => {
+      await this.reload(trace);
+      const deadline = Date.now() + (this.options.observeTimeoutMs ?? 5000);
+      while (this.current.state === "loading" && Date.now() < deadline) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        setTimeout(resolve, 25);
+        await promise;
+      }
+    })();
+    try { await this.refreshing; } finally { this.refreshing = undefined; }
+  }
+
+  private startWatcher(): void {
+    if (this.watcher || !this.active) return;
+    try {
+      this.watcher = watch(this.workspace, { recursive: true }, (_event, filename) => {
+        const name = String(filename ?? "");
+        if (!name.endsWith(".py")) return;
+        if (name.startsWith(".ludens") || name.startsWith("logs/") || name.startsWith(".git/")
+          || name.includes("__pycache__") || name.startsWith("node_modules/")) return;
+        clearTimeout(this.watcherTimer);
+        this.watcherTimer = setTimeout(() => { void this.ensureFresh(); }, 25);
+      });
+    } catch { this.watcher = undefined; }
+  }
+
+  private closeWatcher(): void {
+    if (this.watcherTimer) { clearTimeout(this.watcherTimer); this.watcherTimer = undefined; }
+    try { this.watcher?.close(); } catch { /* already closed */ }
+    this.watcher = undefined;
   }
 
   private request(worker: PythonWorker, message: Record<string, unknown>, timeoutMs: number, signal?: AbortSignal): Promise<WorkerReply> {
@@ -362,7 +486,7 @@ export class PerceptionRuntime {
   }
 
   private record(type: string, data: unknown, trace?: EventTrace, channel?: "diagnostic", origin?: EventMetadata["origin"]) {
-    if (type.startsWith("perception_observe_") && (trace?.recordingPurpose === "continuous-action" || trace?.recordingPurpose === "continuous-perception")) channel = "diagnostic";
+    if (type.startsWith("perception_observe_") && trace?.recordingPurpose === "continuous-perception") channel = "diagnostic";
     if (channel === "diagnostic" && this.options.diagnostics !== "full") return;
     this.options.record(type, data, trace, { source: { component: "perception", implementation: "python" },
       ...(origin ? { origin } : {}), ...(channel ? { channel } : {}) });

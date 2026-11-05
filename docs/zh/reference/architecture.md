@@ -7,7 +7,7 @@ Ludens（RSA，Recursive Self-Adaptation）将设备驱动、Agent 执行运行�
 | 组件 | 进程形态与核心职责 |
 | --- | --- |
 | `baseware/` | **独立设备服务**：加载内置或外部 Driver，提供统一 Controller 能力目录、控制权租约（`epoch`）仲裁、输入取消与设备事实日志，对外暴露 CLI、TS/Python API 与 MCP 接口。 |
-| `core/` | **自适应 Harness**（`@ludens/core`）：管理工作区配置与生命周期、能力发现与路由、常驻感知（`perception.py`）与常驻动作（`action.py`）Python 子进程、工作区内生的能力评估（`ludens eval`）以及运行日志归档。 |
+| `core/` | **自适应 Harness**（`@ludens/core`）：管理工作区配置与生命周期、能力发现与路由、常驻感知与动作（`perception.py`）Python 子进程、工作区内生的能力评估（`ludens eval`）以及运行日志归档。 |
 | **Shiori** | **唯一执行内核（职责名）**：由 Ludens Host Runtime 实现，统一管控控制周期、时间/请求预算、信号取消与退出清理。Agent 模式挂载 **OMP 18.14.0**；普通评测程序、Verifier 与 Metric 共用同一生命周期而不启动模型。 |
 | `app/` | **本地控制台服务（`@ludens/app`，Web）**：通过独立 Node Worker 构建与查询日志索引，提供实时活动流、时空轴视频回放、运行统计、文档浏览、能力目录与人工交还入口。 |
 | `app/desktop/` | **可选桌面伴侣（Ludens Pet）**：Electron 桌面壳，主窗口复用同一 Dashboard 视图，原生透明桌宠窗口与音频引擎增量消费同一套活动日志。 |
@@ -79,7 +79,7 @@ ludens controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":
 
 ### 3. 常驻动作进程与输入重置
 
-工作区 `action.py` 的常驻动作 worker 固定绑定启动时的 `epoch` 与 `inputGeneration`。当在 `auto` 周期内执行 `ludens action stop`、`ludens action reload` 或 `Action.step()` 抛出异常时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
+统一常驻 `perception.py` 状态机固定绑定启动时的 `epoch` 与 `inputGeneration`。当自动重载轮换 generation 或在 `auto` 周期内执行显式 `ludens perception reload` 时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
 
 ## 会话与 Loop
 
@@ -94,7 +94,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 在 `auto` 控制周期内，外层循环按以下步骤运转：
 
 1. **发起轮次**：使用 [continue.md](../../../core/prompts/continue.md) 发起 OMP `prompt`（首次接管若带 `auto on --message` 则附加一次性提醒）。
-2. **感知与动作并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按宿主配置的频率（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30` Hz）持续采样写入 `.ludens/timeline/`，常驻 `Action.step()` 按 `LUDENS_ACTION_STEP_HZ`（默认 `30` Hz）持续读取时空轴并执行高频控制；取舍见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)。
+2. **感知与动作并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按宿主配置的频率（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30` Hz）持续采样写入 `.ludens/timeline/`，其进程内能力在同一进程中持续读取时空轴并执行高频闭环控制；取舍见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)。
 3. **自动上下文交付**：Ludens 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../../core/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
 4. **续轮或交还**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工交还或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
 
