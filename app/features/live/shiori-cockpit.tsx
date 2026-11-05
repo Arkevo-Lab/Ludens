@@ -2,29 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
-  Activity,
   ArrowDown,
   Bot,
-  Check,
   ChevronDown,
   ChevronRight,
-  Copy,
   CornerDownLeft,
   Eye,
   EyeOff,
   FileText,
-  Film,
-  FlaskConical,
-  Gauge,
   PanelRight,
   Play,
   Plus,
-  RefreshCw,
   RotateCcw,
-  Sparkles,
   Square,
-  Terminal,
-  Wrench,
   X,
   Zap,
 } from "lucide-react";
@@ -841,6 +831,23 @@ export function ShioriComposer({
     }
   };
 
+  const runComposerAction = async (command: RuntimeControlAction, feedbackLabel: string) => {
+    if (submitting || !project || !workspace) return;
+    setSubmitting(true);
+    setError(null);
+    setMenuOpen(false);
+    try {
+      const res = await sendRuntimeControl(project, workspace, command);
+      applyReturnedStatus(res);
+      setLastSent(feedbackLabel);
+      onUpdated();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -879,6 +886,46 @@ export function ShioriComposer({
               <small>{preset.prompt}</small>
             </button>
           ))}
+          <div className="codex-preset-popover-title mt-1 border-t border-border pt-2">
+            {t("dockToolsTitle")}
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            className="codex-preset-item"
+            disabled={submitting || isAuto || consolidating}
+            onClick={() =>
+              void runComposerAction(
+                {
+                  action: "consolidate",
+                  runId: data.run,
+                  expectedEpoch: effectiveHost?.epoch ?? null,
+                },
+                t("consolidateBtn"),
+              )
+            }
+          >
+            <span>✨ {t("consolidateBtn")}</span>
+            <small>{t("consolidateDesc")}</small>
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="codex-preset-item"
+            disabled={submitting}
+            onClick={() =>
+              void runComposerAction(
+                {
+                  action: "perception_reload",
+                  runId: data.run,
+                },
+                t("reloadPerceptionHint"),
+              )
+            }
+          >
+            <span>↻ {t("reloadPerceptionHint")}</span>
+            <small>{t("reloadPerceptionDesc")}</small>
+          </button>
         </div>
       )}
 
@@ -972,6 +1019,27 @@ export function ShioriComposer({
               {modelShort}
             </span>
 
+            {isAuto && (
+              <button
+                type="button"
+                className="codex-subtle-pill text-destructive"
+                disabled={submitting}
+                title={t("handbackStop")}
+                onClick={() =>
+                  void runComposerAction(
+                    {
+                      action: "auto_off",
+                      runId: data.run,
+                      expectedEpoch: effectiveHost?.epoch ?? undefined,
+                    },
+                    t("handbackStop"),
+                  )
+                }
+              >
+                <Square className="size-3 fill-current" aria-hidden="true" />
+              </button>
+            )}
+
             <button
               type="button"
               className="codex-send-circle"
@@ -1058,12 +1126,7 @@ export function ShioriWorkbench({
   });
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [dockOpen, setDockOpen] = useState(true);
-  const [dockTab, setDockTab] = useState<"stage" | "tools" | "stats">("stage");
   const [atBottom, setAtBottom] = useState(true);
-  const [busyTool, setBusyTool] = useState<string | null>(null);
-  const [toolError, setToolError] = useState<string | null>(null);
-  const [showStandbyHelper, setShowStandbyHelper] = useState(false);
-  const [copiedCmd, setCopiedCmd] = useState(false);
   const [perceptionOverride, setPerceptionOverride] = useState<boolean | null>(null);
   const [hostStatusOverride, setHostStatusOverride] = useState<Record<string, unknown> | null>(null);
   const [inspectedTurn, setInspectedTurn] = useState<{
@@ -1151,7 +1214,6 @@ export function ShioriWorkbench({
           },
     );
     setDockOpen(true);
-    setDockTab("stage");
     onSelectBlock?.(block);
   };
 
@@ -1167,73 +1229,6 @@ export function ShioriWorkbench({
           },
     );
     setDockOpen(true);
-    setDockTab("stage");
-  };
-
-  const toggleWorkbenchPerception = async () => {
-    if (!project || !workspace) return;
-    const next = !perceptionInject;
-    setPerceptionOverride(next);
-    setToolError(null);
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(`ludens:perception-inject:${project}`, next ? "1" : "0");
-      }
-    } catch {
-      // Ignore storage errors
-    }
-    try {
-      const res = await sendRuntimeControl(project, workspace, {
-        action: "perception_inject",
-        enabled: next,
-        runId: data.run,
-      });
-      const confirmed = res?.status?.context?.perceptionInjection;
-      if (typeof confirmed === "boolean") setPerceptionOverride(confirmed);
-      onUpdated();
-    } catch (cause) {
-      if (!isHostOfflineError(cause)) {
-        setToolError(cause instanceof Error ? cause.message : String(cause));
-      }
-    }
-  };
-
-  const runHostTool = async (key: string, command: RuntimeControlAction) => {
-    if (!project || !workspace || busyTool) return;
-    setBusyTool(key);
-    setToolError(null);
-    setShowStandbyHelper(false);
-    try {
-      const res = await sendRuntimeControl(project, workspace, command);
-      const status = asRecord(asRecord(res)?.status);
-      if (status) {
-        setHostStatusOverride(status);
-        const contextRec = asRecord(status.context);
-        if (typeof contextRec?.perceptionInjection === "boolean") {
-          setPerceptionOverride(contextRec.perceptionInjection);
-        }
-      }
-      onUpdated();
-    } catch (cause) {
-      if (isHostOfflineError(cause)) {
-        setShowStandbyHelper(true);
-      } else {
-        setToolError(cause instanceof Error ? cause.message : String(cause));
-      }
-    } finally {
-      setBusyTool(null);
-    }
-  };
-
-  const launchCmd = `ludens run --workspace ${workspace || "<workspace>"}`;
-  const copyLaunchCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(launchCmd);
-      setCopiedCmd(true);
-      setTimeout(() => setCopiedCmd(false), 2000);
-    } catch {
-      // Ignore clipboard failure
-    }
   };
 
   const inspectedCall = inspectedTurn?.callId
@@ -1449,300 +1444,52 @@ export function ShioriWorkbench({
         />
       </section>
 
-      {/* ── RIGHT WORKBENCH DOCK: LIVE VIEWPORT + TOOLS + SESSION STATS ── */}
+      {/* ── RIGHT WORKBENCH DOCK: LIVE VIEWPORT + COMPACT HOST OPS + TELEMETRY ── */}
       {dockOpen && (
         <aside className="codex-right-dock" aria-label={t("stageColumnAria")}>
-          {/* Dock Top Browser-like Tab Bar */}
-          <div className="codex-dock-tabs" role="tablist">
-            <button
-              type="button"
-              role="tab"
-              aria-selected={dockTab === "stage"}
-              className="codex-dock-tab"
-              data-active={dockTab === "stage" || undefined}
-              onClick={() => setDockTab("stage")}
-            >
-              <Eye className="size-3.5" aria-hidden="true" />
-              <span>{t("dockTabStage")}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={dockTab === "tools"}
-              className="codex-dock-tab"
-              data-active={dockTab === "tools" || undefined}
-              onClick={() => setDockTab("tools")}
-            >
-              <Wrench className="size-3.5" aria-hidden="true" />
-              <span>{t("dockTabTools")}</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={dockTab === "stats"}
-              className="codex-dock-tab"
-              data-active={dockTab === "stats" || undefined}
-              onClick={() => setDockTab("stats")}
-            >
-              <Gauge className="size-3.5" aria-hidden="true" />
-              <span>{t("dockTabStats")}</span>
-            </button>
-          </div>
-
           <div className="codex-dock-body">
-            {/* Live Game / Device Viewport (Shown only in Stage tab so Tools/Stats tabs switch cleanly) */}
-            {dockTab === "stage" && (
-              <div className="codex-dock-viewport">
-                {inspectedTurn && (
-                  <div className="codex-inspected-banner" role="status">
-                    <span>
-                      {t("inspectingCallBanner").replace(
-                        "{number}",
-                        String(inspectedCall?.index ?? "—").padStart(3, "0"),
-                      )}{" "}
-                      · {clockTime(inspectedTurn.at)}
-                    </span>
-                    <button
-                      type="button"
-                      className="codex-inspected-clear"
-                      onClick={() => setInspectedTurn(null)}
-                    >
-                      <X className="size-3" aria-hidden="true" />
-                      <span>{t("clearInspectedBtn")}</span>
-                    </button>
-                  </div>
-                )}
-                {renderObservation
-                  ? renderObservation({
-                      call: inspectedCall,
-                      selectedImage: inspectedTurn?.imageId ?? undefined,
-                      onSelectImage: id =>
-                        setInspectedTurn(prev =>
-                          prev
-                            ? { ...prev, imageId: id }
-                            : {
-                                blockId: "manual-image",
-                                callId: null,
-                                imageId: id,
-                                at: data.updatedAt,
-                              },
-                        ),
-                    })
-                  : observationSlot}
-              </div>
-            )}
-
-            {/* Codex-style "工具 (Tools)" Action List */}
-            {(dockTab === "stage" || dockTab === "tools") && (
-              <div className="codex-dock-section">
-                <h3 className="codex-dock-heading">{t("dockToolsTitle")}</h3>
-                {toolError && (
-                  <p className="codex-tool-err" role="alert">
-                    {toolError}
-                  </p>
-                )}
-                {showStandbyHelper && (
-                  <div className="codex-standby-card" role="status">
-                    <p>{t("hostStandbyHint")}</p>
-                    <div className="codex-standby-cmd">
-                      <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-                      <code>{launchCmd}</code>
-                      <button
-                        type="button"
-                        className="codex-copy-btn"
-                        onClick={() => void copyLaunchCommand()}
-                      >
-                        {copiedCmd ? (
-                          <>
-                            <Check className="size-3" aria-hidden="true" />
-                            <span>{t("copiedLaunchCmd")}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="size-3" aria-hidden="true" />
-                            <span>{t("copyLaunchCmd")}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                <div className="codex-tool-list">
+            {/* 1. Primary Live Game / Device Viewport */}
+            <div className="codex-dock-viewport">
+              {inspectedTurn && (
+                <div className="codex-inspected-banner" role="status">
+                  <span>
+                    {t("inspectingCallBanner").replace(
+                      "{number}",
+                      String(inspectedCall?.index ?? "—").padStart(3, "0"),
+                    )}{" "}
+                    · {clockTime(inspectedTurn.at)}
+                  </span>
                   <button
                     type="button"
-                    className="codex-tool-row"
-                    disabled={busyTool !== null}
-                    onClick={() =>
-                      void runHostTool(
-                        isAuto ? "auto_off" : "auto_on",
-                        isAuto
-                          ? { action: "auto_off", runId: data.run, expectedEpoch: live?.epoch ?? undefined }
-                          : { action: "auto_on", runId: data.run, expectedEpoch: live?.epoch ?? null },
-                      )
-                    }
+                    className="codex-inspected-clear"
+                    onClick={() => setInspectedTurn(null)}
                   >
-                    <span className="codex-tool-row-left">
-                      {isAuto ? (
-                        <Square className="size-4 text-destructive" aria-hidden="true" />
-                      ) : (
-                        <Play className="size-4 text-primary" aria-hidden="true" />
-                      )}
-                      <span>{isAuto ? t("handbackStop") : t("startAutoLoop")}</span>
-                    </span>
-                    <kbd className="codex-tool-kbd">{isAuto ? "AUTO" : "IDLE"}</kbd>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="codex-tool-row"
-                    disabled={busyTool !== null || isAuto || consolidating}
-                    onClick={() =>
-                      void runHostTool("consolidate", {
-                        action: "consolidate",
-                        runId: data.run,
-                        expectedEpoch: live?.epoch ?? null,
-                      })
-                    }
-                  >
-                    <span className="codex-tool-row-left">
-                      <Sparkles className="size-4 text-primary" aria-hidden="true" />
-                      <span>{t("consolidateBtn")}</span>
-                    </span>
-                    <kbd className="codex-tool-kbd">Memory</kbd>
-                  </button>
-
-                  <button
-                    type="button"
-                    className="codex-tool-row"
-                    disabled={busyTool !== null}
-                    onClick={() =>
-                      void runHostTool("perception_reload", {
-                        action: "perception_reload",
-                        runId: data.run,
-                      })
-                    }
-                  >
-                    <span className="codex-tool-row-left">
-                      <RefreshCw className={`size-4${busyTool === "perception_reload" ? " animate-spin" : ""}`} aria-hidden="true" />
-                      <span>{t("reloadPerceptionHint")}</span>
-                    </span>
-                    <kbd className="codex-tool-kbd">perception.py</kbd>
-                  </button>
-
-                  <button type="button" className="codex-tool-row" onClick={onOpenCaps}>
-                    <span className="codex-tool-row-left">
-                      <FlaskConical className="size-4" aria-hidden="true" />
-                      <span>{t("openCapsBtn")}</span>
-                    </span>
-                    <kbd className="codex-tool-kbd">Eval ↗</kbd>
-                  </button>
-
-                  {onOpenReplay && (
-                    <button type="button" className="codex-tool-row" onClick={onOpenReplay}>
-                      <span className="codex-tool-row-left">
-                        <Film className="size-4" aria-hidden="true" />
-                        <span>{t("openReplayBtn")}</span>
-                      </span>
-                      <kbd className="codex-tool-kbd">Timeline ↗</kbd>
-                    </button>
-                  )}
-
-                  <button type="button" className="codex-tool-row" onClick={onOpenPerf}>
-                    <span className="codex-tool-row-left">
-                      <Activity className="size-4" aria-hidden="true" />
-                      <span>{t("openPerfBtn")}</span>
-                    </span>
-                    <kbd className="codex-tool-kbd">Perf ↗</kbd>
+                    <X className="size-3" aria-hidden="true" />
+                    <span>{t("clearInspectedBtn")}</span>
                   </button>
                 </div>
-              </div>
-            )}
+              )}
+              {renderObservation
+                ? renderObservation({
+                    call: inspectedCall,
+                    selectedImage: inspectedTurn?.imageId ?? undefined,
+                    onSelectImage: id =>
+                      setInspectedTurn(prev =>
+                        prev
+                          ? { ...prev, imageId: id }
+                          : {
+                              blockId: "manual-image",
+                              callId: null,
+                              imageId: id,
+                              at: data.updatedAt,
+                            },
+                      ),
+                  })
+                : observationSlot}
+            </div>
 
-            {/* Dedicated Perception Policy & Quick Prompt Templates when in Tools tab */}
-            {dockTab === "tools" && (
-              <>
-                <div className="codex-dock-section">
-                  <h3 className="codex-dock-heading">{t("perceptionPolicyTitle")}</h3>
-                  <div className="codex-tool-list">
-                    <button
-                      type="button"
-                      className="codex-tool-row"
-                      aria-pressed={perceptionInject}
-                      onClick={() => void toggleWorkbenchPerception()}
-                    >
-                      <span className="codex-tool-row-left">
-                        {perceptionInject ? (
-                          <Eye className="size-4 text-primary" aria-hidden="true" />
-                        ) : (
-                          <EyeOff className="size-4 text-muted-foreground" aria-hidden="true" />
-                        )}
-                        <span>{t("perceptionToggleRow")}</span>
-                      </span>
-                      <kbd className="codex-tool-kbd">
-                        {perceptionInject ? t("injectOn") : t("injectOff")}
-                      </kbd>
-                    </button>
-                  </div>
-                </div>
-
-                <div className="codex-dock-section">
-                  <h3 className="codex-dock-heading">{t("quickPromptsTitle")}</h3>
-                  <div className="codex-tool-list">
-                    <button
-                      type="button"
-                      className="codex-tool-row"
-                      onClick={() =>
-                        setWorkflowCommand({ mode: "start", prompt: t("presetExploreStartPrompt") })
-                      }
-                    >
-                      <span className="codex-tool-row-left">
-                        <span>{t("presetExploreStart")}</span>
-                      </span>
-                      <kbd className="codex-tool-kbd">Start</kbd>
-                    </button>
-                    <button
-                      type="button"
-                      className="codex-tool-row"
-                      onClick={() =>
-                        setWorkflowCommand({ mode: "steer", prompt: t("presetEvalPrompt") })
-                      }
-                    >
-                      <span className="codex-tool-row-left">
-                        <span>{t("presetEval")}</span>
-                      </span>
-                      <kbd className="codex-tool-kbd">Steer</kbd>
-                    </button>
-                    <button
-                      type="button"
-                      className="codex-tool-row"
-                      onClick={() =>
-                        setWorkflowCommand({ mode: "steer", prompt: t("presetAdaptPrompt") })
-                      }
-                    >
-                      <span className="codex-tool-row-left">
-                        <span>{t("presetAdapt")}</span>
-                      </span>
-                      <kbd className="codex-tool-kbd">Steer</kbd>
-                    </button>
-                    <button
-                      type="button"
-                      className="codex-tool-row"
-                      onClick={() =>
-                        setWorkflowCommand({ mode: "follow_up", prompt: t("presetMemoryPrompt") })
-                      }
-                    >
-                      <span className="codex-tool-row-left">
-                        <span>{t("presetMemory")}</span>
-                      </span>
-                      <kbd className="codex-tool-kbd">Follow-up</kbd>
-                    </button>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Session Stats / Telemetry Section */}
-            {(dockTab === "stage" || dockTab === "stats") && summary && (
+            {/* 2. Compact Loop Budget & Session Telemetry */}
+            {summary && (
               <div className="codex-dock-section">
                 <div className="flex items-center justify-between">
                   <h3 className="codex-dock-heading">{t("telemetryCardTitle")}</h3>
@@ -1751,29 +1498,43 @@ export function ShioriWorkbench({
                   </span>
                 </div>
 
-                <div className="shiori-budget-bar" role="progressbar" aria-valuenow={budgetRatio} aria-valuemin={0} aria-valuemax={100}>
+                <div
+                  className="shiori-budget-bar"
+                  role="progressbar"
+                  aria-valuenow={budgetRatio}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                >
                   <div className="shiori-budget-bar-fill" style={{ width: `${budgetRatio}%` }} />
                 </div>
 
                 <div className="codex-stat-cards">
                   <div className="codex-stat-card">
-                    <span>{t("tileTurns")}</span>
-                    <strong>{summary.completed}</strong>
+                    <div className="codex-stat-card-top">
+                      <span>{t("tileTurns")}</span>
+                      <strong>{summary.completed}</strong>
+                    </div>
                     <small>{t("tileTotalCalls").replace("{total}", String(data.paging.totalCalls))}</small>
                   </div>
                   <div className="codex-stat-card">
-                    <span>{t("tileActions")}</span>
-                    <strong>{summary.actions}</strong>
+                    <div className="codex-stat-card-top">
+                      <span>{t("tileActions")}</span>
+                      <strong>{summary.actions}</strong>
+                    </div>
                     <small>{t("tileObserves").replace("{count}", String(summary.explicitObserves))}</small>
                   </div>
                   <div className="codex-stat-card">
-                    <span>{t("tileLatency")}</span>
-                    <strong>{summary.medianMs != null ? `${(summary.medianMs / 1000).toFixed(1)}s` : "—"}</strong>
+                    <div className="codex-stat-card-top">
+                      <span>{t("tileLatency")}</span>
+                      <strong>{summary.medianMs != null ? `${(summary.medianMs / 1000).toFixed(1)}s` : "—"}</strong>
+                    </div>
                     <small>P95 {summary.p95Ms != null ? `${(summary.p95Ms / 1000).toFixed(1)}s` : "—"}</small>
                   </div>
                   <div className="codex-stat-card">
-                    <span>{t("tileCache")}</span>
-                    <strong>{summary.cacheHit != null ? `${Math.round(summary.cacheHit * 100)}%` : "—"}</strong>
+                    <div className="codex-stat-card-top">
+                      <span>{t("tileCache")}</span>
+                      <strong>{summary.cacheHit != null ? `${Math.round(summary.cacheHit * 100)}%` : "—"}</strong>
+                    </div>
                     <small>
                       {t("tileWarmCache").replace(
                         "{pct}",
@@ -1782,44 +1543,42 @@ export function ShioriWorkbench({
                     </small>
                   </div>
                 </div>
-              </div>
-            )}
 
-            {/* Session Provenance Details in Stats Tab */}
-            {dockTab === "stats" && (
-              <div className="codex-dock-section">
-                <h3 className="codex-dock-heading">{t("provenanceTitle")}</h3>
-                <dl className="codex-provenance-list">
-                  <div className="codex-provenance-row">
-                    <dt>{t("provShiori")}</dt>
-                    <dd>
-                      {data.manifest.shiori?.implementation ?? "omp"}{" "}
-                      {data.manifest.shiori?.implementationVersion ?? ""}
-                    </dd>
-                  </div>
-                  <div className="codex-provenance-row">
-                    <dt>{t("provModel")}</dt>
-                    <dd>{data.manifest.model ?? t("deviceOnly")}</dd>
-                  </div>
-                  <div className="codex-provenance-row">
-                    <dt>{t("provCompaction")}</dt>
-                    <dd>
-                      {data.manifest.compactionThreshold?.toLocaleString() ?? "default"}
-                    </dd>
-                  </div>
-                  <div className="codex-provenance-row">
-                    <dt>{t("provRun")}</dt>
-                    <dd className="font-mono">{data.run}</dd>
-                  </div>
-                  <div className="codex-provenance-row">
-                    <dt>{t("provEpoch")}</dt>
-                    <dd className="font-mono">{data.selectedEpoch ?? "—"}</dd>
-                  </div>
-                  <div className="codex-provenance-row">
-                    <dt>{t("provWorkspace")}</dt>
-                    <dd className="font-mono break-all">{workspace ?? data.manifest.workspace}</dd>
-                  </div>
-                </dl>
+                {/* Collapsible Provenance Footer */}
+                <details className="codex-provenance-details">
+                  <summary className="codex-provenance-summary">
+                    <span>{t("provenanceTitle")}</span>
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      {data.manifest.shiori?.implementation ?? "omp"} ·{" "}
+                      {(data.manifest.model ?? t("deviceOnly")).replace(/^[^/]+\//, "")}
+                    </span>
+                  </summary>
+                  <dl className="codex-provenance-list">
+                    <div className="codex-provenance-row">
+                      <dt>{t("provShiori")}</dt>
+                      <dd>
+                        {data.manifest.shiori?.implementation ?? "omp"}{" "}
+                        {data.manifest.shiori?.implementationVersion ?? ""}
+                      </dd>
+                    </div>
+                    <div className="codex-provenance-row">
+                      <dt>{t("provModel")}</dt>
+                      <dd>{data.manifest.model ?? t("deviceOnly")}</dd>
+                    </div>
+                    <div className="codex-provenance-row">
+                      <dt>{t("provCompaction")}</dt>
+                      <dd>{data.manifest.compactionThreshold?.toLocaleString() ?? "default"}</dd>
+                    </div>
+                    <div className="codex-provenance-row">
+                      <dt>{t("provRun")}</dt>
+                      <dd className="font-mono">{data.run}</dd>
+                    </div>
+                    <div className="codex-provenance-row">
+                      <dt>{t("provEpoch")}</dt>
+                      <dd className="font-mono">{data.selectedEpoch ?? "—"}</dd>
+                    </div>
+                  </dl>
+                </details>
               </div>
             )}
           </div>
