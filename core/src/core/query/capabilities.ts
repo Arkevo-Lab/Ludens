@@ -5,9 +5,26 @@ import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { isObject } from "../storage/atomic-json.ts";
 import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
-import { readLatestEvals, resolveCapabilityEval, type CapabilityEnvBinding, type CapabilityEvalBinding, type CapabilityEvalStatus } from "../subsystems/capability-evals.ts";
+import {
+  historyCapabilityEvals,
+  readLatestEvals,
+  resolveCapabilityEval,
+  type CapabilityEnvBinding,
+  type CapabilityEvalAdaptation,
+  type CapabilityEvalBinding,
+  type CapabilityEvalRecord,
+  type CapabilityEvalStatus,
+} from "../subsystems/capability-evals.ts";
 
-export type { CapabilityEvalStatus };
+export type {
+  CapabilityEnvBinding,
+  CapabilityEvalAdaptation,
+  CapabilityEvalBinding,
+  CapabilityEvalRecord,
+  CapabilityEvalStatus,
+};
+
+export type CapabilityStaleReason = "capability" | "eval" | "env";
 
 export interface CapabilityEntry {
   id: string;
@@ -16,6 +33,9 @@ export interface CapabilityEntry {
   requiresControl: boolean | null;
   readOnly: boolean | null;
   observe?: boolean;
+  origin?: { path: string; function: string; line: number };
+  codeSHA?: string;
+  eval?: CapabilityEvalBinding | null;
   evalStatus?: CapabilityEvalStatus | null;
   evalId?: string | null;
   evalEnv?: CapabilityEnvBinding | null;
@@ -23,6 +43,19 @@ export interface CapabilityEntry {
   evalRewards?: Record<string, number> | null;
   evalEvaluatedAt?: string | null;
   evalError?: string | null;
+  staleReasons?: CapabilityStaleReason[];
+  latestRecord?: CapabilityEvalRecord | null;
+  history?: CapabilityEvalRecord[];
+}
+
+export interface CapabilityEnvEntry {
+  id: string;
+  name: string;
+  description: string;
+  origin: { path: string; function: string; line: number };
+  codeSHA: string;
+  boundCapabilities: string[];
+  boundEvals: string[];
 }
 
 async function deviceCapabilities(workspace: string, signal?: AbortSignal) {
@@ -83,22 +116,91 @@ async function workspaceCapabilities(workspace: string, signal?: AbortSignal) {
     return { id: value.id, origin: { path: value.origin.path, function: value.origin.function, line: value.origin.line },
       codeSHA: value.codeSHA, description: value.description, env: envBinding(value.env) };
   };
-  const latest = await readLatestEvals(workspace);
+  const [latest, allHistory] = await Promise.all([
+    readLatestEvals(workspace),
+    historyCapabilityEvals(workspace, { limit: 200 }),
+  ]);
+  const historyByCapability = new Map<string, CapabilityEvalRecord[]>();
+  for (const record of allHistory) {
+    const bucket = historyByCapability.get(record.capabilityId);
+    if (bucket) {
+      if (bucket.length < 10) bucket.push(record);
+    } else {
+      historyByCapability.set(record.capabilityId, [record]);
+    }
+  }
+  const summary: Record<CapabilityEvalStatus, number> = {
+    missing: 0, unverified: 0, stale: 0, adapting: 0, failed: 0, verified: 0,
+  };
   const items: CapabilityEntry[] = result.capabilities.map(item => {
     if (!isObject(item) || !isObject(item.origin) || typeof item.origin.path !== "string"
         || typeof item.origin.function !== "string" || typeof item.description !== "string") throw new Error("Invalid Python capability declaration");
     const id = `python/${item.origin.path}:${item.origin.function}`;
-    return { id, kind: "workspace",
-      description: item.description, requiresControl: null, readOnly: null,
+    const origin = {
+      path: item.origin.path,
+      function: item.origin.function,
+      line: typeof item.origin.line === "number" ? item.origin.line : 1,
+    };
+    const codeSHA = typeof item.codeSHA === "string" ? item.codeSHA : "";
+    const parsedEval = evalBinding(item.eval);
+    const latestRecord = latest[id] ?? null;
+    const view = resolveCapabilityEval({ codeSHA, eval: parsedEval }, latestRecord);
+    summary[view.evalStatus]++;
+    const staleReasons: CapabilityStaleReason[] = [];
+    if (view.evalStatus === "stale" && latestRecord && parsedEval) {
+      if (latestRecord.capabilityCodeSHA !== codeSHA) staleReasons.push("capability");
+      if (latestRecord.evalId !== parsedEval.id || latestRecord.evalCodeSHA !== parsedEval.codeSHA) staleReasons.push("eval");
+      if ((latestRecord.envId ?? null) !== (parsedEval.env?.id ?? null)
+          || (latestRecord.envCodeSHA ?? null) !== (parsedEval.env?.codeSHA ?? null)) staleReasons.push("env");
+    }
+    const history = historyByCapability.get(id) ?? (latestRecord ? [latestRecord] : []);
+    return {
+      id,
+      kind: "workspace",
+      description: item.description,
+      requiresControl: null,
+      readOnly: null,
       ...(typeof item.observe === "boolean" ? { observe: item.observe } : {}),
-      ...resolveCapabilityEval({ codeSHA: typeof item.codeSHA === "string" ? item.codeSHA : "",
-        eval: evalBinding(item.eval) }, latest[id]) } as CapabilityEntry;
+      origin,
+      codeSHA,
+      eval: parsedEval,
+      ...view,
+      staleReasons,
+      latestRecord,
+      history,
+    } as CapabilityEntry;
+  });
+  const rawEnvs = Array.isArray(result.envs) ? result.envs : [];
+  const envs: CapabilityEnvEntry[] = rawEnvs.map(item => {
+    if (!isObject(item) || typeof item.id !== "string" || typeof item.name !== "string"
+        || typeof item.description !== "string" || !isObject(item.origin)
+        || typeof item.origin.path !== "string" || typeof item.origin.function !== "string"
+        || typeof item.origin.line !== "number" || typeof item.codeSHA !== "string") {
+      throw new Error("Invalid Python eval env declaration");
+    }
+    const boundCapabilities: string[] = [];
+    const boundEvals: string[] = [];
+    for (const cap of items) {
+      if (cap.evalEnvId === item.id) {
+        boundCapabilities.push(cap.id);
+        if (cap.evalId) boundEvals.push(cap.evalId);
+      }
+    }
+    return {
+      id: item.id,
+      name: item.name,
+      description: item.description,
+      origin: { path: item.origin.path, function: item.origin.function, line: item.origin.line },
+      codeSHA: item.codeSHA,
+      boundCapabilities,
+      boundEvals,
+    };
   });
   const issues = result.diagnostics.map(item => {
     if (!isObject(item) || typeof item.path !== "string" || typeof item.message !== "string") throw new Error("Invalid Python discovery diagnostic");
     return { error: `${item.path}${typeof item.line === "number" ? `:${item.line}` : ""}: ${item.message}` };
   });
-  return { items, issues };
+  return { items, envs, summary, issues };
 }
 
 export interface CapabilitiesResult {
@@ -106,6 +208,8 @@ export interface CapabilitiesResult {
   workspace: string;
   checkedAt: string;
   groups: { id: "device" | "workspace"; items: CapabilityEntry[] }[];
+  envs: CapabilityEnvEntry[];
+  evalSummary: Record<CapabilityEvalStatus, number>;
   issues: { error: string }[];
   sources: Record<"device" | "workspace", { status: "available" | "partial" | "missing" | "error"; issueCount: number }>;
   deviceSnapshot: { generatedAt: string | null; drivers: { id: string; version: string | null }[] } | null;
@@ -142,6 +246,10 @@ export async function capabilities(project: string, expectedWorkspace: string, r
       { id: "device", items: device.status === "fulfilled" ? device.value.items : [] },
       { id: "workspace", items: python.status === "fulfilled" ? python.value.items : [] },
     ],
+    envs: python.status === "fulfilled" ? python.value.envs : [],
+    evalSummary: python.status === "fulfilled"
+      ? python.value.summary
+      : { missing: 0, unverified: 0, stale: 0, adapting: 0, failed: 0, verified: 0 },
     issues,
     sources: {
       device: { status: missingDevice ? "missing" : device.status === "fulfilled" ? "available" : "error", issueCount: device.status === "rejected" && !missingDevice ? 1 : 0 },

@@ -414,11 +414,19 @@ test("controller list and capabilities query expose evaluation enrichment", asyn
     const page = await capabilities(identity.id, directory, home);
     expect(page.issues).toEqual([]);
     expect(page.sources.workspace.status).toBe("available");
-    expect(page.groups[1].items).toEqual([{ id: "python/actions.py:score", kind: "workspace",
+    expect(page.evalSummary?.verified).toBe(1);
+    expect(page.envs).toEqual([]);
+    expect(page.groups[1].items).toHaveLength(1);
+    expect(page.groups[1].items[0]).toMatchObject({ id: "python/actions.py:score", kind: "workspace",
       description: "Score a value into the unit interval.",
       requiresControl: null, readOnly: null, observe: false,
+      origin: { path: "actions.py", line: 4, function: "score" },
+      eval: { id: "python/actions.py:eval_score", origin: { path: "actions.py", line: 9, function: "eval_score" }, env: null },
+      staleReasons: [],
       evalStatus: "verified", evalId: "python/actions.py:eval_score", evalEnvId: null, evalEnv: null,
-      evalRewards: { samples: 4, coverage: 1, sum: 10 }, evalEvaluatedAt: run.results[0]!.evaluatedAt, evalError: null }]);
+      evalRewards: { samples: 4, coverage: 1, sum: 10 }, evalEvaluatedAt: run.results[0]!.evaluatedAt, evalError: null,
+      latestRecord: { runId: run.results[0]!.runId, outcome: "passed", rewards: { samples: 4, coverage: 1, sum: 10 } },
+      history: [{ runId: run.results[0]!.runId, outcome: "passed" }] });
   } finally { await rm(directory, { recursive: true, force: true }); await rm(home, { recursive: true, force: true }); }
 });
 
