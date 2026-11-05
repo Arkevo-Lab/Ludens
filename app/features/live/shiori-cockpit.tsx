@@ -906,7 +906,7 @@ export function ShioriComposer({
             }
           >
             <span>✨ {t("consolidateBtn")}</span>
-            <small>Memory Consolidation</small>
+            <small>{t("consolidateDesc")}</small>
           </button>
           <button
             type="button"
@@ -924,7 +924,7 @@ export function ShioriComposer({
             }
           >
             <span>↻ {t("reloadPerceptionHint")}</span>
-            <small>perception.py</small>
+            <small>{t("reloadPerceptionDesc")}</small>
           </button>
         </div>
       )}
