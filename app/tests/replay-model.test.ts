@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { adjacentReplayFrame, clampReplayTime, mergeReplayPages, replayFramesAt, replayItemActive,
-  replayWindowBounds, retainReplayWindows } from "../features/replay/replay-model";
+  replayStageFramesAt, replayWindowBounds, retainReplayWindows } from "../features/replay/replay-model";
 import type { ReplayFrame, ReplayItem, ReplayWindow } from "../lib/replay-types";
 
 const frame = (id: string, at: number, capability = "vision", sequence = at): ReplayFrame =>
@@ -22,6 +22,8 @@ test("sparse and multi-capability frames preserve the most recent past image ind
   const frames = [frame("a", 10), frame("future", 50), frame("b", 12, "depth"), frame("a2", 10, "vision", 11)];
   assert.deepEqual(replayFramesAt(frames, 20).map(f => f.id), ["b", "a2"]);
   assert.deepEqual(replayFramesAt(frames, 9), []);
+  assert.deepEqual(replayStageFramesAt(frames, 9).map(f => f.id), ["b", "a"]);
+  assert.deepEqual(replayStageFramesAt(frames, 11).map(f => f.id), ["b", "a2"]);
   assert.deepEqual(replayFramesAt(frames, 20, "vision").map(f => f.id), ["a2"]);
   assert.equal(adjacentReplayFrame(frames, 10, 1, "vision")?.id, "future");
   assert.equal(adjacentReplayFrame(frames, 12, -1)?.at, 10);

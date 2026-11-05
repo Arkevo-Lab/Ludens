@@ -105,7 +105,7 @@ export default function ConsoleShell() {
         </header>
         <main ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
           tabIndex={runControls ? -1 : undefined} aria-label={runControls ? t(`views.${view}.title`) : undefined}
-          className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : "")}>
+          className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : view === "replay" && entry === "ready" ? " replay-page" : "")}>
           {view !== "workspaces" && view !== "docs" && view !== "perception" && view !== "caps" && view !== "live" && (view !== "replay" || entry !== "ready") && <div className={"page-heading" + (view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
             <div>
               <h1>{t(`views.${view}.title`)}</h1>

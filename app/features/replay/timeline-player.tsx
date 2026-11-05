@@ -1,13 +1,13 @@
 "use client";
 
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import type { ReplayFrame, ReplayItem, ReplayOverview, ReplayOverviewResult, ReplayCoverage, ReplayWindow } from "@/lib/replay-types";
 import { adjacentReplayFrame, clampReplayTime, mergeReplayPages, nearbyReplayItems, REPLAY_WINDOW_MS,
-  replayDuration, replayFramesAt, replayItemActive, replayTracks, replayWindowBounds,
+  replayDuration, replayFramesAt, replayItemActive, replayStageFramesAt, replayTracks, replayWindowBounds,
   retainReplayWindows } from "@/features/replay/replay-model";
 import { useBufferedMedia } from "@/features/live/use-buffered-media";
 import type { BufferedImage } from "@/features/replay/image-buffer";
@@ -16,7 +16,7 @@ import { replayVideoReady } from "@/features/replay/replay-video-model";
 import { readArchiveJson } from "@/lib/archive-client";
 import "@/features/replay/timeline-player.css";
 import { useTranslations } from "@/lib/locale";
-import { ChevronLeft, ChevronRight, RotateCcw, RotateCw, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, RefreshCw, RotateCcw, RotateCw, Share2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReplayTimeJump } from "@/features/replay/replay-time-jump";
@@ -25,10 +25,10 @@ import { ReplayEvidencePanel, type ReplayEvidenceSelection } from "@/features/re
 import { replayElapsedInput, replayEvidenceKey, replayEvidencePatch } from "@/features/replay/replay-navigation";
 
 const subscribeWide = (listener: () => void) => {
-  const query = window.matchMedia("(min-width: 1280px)"); query.addEventListener("change", listener);
+  const query = window.matchMedia("(min-width: 860px)"); query.addEventListener("change", listener);
   return () => query.removeEventListener("change", listener);
 };
-const isWideScreen = () => window.matchMedia("(min-width: 1280px)").matches;
+const isWideScreen = () => window.matchMedia("(min-width: 860px)").matches;
 
 const read = readArchiveJson;
 
@@ -60,6 +60,12 @@ async function readWindow(scope: string, start: number, end: number, signal: Abo
 const wallTime = (at: number) => new Date(at).toLocaleTimeString("zh-CN", {
   hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3,
 });
+const shortCapabilityName = (capability: string) => {
+  const colon = capability.lastIndexOf(":");
+  if (colon !== -1 && colon < capability.length - 1) return capability.slice(colon + 1);
+  const slash = capability.lastIndexOf("/");
+  return slash !== -1 && slash < capability.length - 1 ? capability.slice(slash + 1) : capability;
+};
 const statusKey: Record<string, string> = { completed: "completed", success: "completed", error: "failed", failed: "failed",
   cancelled: "cancelled", pending: "pending", running: "running" };
 
@@ -127,7 +133,6 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
   const evidenceOpener = useRef<HTMLElement | null>(null);
   const eventsTab = useRef<HTMLButtonElement>(null);
   const eventSearchInput = useRef<HTMLInputElement>(null);
-  const searchFocusIntent = useRef<{ scope: string; trigger: HTMLButtonElement } | null>(null);
   const player = useRef<HTMLDivElement>(null);
   const evidencePresentation = useRef({ wide, evidenceKey, inspectorTab });
   evidencePresentation.current = { wide, evidenceKey, inspectorTab };
@@ -149,7 +154,7 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
         evidencePanel.current?.focus({ preventScroll: true }); evidencePanel.current?.scrollIntoView({ block: "nearest" });
       });
     } else {
-      setInspectorTab("events");
+      if (lastEvidence.current) setInspectorTab("events");
       if (lastEvidence.current && wide && document.activeElement === document.body) requestAnimationFrame(restoreEvidenceFocus);
     }
     lastEvidence.current = evidenceKey;
@@ -158,23 +163,6 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
   const [overview, setOverview] = useState<ReplayOverview | null>(null);
   const resolvedEpoch = overview ? overview.epoch : epoch;
   const scope = new URLSearchParams({ project, run, ...(resolvedEpoch ? { epoch: resolvedEpoch } : {}) }).toString();
-  const revealEventSearch = useCallback(() => {
-    const input = eventSearchInput.current;
-    if (!input?.getClientRects().length) return;
-    input.focus({ preventScroll: true }); input.scrollIntoView({ block: "nearest" });
-  }, []);
-  useEffect(() => {
-    const intent = searchFocusIntent.current;
-    searchFocusIntent.current = null;
-    if (intent && intent.scope === scope && inspectorTab === "events" && document.activeElement === intent.trigger) revealEventSearch();
-  }, [inspectorTab, scope, revealEventSearch]);
-  const findEvent = (trigger: HTMLButtonElement) => {
-    // Explicit focus also establishes the intent in browsers that do not focus clicked buttons.
-    trigger.focus({ preventScroll: true });
-    if (inspectorTab === "events") { searchFocusIntent.current = null; revealEventSearch(); return; }
-    searchFocusIntent.current = { scope, trigger };
-    setInspectorTab("events");
-  };
   const [coverage, setCoverage] = useState<ReplayCoverage | null>(null);
   const [eventWindow, setEventWindow] = useState<ReplayWindow | null>(null);
   const [eventError, setEventError] = useState("");
@@ -317,7 +305,9 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
   }, [scope, needsFrames, bounds.startAt, activeWindow?.nextCursor, storeWindow, framePass]);
 
   const frames = useMemo(() => mergeReplayPages(windows).frames, [windows]);
-  const visibleFrames = useMemo(() => replayFramesAt(activeWindow?.frames ?? [], at, capability), [activeWindow, at, capability]);
+  const pastFrames = useMemo(() => replayFramesAt(activeWindow?.frames ?? [], at, capability), [activeWindow, at, capability]);
+  const visibleFrames = useMemo(() => replayStageFramesAt(activeWindow?.frames ?? [], at, capability), [activeWindow, at, capability]);
+  const pastCapabilities = useMemo(() => new Set(pastFrames.map(frame => frame.capability)), [pastFrames]);
   // Records are immutable. Keep frame identity stable while the playhead moves within one sample.
   const frameKey = JSON.stringify(visibleFrames.map(frame => [frame.id, frame.media]));
   const target = useMemo(() => activeWindow ? { key: frameKey, value: visibleFrames,
@@ -330,7 +320,7 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
   // Video frames share a decoder for the entire segment; advancing record metadata must not pause playback.
   const imageReady = !!activeWindow && (!activeWindow.nextCursor || frameTail === undefined || at <= frameTail) && (!target?.urls.length || !pending) && !stepping;
   const shownFrames = (target && !target.urls.length ? visibleFrames : displayed?.value ?? [])
-    .filter(frame => frame.at <= at);
+    .filter(frame => frame.at <= at || !pastCapabilities.has(frame.capability));
   const videoSlots = visibleFrames.flatMap(frame => frame.media.filter(media => media.video)
     .map(media => ({ slot: frame.capability + ":" + media.index, video: media.video! })));
   const slotsKey = JSON.stringify(videoSlots.map(({ slot }) => slot));
@@ -446,120 +436,326 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
     {overviewError ? <Alert variant="destructive"><AlertDescription>{overviewError}</AlertDescription></Alert>
       : <p role="status">{coverage ? <>{t("readingSourceDir")} {Math.round(coverage.bytes / Math.max(1, coverage.totalBytes) * 100)}% · {t("loadIndependent")}</> : t("readingFromRecords")}</p>}
     {overviewError && <Button type="button" variant="outline" size="sm" onClick={() => setRefresh(value => value + 1)}>{t("retryLoad")}</Button>}</section>;
+
   const duration = overview.endAt - overview.startAt;
-  const x = (time: number) => Math.max(0, Math.min(100, (time - eventBounds.startAt) / Math.max(1, eventBounds.endAt - eventBounds.startAt) * 100));
+  const windowSpan = Math.max(1, eventBounds.endAt - eventBounds.startAt);
+  const x = (time: number) => Math.max(0, Math.min(100, (time - eventBounds.startAt) / windowSpan * 100));
   const trackFrames = (activeWindow?.frames ?? []).filter(frame => frame.at >= bounds.startAt && (!capability || frame.capability === capability));
+
+  const seekOnLaneClick = (event: MouseEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    const ratio = Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width));
+    seek(eventBounds.startAt + ratio * windowSpan);
+  };
+
+  const rulerTicks = [0, 0.25, 0.5, 0.75, 1].map(ratio => ({
+    ratio,
+    time: eventBounds.startAt + ratio * windowSpan - overview.startAt,
+  }));
+
   return <div ref={player} tabIndex={-1} className="replay-player outline-none">
-    <div className="replay-toolbar">
-      <div className="replay-title"><h1>{nt("title")}</h1><span className="replay-readonly"><i /> {t("readonlyNotice")}</span></div>
-      <div><Button type="button" variant="outline" size="sm" className="replay-find-event" aria-controls={`${controlsId}-event-query`} onClick={event => findEvent(event.currentTarget)}><Search aria-hidden="true" />{nt("findEvent")}</Button>
-        <Button type="button" variant="ghost" size="xs" disabled={refreshing} onClick={() => { cached.current = []; setWindows([]); setRefresh(value => value + 1); setRetry(value => value + 1); }}>
-        {refreshing ? t("refreshing") : t("refreshRecords")}</Button>
-        <Button type="button" variant="ghost" size="xs" onClick={share}>{t("shareMoment")}</Button></div>
-    </div>
-    {coverage && !coverage.complete && <p className="replay-notice" role="status">{t("coverageReadPrefix")} {Math.round(coverage.bytes / Math.max(1, coverage.totalBytes) * 100)}%{t("coverageReadSuffix")}</p>}
-    {shareState && <p className="replay-notice" role="status">{shareState}</p>}
     {overviewError && <Alert variant="destructive"><AlertDescription>{overviewError}{t("keepLoaded")}</AlertDescription></Alert>}
-    <div className="replay-workbench"><div className="replay-main-stack">
-    <section className="surface replay-stage">
-      <div className="surface-heading"><h2>{t("stageTitle")}</h2><div className="replay-capability">
-        <Label htmlFor={`${controlsId}-capability`} className="text-xs font-normal">{t("capabilityLabel")}</Label>
-        <NativeSelect id={`${controlsId}-capability`} size="sm" className="max-w-[260px] text-xs max-[620px]:max-w-[180px]" value={capability} onChange={event => {
-          stepRequest.current?.abort(); setStepping(false); setCapability(event.target.value);
-        }}>
-          <NativeSelectOption value="">{t("allCapabilities")}</NativeSelectOption>{capabilities.map(value => <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>)}
-        </NativeSelect></div></div>
-      <div className="replay-frames" aria-busy={!ready}>
-        {shownFrames.length ? shownFrames.map(frame => <article className="replay-frame" key={frame.capability} data-frame-id={frame.id}>
-          <div className="replay-frame-meta"><Button type="button" variant="ghost" size="xs" onClick={event => selectFrame(frame, event.currentTarget)}>
-            {frame.capability} · #{frame.sequence} ↗</Button><span>{t("sampled")} {wallTime(frame.at)}{ready ? " · " + (Math.max(0, at - frame.at) / 1000).toFixed(1) + " " + t("secondsAgo") : t("previousFrame")}</span></div>
-          <FrameMedia key={refresh + ":" + retry} frame={frame} images={displayed?.images ?? new Map()} playback={{ at, playing, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }} />
-        </article>) : <div className="replay-loading">{!ready ? t("loadingFrames") : capability ? t("noFramesFiltered") : t("noFramesAll")}<small>{t("playbackContinues")}</small></div>}
-        {!ready && <span className="replay-buffering" role="status">{windowError ? t("segmentFailed") : t("buffering")}</span>}
-      </div>
-      {windowError && <Alert variant="destructive"><AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-        <span>{windowError}</span><Button type="button" variant="outline" size="xs" onClick={() => setRetry(value => value + 1)}>{t("retrySegment")}</Button>
-      </AlertDescription></Alert>}
-      <div className="replay-controls">
-        {/* The media scrubber keeps native pointer/key commit semantics and millisecond steps. */}
-        <input className="replay-seek accent-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring" type="range" min={overview.startAt} max={Math.max(overview.endAt, overview.startAt + 1)} step="1" value={at}
-          disabled={duration <= 0} aria-label={t("seekLabel")} aria-valuetext={replayDuration(at - overview.startAt) + " / " + replayDuration(duration)}
-          onChange={event => seek(Number(event.target.value), false)} onPointerUp={() => commitPosition(atRef.current)}
-          onKeyUp={() => commitPosition(atRef.current)} />
-        <div className="replay-control-row"><div className="replay-transport">
-          <Button type="button" size="sm" className="min-w-[90px]" aria-label={playing ? t("pauseReplay") : t("playReplay")} disabled={duration <= 0 || !!windowError}
-            onClick={() => { stepRequest.current?.abort(); setStepping(false); if (at >= overview.endAt) move(overview.startAt); setPlaying(value => !value); }}>
-            {playing ? t("pause") : t("play")}</Button>
-          <Button type="button" variant="outline" size="sm" aria-label={nt("backTen")} disabled={at <= overview.startAt} onClick={() => seek(at - 10_000)}><RotateCcw aria-hidden="true" />10{t("seconds")}</Button>
-          <Button type="button" variant="outline" size="sm" aria-label={nt("forwardTen")} disabled={at >= overview.endAt} onClick={() => seek(at + 10_000)}><RotateCw aria-hidden="true" />10{t("seconds")}</Button>
-          <Button type="button" variant="outline" size="sm" aria-label={t("prevFrame")} disabled={stepping || at <= overview.startAt} onClick={() => void step(-1)}>{t("prevFrameShort")}</Button>
-          <Button type="button" variant="outline" size="sm" aria-label={t("nextFrame")} disabled={stepping || at >= overview.endAt} onClick={() => void step(1)}>{t("nextFrameShort")}</Button>
-          <span className="replay-time mono">{replayDuration(at - overview.startAt)} <small>/ {replayDuration(duration)}</small></span>
-        </div><div className="replay-clock"><span className="mono">{wallTime(at)}</span>
-          <NativeSelect size="sm" aria-label={t("speedLabel")} value={speed} onChange={event => setSpeed(Number(event.target.value))}>
-            {[0.25, 0.5, 1, 2, 4, 8].map(value => <NativeSelectOption key={value} value={value}>{value}×</NativeSelectOption>)}
-          </NativeSelect></div></div>
-        <ReplayTimeJump elapsed={at - overview.startAt} duration={duration} onJump={elapsed => seek(overview.startAt + elapsed)} />
-      </div>
-    </section>
-    <section className="surface replay-timeline" aria-label={t("timelineLabel")}>
-      <div className="surface-heading"><h2>{t("timelineTitle")}</h2><div className="replay-window-size">
-        <Label htmlFor={`${controlsId}-window`} className="text-xs font-normal">{t("windowLabel")}</Label>
-        <NativeSelect id={`${controlsId}-window`} size="sm" className="text-xs" aria-label={t("windowSelectLabel")} value={windowMs} onChange={event => {
-          setEventPage(0); setWindowMs(Number(event.target.value));
-        }}>{[5, 15, 30, 60, 300, 900].map(seconds => <NativeSelectOption key={seconds} value={seconds * 1000}>{seconds >= 60 ? `${seconds / 60} ${nt("minutes")}` : `${seconds} ${t("seconds")}`}</NativeSelectOption>)}</NativeSelect>
-        <Button type="button" variant="outline" size="icon-sm" aria-label={nt("previousWindow")} disabled={eventBounds.startAt <= overview.startAt} onClick={() => seek(at - windowMs)}><ChevronLeft aria-hidden="true" /></Button>
-        <Button type="button" variant="outline" size="icon-sm" aria-label={nt("nextWindow")} disabled={eventBounds.endAt >= overview.endAt} onClick={() => seek(at + windowMs)}><ChevronRight aria-hidden="true" /></Button>
-        </div></div>
-      <div className="replay-time-axis"><time>{replayElapsedInput(eventBounds.startAt - overview.startAt, "seconds")}</time><span>{nt("elapsedTime")}</span><time>{replayElapsedInput(eventBounds.endAt - overview.startAt, "seconds")}</time></div>
-      <div className="replay-track-row"><span>{t("track.perception")}</span><div className="replay-track-lane">
-        <span className="replay-sampled-window" aria-hidden="true" style={{ left: x(bounds.startAt) + "%", width: Math.max(0.5, x(bounds.endAt) - x(bounds.startAt)) + "%" }} />
-        {trackFrames.map(frame => <button type="button" key={frame.id} className="replay-frame-tick focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring" style={{ left: x(frame.at) + "%" }}
-          aria-label={t("viewPerception") + " " + wallTime(frame.at)} title={frame.capability + " · " + wallTime(frame.at)} onClick={event => selectFrame(frame, event.currentTarget)} />)}
-        <i className="replay-cursor" style={{ left: x(at) + "%" }} />
-      </div></div>
-      {replayTracks.map(track => <div key={track} className="replay-track-row"><span>{t(`track.${track}`)}</span><div className="replay-track-lane">
-        {items.filter(item => item.track === track).map(item => <button type="button" key={item.id}
-          className={"replay-span focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring " + track + (replayItemActive(item, at) ? " active" : "") + (/error|failed/.test(item.status ?? "") ? " failed" : "")}
-          style={{ left: x(item.startAt) + "%", width: Math.max(0.35, x(item.track === "log" ? item.startAt : item.endAt ?? eventBounds.endAt) - x(item.startAt)) + "%" }}
-          title={item.label + " · " + wallTime(item.startAt)} aria-label={t(`track.${track}`) + " · " + item.label}
-          onClick={event => selectItem(item, event.currentTarget)}>{track === "log" ? "" : item.label}</button>)}
-        <i className="replay-cursor" style={{ left: x(at) + "%" }} />
-      </div></div>)}
-      {eventError && <Alert variant="destructive"><AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-        <span>{t("eventTrackPrefix")}{eventError}{t("videoContinues")}</span><Button type="button" variant="outline" size="xs" onClick={() => setEventPage(value => value + 1)}>{t("retry")}</Button>
-      </AlertDescription></Alert>}
-      {eventsLoading && <p role="status">{t("supplementingEvents")}</p>}
-      {eventWindow?.nextCursor && !eventsLoading && <Button type="button" variant="ghost" size="xs" onClick={() => setEventPage(value => value + 1)}>{t("continueEvents")}</Button>}
-      <p className="replay-axis-note">{nt("frameWindowNote")} {t("axisNote")}</p>
-    </section>
+
+    <div className="replay-workbench">
+      <section className="surface replay-studio-main" aria-label={t("stageTitle")}>
+        <header className="replay-studio-topbar">
+          <div className="replay-studio-topbar-left">
+            <span className="replay-readonly-pill"><i /> {t("readonlyNotice")}</span>
+            {capabilities.length > 1 && (
+              <div className="replay-capability">
+                <Label htmlFor={`${controlsId}-capability`} className="sr-only">{t("capabilityLabel")}</Label>
+                <NativeSelect id={`${controlsId}-capability`} size="sm" className="max-w-[180px] text-xs" value={capability} onChange={event => {
+                  stepRequest.current?.abort(); setStepping(false); setCapability(event.target.value);
+                }}>
+                  <NativeSelectOption value="">{t("allCapabilities")}</NativeSelectOption>
+                  {capabilities.map(value => <NativeSelectOption key={value} value={value}>{shortCapabilityName(value)}</NativeSelectOption>)}
+                </NativeSelect>
+              </div>
+            )}
+            {coverage && !coverage.complete && (
+              <span className="replay-coverage-pill" role="status">
+                {t("coverageReadPrefix")} {Math.round(coverage.bytes / Math.max(1, coverage.totalBytes) * 100)}%
+              </span>
+            )}
+          </div>
+          <div className="replay-studio-topbar-right">
+            {shareState && <span className="replay-share-feedback" role="status">{shareState}</span>}
+            <Button type="button" variant="ghost" size="xs" disabled={refreshing} onClick={() => { cached.current = []; setWindows([]); setRefresh(value => value + 1); setRetry(value => value + 1); }}>
+              <RefreshCw className={"size-3.5" + (refreshing ? " animate-spin" : "")} aria-hidden="true" />
+              {refreshing ? t("refreshing") : t("refreshRecords")}
+            </Button>
+            <Button type="button" variant="outline" size="xs" onClick={share}>
+              <Share2 className="size-3.5" aria-hidden="true" />
+              {t("shareMoment")}
+            </Button>
+          </div>
+        </header>
+
+        <div className="replay-frames" aria-busy={!ready}>
+          {shownFrames.length ? shownFrames.map(frame => {
+            const isPreview = frame.at > at;
+            return (
+              <article className="replay-frame" key={frame.capability} data-frame-id={frame.id}>
+                <div className="replay-frame-meta">
+                  <Button type="button" variant="ghost" size="xs" title={frame.capability} onClick={event => selectFrame(frame, event.currentTarget)}>
+                    {shortCapabilityName(frame.capability)} · #{frame.sequence} ↗
+                  </Button>
+                  {isPreview ? (
+                    <span className="replay-preview-badge">
+                      {t("initialPreview")} · {wallTime(frame.at)}
+                    </span>
+                  ) : (
+                    <span>
+                      {t("sampled")} {wallTime(frame.at)}
+                      {ready ? " · " + (Math.max(0, at - frame.at) / 1000).toFixed(1) + " " + t("secondsAgo") : t("previousFrame")}
+                    </span>
+                  )}
+                </div>
+                <FrameMedia
+                  key={refresh + ":" + retry}
+                  frame={frame}
+                  images={displayed?.images ?? new Map()}
+                  playback={{ at, playing: playing && !isPreview, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }}
+                />
+              </article>
+            );
+          }) : (
+            <div className="replay-loading">
+              {!ready ? t("loadingFrames") : capability ? t("noFramesFiltered") : t("noFramesAll")}
+              <small>{t("playbackContinues")}</small>
+            </div>
+          )}
+          {!ready && <span className="replay-buffering" role="status">{windowError ? t("segmentFailed") : t("buffering")}</span>}
+        </div>
+
+        {windowError && <Alert variant="destructive" className="mx-4 my-2"><AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+          <span>{windowError}</span><Button type="button" variant="outline" size="xs" onClick={() => setRetry(value => value + 1)}>{t("retrySegment")}</Button>
+        </AlertDescription></Alert>}
+
+        <div className="replay-controls">
+          {/* The media scrubber keeps native pointer/key commit semantics and millisecond steps. */}
+          <input className="replay-seek accent-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+            type="range" min={overview.startAt} max={Math.max(overview.endAt, overview.startAt + 1)} step="1" value={at}
+            disabled={duration <= 0} aria-label={t("seekLabel")} aria-valuetext={replayDuration(at - overview.startAt) + " / " + replayDuration(duration)}
+            onChange={event => seek(Number(event.target.value), false)} onPointerUp={() => commitPosition(atRef.current)}
+            onKeyUp={() => commitPosition(atRef.current)} />
+
+          <div className="replay-control-row">
+            <div className="replay-transport">
+              <Button type="button" size="xs" className="min-w-[54px] px-2 font-medium" aria-label={playing ? t("pauseReplay") : t("playReplay")} disabled={duration <= 0 || !!windowError}
+                onClick={() => { stepRequest.current?.abort(); setStepping(false); if (at >= overview.endAt) move(overview.startAt); setPlaying(value => !value); }}>
+                {playing ? t("pause") : t("play")}
+              </Button>
+              <Button type="button" variant="outline" size="xs" className="px-2" aria-label={nt("backTen")} disabled={at <= overview.startAt} onClick={() => seek(at - 10_000)}>
+                <RotateCcw className="size-3" aria-hidden="true" />10s
+              </Button>
+              <Button type="button" variant="outline" size="xs" className="px-2" aria-label={t("prevFrame")} disabled={stepping || at <= overview.startAt} onClick={() => void step(-1)}>
+                {t("prevFrameShort")}
+              </Button>
+              <Button type="button" variant="outline" size="xs" className="px-2" aria-label={t("nextFrame")} disabled={stepping || at >= overview.endAt} onClick={() => void step(1)}>
+                {t("nextFrameShort")}
+              </Button>
+              <Button type="button" variant="outline" size="xs" className="px-2" aria-label={nt("forwardTen")} disabled={at >= overview.endAt} onClick={() => seek(at + 10_000)}>
+                <RotateCw className="size-3" aria-hidden="true" />10s
+              </Button>
+              <ReplayTimeJump elapsed={at - overview.startAt} duration={duration} onJump={elapsed => seek(overview.startAt + elapsed)} />
+            </div>
+
+            <div className="replay-clock">
+              <span className="replay-wallclock-pill mono">{wallTime(at)}</span>
+              <NativeSelect size="sm" className="h-6 w-[50px] rounded-[5px] py-0 pl-1.5 pr-5 text-xs data-[size=sm]:h-6 data-[size=sm]:py-0" aria-label={t("speedLabel")} value={speed} onChange={event => setSpeed(Number(event.target.value))}>
+                {[0.25, 0.5, 1, 2, 4, 8].map(value => <NativeSelectOption key={value} value={value}>{value}×</NativeSelectOption>)}
+              </NativeSelect>
+            </div>
+          </div>
+        </div>
+
+        <div className="replay-timeline" role="region" aria-label={t("timelineLabel")}>
+          <div className="replay-timeline-header">
+            <div className="replay-timeline-title-group">
+              <h2>{t("timelineTitle")}</h2>
+              <span className="replay-window-range-pill mono">
+                {replayElapsedInput(eventBounds.startAt - overview.startAt, "seconds")} – {replayElapsedInput(eventBounds.endAt - overview.startAt, "seconds")}
+              </span>
+              {eventsLoading && <span className="replay-timeline-status" role="status">{t("supplementingEvents")}</span>}
+              {eventWindow?.nextCursor && !eventsLoading && (
+                <Button type="button" variant="ghost" size="xs" onClick={() => setEventPage(value => value + 1)}>{t("continueEvents")}</Button>
+              )}
+            </div>
+            <div className="replay-window-size">
+              <Label htmlFor={`${controlsId}-window`} className="text-xs font-normal">{t("windowLabel")}</Label>
+              <NativeSelect id={`${controlsId}-window`} size="sm" className="h-6 rounded-[5px] py-0 pl-2 pr-6 text-xs data-[size=sm]:h-6 data-[size=sm]:py-0" aria-label={t("windowSelectLabel")} value={windowMs} onChange={event => {
+                setEventPage(0); setWindowMs(Number(event.target.value));
+              }}>
+                {[5, 15, 30, 60, 300, 900].map(seconds => (
+                  <NativeSelectOption key={seconds} value={seconds * 1000}>
+                    {seconds >= 60 ? `${seconds / 60} ${nt("minutes")}` : `${seconds} ${t("seconds")}`}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <Button type="button" variant="outline" size="icon-xs" aria-label={nt("previousWindow")} disabled={eventBounds.startAt <= overview.startAt} onClick={() => seek(at - windowMs)}>
+                <ChevronLeft className="size-3.5" aria-hidden="true" />
+              </Button>
+              <Button type="button" variant="outline" size="icon-xs" aria-label={nt("nextWindow")} disabled={eventBounds.endAt >= overview.endAt} onClick={() => seek(at + windowMs)}>
+                <ChevronRight className="size-3.5" aria-hidden="true" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="replay-time-axis" onClick={seekOnLaneClick}>
+            {rulerTicks.map(({ ratio, time }) => (
+              <time key={ratio} style={{ left: `${ratio * 100}%` }} className="replay-ruler-tick mono">
+                {replayElapsedInput(time, "seconds")}
+              </time>
+            ))}
+            <i className="replay-playhead-cap" style={{ left: x(at) + "%" }} aria-hidden="true" />
+          </div>
+
+          <div className="replay-tracks-stack">
+            <div className="replay-track-row">
+              <span className="replay-track-label"><i className="replay-track-dot perception" />{t("track.perception")}</span>
+              <div className="replay-track-lane" onClick={seekOnLaneClick}>
+                <span className="replay-sampled-window" aria-hidden="true" style={{ left: x(bounds.startAt) + "%", width: Math.max(0.5, x(bounds.endAt) - x(bounds.startAt)) + "%" }} />
+                {trackFrames.map(frame => (
+                  <button type="button" key={frame.id}
+                    className="replay-frame-tick focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring"
+                    style={{ left: x(frame.at) + "%" }}
+                    aria-label={t("viewPerception") + " " + wallTime(frame.at)}
+                    title={frame.capability + " · " + wallTime(frame.at)}
+                    onClick={event => { event.stopPropagation(); selectFrame(frame, event.currentTarget); }} />
+                ))}
+                <i className="replay-cursor" style={{ left: x(at) + "%" }} />
+              </div>
+            </div>
+
+            {replayTracks.map(track => (
+              <div key={track} className="replay-track-row">
+                <span className="replay-track-label"><i className={"replay-track-dot " + track} />{t(`track.${track}`)}</span>
+                <div className="replay-track-lane" onClick={seekOnLaneClick}>
+                  {items.filter(item => item.track === track).map(item => (
+                    <button type="button" key={item.id}
+                      className={"replay-span focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring " + track + (replayItemActive(item, at) ? " active" : "") + (/error|failed/.test(item.status ?? "") ? " failed" : "")}
+                      style={{ left: x(item.startAt) + "%", width: Math.max(0.45, x(item.track === "log" ? item.startAt : item.endAt ?? eventBounds.endAt) - x(item.startAt)) + "%" }}
+                      title={item.label + " · " + wallTime(item.startAt)}
+                      aria-label={t(`track.${track}`) + " · " + item.label}
+                      onClick={event => { event.stopPropagation(); selectItem(item, event.currentTarget); }}>
+                      {track === "log" ? "" : item.label}
+                    </button>
+                  ))}
+                  <i className="replay-cursor" style={{ left: x(at) + "%" }} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {eventError && <Alert variant="destructive" className="mx-4 mt-2"><AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+            <span>{t("eventTrackPrefix")}{eventError}{t("videoContinues")}</span>
+            <Button type="button" variant="outline" size="xs" onClick={() => setEventPage(value => value + 1)}>{t("retry")}</Button>
+          </AlertDescription></Alert>}
+        </div>
+      </section>
+
+      <aside className="replay-inspector" data-evidence-open={wide && !!evidence && inspectorTab === "details"}>
+        <Tabs value={inspectorTab} onValueChange={setInspectorTab} className="replay-inspector-tabs">
+          <TabsList variant="line" aria-label={nt("inspectorTabs")} className="replay-inspector-tablist w-full">
+            <TabsTrigger ref={eventsTab} value="events">{nt("eventsTab")}</TabsTrigger>
+            <TabsTrigger value="moment">
+              {nt("momentTab")}
+              {activeItems.length > 0 && <span className="replay-tab-count">{activeItems.length}</span>}
+            </TabsTrigger>
+            <TabsTrigger value="details" onClick={() => { if (evidence && !wide) setInspectorTab("details"); }}>
+              {nt("evidenceTab")}
+              {evidence && <i className="replay-tab-dot" aria-hidden="true" />}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="events" forceMount className="replay-inspector-content data-[state=inactive]:hidden">
+            <ReplayEventSearch
+              key={scope}
+              scope={scope}
+              startAt={overview.startAt}
+              at={at}
+              itemUrl={evidenceUrl}
+              onSelect={selectItem}
+              selectedId={evidence?.kind === "item" ? evidence.id : undefined}
+              inputId={`${controlsId}-event-query`}
+              inputRef={eventSearchInput}
+            />
+          </TabsContent>
+
+          <TabsContent value="moment" className="replay-inspector-content">
+            <div className="replay-moment-pane">
+              <div className="replay-moment-clock">
+                <span className="mono">{replayDuration(at - overview.startAt)}</span>
+                <small className="mono">{wallTime(at)}</small>
+              </div>
+
+              <section className="replay-context-section">
+                <div className="replay-context-heading">
+                  <h3>{t("currentActions")}</h3>
+                  <span>{activeItems.length} {t("items")}</span>
+                </div>
+                {activeItems.length ? (
+                  <div className="replay-context-list">
+                    {activeItems.map(item => (
+                      <button type="button" key={item.id}
+                        className="replay-context-item focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring"
+                        onClick={event => selectItem(item, event.currentTarget)}>
+                        <span className={"replay-track-badge " + item.track}>{t(`track.${item.track}`)}</span>
+                        <strong>{item.label}</strong>
+                        <small>{item.status && statusKey[item.status] ? t(`status.${statusKey[item.status]}`) : (item.status ?? (item.endAt === null ? t("status.notEnded") : t("status.recorded")))}</small>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="replay-empty-context">{t("noActiveItems")}</p>
+                )}
+              </section>
+
+              <section className="replay-context-section">
+                <div className="replay-context-heading">
+                  <h3>{t("nearbyLogs")}</h3>
+                  <span>{t("clickToLocate")}</span>
+                </div>
+                {logs.length ? (
+                  <div className="replay-context-list">
+                    {logs.map(item => (
+                      <button type="button" key={item.id}
+                        className={"replay-context-item focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" + (item.startAt <= at ? " past" : " future")}
+                        onClick={event => selectItem(item, event.currentTarget)}>
+                        <time className="mono">{wallTime(item.startAt)}</time>
+                        <strong>{item.label}</strong>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="replay-empty-context">{t("noLogs")}</p>
+                )}
+              </section>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="details" className="replay-inspector-content">
+            {evidence ? (
+              wide ? evidenceView : <Button type="button" variant="outline" onClick={() => setInspectorTab("details")}>{nt("evidenceTab")}</Button>
+            ) : (
+              <div className="replay-empty-details">
+                <h3>{t("emptyDetailsTitle")}</h3>
+                <p>{t("emptyDetailsHint")}</p>
+                {shownFrames[0] && (
+                  <Button type="button" variant="outline" size="sm" onClick={event => selectFrame(shownFrames[0], event.currentTarget)}>
+                    {t("inspectCurrentFrame")} ({shownFrames[0].capability} · #{shownFrames[0].sequence})
+                  </Button>
+                )}
+              </div>
+            )}
+          </TabsContent>
+        </Tabs>
+      </aside>
     </div>
-    <aside className="replay-inspector" data-evidence-open={wide && !!evidence && inspectorTab === "details"}>
-      <Tabs value={inspectorTab} onValueChange={setInspectorTab}>
-        <TabsList variant="line" aria-label={nt("inspectorTabs")} className="w-full">
-          <TabsTrigger ref={eventsTab} value="events">{nt("eventsTab")}</TabsTrigger>
-          <TabsTrigger value="details" disabled={!evidence} onClick={() => { if (evidence && !wide) setInspectorTab("details"); }}>{nt("evidenceTab")}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="events" forceMount className="data-[state=inactive]:hidden">
-          <ReplayEventSearch key={scope} scope={scope} startAt={overview.startAt} itemUrl={evidenceUrl} onSelect={selectItem} selectedId={evidence?.kind === "item" ? evidence.id : undefined}
-            inputId={`${controlsId}-event-query`} inputRef={eventSearchInput} />
-        </TabsContent>
-        <TabsContent value="details">{wide ? evidenceView : evidence && <Button type="button" variant="outline" onClick={() => setInspectorTab("details")}>{nt("evidenceTab")}</Button>}</TabsContent>
-      </Tabs>
-    </aside>
-    <div className="replay-context-grid">
-      <section className="surface replay-context"><div className="surface-heading"><h2>{t("currentActions")}</h2><span>{activeItems.length} {t("items")}</span></div>
-        {activeItems.length ? activeItems.map(item => <button type="button" key={item.id} className="replay-context-item focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" onClick={event => selectItem(item, event.currentTarget)}>
-          <span className={"replay-track-badge " + item.track}>{t(`track.${item.track}`)}</span><strong>{item.label}</strong>
-          <small>{item.status && statusKey[item.status] ? t(`status.${statusKey[item.status]}`) : (item.status ?? (item.endAt === null ? t("status.notEnded") : t("status.recorded")))}</small>
-        </button>) : <p className="replay-empty-context">{t("noActiveItems")}</p>}
-      </section>
-      <section className="surface replay-context"><div className="surface-heading"><h2>{t("nearbyLogs")}</h2><span>{t("clickToLocate")}</span></div>
-        {logs.length ? logs.map(item => <button type="button" key={item.id} className={"replay-context-item focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring" + (item.startAt <= at ? " past" : " future")} onClick={event => selectItem(item, event.currentTarget)}>
-          <time className="mono">{wallTime(item.startAt)}</time><strong>{item.label}</strong>
-        </button>) : <p className="replay-empty-context">{t("noLogs")}</p>}
-      </section>
-    </div></div>
+
     <Dialog open={!wide && !!evidence && inspectorTab === "details"} onOpenChange={open => { if (!open) closeEvidence(); }}>
       <DialogContent showCloseButton={false} className="replay-evidence-dialog p-0" onOpenAutoFocus={event => { event.preventDefault(); evidencePanel.current?.focus(); }}
         onCloseAutoFocus={event => {
