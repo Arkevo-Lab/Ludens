@@ -165,6 +165,18 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       throw error;
     }
   }
+  if (kind === "steer") {
+    if (epoch !== undefined) throw new Error("Control management belongs to the human, not an agent cycle");
+    const status = runtime.status();
+    if (request.runId && request.runId !== status.runId) throw new Error("STALE_RUN: refresh the host status before changing control");
+    if (request.expectedEpoch !== undefined && request.expectedEpoch !== status.epoch) throw new Error("STALE_EPOCH: the control cycle changed");
+    const followUp = argv[0] === "--follow-up";
+    const messageArgs = followUp ? argv.slice(1) : argv;
+    const message = messageArgs[0] === "--message" ? messageArgs[1] : messageArgs[0];
+    if (messageArgs.length > 2 || (messageArgs[0] === "--message" && messageArgs.length !== 2) || !message?.trim())
+      throw new Error("Usage: ludens steer [--follow-up] --message <text> | ludens steer [--follow-up] <text>");
+    return runtime.steer(message, followUp ? "follow_up" : "steer");
+  }
   if (kind === "auto" || kind === "consolidate") {
     if (epoch !== undefined) throw new Error("Control management belongs to the human, not an agent cycle");
     const status = runtime.status();

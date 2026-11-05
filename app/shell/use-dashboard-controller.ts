@@ -242,6 +242,9 @@ export function useDashboardController() {
   ]);
   useEffect(() => { runPoller.current?.reader.setEnabled(refresh); }, [refresh]);
   const retryingRun = runReading?.key === key && runReading.reader === runPoller.current?.reader;
+  const refreshRun = useCallback(() => {
+    void runPoller.current?.reader.readOnce();
+  }, []);
   const retryRun = (control: HTMLButtonElement) => {
     const pending = runPoller.current;
     if (!pending || pending.key !== key || retryingRun) return;
@@ -427,6 +430,7 @@ export function useDashboardController() {
     hasTelemetry,
     setPausedSelection,
     setSnapshotRevision,
+    refreshRun,
     refreshCatalog,
     s,
     verifiedCreationDriver,

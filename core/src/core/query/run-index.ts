@@ -271,6 +271,16 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
           delete state.autoStarted;
         }
       }
+      if (event.type === "context_policy") {
+        state.lastControl = {
+          ...(state.lastControl ?? {}),
+          context: {
+            ...((state.lastControl?.context as Record<string, unknown> | undefined) ?? {}),
+            perceptionInjection: Boolean(d.perceptionInjection),
+          },
+          at: event.at,
+        };
+      }
       if (event.type === "auto_compaction_start") state.compaction = { startedAt: event.at, reason: String(d.reason ?? d.action ?? "") };
       if (event.type === "auto_compaction_end") state.compaction = null;
       advanceLivePhase(state.phase, [event]);

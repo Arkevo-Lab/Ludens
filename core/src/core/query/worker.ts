@@ -3,6 +3,7 @@ import { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } fro
 import { diagnosticEvents } from "./diagnostic-events";
 import { getActivity } from "./activity";
 import { getReplay } from "./replay";
+import { controlWorkspaceRuntime } from "./runtime-control";
 import { capabilities, capabilityRuntime } from "./capabilities";
 import { discoverDriver } from "./drivers";
 import { docGroups, readDoc } from "./docs";
@@ -30,6 +31,7 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   timelineRecord: ([project, run, record, sequence, source], signal) => timelineRecord(project, run, record, sequence, source, undefined, signal),
   capabilities: ([project, workspace], signal) => capabilities(project, workspace, undefined, signal),
   capabilityRuntime: ([project, workspace]) => capabilityRuntime(project, workspace),
+  runtimeControl: ([project, workspace, command]) => controlWorkspaceRuntime(project, workspace, command),
   discoverDriver: ([spec], signal) => discoverDriver(spec, signal),
   docGroups: ([root, lang]) => docGroups(root, lang),
   readDoc: ([id, root, lang]) => readDoc(id, root, lang),

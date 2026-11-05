@@ -7,6 +7,7 @@ import type { ExecutionResult } from "@ludens/baseware/contracts";
 export const HELP = `ludens status
 ludens auto on [--message <text>]
 ludens auto off
+ludens steer [--follow-up] <message>
 ludens consolidate [--seconds <n>]
 ludens perception status | state | reload | stop
 ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
@@ -143,8 +144,8 @@ export async function cli(argv: string[], socket: string) {
     return;
   }
   if (kind === "action" && (!rest.length || rest[0] === "--help")) { console.log(ACTION_HELP); return; }
-  if (!["status", "auto", "consolidate", "perception", "action"].includes(kind)) throw new Error("Unknown command; see ludens --help");
-  const control = kind === "auto" || kind === "consolidate" ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null } : undefined;
+  if (!["status", "auto", "steer", "consolidate", "perception", "action"].includes(kind)) throw new Error("Unknown command; see ludens --help");
+  const control = kind === "auto" || kind === "steer" || kind === "consolidate" ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null } : undefined;
   const value = await send(socket, {
     kind, argv: rest, epoch: process.env.BASEWARE_EPOCH,
     trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined,

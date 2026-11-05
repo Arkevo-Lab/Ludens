@@ -222,6 +222,7 @@ export function ObservationPanel({
   call,
   selectedImage,
   onImage,
+  onOpenReplayAt,
   compact = false,
   priority = false,
 }: {
@@ -229,6 +230,7 @@ export function ObservationPanel({
   call?: Call;
   selectedImage?: string;
   onImage(id: string): void;
+  onOpenReplayAt?: (frame: { record: string; sequence: number }) => void;
   compact?: boolean;
   priority?: boolean;
 }) {
@@ -362,6 +364,22 @@ export function ObservationPanel({
               (observation.perception ? t("meta.recordedAt") : "") + observationTime(timestamp(observation), t))
             : text ? t("meta.textObservation") : records.length ? t("meta.records") : t("meta.noMedia")}
         </span>
+        {onOpenReplayAt &&
+          (snapshot?.timeline?.recordId ?? observation?.timeline?.recordId) &&
+          (snapshot?.timeline?.sequence ?? observation?.timeline?.sequence) != null && (
+            <button
+              type="button"
+              className="codex-replay-jump-link"
+              onClick={() =>
+                onOpenReplayAt({
+                  record: (snapshot?.timeline?.recordId ?? observation?.timeline?.recordId)!,
+                  sequence: Number(snapshot?.timeline?.sequence ?? observation?.timeline?.sequence),
+                })
+              }
+            >
+              ⏱ {observationTime(timestamp(observation!) ?? snapshot?.recordedAt, t)} ↗
+            </button>
+          )}
         {observation?.sourceSequence != null && (
           <span>{t("meta.sourceFrame")} {observation.sourceSequence}</span>
         )}

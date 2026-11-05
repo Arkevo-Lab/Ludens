@@ -148,6 +148,12 @@ export async function createOmpAgent(options: {
         try { await consolidateOmpSession(session, context.signal, options.workspace); }
         finally { cycle = undefined; }
       },
+      steer: async (message: string) => { await session.steer(message); },
+      followUp: async (message: string) => { await session.followUp(message); },
+      queueState: () => {
+        const queued = session.getQueuedMessages();
+        return { steering: queued.steering.length + queued.liveSteered, followUp: queued.followUp.length };
+      },
       abort: () => session.abort(),
       async close() {
         try { await session.dispose(); }

@@ -9,6 +9,10 @@ import { executeProgram, type Program } from "./program.ts";
 export interface AgentRunner {
   run(context: { epoch: string; signal: AbortSignal; message?: string }): Promise<void>;
   consolidate(context: { epoch: string; signal: AbortSignal }): Promise<void>;
+  /** Live mid-run guidance; optional because not every agent supports it. */
+  steer?(message: string): Promise<void>;
+  followUp?(message: string): Promise<void>;
+  queueState?(): { steering: number; followUp: number };
   abort(): Promise<void>;
   close(): Promise<void>;
 }
@@ -77,7 +81,7 @@ export class Runtime {
   status() {
     // The host can outlive many takeovers; its log clock is not this cycle's budget.
     const remainingSeconds = this.mode === "auto" ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null;
-    return { runId: this.runId, maxSeconds: this.maxSeconds, remainingSeconds, mode: this.mode, epoch: this.mode === "auto" ? this.epoch : null, connected: this.connected, reason: this.reason, agent: !!this._agent, thinking: !!this.running, consolidating: this.consolidating, perception: this._perception?.status(), action: this._action?.status(), context: { perceptionInjection: this.perceptionInjection }, logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" } };
+    return { runId: this.runId, maxSeconds: this.maxSeconds, remainingSeconds, mode: this.mode, epoch: this.mode === "auto" ? this.epoch : null, connected: this.connected, reason: this.reason, agent: !!this._agent, thinking: !!this.running, consolidating: this.consolidating, queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 }, perception: this._perception?.status(), action: this._action?.status(), context: { perceptionInjection: this.perceptionInjection }, logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" } };
   }
 
   perceptionInjectionEnabled(): boolean { return this.perceptionInjection; }
@@ -147,7 +151,7 @@ export class Runtime {
     this.mode = "auto";
     this.reason = "enabled";
     this.record("control", this.status(), { epoch });
-    if (message) this.record("user_message", { text: message }, { epoch });
+    if (message) this.record("user_message", { text: message, mode: "start" }, { epoch });
     if (!this.budget) this.timer = setTimeout(this.budgetEnded, this.maxSeconds * 1000);
     if (control.signal.aborted) return this.status();
     try {
@@ -216,6 +220,18 @@ export class Runtime {
         this.record("consolidation_end", { outcome, reason: this.reason }, { epoch });
       });
     return { ...this.status(), consolidationId: epoch };
+  }
+
+  /** Live mid-run guidance from the human. Queued by the agent, not a new cycle. */
+  async steer(message: string, delivery: "steer" | "follow_up" = "steer") {
+    const text = message.trim();
+    if (!text) throw new Error("Message cannot be empty");
+    if (this.mode !== "auto" || !this.running || !this._agent) throw new Error("Auto loop is not active");
+    this.record("user_message", { text, mode: delivery }, { epoch: this.epoch });
+    if (delivery === "follow_up" && this._agent.followUp) await this._agent.followUp(text);
+    else if (this._agent.steer) await this._agent.steer(text);
+    else throw new Error("Agent does not support live steering");
+    return this.status();
   }
 
   private abortAgent() {

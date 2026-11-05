@@ -6,6 +6,7 @@ import { ArrowRight, History } from "lucide-react";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ActivityFeed } from "@/features/live/activity-feed";
+import { ShioriWorkbench } from "@/features/live/shiori-cockpit";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConsoleSidebar, type ConsoleView as View } from "@/shell/console-sidebar";
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
@@ -24,7 +25,7 @@ import { Metric, ObservationPanel, seconds, percent, bytes, clockTime } from "@/
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
 export default function ConsoleShell() {
-  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshCatalog} = useDashboardController();
+  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog} = useDashboardController();
   const waitSummary = [
     s?.medianHttpHeadersMs != null ? dt("waitHttp") + " " + seconds(s.medianHttpHeadersMs) : "",
     s?.medianWsWaitMs != null ? dt("waitWs") + " " + seconds(s.medianWsWaitMs) : "",
@@ -139,12 +140,12 @@ export default function ConsoleShell() {
         <main ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
           tabIndex={runControls ? -1 : undefined} aria-label={runControls ? t(`views.${view}.title`) : undefined}
           className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : "")}>
-          {view !== "workspaces" && view !== "docs" && view !== "perception" && view !== "caps" && (view !== "replay" || entry !== "ready") && <div className={"page-heading" + (view === "live" ? " live-page-heading" : view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
+          {view !== "workspaces" && view !== "docs" && view !== "perception" && view !== "caps" && view !== "live" && (view !== "replay" || entry !== "ready") && <div className={"page-heading" + (view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
             <div>
               <h1>{t(`views.${view}.title`)}</h1>
               <p>{t(`views.${view}.description`)}</p>
             </div>
-            {data && (view === "live" || view === "perf") && (
+            {data && view === "perf" && (
               <Button
                 type="button"
                 variant="outline"
@@ -176,7 +177,7 @@ export default function ConsoleShell() {
               </div>
             </AlertDescription></Alert>
           )}
-          {view === "live" && entry === "ready" && (context || latestRequested) && <section
+          {view === "live" && entry === "ready" && ((context && context.kind !== "latest") || latestRequested) && <section
             className={"live-context-banner "
               + ((context?.kind ?? "latest") === "latest" ? "border-border bg-card" : "border-primary/40 bg-primary/5")}
             aria-labelledby="live-context-title"
@@ -241,68 +242,94 @@ export default function ConsoleShell() {
             </section>
           ) : (
             <>
-              <div className={"run-status" + (view === "live" ? " live-host-status" : "")}>
-                <span className={"status-dot " + (auto && !staleStatus ? "online" : "")} />
-                <strong>{view === "live" ? <>{staleStatus && `${lt("hostSnapshot")}: `}{observedStatus}</> : status}</strong>
-                {view === "live" && phase?.label && !staleStatus && <span>{phase.label}</span>}
-                {phase?.elapsedMs != null && !staleStatus && (
-                  <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
-                )}
-                {view !== "live" && <><i />
-                <span>{data.manifest.model ?? dt("deviceOnly")}</span>
-                <span className="run-time">
-                  {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
-                  {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>{dt("budget")}{" "}
-                  {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}
-                </span></>}
-              </div>
               {view === "live" ? (
-                <>
-                <div className="live-grid">
-                  <div className="live-observation">
+                <ShioriWorkbench
+                  project={selection.project}
+                  workspace={project?.workspace ?? data.manifest.workspace ?? null}
+                  workspaceTitle={workspaceName(project)}
+                  data={data}
+                  feed={activity}
+                  isLiveRun={
+                    Boolean(!selection.run || selection.run === latest?.id) &&
+                    (!selection.epoch || selection.epoch === cycles.at(-1)?.epoch)
+                  }
+                  phaseLabel={!staleStatus ? phase?.label : null}
+                  phaseElapsedMs={!staleStatus ? phase?.elapsedMs : null}
+                  selectedBlock={query.get("block") ?? undefined}
+                  onUpdated={() => {
+                    refreshRun();
+                  }}
+                  onOpenPerf={() => navigate({ view: "perf" })}
+                  onOpenCaps={() => navigate({ view: "caps" })}
+                  onOpenReplay={() => navigate({ view: "replay" })}
+                  onOpenReplayAt={(frame) =>
+                    navigate({
+                      ...pinned,
+                      view: "replay",
+                      ...replayEvidencePatch({ kind: "frame", record: frame.record, sequence: frame.sequence }),
+                    })
+                  }
+                  onReturnLatest={returnToLatest}
+                  renderObservation={({ call: overrideCall, selectedImage: overrideImage, onSelectImage }) => {
+                    const effectiveCall =
+                      overrideCall ??
+                      (call?.inputObservations.length
+                        ? call
+                        : [...data.calls].reverse().find(c => c.inputObservations.length > 0) ?? call);
+                    const effectiveImage =
+                      overrideImage ??
+                      selectedImage ??
+                      (!effectiveCall?.inputObservations.length ? data.observations.at(-1)?.id : undefined);
+                    return (
+                      <ObservationPanel
+                        priority
+                        data={data}
+                        call={effectiveCall}
+                        selectedImage={effectiveImage}
+                        onImage={onSelectImage}
+                        onOpenReplayAt={(frame) =>
+                          navigate({
+                            ...pinned,
+                            view: "replay",
+                            ...replayEvidencePatch({ kind: "frame", record: frame.record, sequence: frame.sequence }),
+                          })
+                        }
+                      />
+                    );
+                  }}
+                  observationSlot={
                     <ObservationPanel
                       priority
                       data={data}
-                      call={call}
-                      selectedImage={selectedImage}
+                      call={
+                        call?.inputObservations.length
+                          ? call
+                          : [...data.calls].reverse().find(c => c.inputObservations.length > 0) ?? call
+                      }
+                      selectedImage={
+                        selectedImage ??
+                        (!call?.inputObservations.length ? data.observations.at(-1)?.id : undefined)
+                      }
                       onImage={(id) => navigate({ ...pinned, image: id })}
                     />
-                  </div>
-                  <ActivityFeed
-                    key={scopeKey + "/" + data.selectedEpoch}
-                    feed={activity}
-                    expectedEpoch={data.selectedEpoch}
-                    selectedBlock={query.get("block") ?? undefined}
-                    onSelect={(block) =>
-                      navigate({
-                        ...pinned,
-                        block: block.id,
-                        call: block.trace?.modelCallId ?? null,
-                        image: null,
-                      })
-                    }
-                  />
-                </div>
-                <details className="surface live-run-details">
-                  <summary><span>{lt("runDetails")}</span><span className="live-run-summary">{s!.completed} {dt("requestsUnit")} · {seconds(s!.medianMs)}</span></summary>
-                  <div className="live-run-details-content">
-                    <p className="live-run-context-help">{lt("detail")}</p>
-                    <dl className="live-run-facts">
-                      <div><dt>{lt("model")}</dt><dd>{data.manifest.model ?? dt("deviceOnly")}</dd></div>
-                      <div><dt>{dt("elapsed")}</dt><dd>{Math.floor(s!.elapsedSeconds / 60)}{dt("min")} {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} / {dt("budget")} {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}</dd></div>
-                      <div><dt>{lt("drivers")}</dt><dd>{data.manifest.drivers.map(driver => driver.id).join(" · ") || "—"}</dd></div>
-                    </dl>
-                    {metrics}
-                    <Button type="button" variant="ghost" size="xs"
-                      className="h-auto justify-start whitespace-normal text-left text-xs text-muted-foreground hover:text-foreground"
-                      onClick={() => navigate({ view: "perf" })}>
-                      {dt("checkPerf")} ↗
-                    </Button>
-                  </div>
-                </details>
-                </>
+                  }
+                />
               ) : (
                 <>
+                  <div className="run-status">
+                    <span className={"status-dot " + (auto && !staleStatus ? "online" : "")} />
+                    <strong>{status}</strong>
+                    {phase?.elapsedMs != null && !staleStatus && (
+                      <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
+                    )}
+                    <i />
+                    <span>{data.manifest.model ?? dt("deviceOnly")}</span>
+                    <span className="run-time">
+                      {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
+                      {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>{dt("budget")}{" "}
+                      {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}
+                    </span>
+                  </div>
                   <RunAnalysis
                     data={data}
                     detailData={analysis.detail}
@@ -404,15 +431,12 @@ export default function ConsoleShell() {
                   </details>
                 </>
               )}
-              <footer className="page-footer">
-                <span>
-                  ⓘ{" "}
-                  {view === "live"
-                    ? dt("footer.live")
-                    : dt("footer.perf")}
-                </span>
-                <span>{dt("updatedAt")} {clockTime(data.updatedAt)}</span>
-              </footer>
+              {view !== "live" && (
+                <footer className="page-footer">
+                  <span>ⓘ {dt("footer.perf")}</span>
+                  <span>{dt("updatedAt")} {clockTime(data.updatedAt)}</span>
+                </footer>
+              )}
             </>
           )}
         </main>
