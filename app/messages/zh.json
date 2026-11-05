@@ -1769,6 +1769,20 @@
     "presetVerifyStart": "✅ 先验能力再推进",
     "presetVerifyStartPrompt": "先运行 `ludens eval` 确认所有能力验证通过，再继续自动推进当前游戏目标。",
     "presetExploreStart": "🚀 读取记忆继续推进",
-    "presetExploreStartPrompt": "先读取 `memory/` 确认当前主线目标，观察当前画面后继续推进。"
+    "presetExploreStartPrompt": "先读取 `memory/` 确认当前主线目标，观察当前画面后继续推进。",
+    "inspectingCallBanner": "正在查看试跑请求 #{number}",
+    "clearInspectedBtn": "返回最新画面",
+    "perceptionPolicyTitle": "感知与上下文策略",
+    "perceptionToggleRow": "自动感知上下文注入",
+    "provenanceTitle": "会话溯源与环境参数",
+    "provShiori": "Shiori 引擎",
+    "provModel": "推理模型",
+    "provCompaction": "上下文压缩阈值",
+    "provRun": "运行 ID",
+    "provEpoch": "控制周期 (Epoch)",
+    "provWorkspace": "工作区目录",
+    "hostStandbyHint": "当前工作区宿主待命（未检测到活跃 ludens run 进程）。在终端启动宿主后即可执行实时控制：",
+    "copyLaunchCmd": "复制启动命令",
+    "copiedLaunchCmd": "已复制命令"
   }
 }

@@ -150,6 +150,16 @@ export function aggregate(events: Event[], now = Date.now()) {
         autoStarted = undefined;
       }
     }
+    if (event.type === "context_policy") {
+      lastControl = {
+        ...(lastControl ?? {}),
+        context: {
+          ...((lastControl?.context as Record<string, unknown> | undefined) ?? {}),
+          perceptionInjection: Boolean(d.perceptionInjection),
+        },
+        at: event.at,
+      };
+    }
     if (event.type === "model_request" && call) {
       call.transport = d.transport === "websocket" ? "websocket" : null;
       call.frameBytes = call.transport === "websocket" ? finite(d.bodyBytes) : null;

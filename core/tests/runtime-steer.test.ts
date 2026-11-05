@@ -124,6 +124,11 @@ test("controlWorkspaceRuntime validates scope and steers the live host", async (
     expect(status).toMatchObject({ mode: "auto", queue: { steering: 0, followUp: 1 } });
     const off = await controlWorkspaceRuntime(identity.id, canonical, { action: "auto_off" }, home);
     expect(off).toMatchObject({ mode: "manual" });
+    const injectOff = await controlWorkspaceRuntime(identity.id, canonical, { action: "perception_inject", enabled: false }, home);
+    expect(injectOff).toMatchObject({ context: { perceptionInjection: false } });
+    const injectOn = await controlWorkspaceRuntime(identity.id, canonical, { action: "perception_inject", enabled: true }, home);
+    expect(injectOn).toMatchObject({ context: { perceptionInjection: true } });
     await stop();
+    await expect(controlWorkspaceRuntime(identity.id, canonical, { action: "status" }, home)).rejects.toThrow("当前工作区宿主未在线");
   } finally { gate.resolve(); await runtime.close(); await rm(directory, { recursive: true, force: true }); }
 });

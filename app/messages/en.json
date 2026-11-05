@@ -1769,6 +1769,20 @@
     "presetVerifyStart": "✅ Verify capabilities & play",
     "presetVerifyStartPrompt": "First run `ludens eval` to verify all capabilities are green, then continue autonomous gameplay.",
     "presetExploreStart": "🚀 Continue autonomous goal",
-    "presetExploreStartPrompt": "Check `memory/` for the current objective, observe the screen, and continue advancing the goal."
+    "presetExploreStartPrompt": "Check `memory/` for the current objective, observe the screen, and continue advancing the goal.",
+    "inspectingCallBanner": "Inspecting request #{number}",
+    "clearInspectedBtn": "Latest frame",
+    "perceptionPolicyTitle": "Perception & Context Policy",
+    "perceptionToggleRow": "Auto Perception Injection",
+    "provenanceTitle": "Session Provenance & Environment",
+    "provShiori": "Shiori Engine",
+    "provModel": "Model",
+    "provCompaction": "Compaction Threshold",
+    "provRun": "Run ID",
+    "provEpoch": "Control Epoch",
+    "provWorkspace": "Workspace",
+    "hostStandbyHint": "Workspace host daemon is on standby (no active ludens run process). Launch the host in terminal for live control:",
+    "copyLaunchCmd": "Copy launch command",
+    "copiedLaunchCmd": "Command copied"
   }
 }

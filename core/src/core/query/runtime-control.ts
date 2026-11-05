@@ -30,6 +30,18 @@ async function controlWorkspace(project: string, expectedWorkspace: string, root
   return socket;
 }
 
+function wrapSocketError(cause: unknown): never {
+  const code = (cause as { code?: string } | null)?.code;
+  const message = cause instanceof Error ? cause.message : String(cause);
+  if (code === "ENOENT" || code === "ECONNREFUSED" || message.includes("ENOENT") || message.includes("ECONNREFUSED")) {
+    throw Object.assign(new Error("当前工作区宿主未在线（未检测到运行中的 ludens run 进程）"), {
+      code: "HOST_OFFLINE",
+      status: 409,
+    });
+  }
+  throw cause;
+}
+
 /**
  * Send one control command to a workspace host and return its latest status.
  * Callers that have not read the host status yet may omit runId; it is fetched
@@ -37,10 +49,17 @@ async function controlWorkspace(project: string, expectedWorkspace: string, root
  */
 export async function controlWorkspaceRuntime(project: string, workspace: string, command: RuntimeControlCommand, home = globalHome): Promise<HostControlStatus> {
   const socket = await controlWorkspace(project, workspace, home);
-  const status = async (): Promise<HostControlStatus> => await send(socket, { kind: "status", argv: [] }) as HostControlStatus;
+  const rpc = async (request: Parameters<typeof send>[1]) => {
+    try {
+      return await send(socket, request);
+    } catch (cause) {
+      wrapSocketError(cause);
+    }
+  };
+  const status = async (): Promise<HostControlStatus> => await rpc({ kind: "status", argv: [] }) as HostControlStatus;
   const scoped = async (request: Parameters<typeof send>[1]): Promise<HostControlStatus> => {
     if (request.runId === undefined) request.runId = (await status()).runId;
-    return await send(socket, request) as HostControlStatus;
+    return await rpc(request) as HostControlStatus;
   };
   switch (command.action) {
     case "status":
@@ -56,11 +75,11 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
     case "consolidate":
       return await scoped({ kind: "consolidate", argv: command.seconds ? ["--seconds", String(command.seconds)] : [], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "perception_inject": {
-      await send(socket, { kind: "perception", argv: ["inject", command.enabled ? "on" : "off"] });
+      await rpc({ kind: "perception", argv: ["inject", command.enabled ? "on" : "off"] });
       return await status();
     }
     case "perception_reload": {
-      await send(socket, { kind: "perception", argv: ["reload"] });
+      await rpc({ kind: "perception", argv: ["reload"] });
       return await status();
     }
   }

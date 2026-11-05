@@ -4,40 +4,36 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import {
   Activity,
   ArrowDown,
-  ArrowUpRight,
   Bot,
+  Check,
   ChevronDown,
   ChevronRight,
+  Copy,
   CornerDownLeft,
-  Cpu,
   Eye,
   EyeOff,
   FileText,
   Film,
   FlaskConical,
   Gauge,
-  Layers,
   PanelRight,
   Play,
   Plus,
   RefreshCw,
   RotateCcw,
-  Send,
   Sparkles,
   Square,
   Terminal,
   Wrench,
+  X,
   Zap,
 } from "lucide-react";
 import { useTranslations } from "@/lib/locale";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
 import { clockTime } from "@/features/live/run-visuals";
-import type { RunData } from "@/lib/types";
+import type { Call, RunData } from "@/lib/types";
 import "@/features/live/activity-feed.css";
 
 export type RuntimeControlAction =
@@ -386,11 +382,53 @@ function CodexStepGroup({
   );
 }
 
+function isHostOfflineError(cause: unknown): boolean {
+  const msg = cause instanceof Error ? cause.message : String(cause);
+  return (
+    msg.includes("未在线") ||
+    msg.includes("HOST_OFFLINE") ||
+    msg.includes("ENOENT") ||
+    msg.includes("ECONNREFUSED")
+  );
+}
+
+function resolveCallForTurn(
+  block: ActivityBlock,
+  siblingSteps: ActivityBlock[],
+  calls: Call[],
+): Call | undefined {
+  if (!calls.length) return undefined;
+  const directId = block.trace?.modelCallId;
+  if (directId) {
+    const found = calls.find(c => c.id === directId);
+    if (found) return found;
+  }
+  for (let i = siblingSteps.length - 1; i >= 0; i--) {
+    const stepCallId = siblingSteps[i].trace?.modelCallId;
+    if (stepCallId) {
+      const found = calls.find(c => c.id === stepCallId);
+      if (found) return found;
+    }
+  }
+  const targetMs = Date.parse(block.at) || Date.parse(siblingSteps.at(-1)?.at ?? "") || 0;
+  if (targetMs > 0) {
+    const candidates = calls.filter(c => (c.atMs || Date.parse(c.at)) <= targetMs + 15_000);
+    const withObs = [...candidates].reverse().find(c => c.inputObservations.length > 0);
+    if (withObs) return withObs;
+    if (candidates.length > 0) return candidates[candidates.length - 1];
+  }
+  return [...calls].reverse().find(c => c.inputObservations.length > 0) ?? calls.at(-1);
+}
+
 export function ShioriComposer({
   project,
   workspace,
   data,
   isLiveRun,
+  hostStatusOverride,
+  onHostStatusChange,
+  perceptionInjectOverride,
+  onPerceptionChange,
   externalMode,
   externalDraft,
   onExternalConsumed,
@@ -401,6 +439,10 @@ export function ShioriComposer({
   workspace: string | null;
   data: RunData;
   isLiveRun: boolean;
+  hostStatusOverride?: Record<string, unknown> | null;
+  onHostStatusChange?: (status: Record<string, unknown>) => void;
+  perceptionInjectOverride?: boolean | null;
+  onPerceptionChange?: (enabled: boolean) => void;
   externalMode?: "start" | "steer" | "follow_up" | null;
   externalDraft?: string | null;
   onExternalConsumed?(): void;
@@ -415,16 +457,21 @@ export function ShioriComposer({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(null);
+  const [localPerceptionInject, setLocalPerceptionInject] = useState<boolean | null>(null);
+  const [localHostStatus, setLocalHostStatus] = useState<Record<string, unknown> | null>(null);
 
-  const live = data.live as (NonNullable<RunData["live"]> & {
+  const effectiveHost = (hostStatusOverride ?? localHostStatus ?? data.live) as (NonNullable<RunData["live"]> & {
     consolidating?: boolean;
     context?: { perceptionInjection?: boolean };
   }) | null;
   const control = data.lastControl;
-  const hostOnline = Boolean(isLiveRun && (live || data.controlAllowed));
-  const runtimeMode = live?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
-  const consolidating = Boolean(live?.consolidating ?? control?.consolidating);
-  const perceptionInject = live?.context?.perceptionInjection ?? control?.context?.perceptionInjection ?? true;
+  const runtimeMode =
+    effectiveHost?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
+  const consolidating = Boolean(effectiveHost?.consolidating ?? control?.consolidating);
+  const serverPerceptionInject =
+    effectiveHost?.context?.perceptionInjection ?? control?.context?.perceptionInjection ?? true;
+  const perceptionInject =
+    perceptionInjectOverride ?? localPerceptionInject ?? serverPerceptionInject;
   const isAuto = runtimeMode === "auto";
 
   if (externalDraft != null || externalMode != null) {
@@ -443,18 +490,44 @@ export function ShioriComposer({
     setSelectedTab(next);
   };
 
+  const applyReturnedStatus = (res: unknown) => {
+    const status = asRecord(asRecord(res)?.status);
+    if (status) {
+      setLocalHostStatus(status);
+      onHostStatusChange?.(status);
+      const contextRec = asRecord(status.context);
+      if (typeof contextRec?.perceptionInjection === "boolean") {
+        setLocalPerceptionInject(contextRec.perceptionInjection);
+        onPerceptionChange?.(contextRec.perceptionInjection);
+      }
+    }
+  };
+
   const togglePerception = async () => {
     if (submitting || !project || !workspace) return;
+    const next = !perceptionInject;
     setError(null);
+    setLocalPerceptionInject(next);
+    onPerceptionChange?.(next);
     try {
-      await sendRuntimeControl(project, workspace, {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(`ludens:perception-inject:${project}`, next ? "1" : "0");
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    try {
+      const res = await sendRuntimeControl(project, workspace, {
         action: "perception_inject",
-        enabled: !perceptionInject,
+        enabled: next,
         runId: data.run,
       });
+      applyReturnedStatus(res);
       onUpdated();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (!isHostOfflineError(cause)) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     }
   };
 
@@ -465,22 +538,39 @@ export function ShioriComposer({
     setSubmitting(true);
     setError(null);
     try {
+      let res: unknown;
       if (effectiveTab === "steer" || effectiveTab === "follow_up") {
-        await sendRuntimeControl(project, workspace, {
-          action: "steer",
-          message: text,
-          delivery: effectiveTab,
-          runId: data.run,
-          expectedEpoch: live?.epoch ?? undefined,
-        });
+        try {
+          res = await sendRuntimeControl(project, workspace, {
+            action: "steer",
+            message: text,
+            delivery: effectiveTab,
+            runId: data.run,
+            expectedEpoch: effectiveHost?.epoch ?? undefined,
+          });
+        } catch (steerErr) {
+          const msg = steerErr instanceof Error ? steerErr.message : String(steerErr);
+          if (msg.includes("Auto loop is not active")) {
+            res = await sendRuntimeControl(project, workspace, {
+              action: "auto_on",
+              ...(text ? { message: text } : {}),
+              runId: data.run,
+              expectedEpoch: effectiveHost?.epoch ?? null,
+            });
+            setSelectedTab(null);
+          } else {
+            throw steerErr;
+          }
+        }
       } else {
-        await sendRuntimeControl(project, workspace, {
+        res = await sendRuntimeControl(project, workspace, {
           action: "auto_on",
           ...(text ? { message: text } : {}),
           runId: data.run,
-          expectedEpoch: live?.epoch ?? null,
+          expectedEpoch: effectiveHost?.epoch ?? null,
         });
       }
+      applyReturnedStatus(res);
       if (!overrideText) setDraft("");
       setLastSent(text || t("resumedDefaultPrompt"));
       onUpdated();
@@ -603,6 +693,7 @@ export function ShioriComposer({
             <button
               type="button"
               className="codex-subtle-pill"
+              aria-pressed={perceptionInject}
               data-active={perceptionInject || undefined}
               title={t("perceptionInjectHint")}
               onClick={() => void togglePerception()}
@@ -672,6 +763,7 @@ export function ShioriWorkbench({
   onOpenCaps,
   onOpenReplay,
   onReturnLatest,
+  renderObservation,
   observationSlot,
 }: {
   project: string;
@@ -689,22 +781,53 @@ export function ShioriWorkbench({
   onOpenCaps(): void;
   onOpenReplay?(): void;
   onReturnLatest(): void;
+  renderObservation?: (options: {
+    call: Call | undefined;
+    selectedImage: string | undefined;
+    onSelectImage: (id: string) => void;
+  }) => ReactNode;
   observationSlot: ReactNode;
 }) {
   const t = useTranslations("shioriCockpit");
   const streamRef = useRef<HTMLDivElement | null>(null);
+  const cachedSegmentsRef = useRef<{ run: string; segments: StreamSegment[] }>({
+    run: "",
+    segments: [],
+  });
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [dockOpen, setDockOpen] = useState(true);
   const [dockTab, setDockTab] = useState<"stage" | "tools" | "stats">("stage");
   const [atBottom, setAtBottom] = useState(true);
   const [busyTool, setBusyTool] = useState<string | null>(null);
   const [toolError, setToolError] = useState<string | null>(null);
+  const [showStandbyHelper, setShowStandbyHelper] = useState(false);
+  const [copiedCmd, setCopiedCmd] = useState(false);
+  const [perceptionOverride, setPerceptionOverride] = useState<boolean | null>(null);
+  const [hostStatusOverride, setHostStatusOverride] = useState<Record<string, unknown> | null>(null);
+  const [inspectedTurn, setInspectedTurn] = useState<{
+    blockId: string;
+    callId: string | null;
+    imageId: string | null;
+    at: string;
+  } | null>(null);
   const [workflowCommand, setWorkflowCommand] = useState<{
     mode: "start" | "steer" | "follow_up";
     prompt: string;
   } | null>(null);
 
-  const live = data.live as (NonNullable<RunData["live"]> & {
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && project) {
+        const stored = window.localStorage.getItem(`ludens:perception-inject:${project}`);
+        if (stored === "0") setPerceptionOverride(false);
+        else if (stored === "1") setPerceptionOverride(true);
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [project]);
+
+  const live = (hostStatusOverride ?? data.live) as (NonNullable<RunData["live"]> & {
     remainingSeconds?: number | null;
     consolidating?: boolean;
     context?: { perceptionInjection?: boolean };
@@ -715,10 +838,19 @@ export function ShioriWorkbench({
   const mode = live?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
   const consolidating = Boolean(live?.consolidating ?? control?.consolidating);
   const thinking = Boolean(live?.thinking ?? control?.thinking);
-  const perceptionInject = live?.context?.perceptionInjection ?? control?.context?.perceptionInjection ?? true;
+  const serverPerceptionInject =
+    live?.context?.perceptionInjection ?? control?.context?.perceptionInjection ?? true;
+  const perceptionInject = perceptionOverride ?? serverPerceptionInject;
   const isAuto = mode === "auto";
 
-  const segments = useMemo(() => buildCodexSegments(feed.blocks), [feed.blocks]);
+  const computedSegments = useMemo(() => buildCodexSegments(feed.blocks), [feed.blocks]);
+  if (computedSegments.length > 0) {
+    cachedSegmentsRef.current = { run: data.run, segments: computedSegments };
+  }
+  const segments =
+    computedSegments.length === 0 && feed.loading && cachedSegmentsRef.current.run === data.run
+      ? cachedSegmentsRef.current.segments
+      : computedSegments;
 
   // Keep scrolled to bottom when new blocks arrive while following
   useEffect(() => {
@@ -741,19 +873,93 @@ export function ShioriWorkbench({
     setAtBottom(true);
   };
 
+  const handleInspectBlock = (block: ActivityBlock, siblingSteps: ActivityBlock[] = []) => {
+    const matchedCall = resolveCallForTurn(block, siblingSteps, data.calls);
+    setInspectedTurn(prev =>
+      prev?.blockId === block.id
+        ? null
+        : {
+            blockId: block.id,
+            callId: matchedCall?.id ?? null,
+            imageId: null,
+            at: block.at,
+          },
+    );
+    setDockOpen(true);
+    setDockTab("stage");
+    onSelectBlock?.(block);
+  };
+
+  const toggleWorkbenchPerception = async () => {
+    if (!project || !workspace) return;
+    const next = !perceptionInject;
+    setPerceptionOverride(next);
+    setToolError(null);
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(`ludens:perception-inject:${project}`, next ? "1" : "0");
+      }
+    } catch {
+      // Ignore storage errors
+    }
+    try {
+      const res = await sendRuntimeControl(project, workspace, {
+        action: "perception_inject",
+        enabled: next,
+        runId: data.run,
+      });
+      const confirmed = res?.status?.context?.perceptionInjection;
+      if (typeof confirmed === "boolean") setPerceptionOverride(confirmed);
+      onUpdated();
+    } catch (cause) {
+      if (!isHostOfflineError(cause)) {
+        setToolError(cause instanceof Error ? cause.message : String(cause));
+      }
+    }
+  };
+
   const runHostTool = async (key: string, command: RuntimeControlAction) => {
     if (!project || !workspace || busyTool) return;
     setBusyTool(key);
     setToolError(null);
+    setShowStandbyHelper(false);
     try {
-      await sendRuntimeControl(project, workspace, command);
+      const res = await sendRuntimeControl(project, workspace, command);
+      const status = asRecord(asRecord(res)?.status);
+      if (status) {
+        setHostStatusOverride(status);
+        const contextRec = asRecord(status.context);
+        if (typeof contextRec?.perceptionInjection === "boolean") {
+          setPerceptionOverride(contextRec.perceptionInjection);
+        }
+      }
       onUpdated();
     } catch (cause) {
-      setToolError(cause instanceof Error ? cause.message : String(cause));
+      if (isHostOfflineError(cause)) {
+        setShowStandbyHelper(true);
+      } else {
+        setToolError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
       setBusyTool(null);
     }
   };
+
+  const launchCmd = `ludens run --workspace ${workspace || "<workspace>"}`;
+  const copyLaunchCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(launchCmd);
+      setCopiedCmd(true);
+      setTimeout(() => setCopiedCmd(false), 2000);
+    } catch {
+      // Ignore clipboard failure
+    }
+  };
+
+  const inspectedCall = inspectedTurn?.callId
+    ? data.calls.find(c => c.id === inspectedTurn.callId)
+    : undefined;
+  const activeBlockId = inspectedTurn?.blockId ?? selectedBlock;
 
   const summary = data.summary;
   const budgetSeconds = Math.max(1, data.manifest.seconds || 1800);
@@ -880,14 +1086,17 @@ export function ShioriWorkbench({
                 const paragraphs = seg.responseText
                   ? seg.responseText.split(/\n{2,}/).filter(Boolean)
                   : [];
+                const isTurnInspected = Boolean(
+                  seg.responseBlock && activeBlockId === seg.responseBlock.id,
+                );
 
                 return (
                   <article key={seg.id} className="codex-turn-assistant">
                     <CodexStepGroup
                       steps={seg.steps}
                       forceExpanded={showAllSteps}
-                      selectedBlock={selectedBlock}
-                      onSelect={onSelectBlock}
+                      selectedBlock={activeBlockId}
+                      onSelect={step => handleInspectBlock(step, seg.steps)}
                     />
 
                     {paragraphs.length > 0 && (
@@ -900,7 +1109,9 @@ export function ShioriWorkbench({
                             <button
                               type="button"
                               className="codex-trace-link"
-                              onClick={() => onSelectBlock?.(seg.responseBlock!)}
+                              data-active={isTurnInspected || undefined}
+                              aria-pressed={isTurnInspected}
+                              onClick={() => handleInspectBlock(seg.responseBlock!, seg.steps)}
                             >
                               {"{}"} {t("inspectTurnRecord")} · {clockTime(seg.responseBlock.at)}
                             </button>
@@ -941,6 +1152,10 @@ export function ShioriWorkbench({
           workspace={workspace}
           data={data}
           isLiveRun={isLiveRun}
+          hostStatusOverride={hostStatusOverride}
+          onHostStatusChange={setHostStatusOverride}
+          perceptionInjectOverride={perceptionInject}
+          onPerceptionChange={setPerceptionOverride}
           externalMode={workflowCommand?.mode ?? null}
           externalDraft={workflowCommand?.prompt ?? null}
           onExternalConsumed={() => setWorkflowCommand(null)}
@@ -990,14 +1205,49 @@ export function ShioriWorkbench({
           </div>
 
           <div className="codex-dock-body">
-            {/* Live Game / Device Viewport (Shown in Stage tab, or compactly above Tools) */}
-            {(dockTab === "stage" || dockTab === "tools") && (
+            {/* Live Game / Device Viewport (Shown only in Stage tab so Tools/Stats tabs switch cleanly) */}
+            {dockTab === "stage" && (
               <div className="codex-dock-viewport">
-                {observationSlot}
+                {inspectedTurn && (
+                  <div className="codex-inspected-banner" role="status">
+                    <span>
+                      {t("inspectingCallBanner").replace(
+                        "{number}",
+                        String(inspectedCall?.index ?? "—").padStart(3, "0"),
+                      )}{" "}
+                      · {clockTime(inspectedTurn.at)}
+                    </span>
+                    <button
+                      type="button"
+                      className="codex-inspected-clear"
+                      onClick={() => setInspectedTurn(null)}
+                    >
+                      <X className="size-3" aria-hidden="true" />
+                      <span>{t("clearInspectedBtn")}</span>
+                    </button>
+                  </div>
+                )}
+                {renderObservation
+                  ? renderObservation({
+                      call: inspectedCall,
+                      selectedImage: inspectedTurn?.imageId ?? undefined,
+                      onSelectImage: id =>
+                        setInspectedTurn(prev =>
+                          prev
+                            ? { ...prev, imageId: id }
+                            : {
+                                blockId: "manual-image",
+                                callId: null,
+                                imageId: id,
+                                at: data.updatedAt,
+                              },
+                        ),
+                    })
+                  : observationSlot}
               </div>
             )}
 
-            {/* Codex-style "工具 (Tools)" Action List (just like the right panel in the screenshot) */}
+            {/* Codex-style "工具 (Tools)" Action List */}
             {(dockTab === "stage" || dockTab === "tools") && (
               <div className="codex-dock-section">
                 <h3 className="codex-dock-heading">{t("dockToolsTitle")}</h3>
@@ -1005,6 +1255,32 @@ export function ShioriWorkbench({
                   <p className="codex-tool-err" role="alert">
                     {toolError}
                   </p>
+                )}
+                {showStandbyHelper && (
+                  <div className="codex-standby-card" role="status">
+                    <p>{t("hostStandbyHint")}</p>
+                    <div className="codex-standby-cmd">
+                      <Terminal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      <code>{launchCmd}</code>
+                      <button
+                        type="button"
+                        className="codex-copy-btn"
+                        onClick={() => void copyLaunchCommand()}
+                      >
+                        {copiedCmd ? (
+                          <>
+                            <Check className="size-3" aria-hidden="true" />
+                            <span>{t("copiedLaunchCmd")}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="size-3" aria-hidden="true" />
+                            <span>{t("copyLaunchCmd")}</span>
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </div>
                 )}
                 <div className="codex-tool-list">
                   <button
@@ -1097,6 +1373,89 @@ export function ShioriWorkbench({
               </div>
             )}
 
+            {/* Dedicated Perception Policy & Quick Prompt Templates when in Tools tab */}
+            {dockTab === "tools" && (
+              <>
+                <div className="codex-dock-section">
+                  <h3 className="codex-dock-heading">{t("perceptionPolicyTitle")}</h3>
+                  <div className="codex-tool-list">
+                    <button
+                      type="button"
+                      className="codex-tool-row"
+                      aria-pressed={perceptionInject}
+                      onClick={() => void toggleWorkbenchPerception()}
+                    >
+                      <span className="codex-tool-row-left">
+                        {perceptionInject ? (
+                          <Eye className="size-4 text-primary" aria-hidden="true" />
+                        ) : (
+                          <EyeOff className="size-4 text-muted-foreground" aria-hidden="true" />
+                        )}
+                        <span>{t("perceptionToggleRow")}</span>
+                      </span>
+                      <kbd className="codex-tool-kbd">
+                        {perceptionInject ? t("injectOn") : t("injectOff")}
+                      </kbd>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="codex-dock-section">
+                  <h3 className="codex-dock-heading">{t("quickPromptsTitle")}</h3>
+                  <div className="codex-tool-list">
+                    <button
+                      type="button"
+                      className="codex-tool-row"
+                      onClick={() =>
+                        setWorkflowCommand({ mode: "start", prompt: t("presetExploreStartPrompt") })
+                      }
+                    >
+                      <span className="codex-tool-row-left">
+                        <span>{t("presetExploreStart")}</span>
+                      </span>
+                      <kbd className="codex-tool-kbd">Start</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      className="codex-tool-row"
+                      onClick={() =>
+                        setWorkflowCommand({ mode: "steer", prompt: t("presetEvalPrompt") })
+                      }
+                    >
+                      <span className="codex-tool-row-left">
+                        <span>{t("presetEval")}</span>
+                      </span>
+                      <kbd className="codex-tool-kbd">Steer</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      className="codex-tool-row"
+                      onClick={() =>
+                        setWorkflowCommand({ mode: "steer", prompt: t("presetAdaptPrompt") })
+                      }
+                    >
+                      <span className="codex-tool-row-left">
+                        <span>{t("presetAdapt")}</span>
+                      </span>
+                      <kbd className="codex-tool-kbd">Steer</kbd>
+                    </button>
+                    <button
+                      type="button"
+                      className="codex-tool-row"
+                      onClick={() =>
+                        setWorkflowCommand({ mode: "follow_up", prompt: t("presetMemoryPrompt") })
+                      }
+                    >
+                      <span className="codex-tool-row-left">
+                        <span>{t("presetMemory")}</span>
+                      </span>
+                      <kbd className="codex-tool-kbd">Follow-up</kbd>
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+
             {/* Session Stats / Telemetry Section */}
             {(dockTab === "stage" || dockTab === "stats") && summary && (
               <div className="codex-dock-section">
@@ -1138,6 +1497,44 @@ export function ShioriWorkbench({
                     </small>
                   </div>
                 </div>
+              </div>
+            )}
+
+            {/* Session Provenance Details in Stats Tab */}
+            {dockTab === "stats" && (
+              <div className="codex-dock-section">
+                <h3 className="codex-dock-heading">{t("provenanceTitle")}</h3>
+                <dl className="codex-provenance-list">
+                  <div className="codex-provenance-row">
+                    <dt>{t("provShiori")}</dt>
+                    <dd>
+                      {data.manifest.shiori?.implementation ?? "omp"}{" "}
+                      {data.manifest.shiori?.implementationVersion ?? ""}
+                    </dd>
+                  </div>
+                  <div className="codex-provenance-row">
+                    <dt>{t("provModel")}</dt>
+                    <dd>{data.manifest.model ?? t("deviceOnly")}</dd>
+                  </div>
+                  <div className="codex-provenance-row">
+                    <dt>{t("provCompaction")}</dt>
+                    <dd>
+                      {data.manifest.compactionThreshold?.toLocaleString() ?? "default"}
+                    </dd>
+                  </div>
+                  <div className="codex-provenance-row">
+                    <dt>{t("provRun")}</dt>
+                    <dd className="font-mono">{data.run}</dd>
+                  </div>
+                  <div className="codex-provenance-row">
+                    <dt>{t("provEpoch")}</dt>
+                    <dd className="font-mono">{data.selectedEpoch ?? "—"}</dd>
+                  </div>
+                  <div className="codex-provenance-row">
+                    <dt>{t("provWorkspace")}</dt>
+                    <dd className="font-mono break-all">{workspace ?? data.manifest.workspace}</dd>
+                  </div>
+                </dl>
               </div>
             )}
           </div>

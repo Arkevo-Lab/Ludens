@@ -25,7 +25,7 @@ import { Metric, ObservationPanel, seconds, percent, bytes, clockTime } from "@/
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
 export default function ConsoleShell() {
-  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshCatalog} = useDashboardController();
+  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog} = useDashboardController();
   const waitSummary = [
     s?.medianHttpHeadersMs != null ? dt("waitHttp") + " " + seconds(s.medianHttpHeadersMs) : "",
     s?.medianWsWaitMs != null ? dt("waitWs") + " " + seconds(s.medianWsWaitMs) : "",
@@ -249,26 +249,40 @@ export default function ConsoleShell() {
                   workspaceTitle={workspaceName(project)}
                   data={data}
                   feed={activity}
-                  isLiveRun={Boolean(!selection.run || selection.run === latest?.id) && !selection.epoch}
+                  isLiveRun={
+                    Boolean(!selection.run || selection.run === latest?.id) &&
+                    (!selection.epoch || selection.epoch === cycles.at(-1)?.epoch)
+                  }
                   phaseLabel={!staleStatus ? phase?.label : null}
                   phaseElapsedMs={!staleStatus ? phase?.elapsedMs : null}
                   selectedBlock={query.get("block") ?? undefined}
-                  onSelectBlock={(block) =>
-                    navigate({
-                      ...pinned,
-                      block: block.id,
-                      call: block.trace?.modelCallId ?? null,
-                      image: null,
-                    })
-                  }
                   onUpdated={() => {
-                    setSnapshotRevision(n => n + 1);
-                    activity.latest();
+                    refreshRun();
                   }}
                   onOpenPerf={() => navigate({ view: "perf" })}
                   onOpenCaps={() => navigate({ view: "caps" })}
                   onOpenReplay={() => navigate({ view: "replay" })}
                   onReturnLatest={returnToLatest}
+                  renderObservation={({ call: overrideCall, selectedImage: overrideImage, onSelectImage }) => {
+                    const effectiveCall =
+                      overrideCall ??
+                      (call?.inputObservations.length
+                        ? call
+                        : [...data.calls].reverse().find(c => c.inputObservations.length > 0) ?? call);
+                    const effectiveImage =
+                      overrideImage ??
+                      selectedImage ??
+                      (!effectiveCall?.inputObservations.length ? data.observations.at(-1)?.id : undefined);
+                    return (
+                      <ObservationPanel
+                        priority
+                        data={data}
+                        call={effectiveCall}
+                        selectedImage={effectiveImage}
+                        onImage={onSelectImage}
+                      />
+                    );
+                  }}
                   observationSlot={
                     <ObservationPanel
                       priority
