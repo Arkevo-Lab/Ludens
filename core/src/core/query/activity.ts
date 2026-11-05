@@ -249,6 +249,9 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
   // Action halts on its first failure; action_status is the visible notification.
   // Keep detailed fault intervals available without repeating the same Pet bubble.
   const actionDetail = event.type === "action_fault" || event.type === "action_fault_end";
+  if (event.type === "user_message" && typeof data?.text === "string") return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`,
+    kind: "text" as const, at: event.at, title: data.mode === "steer" ? "Steer" : data.mode === "follow_up" ? "Follow-up" : "User",
+    ...provenance(event), status: "complete" as const };
   return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`, kind: system && !actionDetail ? "system" : "diagnostic",
     at: event.at, title: event.type, ...provenance(event), status: failed ? "error" : "complete",
     ...(raised ? { outcome: "raised" as const } : {}) };
@@ -293,6 +296,10 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
           block.status = failed ? "error" : "complete";
         }
       }
+    }
+    if (event.type === "user_message" && typeof data?.text === "string") {
+      blocks.set(header.id, { ...header, text: data.text as string, data: { role: "user", mode: (data.mode as string) ?? "start", text: data.text } });
+      continue;
     }
     const text = readable(data);
     blocks.set(header.id, { ...header, text, data: structuredText(text) as Record<string, unknown> });

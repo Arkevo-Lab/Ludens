@@ -6,6 +6,7 @@ import { ArrowRight, History } from "lucide-react";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ActivityFeed } from "@/features/live/activity-feed";
+import { ShioriComposer, ShioriLoopCockpit } from "@/features/live/shiori-cockpit";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConsoleSidebar, type ConsoleView as View } from "@/shell/console-sidebar";
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
@@ -241,21 +242,36 @@ export default function ConsoleShell() {
             </section>
           ) : (
             <>
-              <div className={"run-status" + (view === "live" ? " live-host-status" : "")}>
-                <span className={"status-dot " + (auto && !staleStatus ? "online" : "")} />
-                <strong>{view === "live" ? <>{staleStatus && `${lt("hostSnapshot")}: `}{observedStatus}</> : status}</strong>
-                {view === "live" && phase?.label && !staleStatus && <span>{phase.label}</span>}
-                {phase?.elapsedMs != null && !staleStatus && (
-                  <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
-                )}
-                {view !== "live" && <><i />
-                <span>{data.manifest.model ?? dt("deviceOnly")}</span>
-                <span className="run-time">
-                  {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
-                  {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>{dt("budget")}{" "}
-                  {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}
-                </span></>}
-              </div>
+              {view === "live" ? (
+                <ShioriLoopCockpit
+                  project={selection.project}
+                  workspace={project?.workspace ?? data.manifest.workspace ?? null}
+                  data={data}
+                  isLiveRun={!staleStatus && (!selection.run || selection.run === latest?.id)}
+                  phaseLabel={!staleStatus ? phase?.label : null}
+                  phaseElapsedMs={!staleStatus ? phase?.elapsedMs : null}
+                  onUpdated={() => {
+                    setSnapshotRevision(n => n + 1);
+                    activity.latest();
+                  }}
+                  onOpenPerf={() => navigate({ view: "perf" })}
+                />
+              ) : (
+                <div className="run-status">
+                  <span className={"status-dot " + (auto && !staleStatus ? "online" : "")} />
+                  <strong>{status}</strong>
+                  {phase?.elapsedMs != null && !staleStatus && (
+                    <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
+                  )}
+                  <i />
+                  <span>{data.manifest.model ?? dt("deviceOnly")}</span>
+                  <span className="run-time">
+                    {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
+                    {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>{dt("budget")}{" "}
+                    {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}
+                  </span>
+                </div>
+              )}
               {view === "live" ? (
                 <>
                 <div className="live-grid">
@@ -280,6 +296,18 @@ export default function ConsoleShell() {
                         call: block.trace?.modelCallId ?? null,
                         image: null,
                       })
+                    }
+                    composer={
+                      <ShioriComposer
+                        project={selection.project}
+                        workspace={project?.workspace ?? data.manifest.workspace ?? null}
+                        data={data}
+                        isLiveRun={!staleStatus && (!selection.run || selection.run === latest?.id)}
+                        onUpdated={() => {
+                          setSnapshotRevision(n => n + 1);
+                          activity.latest();
+                        }}
+                      />
                     }
                   />
                 </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { LogBlock } from "@/lib/activity";
 import {
   activityContentView,
@@ -22,6 +22,7 @@ interface ActivityFeedProps {
   expectedEpoch?: string | null;
   selectedBlock?: string;
   onSelect?: (block: LogBlock) => void;
+  composer?: ReactNode;
 }
 
 const filters: ActivityFilter[] = [
@@ -156,6 +157,63 @@ const provenanceLabels: Record<string, string> = {
   "trace.spanId": "spanId", "trace.parentSpanId": "parentSpanId", "trace.epoch": "epoch",
 };
 
+function extractToolSummary(block: LogBlock): { badge: string; detail: string; kind: "bash" | "file" | "observe" | "capability" | "generic" } | null {
+  if (block.kind !== "tool") return null;
+  const rawArgs = block.tool?.args;
+  const args = rawArgs && typeof rawArgs === "object" && !Array.isArray(rawArgs) ? (rawArgs as Record<string, unknown>) : null;
+  const name = block.title;
+  if (name === "bash") {
+    const cmd = typeof args?.command === "string" ? args.command : typeof rawArgs === "string" ? rawArgs : "";
+    return { badge: "$ bash", detail: cmd.split("\n")[0]?.slice(0, 120) || "shell command", kind: "bash" };
+  }
+  if (name === "edit" || name === "write" || name === "read") {
+    const filePath = typeof args?.path === "string" ? args.path : typeof args?.file_path === "string" ? args.file_path : "";
+    return { badge: name.toUpperCase(), detail: filePath || name, kind: "file" };
+  }
+  if (name === "observe") {
+    const cap = typeof args?.capability === "string" ? args.capability : "*";
+    const limit = typeof args?.limit === "number" ? ` · limit=${args.limit}` : "";
+    return { badge: "👁 observe", detail: `${cap}${limit}`, kind: "observe" };
+  }
+  if (name === "wait") {
+    const sec = typeof args?.seconds === "number" ? `${args.seconds}s` : typeof args?.ms === "number" ? `${args.ms}ms` : "";
+    return { badge: "⏱ wait", detail: sec || "pause", kind: "generic" };
+  }
+  if (name.startsWith("python/") || name.startsWith("controller/")) {
+    return { badge: "⚡ capability", detail: name, kind: "capability" };
+  }
+  return null;
+}
+
+function extractUserPrompt(block: LogBlock): { text: string; mode: string } | null {
+  if (block.title === "user_message" || block.data?.role === "user") {
+    const text = typeof block.data?.text === "string" ? block.data.text : block.text;
+    const mode = typeof block.data?.mode === "string" ? block.data.mode : "start";
+    return { text, mode };
+  }
+  return null;
+}
+
+function extractSystemSummary(block: LogBlock): string | null {
+  if (block.kind !== "system") return null;
+  const data = block.data;
+  if (block.title === "control" && data) {
+    const mode = typeof data.mode === "string" ? data.mode.toUpperCase() : "CONTROL";
+    const reason = typeof data.reason === "string" ? ` · ${data.reason}` : "";
+    return `Control → ${mode}${reason}`;
+  }
+  if (block.title === "consolidation_start") return "Memory & Skill Consolidation started";
+  if (block.title === "consolidation_end") {
+    const outcome = typeof data?.outcome === "string" ? data.outcome : "done";
+    return `Memory & Skill Consolidation (${outcome})`;
+  }
+  if (block.title.includes("compaction")) {
+    const tokens = typeof data?.tokensBefore === "number" ? ` · ${data.tokensBefore.toLocaleString()} tokens` : "";
+    return `${block.title.replaceAll("_", " ")}${tokens}`;
+  }
+  return null;
+}
+
 function ActivityBlock({
   block,
   selected,
@@ -173,11 +231,15 @@ function ActivityBlock({
   const at = Number.isNaN(time.getTime())
     ? block.at
     : time.toLocaleTimeString("zh-CN", { hour12: false });
+  const toolSummary = extractToolSummary(block);
+  const userPrompt = extractUserPrompt(block);
+  const systemSummary = extractSystemSummary(block);
   return (
     <article
-      className={`block-item block-${block.kind}${selected ? " block-selected" : ""}${block.status === "error" ? " block-error" : ""}`}
+      className={`block-item block-${block.kind}${userPrompt ? " block-user-turn" : ""}${selected ? " block-selected" : ""}${block.status === "error" ? " block-error" : ""}`}
       aria-label={`${t(`kind.${block.kind}`)}: ${block.title}`}
       data-activity-block={block.id}
+      data-user-mode={userPrompt?.mode}
     >
       <div className="block-main">
         <div className="block-heading">
@@ -186,6 +248,20 @@ function ActivityBlock({
             {sourceName}
           </span>
           <Badge variant="secondary" className="rounded px-1.5 py-0 text-[11px]">{t(`kind.${block.kind}`)}</Badge>
+          {userPrompt && (
+            <span className="codex-user-badge" data-mode={userPrompt.mode}>
+              {userPrompt.mode === "steer" ? "⚡ STEER" : userPrompt.mode === "follow_up" ? "↳ FOLLOW-UP" : "▶ PROMPT"}
+            </span>
+          )}
+          {toolSummary && (
+            <span className="codex-tool-pill" data-tool-kind={toolSummary.kind}>
+              <b>{toolSummary.badge}</b>
+              <code>{toolSummary.detail}</code>
+            </span>
+          )}
+          {systemSummary && !userPrompt && (
+            <span className="codex-system-pill">{systemSummary}</span>
+          )}
           <time dateTime={block.at} title={block.at}>
             {at}
           </time>
@@ -208,6 +284,9 @@ function ActivityBlock({
             <span className="block-title">{block.title}</span>
           )}
         </div>
+        {userPrompt && userPrompt.text !== block.text && (
+          <p className="codex-user-prompt-text">{userPrompt.text}</p>
+        )}
         {block.kind === "tool" && block.tool ? (
           <div className="block-tool-fields">
             {block.tool.intent && (
@@ -251,7 +330,7 @@ function ActivityBlock({
   );
 }
 
-export function ActivityFeed({ feed, expectedEpoch, selectedBlock, onSelect }: ActivityFeedProps) {
+export function ActivityFeed({ feed, expectedEpoch, selectedBlock, onSelect, composer }: ActivityFeedProps) {
   const { filter, query, setFilter, setQuery } = feed;
   const t = useTranslations("activityFeed");
   const consistent = expectedEpoch === undefined || feed.scope?.epoch === expectedEpoch;
@@ -359,6 +438,7 @@ export function ActivityFeed({ feed, expectedEpoch, selectedBlock, onSelect }: A
           <span>{!loading && (feed.error || !consistent) ? t("retryLatestHint") : !loading && !query ? t("emptyHintDefault") : query ? t("emptyHintQuery") : ""}</span>
         </div>}
       </div>
+      {composer}
       <footer className="feed-footer">
         <span>{t("footerInWindow")} {page.length.toLocaleString()}{t("itemsUnit")} {t("footerHistoryTotal")} {feed.total.toLocaleString()}{t("itemsUnit")}
           {pinned ? t("pinnedKept") : ""}</span>

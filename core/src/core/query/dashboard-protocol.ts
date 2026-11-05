@@ -1,4 +1,5 @@
 import type { getActivity, ActivityQuery } from "./activity";
+import type { HostControlStatus, RuntimeControlCommand } from "./runtime-control";
 import type { petState, recordPetConsumer, setPetTarget } from "./pet-state";
 import type { capabilities, capabilityRuntime } from "./capabilities";
 import type { discoverDriver } from "./drivers";
@@ -29,6 +30,7 @@ export interface DashboardMethods {
   timelineRecord: { args: [project: string, run: string, record: string, sequence: number, source: { call?: string; observation?: string }]; result: Awaited<ReturnType<typeof timelineRecord>> };
   capabilities: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilities>> };
   capabilityRuntime: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilityRuntime>> };
+  runtimeControl: { args: [project: string, workspace: string, command: RuntimeControlCommand]; result: HostControlStatus };
   discoverDriver: { args: [spec: string]; result: Awaited<ReturnType<typeof discoverDriver>> };
   docGroups: { args: [root?: string, lang?: "en" | "zh"]; result: Awaited<ReturnType<typeof docGroups>> };
   readDoc: { args: [id: string, root?: string, lang?: "en" | "zh"]; result: Awaited<ReturnType<typeof readDoc>> };

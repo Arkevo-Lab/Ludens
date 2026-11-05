@@ -367,4 +367,304 @@
   }
 }
 
+/* ── Shiori × Codex Loop Cockpit & Thread ────────────────────── */
+.shiori-cockpit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--card);
+}
+.shiori-cockpit-bar[data-shiori-state="auto"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 45%, var(--border));
+  background: color-mix(in srgb, var(--success, #16a34a) 5%, var(--card));
+}
+.shiori-cockpit-bar[data-shiori-state="consolidating"] {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+  background: color-mix(in srgb, var(--primary) 6%, var(--card));
+}
+.shiori-cockpit-main {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 18px;
+  min-width: 0;
+  flex: 1;
+}
+.shiori-cockpit-identity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.shiori-pulse-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--muted-foreground);
+}
+.shiori-pulse-dot[data-tone="auto"] {
+  background: var(--success, #16a34a);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--success, #16a34a) 22%, transparent);
+}
+.shiori-pulse-dot[data-tone="consolidating"] {
+  background: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.shiori-pulse-dot[data-tone="manual"] {
+  background: var(--gold, #d97706);
+}
+.shiori-state-title {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.shiori-phase-pill {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.shiori-budget-pill {
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success, #16a34a) 10%, transparent);
+  color: var(--success, #16a34a);
+  font: 600 11px/1.35 var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+.shiori-epoch-chip {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-inset, var(--muted));
+  font: 11px/1.4 var(--font-mono);
+  color: var(--muted-foreground);
+}
+.shiori-queue-pill {
+  border-color: var(--primary);
+  color: var(--primary);
+  font-size: 10.5px;
+}
+.shiori-cockpit-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.shiori-meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-inset, var(--muted));
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.shiori-meta-chip code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--foreground);
+}
+.shiori-meta-link {
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.shiori-meta-link:hover {
+  border-color: var(--primary);
+  color: var(--foreground);
+}
+.shiori-cockpit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Codex Semantic Block Enhancements */
+.block-user-turn {
+  background: color-mix(in srgb, var(--primary) 7%, var(--card));
+  border-left: 3px solid var(--primary);
+}
+.codex-user-badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
+  color: var(--primary);
+  font: 600 10px/1.35 var(--font-mono);
+  letter-spacing: 0.03em;
+}
+.codex-user-badge[data-mode="steer"] {
+  background: color-mix(in srgb, var(--success, #16a34a) 18%, transparent);
+  color: var(--success, #16a34a);
+}
+.codex-user-prompt-text {
+  margin: 6px 0 8px;
+  padding: 8px 11px;
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
+  border-radius: 6px;
+  background: var(--card);
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--foreground);
+  white-space: pre-wrap;
+}
+.codex-tool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: min(100%, 340px);
+  padding: 1px 7px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-inset, var(--muted));
+  font: 11px/1.4 var(--font-mono);
+}
+.codex-tool-pill b {
+  color: var(--primary);
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.codex-tool-pill code {
+  color: var(--foreground);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-system-pill {
+  padding: 1px 7px;
+  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 35%, var(--border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--success, #16a34a) 8%, transparent);
+  color: var(--foreground);
+  font: 500 11px/1.35 var(--font-mono);
+}
+
+/* Shiori Composer Dock */
+.shiori-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 65%, var(--card));
+}
+.shiori-composer[data-shiori-composer="steer"] {
+  border-top-color: color-mix(in srgb, var(--success, #16a34a) 40%, var(--border));
+}
+.shiori-composer-readonly {
+  padding: 8px 16px;
+}
+.shiori-composer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+.shiori-composer-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.shiori-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font: 600 10.5px/1.35 var(--font-mono);
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
+  color: var(--primary);
+}
+.shiori-mode-badge[data-mode="steer"] {
+  background: color-mix(in srgb, var(--success, #16a34a) 15%, transparent);
+  color: var(--success, #16a34a);
+}
+.shiori-delivery-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--card);
+}
+.shiori-delivery-btn {
+  padding: 2px 8px;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.shiori-delivery-btn[data-active] {
+  background: color-mix(in srgb, var(--primary) 16%, var(--card));
+  color: var(--foreground);
+  font-weight: 500;
+}
+.shiori-composer-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.shiori-preset-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+.shiori-preset-chip:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--foreground);
+}
+.shiori-composer-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+.shiori-composer-textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 11px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--foreground);
+  font-size: 13px;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 52px;
+  max-height: 140px;
+}
+.shiori-composer-textarea:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+.shiori-composer-send {
+  flex-shrink: 0;
+  height: 36px;
+}
+.shiori-composer-error {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--destructive);
+}
+.shiori-composer-sent {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.shiori-composer-sent code {
+  font-family: var(--font-mono);
+  color: var(--foreground);
+}
+
 }
