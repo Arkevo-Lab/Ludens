@@ -1706,7 +1706,7 @@
     "dockTabStage": "Viewport",
     "dockTabTools": "Tools",
     "dockTabStats": "Stats",
-    "dockToolsTitle": "Tools",
+    "dockToolsTitle": "Host Control",
     "pipelineAria": "Shiori 4-stage autonomous loop pipeline",
     "stageObserveTitle": "Observe & Perceive",
     "stageObserveDesc": "Capture latest frame & inject structured perception.py state",

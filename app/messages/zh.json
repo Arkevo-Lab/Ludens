@@ -1706,7 +1706,7 @@
     "dockTabStage": "实时画面",
     "dockTabTools": "工具",
     "dockTabStats": "本轮状态",
-    "dockToolsTitle": "工具",
+    "dockToolsTitle": "宿主控制",
     "pipelineAria": "Shiori 四阶段自动循环管线",
     "stageObserveTitle": "Observe 画面感知",
     "stageObserveDesc": "捕获最新帧并注入 perception.py 结构化状态",
