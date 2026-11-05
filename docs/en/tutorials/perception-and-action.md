@@ -14,7 +14,9 @@ The `Perception` class in `perception.py` runs in a dedicated resident Python pr
 - `sample(self)`: must be annotated with `@observe`, `@record`, and `@capability`; `@observe` selects it as the workspace's main observation capability. The scheduler calls the active state continuously at the host-configured rate `LUDENS_PERCEPTION_SAMPLE_HZ` (default `30.0` Hz, which also serves as the nominal frame rate for recording; `Perception.sample_hz` class attributes are ignored — see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md)). If a single sample takes longer than one period, the next sample is deferred rather than overlapping concurrently or catching up with a backlog.
 - `close(self)`: called on `reload`, `stop`, or Host exit to release self-owned resources.
 
-- **Automatic reload on source edits**: edits to `perception.py` or its imported workspace `.py` modules automatically reload the resident process (non-Python assets never trigger a reload); explicit history queries survive the reload and the new generation preserves prior generations. For an explicit restart without editing sources, run `ludens perception reload`.
+The resident runs a continuous state machine in one Python process. Any active capability may return an optional `effect` (`{"id": "controller/...", "arguments": {...}}`, or a list of such objects) to request closed-loop actuation, and an optional `transition` (`"method_name"` or `{"to": "method_name", "arguments": {...}}`) to select the capability called on the next tick. Transition targets resolve to capabilities on the same instance, module, or workspace without crossing a process boundary, so instance attributes and module globals provide shared-memory context across ticks.
+
+**Automatic reload on source edits**: edits to `perception.py` or its imported workspace `.py` modules automatically reload the resident process (non-Python assets never trigger a reload); explicit history queries survive the reload and the new generation preserves prior generations. For an explicit restart without editing sources, run `ludens perception reload`.
 
 Without a `Perception` class, `perception.py` may instead define a top-level `@observe @record @capability` function with any name. Default live and offline timeline reads select the unique `@observe` channel, including a recorded capability in another workspace module; `@observe` does not schedule that other module automatically. With no marker, the default remains `python/perception.py:Perception.sample`. Duplicate markers produce diagnostics for every conflicting declaration and prevent the resident from starting.
 
@@ -34,7 +36,7 @@ class Perception:
         """Observe the environment and enter tracking when a target appears."""
         return {
             "text": "target acquired",
-            "effect": {"id": "controller/pad.play", "arguments": {"button": "a"}},
+            "effect": {"id": "controller/pad.play", "arguments": {"inputs": [{"atMs": 0, "durationMs": 120, "key": "a"}]}},
             "transition": {"to": "track", "arguments": {"target": "marker"}},
         }
 
@@ -48,7 +50,7 @@ class Perception:
         pass
 ```
 
-A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. After editing `perception.py` (such as capture logic or model weights), the resident process reloads automatically while keeping the historical timeline; `ludens perception reload` remains available for explicit restarts.
+A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. Editing Python source reloads the resident automatically while retaining persistent history. Changes to weights or other non-Python assets require `ludens perception reload`. A stopped resident stays stopped after edits until explicitly reloaded.
 
 ### 2. Perception Management and History Query Commands (`ludens observe`)
 
@@ -91,7 +93,7 @@ CLI `ludens observe`, Python `Client().observe(query)`, and the OMP-native `obse
 
 The host process supports the following environment variables for timeline windows and video encoding parameters (the effective values are visible in the `history` field of `ludens perception status`):
 
-Sampling and stepping rates default only when the corresponding variable is unset. Empty or whitespace-only values, non-numeric values, zero, negative numbers, NaN, and infinity fail worker startup with a variable-specific validation error; surrounding whitespace on a valid number is accepted.
+The sampling rate defaults only when its environment variable is unset. Empty or whitespace-only values, non-numeric values, zero, negative numbers, NaN, and infinity fail worker startup with a variable-specific validation error; surrounding whitespace on a valid number is accepted.
 
 | Environment variable | Default | Description |
 | --- | --- | --- |
@@ -118,4 +120,4 @@ Video uses fragmented MP4 (`+frag_keyframe+empty_moov`), with roughly one keyfra
 
 ## Lease Authority and Input Generations
 
-The unified resident state machine is strictly bound to the `epoch` and `inputGeneration` from its start. `PerceptionRuntime` owns the `inputGeneration` authority: granting a lease, replacing the generation on auto-reload, and clearing the device input generation on `stop()` keep stale calls from the old instance rejected while the current control `epoch`, the OMP session, and the remaining budget survive. On human handoff (`auto off`), budget exhaustion, or device disconnect, the lease is revoked and device input is released; after fixing the code, the next auto-reload or explicit `ludens perception reload` re-enables control, and if control was already handed back, run `ludens auto on` again.
+The unified resident state machine adopts the current host control `epoch` on takeover. `PerceptionRuntime` grants its `inputGeneration` before starting replacement code and clears it before waiting for old Python shutdown. Reload and `stop()` release current device inputs, including concurrent CLI inputs, and reject calls from the old generation while preserving the control `epoch`, OMP session, and remaining budget. If input cleanup fails, the Host hands control back. Human handoff (`auto off`), budget exhaustion, or device disconnect revokes the lease while perception may continue without device effects. After `stop()`, use an explicit `ludens perception reload` to restart; after handback, use `ludens auto on` to grant device control again.

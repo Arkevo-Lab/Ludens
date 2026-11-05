@@ -69,7 +69,6 @@ export class Runtime {
     if ("perception" in subsystems) this._perception = subsystems.perception;
   }
 
-
   constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000) {
     if (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647) throw new Error("Invalid Shiori time budget");
     if (budget && !Number.isFinite(budget.deadlineMs)) throw new Error("Invalid shared Shiori deadline");
@@ -153,7 +152,7 @@ export class Runtime {
     if (control.signal.aborted) return this.status();
     try {
       if (this.ownsDevice) {
-        if (!control.signal.aborted) await this._perception?.setLease(epoch, this._perception?.status().generation ?? null, control.signal);
+        if (!control.signal.aborted) await this._perception?.setLease(epoch, null, control.signal);
       }
     }
     catch (error) { await this.stop(String(error)); throw error; }

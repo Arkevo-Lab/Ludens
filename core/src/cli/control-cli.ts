@@ -40,7 +40,7 @@ ludens perception transition <target> [--args '<JSON object>' | --file <argument
 ludens perception inject [on|off]
 ${OBSERVE_HELP}
 Loads workspace/perception.py:Perception in a resident process and calls sample() continuously.
-Samples at LUDENS_PERCEPTION_SAMPLE_HZ (default 30 Hz; slow samples never overlap). Reload after editing code or weights.
+Samples at LUDENS_PERCEPTION_SAMPLE_HZ (default 30 Hz; slow samples never overlap). Python source edits auto-reload; explicitly reload after changing non-Python assets such as weights.
 Mark sample() with @capability and @record from ludens_tools. Only marked results enter the timeline.
 Persistent history survives reload and new runs. Defaults: 10-minute hot window, hourly segments.
 Set LUDENS_PERCEPTION_PERSIST=0 in the host environment for hot-window-only history.

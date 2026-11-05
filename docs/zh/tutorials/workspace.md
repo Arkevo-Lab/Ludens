@@ -2,7 +2,7 @@
 
 Workspace 是交由 Agent 与开发者共同演进的普通 Coding 工作区：可以在其中编写感知与控制代码、沉淀技能与记忆、收集数据集并训练模型，而无需改动仓库内的 Harness 或 Driver 源码。
 
-下文中的 CLI 命令均在**目标工作区目录**下执行（假定仓库 `core/bin` 与 `baseware/bin` 已加入 `PATH`）。环境安装与服务启停见 [安装与工作区启停](quickstart.md)，常驻 `perception.py` 的具体实现见 [常驻感知与动作循环](perception-and-action.md)。
+下文中的 CLI 命令均在**目标工作区目录**下执行（假定仓库 `core/bin` 与 `baseware/bin` 已加入 `PATH`）。环境安装与服务启停见 [安装与工作区启停](quickstart.md)，常驻 `perception.py` 的具体实现见 [常驻感知与动作状态机](perception-and-action.md)。
 
 ## 文件与会话
 
@@ -11,41 +11,41 @@ Workspace 是交由 Agent 与开发者共同演进的普通 Coding 工作区：�
 全局目录与工作区分为两层。`LUDENS_HOME` 默认为 `~/.ludens`，不随源码 checkout 移动；它只保存应用配置、可重建的索引、共享缓存与桌宠状态：
 
 ```text
-~/.ludens/                  # 可由 LUDENS_HOME 覆盖
+~/.ludens/                  # Override with LUDENS_HOME
 ├── config.json             # {version: 1, workspaceRoot: absolute, defaults: {...}}
-├── registry/<id>.json      # {id, workspace, name, updatedAt}，只指向工作区
-├── cache/drivers/          # 外部驱动安装缓存
-├── logs/baseware/          # 未指定 --data-dir 的独立 Baseware 日志
+├── registry/<id>.json      # {id, workspace, name, updatedAt}, a pointer to the workspace
+├── cache/drivers/          # External driver installation cache
+├── logs/baseware/          # Standalone Baseware logs without --data-dir
 ├── pet/
-│   ├── target.json         # 桌宠跟随的稳定 workspace ID
-│   ├── consumer.json       # 桌宠消费者心跳
-│   ├── profile/            # Electron 偏好与本地缓存
-│   └── background/         # 共享桌宠后台日志
-└── workspaces/             # 初始 workspaceRoot，可改到任意绝对路径
+│   ├── target.json         # Stable workspace ID followed by the pet
+│   ├── consumer.json       # Pet consumer heartbeat
+│   ├── profile/            # Electron preferences and local cache
+│   └── background/         # Shared pet background logs
+└── workspaces/             # Initial workspaceRoot; configurable to any absolute path
 ```
 
 每个工作区独立保存运行所需的状态，移动或备份时应保留整个目录：
 
 ```text
 workspace/
-├── ludens.json                 # 本机服务启动配置（driver、端口、模型、预算）
-├── AGENTS.md                # 可选的工作区专属约定（随 OMP 原生 contextFiles 加载）
-├── baseware.json            # 连接设备后自动导出的设备能力与参数 schema 快照
-├── perception.py            # 工作区常驻感知入口（Perception 类）
-├── skills/<name>/SKILL.md   # 可复用技能文档与配套脚本
-├── memory/current.md        # 当前目标、状态与下一步计划
+├── ludens.json                 # Local service startup config (driver, ports, model, budget)
+├── AGENTS.md                # Optional workspace-specific conventions (loaded via OMP native contextFiles)
+├── baseware.json            # Device capability and parameter schema snapshot auto-exported after connecting a device
+├── perception.py            # Resident workspace perception entry point (Perception class)
+├── skills/<name>/SKILL.md   # Reusable skill docs and helper scripts
+├── memory/current.md        # Current goals, status, and next steps
 ├── .ludens/
-│   ├── workspace.json       # {version: 1, id: "ws-UUID"}，持久身份
-│   ├── settings.json        # 可选的工作区感知热窗口与视频分段参数覆盖
-│   ├── skill-versions/      # 技能与记忆的历史内容快照
-│   ├── timeline/            # 跨 run 共享的 @record 能力记录、MP4 视频段与去重媒体原件
-│   ├── archive/             # 模型与工具日志的内容寻址 JSON 归档（媒体引用 timeline）
+│   ├── workspace.json       # {version: 1, id: "ws-UUID"}, persistent identity
+│   ├── settings.json        # Optional workspace perception hot-window and video segment parameter overrides
+│   ├── skill-versions/      # Historical skill and memory content snapshots
+│   ├── timeline/            # Cross-run shared @record capability records, MP4 video segments, and deduped media originals
+│   ├── archive/             # Content-addressed JSON archive of model and tool logs (media references timeline)
 │   └── shiori/
-│       ├── sessions/        # OMP 会话 JSONL 及其同名资源目录
-│       └── current-session.json # 默认续接会话指针
+│       ├── sessions/        # OMP session JSONL files and their same-named resource directories
+│       └── current-session.json # Default session-resume pointer
 └── logs/
-    ├── <run-id>/            # 单次 Host 运行的事件与流记录
-    └── background/          # launchd 后台服务日志与状态
+    ├── <run-id>/            # Event and stream records for a single Host run
+    └── background/          # launchd background service logs and status
 ```
 
 ### 2. 模板与会话生命周期
@@ -62,14 +62,14 @@ workspace/
 设备原生 Controller（来自 Baseware）与工作区声明的 Python 能力（来自 `@capability`）共用同一个目录入口：
 
 ```sh
-# 列出当前所有设备能力与工作区 Python 能力
+# List all current device capabilities and workspace Python capabilities
 ludens controller list
 
-# 查看单项能力的输入/输出 JSON Schema 与控制权要求
+# Show a single capability's input/output JSON Schema and control-ownership requirements
 ludens controller controller/pad.play --help
 ludens controller python/perception.py:Perception.sample --help
 
-# 通过 --args 或 --file 传入完整 JSON 参数对象执行调用
+# Pass a full JSON argument object via --args or --file to invoke a call
 ludens controller controller/screen.top.capture --args '{}'
 ludens controller python/scripts/nav.py:move_to --file ./move-args.json
 ```
@@ -90,7 +90,7 @@ def capture_top(exposure: int = 1) -> dict:
     return Client().call("controller/screen.top.capture", {})
 ```
 
-`@capability` 既可用于顶层同步函数，也可用于类方法（如 `Perception.sample`）。静态发现会扫描工作区代码（跳过 `logs/`、`.ludens/`、`.git/` 与虚拟环境），要求被标记函数具备 **docstring** 与**显式参数类型注解**（支持标量、`list`、`dict[str, ...]` 与 `Optional`），并将顶层同步函数及 `Perception.sample` 纳入 `ludens controller list` 目录。实现细节见 [_capabilities.py](../../../core/python/ludens_tools/_capabilities.py)。
+`@capability` 既可用于顶层同步函数，也可用于类方法（如 `Perception.sample`）。静态发现会扫描工作区代码（跳过 `logs/`、`.ludens/`、`.git/` 与虚拟环境），要求被标记函数具备 **docstring** 与**显式参数类型注解**（支持标量、`list`、`dict[str, ...]` 与 `Optional`），只有顶层同步函数会进入 `ludens controller list` 目录；绑定方法保留在常驻进程内。实现细节见 [_capabilities.py](../../../core/python/ludens_tools/_capabilities.py)。
 
 `@observe` 用于选择工作区的主观测能力。它必须与同一函数上的 `@capability` 配对（也可同时搭配 `@record`），且整个工作区最多只能声明一个 `@observe` 能力。发现过程会将重复声明报告为诊断，而不会选择有歧义的主通道。
 
@@ -171,17 +171,17 @@ def eval_reel_on_bite() -> dict:
 评估函数必须包含 docstring，并返回非空的扁平 `dict[str, int | float]` 有限数值奖励，或信封 `{"rewards": {...}, "details"?: {...}, "passed"?: bool}`。当 `passed` 为 `False` 时，运行会记录 `failed`，同时保留 `rewards` 与 `details` 以便迭代。由此构成**能力 – 评估 – 环境（Capability – Eval – Env）三元关系**：`@eval_capability(fn, env=...)` 的可选 `env` 参数接受同文件的 `@eval_env` 符号，或指向其他模块中声明环境的 `"python/path.py:EnvName"` ID 字符串；`ludens eval list` 会报告静态发现的环境目录 `envs`（id、description、origin、`codeSHA`）。发现过程只进行静态扫描；只有显式请求时才执行评估：
 
 ```sh
-# 列出绑定、当前状态、奖励与发现诊断
+# List bindings, current statuses, rewards, and discovery diagnostics
 ludens eval list
 
-# 运行一个已绑定评估，或运行所有已绑定评估
+# Run one bound eval, or every capability with a bound eval
 ludens eval run python/perception.py:parse_hp_bar
 ludens eval run --all
 
-# 当能力在旧题集上通过但实机翻车时，标记为 adapting 并记录反例帧
+# Flag a capability as adapting when live usage fails despite passing its old test set
 ludens eval adapt python/perception.py:parse_hp_bar --reason "False positive on dark transition" --record <record-id>
 
-# 按时间倒序读取不可变历史运行
+# Read immutable historical runs, newest first
 ludens eval history python/perception.py:parse_hp_bar
 ludens eval history
 ```
@@ -246,7 +246,7 @@ def detect_scene() -> dict:
 - **图像流转 fMP4 视频段**：图像写入 `.ludens/timeline/video/` 下的 fragmented MP4 视频段（默认 5 分钟一段，空闲 10 秒收尾），通过 `timeline.video` 的 `{pts, timeBase, width, height}` 精确定位；热窗口内保留内存原图供实时交付，冷历史查询时按需从视频段解码。
 - **非视频媒体内容寻址**：音频、二进制等其他媒体按 SHA-256 哈希去重保存在 `.ludens/timeline/objects/<sha256>.bin`。
 
-关于如何通过常驻 `perception.py` 持续采样、`ludens observe` 查询时空轴、配置 `.ludens/settings.json` ，请继续阅读 [常驻感知与动作循环](perception-and-action.md)。
+关于如何通过常驻 `perception.py` 持续采样、`ludens observe` 查询时空轴、配置 `.ludens/settings.json` 以及编写闭环状态，请继续阅读 [常驻感知与动作状态机](perception-and-action.md)。
 
 ## 后台程序与人工交还
 

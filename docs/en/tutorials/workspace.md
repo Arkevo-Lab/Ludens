@@ -2,7 +2,7 @@
 
 A Workspace is an ordinary coding workspace evolved jointly by the agent and developers: perception and control code can be written in it, skills and memory accumulated, datasets collected and models trained, without modifying the Harness or Driver sources in the repo.
 
-All CLI commands below run in the **target workspace directory** (assuming the repo's `core/bin` and `baseware/bin` are on `PATH`). For environment setup and service lifecycle see [Installation and Workspace Lifecycle](quickstart.md); the resident `perception.py` implementation is covered in [Resident Perception and Action Loops](perception-and-action.md).
+All CLI commands below run in the **target workspace directory** (assuming the repo's `core/bin` and `baseware/bin` are on `PATH`). For environment setup and service lifecycle see [Installation and Workspace Lifecycle](quickstart.md); the resident `perception.py` implementation is covered in [Resident Perception-and-Action State Machine](perception-and-action.md).
 
 ## Files and Sessions
 
@@ -50,7 +50,7 @@ workspace/
 
 ### 2. Templates and Session Lifecycle
 
-- **Init templates**: `ludens init --name <name> --driver <id>` creates a workspace below the global default parent; pass `--workspace <path>` for an explicit directory. It creates missing [AGENTS.md](../../../core/templates/AGENTS.md), [perception.py](../../../core/templates/perception.py), template. Global `defaults` are copied into the new `ludens.json`; later global changes do not affect it. `AGENTS.md` may be freely edited or deleted and is never force-restored on later starts; restart the Host after editing it for changes to take effect.
+- **Init templates**: `ludens init --name <name> --driver <id>` creates a workspace below the global default parent; pass `--workspace <path>` for an explicit directory. It creates missing [AGENTS.md](../../../core/templates/AGENTS.md) and [perception.py](../../../core/templates/perception.py) templates. Global `defaults` are copied into the new `ludens.json`; later global changes do not affect it. `AGENTS.md` may be freely edited or deleted and is never force-restored on later starts; restart the Host after editing it for changes to take effect.
 - **Workspace identity**: the ID in `.ludens/workspace.json` is persistent and is not derived from the directory name or path. After moving a workspace, run `ludens workspace open <new-path>` to update the global index. Use `open <copy-path> --new-id` for an independent copy, assigning a new identity and clearing the current session selection. Past sessions, skill versions, recordings, and logs remain in the workspace. Rebuild a lost registry with `open`; `forget <id>` removes only its index entry. Old directories need explicit [import](quickstart.md#registering-and-migrating-existing-workspaces).
 - **Session resume**: restarting the Host resumes the previous OMP session via `.ludens/shiori/current-session.json` by default; `ludens run --new-session` starts a new session while keeping all workspace code and files, and `--resume <session.jsonl>` resumes a specified historical session under the same workspace.
 - **Skills and memory**: `skills/<name>/SKILL.md` uses YAML frontmatter with `name` and `description`. The agent reads and writes skills and memory on demand through the OMP-native `read` / `write` / `edit` tools; Ludens does not re-push a full file index on every model request.
@@ -90,7 +90,7 @@ def capture_top(exposure: int = 1) -> dict:
     return Client().call("controller/screen.top.capture", {})
 ```
 
-`@capability` works on both top-level sync functions and methods (e.g. `Perception.sample`). Static discovery scans workspace code (skipping `logs/`, `.ludens/`, `.git/`, and virtual environments) and requires marked functions to have a **docstring** and **explicit parameter type annotations** (scalars, `list`, `dict[str, ...]`, and `Optional` are supported); top-level sync functions plus `Perception.sample` are included in the `ludens controller list` catalog. Implementation details: [_capabilities.py](../../../core/python/ludens_tools/_capabilities.py).
+`@capability` works on both top-level sync functions and methods (e.g. `Perception.sample`). Static discovery scans workspace code (skipping `logs/`, `.ludens/`, `.git/`, and virtual environments) and requires marked functions to have a **docstring** and **explicit parameter type annotations** (scalars, `list`, `dict[str, ...]`, and `Optional` are supported); only top-level sync functions are included in the `ludens controller list` catalog; bound methods remain inside the resident process. Implementation details: [_capabilities.py](../../../core/python/ludens_tools/_capabilities.py).
 
 `@observe` selects the workspace's main observation capability. It must be paired with `@capability` on the same function (and may also be paired with `@record`), and at most one `@observe` capability may be declared across the entire workspace. Discovery reports duplicate declarations as diagnostics instead of selecting an ambiguous main channel.
 
@@ -246,7 +246,7 @@ Whether an `@record` function is called in the resident process, via a plain `im
 - **Images flow into fMP4 video segments**: images are written to fragmented MP4 segments under `.ludens/timeline/video/` (5 minutes per segment by default, finalized after 10 idle seconds), addressed precisely via `{pts, timeBase, width, height}` in `timeline.video`; the hot window keeps in-memory originals for realtime delivery, and cold history queries decode from video segments on demand.
 - **Content-addressed non-video media**: audio, binaries, and other media are deduplicated by SHA-256 hash under `.ludens/timeline/objects/<sha256>.bin`.
 
-For continuous sampling via the resident `perception.py`, querying the timeline with `ludens observe`, configuring `.ludens/settings.json`, continue with [Resident Perception and Action Loops](perception-and-action.md).
+For continuous sampling via the resident `perception.py`, querying the timeline with `ludens observe`, configuring `.ludens/settings.json`, and writing closed-loop states, continue with [Resident Perception-and-Action State Machine](perception-and-action.md).
 
 ## Background Programs and Human Handoff
 

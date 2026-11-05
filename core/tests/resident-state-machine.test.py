@@ -1,6 +1,5 @@
 """Resident perception state machine uses ordinary capabilities and the timeline writer."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -77,18 +76,6 @@ class Worker:
             self.reader.join(timeout=1)
             self.process.stdout.close()
             self.stderr.close()
-
-
-PERCEPTION = '''from ludens_tools import capability, record
-class Perception:
-    def start(self, context): self.count = 0
-    @record
-    @capability
-    def sample(self):
-        self.count += 1
-        return {"data": {"frame": self.count}}
-    def close(self): pass
-'''
 
 
 STATE_MACHINE = '''from ludens_tools import capability, record, observe

@@ -20,7 +20,7 @@
 | `baseware` | `typecheck`、`test` | `baseware`：运行设备服务 CLI。 |
 | `core` | `typecheck`：检查 TypeScript 与 Python；`test`：运行两种语言的默认测试集。 | `typescript:typecheck`、`python:typecheck`：单独检查对应语言；`typescript:test`、`python:test`：单独运行对应语言测试；`omp:test:transport`：运行 OMP WebSocket 传输恢复测试；`perf`：运行子系统性能基线（`control-handoff`、`perception-lifecycle`、`video-storage`）；`ludens`：运行 Host CLI。 |
 | `app` | `dev`、`build`、`start`、`test`、`typecheck` | `build:check`：校验现有生产构建与当前源码指纹是否一致；`perf`：在合成运行上执行 `index-memory` 基线（冷构建与查询的内存/延迟预算）。 |
-| `app` | `build`：使用 esbuild 生成 Electron 产物；`start`、`test`、`typecheck` | `pet:preview`：桌宠交互预览；`pet:smoke`：桌宠交互冒烟测试。两者都会先执行 `build`。 |
+| `app`（desktop） | `desktop:build`：使用 esbuild 生成 Electron 产物；`desktop:start`、`desktop:test`、`desktop:typecheck` | `pet:preview`：桌宠交互预览；`pet:smoke`：桌宠交互冒烟测试。两者都会先执行 `desktop:build`。 |
 
 ## 独立组件与控制台
 
@@ -29,7 +29,7 @@
 不经过 `ludens up` 单独调试时，先按 [设备与驱动准备](devices.md) 准备好设备桥，随后在两个终端进入同一工作区分别启动服务：
 
 ```sh
-# 终端 1：启动设备服务
+# Terminal 1: start the device service
 cd /absolute/path/to/workspace
 baseware serve --driver <id> \
   --driver-package 'github:<org>/<driver-repo>#<rev>' \
@@ -37,7 +37,7 @@ baseware serve --driver <id> \
 ```
 
 ```sh
-# 终端 2：启动前台 Host（不读取 ludens.json，默认 300s / 50 次请求）
+# Terminal 2: start the foreground Host (ignores ludens.json; defaults: 300s / 50 requests)
 cd /absolute/path/to/workspace
 ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 ```
@@ -49,10 +49,10 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 仅开发或查看前端界面时无需启动模型与模拟器，空日志目录也可直接运行：
 
 ```sh
-# 开发模式（支持前端 HMR；修改 lib/ 或 worker/ 后需重启进程）
+# Dev mode (frontend HMR; restart the process after editing lib/ or worker/)
 (cd app && npm run dev)
 
-# 生产模式（ludens up 受管启动使用的模式）
+# Prod mode (the mode ludens up uses for managed startup)
 (cd app && npm run build && npm run start)
 ```
 

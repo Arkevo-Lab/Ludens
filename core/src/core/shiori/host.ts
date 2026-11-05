@@ -24,8 +24,18 @@ export async function createHostRuntime(options: {
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, record, env }) });
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, env, record, registerMedia: log.registerMedia,
     diagnostics: log.diagnostics, clock: log.clock,
+    onCleanupError: error => { void runtime.stop(error.message); },
     setInputGeneration: devices.setInputGeneration
-      ? (epoch, generation) => devices.setInputGeneration!(epoch, generation)
+      ? async (epoch, generation) => {
+        // Host handback owns the full device release. A concurrent per-generation
+        // cleanup may arrive after that epoch has already been revoked.
+        if (generation === null && runtime.status().epoch !== epoch) return;
+        try { await devices.setInputGeneration!(epoch, generation); }
+        catch (error) {
+          if (generation === null && runtime.status().epoch !== epoch) return;
+          throw error;
+        }
+      }
       : undefined }) });
   try {
     if (options.model) {

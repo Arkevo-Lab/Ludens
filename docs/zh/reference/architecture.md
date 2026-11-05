@@ -14,22 +14,19 @@ Ludens（RSA，Recursive Self-Adaptation）将设备驱动、Agent 执行运行�
 
 ```mermaid
 flowchart LR
-    O[操作者] --> H[Ludens Host / Shiori: OMP]
-    H --> P[工作区常驻 Perception]
-    H --> X[工作区常驻 Action]
-    H --> S[OMP 原生 bash / 后台程序]
-    S --> C[Ludens 统一 Controller 入口]
+    O[Operator] --> H[Ludens Host / Shiori: OMP]
+    H --> P[Workspace resident Perception-and-Action State Machine]
+    H --> S[OMP native bash / background jobs]
+    S --> C[Ludens unified Controller entry]
     P --> C
-    X --> C
-    X --> P
-    C --> B[Baseware 服务]
+    C --> B[Baseware service]
     B --> D[Driver]
-    D --> E[模拟器 / 桌面 / 设备]
+    D --> E[Emulator / desktop / device]
     H --> L[workspace/logs & .ludens]
     B --> L
-    L --> R[Dashboard 归档读取 Worker]
-    R --> V[Dashboard 网页 / Electron 主窗]
-    R --> A[Ludens Pet 桌宠增量气泡]
+    L --> R[Dashboard archive reader Worker]
+    R --> V[Dashboard page / Electron main window]
+    R --> A[Ludens Pet desktop-pet incremental bubbles]
 ```
 
 各组件拥有独立的 `package.json` / `pyproject.toml` 与锁文件。Ludens Harness 仅依赖 Baseware 的客户端与类型契约，不直接导入任何具体 Driver 实现；`ludens up` 按工作区配置与驱动 Manifest 编排本机进程。
@@ -77,9 +74,9 @@ ludens controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":
 - **异步生命周期**：`pad.play` 默认提交后立即返回 `actionId`（动作归当前控制 `epoch` 所有，短连接 CLI 退出不会中断已提交动作）；传入 `"wait": true` 或调用 `pad.wait / status / cancel`（传 `{"actionId": "<id>"}`）可等待、查询或取消该动作。同一设备同时只执行一张时间表，并发提交新时间表会返回 `BUSY`。
 - **硬件时钟语义**：时间参数单位为毫秒；轮询驱动桥按输入轮询时的单调墙钟推进（最小跨度 16ms），帧驱动桥按模拟帧率向上取整换算为帧数。
 
-### 3. 常驻动作进程与输入重置
+### 3. 常驻状态机与输入重置
 
-统一常驻 `perception.py` 状态机固定绑定启动时的 `epoch` 与 `inputGeneration`。当自动重载轮换 generation 或在 `auto` 周期内执行显式 `ludens perception reload` 时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
+统一常驻 `perception.py` 状态机在接管时采用宿主当前控制 `epoch`，并在每次重载时采用新的 `inputGeneration`。当自动重载轮换 generation 或在 `auto` 周期内执行显式 `ludens perception reload` 时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
 
 ## 会话与 Loop
 
@@ -94,7 +91,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 在 `auto` 控制周期内，外层循环按以下步骤运转：
 
 1. **发起轮次**：使用 [continue.md](../../../core/prompts/continue.md) 发起 OMP `prompt`（首次接管若带 `auto on --message` 则附加一次性提醒）。
-2. **感知与动作并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按宿主配置的频率（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30` Hz）持续采样写入 `.ludens/timeline/`，其进程内能力在同一进程中持续读取时空轴并执行高频闭环控制；取舍见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)。
+2. **常驻状态机与模型推理并行运转**：模型推理期间环境持续运行——常驻 `Perception.sample()` 按宿主配置的频率（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30` Hz）持续采样写入 `.ludens/timeline/`，其进程内能力在同一进程中持续读取时空轴并执行高频闭环控制；取舍见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)。
 3. **自动上下文交付**：Ludens 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../../core/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
 4. **续轮或交还**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工交还或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
 
@@ -113,7 +110,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python/ludens_tools/`）共同组成：
 
 - **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、跨进程 RPC 与 CLI 编排。
-- **Python 侧**：负责 `@capability` 静态发现与动态执行、常驻 `Perception` / `Action` 循环、PyAV 视频段编码与冷帧按需解码。常驻感知通过媒体流引用（`_StreamMediaRef`）直接从磁盘摄取 Baseware 缓冲的原始字节，省去跨进程内联 Base64 往返，自动将设备观测 `sources` 时空溯源绑定至时间线记录，并通过 `ifNoneMatchSequence` 对未发生帧变化的最新帧 `Client().observe()` 轮询执行零编码短路。视频编解码直接在常驻感知进程内完成，不额外引入独立的流媒体服务。
+- **Python 侧**：负责 `@capability` 静态发现与动态执行、统一常驻 `Perception` 状态机、PyAV 视频段编码与冷帧按需解码。常驻感知通过媒体流引用（`_StreamMediaRef`）直接从磁盘摄取 Baseware 缓冲的原始字节，省去跨进程内联 Base64 往返，自动将设备观测 `sources` 时空溯源绑定至时间线记录，并通过 `ifNoneMatchSequence` 对未发生帧变化的最新帧 `Client().observe()` 轮询执行零编码短路。视频编解码直接在常驻感知进程内完成，不额外引入独立的流媒体服务。
 
 ## 能力持久化边界
 

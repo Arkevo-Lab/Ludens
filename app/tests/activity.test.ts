@@ -161,7 +161,7 @@ test("system and diagnostic blocks preserve structured event data with the exist
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });
 
-test("perception worker lifecycle reports failure once while fault detail and continuous statistics remain diagnostic", async () => {
+test("perception lifecycle and faults remain visible while continuous statistics stay diagnostic", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-perception-activity-")));
   try {
     const blocks = await activityBlocks(root, [
@@ -177,6 +177,7 @@ test("perception worker lifecycle reports failure once while fault detail and co
       ["perception_fault", "system", "error"], ["perception_status", "system", "error"],
       ["perception_fault_end", "system", "complete"], ["perception_status", "system", "complete"],
     ]);
+    assert.deepEqual(blocks[1].data?.sample, { completed: 150 }, "statistics remain available for inspection");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 

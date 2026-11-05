@@ -90,13 +90,18 @@ export class PerceptionRuntime {
   private loadedSources = new Map<string, string | null>();
   private watcher?: FSWatcher;
   private watcherTimer?: NodeJS.Timeout;
-  private refreshing?: Promise<void>;
+  private lifecycle = 0;
+  private leaseRevision = 0;
+  private leaseSignal?: AbortSignal;
+  private admittedGeneration: string | null = null;
+  private deviceLeaseEpoch: string | null = null;
 
   constructor(private readonly options: {
     workspace: string; runDir: string; env?: NodeJS.ProcessEnv; record: RecordEvent; clock?: Clock;
     registerMedia?: RegisterMedia; diagnostics?: DiagnosticsMode;
     startTimeoutMs?: number; observeTimeoutMs?: number;
     setInputGeneration?: (epoch: string, generation: string | null) => Promise<void>;
+    onCleanupError?: (error: Error) => void;
   }) {
     this.workspace = resolve(options.workspace);
     this.clock = options.clock ?? { id: basename(options.runDir), now: () => performance.now() };
@@ -112,43 +117,49 @@ export class PerceptionRuntime {
   }
 
   accepts(epoch: string | undefined, inputGeneration: string): boolean {
-    return !!epoch && this.lease.epoch === epoch && this.lease.inputGeneration === inputGeneration;
+    return !!epoch && this.lease.epoch === epoch && this.admittedGeneration === inputGeneration;
+  }
+
+  private enqueue<T>(work: () => Promise<T>): Promise<T> {
+    const operation = this.transition.then(work);
+    this.transition = operation.catch(() => {});
+    return operation;
   }
 
   reload(trace: EventTrace = {}): Promise<PerceptionStatus> {
-    const operation = this.transition.then(() => this.replace(trace));
-    this.transition = operation.catch(() => {});
-    return operation;
+    this.active = true;
+    const lifecycle = this.lifecycle;
+    return this.enqueue(async () => {
+      if (this.active && lifecycle === this.lifecycle) await this.replace(trace);
+      return this.status();
+    });
   }
 
   stop(): Promise<void> {
-    const operation = this.transition.then(async () => {
-      if (this.lease.epoch !== null && this.options.setInputGeneration) {
-        try { await this.options.setInputGeneration(this.lease.epoch, null); } catch { /* lease already gone */ }
+    // Fence checks already reading files, queued reloads, and delayed grants.
+    this.active = false;
+    ++this.lifecycle;
+    ++this.leaseRevision;
+    this.admittedGeneration = null;
+    this.lease.inputGeneration = null;
+    this.closeWatcher();
+    return this.enqueue(async () => {
+      try { await this.clearDeviceGeneration(); }
+      finally {
+        await this.closeWorker();
+        this.setStatus({ ...this.current, state: "stopped", pid: undefined, error: undefined });
       }
-      this.lease.inputGeneration = null;
-      this.active = false;
-      this.closeWatcher();
-      await this.closeWorker();
-      this.setStatus({ ...this.current, state: "stopped", pid: undefined, error: undefined });
     });
-    this.transition = operation.catch(() => {});
-    return operation;
   }
 
   observe(signal: AbortSignal, parent: EventTrace = {}, query: ObservationQuery = {}): Promise<PerceptionRead> {
-    const result = this.reading.then(async () => {
-      const latest = query.at === undefined && query.start === undefined && query.end === undefined
-        && query.after === undefined && query.id === undefined;
-      if (latest && this.active) await this.ensureFresh(parent);
-      return this.read(signal, parent, query);
-    });
+    const result = this.reading.then(() => this.read(signal, parent, query));
     this.reading = result.catch(() => {});
     return result;
   }
 
   async stateMachine(signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
-    if (this.active) await this.ensureFresh();
+    if (this.active) await this.ensureFresh({}, signal);
     const worker = this.worker;
     if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
     const reply = await this.request(worker, { action: "state" }, 5000, signal);
@@ -157,7 +168,7 @@ export class PerceptionRuntime {
   }
 
   async transitionState(to: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
-    if (this.active) await this.ensureFresh();
+    if (this.active) await this.ensureFresh({}, signal);
     const worker = this.worker;
     if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
     const reply = await this.request(worker, { action: "transition", to, arguments: args }, 5000, signal);
@@ -166,26 +177,64 @@ export class PerceptionRuntime {
   }
 
   setLease(epoch: string | null, inputGeneration: string | null = null, signal?: AbortSignal): Promise<unknown> {
-    const operation = this.transition.then(async () => {
-      signal?.throwIfAborted();
-      const effectiveGeneration = epoch ? (inputGeneration ?? this.current.generation) : null;
-      const previous = this.lease;
-      this.lease = { epoch, inputGeneration: effectiveGeneration };
-      if ((previous.epoch !== epoch || previous.inputGeneration !== effectiveGeneration) && this.options.setInputGeneration) {
-        if (epoch === null) {
-          if (previous.epoch !== null) await this.options.setInputGeneration(previous.epoch, null);
-        } else {
-          await this.options.setInputGeneration(epoch, effectiveGeneration);
-        }
+    const effectiveGeneration = inputGeneration ?? this.current.generation;
+    if (epoch && this.active && !signal?.aborted && this.lease.epoch === epoch
+      && this.admittedGeneration !== null && this.admittedGeneration === effectiveGeneration) {
+      this.leaseSignal = signal;
+      return Promise.resolve({ ...this.lease });
+    }
+    const revision = ++this.leaseRevision;
+    this.admittedGeneration = null;
+    // Desired authority changes synchronously, even while Python is shutting down.
+    this.lease = { epoch, inputGeneration: null };
+    this.leaseSignal = signal;
+    return this.enqueue(async () => {
+      if (revision !== this.leaseRevision) return this.lease;
+      const generation = epoch && this.active ? (inputGeneration ?? this.current.generation) : null;
+      try {
+        signal?.throwIfAborted();
+        if (this.deviceLeaseEpoch && this.deviceLeaseEpoch !== epoch) await this.clearDeviceGeneration();
+        if (epoch && generation) await this.grantGeneration(epoch, generation, revision);
+        else await this.clearDeviceGeneration();
+        signal?.throwIfAborted();
+        if (revision !== this.leaseRevision) return this.lease;
+        const worker = this.worker;
+        if (!worker || worker.expectedExit) return this.lease;
+        const reply = await this.request(worker, { action: "lease", ...this.lease }, 5000, signal);
+        if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
+        return reply.result;
+      } catch (error) {
+        this.admittedGeneration = null;
+        if (revision === this.leaseRevision) this.lease = { epoch: null, inputGeneration: null };
+        await this.clearDeviceGeneration();
+        throw error;
       }
-      const worker = this.worker;
-      if (!worker || worker.expectedExit) return this.lease;
-      const reply = await this.request(worker, { action: "lease", ...this.lease }, 5000, signal);
-      if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
-      return reply.result;
     });
-    this.transition = operation.catch(() => {});
-    return operation;
+  }
+
+  private async grantGeneration(epoch: string, generation: string, revision: number): Promise<void> {
+    this.leaseSignal?.throwIfAborted();
+    // Track even a failed grant so cleanup can compensate an uncertain reply.
+    this.deviceLeaseEpoch = epoch;
+    await this.options.setInputGeneration?.(epoch, generation);
+    if (this.active && revision === this.leaseRevision && this.lease.epoch === epoch && !this.leaseSignal?.aborted) {
+      this.lease.inputGeneration = generation;
+      this.admittedGeneration = generation;
+    }
+  }
+
+  private async clearDeviceGeneration(): Promise<void> {
+    this.admittedGeneration = null;
+    const epoch = this.deviceLeaseEpoch;
+    if (epoch === null) return;
+    try {
+      await this.options.setInputGeneration?.(epoch, null);
+      this.deviceLeaseEpoch = null;
+    } catch (error) {
+      const failure = new Error(`Perception input cleanup failed: ${String(error)}`);
+      this.options.onCleanupError?.(failure);
+      throw failure;
+    }
   }
 
   async append(input: TimelineAppend, signal: AbortSignal): Promise<unknown> {
@@ -218,7 +267,7 @@ export class PerceptionRuntime {
 
   private async read(signal: AbortSignal, parent: EventTrace, query: ObservationQuery): Promise<PerceptionRead> {
     const trace = childTrace(parent), started = this.clock.now(), queryId = trace.spanId!;
-    const worker = this.worker;
+    let worker: PythonWorker | undefined;
     const failure = (code: string, message: string, availability?: PerceptionRead["availability"]): PerceptionRead => ({
       queryId, ok: false, query, records: [], hasMore: false, error: { code, message },
       ...(availability ? { availability } : {}),
@@ -226,6 +275,11 @@ export class PerceptionRuntime {
     this.record("perception_observe_start", { queryId, query }, trace);
     try {
       signal.throwIfAborted();
+      const latestQuery = [query.at, query.start, query.end, query.after, query.id]
+        .every(value => value == null || (typeof value === "string" && !value.trim()));
+      if (latestQuery && this.active) await this.ensureFresh(parent, signal);
+      signal.throwIfAborted();
+      worker = this.worker;
       if (!worker || worker.expectedExit) return this.finish(failure("UNAVAILABLE",
         this.current.error ?? `Perception is ${this.current.state}.`), started, trace);
       const reply = await this.request(worker, { action: "observe", query },
@@ -256,7 +310,8 @@ export class PerceptionRuntime {
         || query.capability === "python/perception.py:Perception.sample");
       // Explicit history survives sampler failure/reload; current perception must
       // never present a previous generation's record as a fresh observation.
-      const currentRecords = mainLatest ? records.filter(record => record.generation === worker.generation) : records;
+      const generation = worker.generation;
+      const currentRecords = mainLatest ? records.filter(record => record.generation === generation) : records;
       if (mainLatest && this.current.state !== "ready") {
         return this.finish(failure(this.current.state === "loading" ? "NOT_READY" : "UNAVAILABLE",
           this.current.error ?? `Perception is ${this.current.state}.`,
@@ -295,8 +350,26 @@ export class PerceptionRuntime {
     }
   }
 
-  private async replace(trace: EventTrace): Promise<PerceptionStatus> {
-    await this.closeWorker();
+  private async replace(trace: EventTrace): Promise<void> {
+    const lifecycle = this.lifecycle;
+    try {
+      // Reject old calls and clear held input before waiting on user close().
+      try { await this.clearDeviceGeneration(); }
+      finally { await this.closeWorker(); }
+      if (!this.active || lifecycle !== this.lifecycle) return;
+      await this.startGeneration(trace);
+    } catch (error) {
+      try { await this.clearDeviceGeneration(); }
+      finally {
+        await this.closeWorker();
+        this.setStatus({ ...this.current, state: "error", pid: undefined, error: String(error) }, trace);
+      }
+      throw error;
+    }
+  }
+
+  private async startGeneration(trace: EventTrace): Promise<void> {
+    const lifecycle = this.lifecycle;
     let source: Buffer | undefined;
     let sourceError: string | undefined;
     try { source = await readFile(join(this.workspace, "perception.py")); }
@@ -314,6 +387,9 @@ export class PerceptionRuntime {
       BASEWARE_TRACE: JSON.stringify(backgroundTrace) };
     for (const key of ["LUDENS_EPOCH", "LUDENS_TRACE", "BASEWARE_EPOCH"]) delete (env as NodeJS.ProcessEnv)[key];
     env.PYTHONPATH = [...pythonModulePaths(), ...(env.PYTHONPATH ? [env.PYTHONPATH] : [])].join(delimiter);
+    if (!this.active || lifecycle !== this.lifecycle) return;
+    if (this.lease.epoch !== null) await this.grantGeneration(this.lease.epoch, generation, this.leaseRevision);
+    if (!this.active || lifecycle !== this.lifecycle) return;
     const worker = new PythonWorker(generation, {
       executable: pythonExecutable(env), module: "ludens_tools._perception", workspace: this.workspace, env,
       stderrPath: join(directory, "stderr.log"),
@@ -330,7 +406,14 @@ export class PerceptionRuntime {
       onExit: error => {
         if (this.worker !== worker) return;
         this.worker = undefined;
-        if (!worker.expectedExit) this.setStatus({ ...this.current, state: "error", pid: undefined, error: error.message });
+        if (!worker.expectedExit) {
+          this.admittedGeneration = null;
+          this.lease.inputGeneration = null;
+          this.setStatus({ ...this.current, state: "error", pid: undefined, error: error.message });
+          void this.enqueue(async () => {
+            if (this.current.generation === worker.generation) await this.clearDeviceGeneration();
+          }).catch(error => this.record("perception_reload_error", { error: String(error) }));
+        }
       },
     });
     this.worker = worker;
@@ -340,7 +423,8 @@ export class PerceptionRuntime {
     try {
       const reply = await this.request(worker, { action: "start", workspace: this.workspace,
         runDir: this.options.runDir, generation, source: source?.toString("utf8"), sourceError, trace: backgroundTrace,
-        diagnostics: this.options.diagnostics ?? "normal", ...this.lease },
+        diagnostics: this.options.diagnostics ?? "normal",
+        epoch: this.admittedGeneration ? this.lease.epoch : null, inputGeneration: this.admittedGeneration },
       this.options.startTimeoutMs ?? 30_000);
       if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
       const result = reply.result as { sampleHz?: number; history: PerceptionStatus["history"]; state: PerceptionStatus["state"]; error?: string; observeCapability: string };
@@ -348,20 +432,12 @@ export class PerceptionRuntime {
       this.setStatus({ ...this.current, sampleHz: result.sampleHz, history: this.current.history ?? result.history,
         ...(this.current.state === "loading" ? { state: result.state, error: result.error } : {}) }, trace);
     } catch (error) {
-      await this.closeWorker();
+      try { await this.clearDeviceGeneration(); }
+      finally { await this.closeWorker(); }
       this.setStatus({ ...this.current, state: "error", pid: undefined, error: String(error) }, trace);
     }
     await this.snapshotSources(codeSHA ?? null, generation);
-    if (this.lease.epoch !== null) {
-      const leaseEpoch = this.lease.epoch;
-      this.lease = { epoch: leaseEpoch, inputGeneration: generation };
-      if (this.options.setInputGeneration) {
-        try { await this.options.setInputGeneration(leaseEpoch, generation); } catch { /* lease already gone */ }
-      }
-    }
-    this.active = true;
-    this.startWatcher();
-    return this.status();
+    if (this.active && lifecycle === this.lifecycle) this.startWatcher();
   }
 
   private async snapshotSources(codeSHA: string | null, generation: string): Promise<void> {
@@ -374,6 +450,11 @@ export class PerceptionRuntime {
         if (relPath.endsWith(".py") && typeof sha === "string") next.set(relPath, sha);
       }
     } catch { /* worker may have failed before writing sources.json */ }
+    // A deleted dependency cannot be imported into the new manifest. Retain
+    // its missing-file baseline so restoring it can repair the failed load.
+    for (const relPath of this.loadedSources.keys()) {
+      if (!next.has(relPath) && await this.digestSource(relPath) === null) next.set(relPath, null);
+    }
     this.loadedSources = next;
   }
 
@@ -388,7 +469,7 @@ export class PerceptionRuntime {
   }
 
   private async hasSourceChanges(): Promise<boolean> {
-    if (!this.active || this.current.state === "loading") return false;
+    if (!this.active) return false;
     const generation = this.current.generation;
     if (generation) {
       try {
@@ -401,42 +482,53 @@ export class PerceptionRuntime {
       } catch { /* sources.json not yet written */ }
     }
     for (const [relPath, expectedSha] of this.loadedSources) {
-      let actualSha: string | null = null;
-      try { actualSha = await this.digestSource(relPath); }
-      catch { return false; }
+      const actualSha = await this.digestSource(relPath);
       if (actualSha !== expectedSha) return true;
     }
     return false;
   }
-  private async ensureFresh(trace: EventTrace = {}): Promise<void> {
-    if (this.refreshing) return this.refreshing;
-    let changed = false;
-    try { changed = await this.hasSourceChanges(); } catch { return; }
-    if (!changed) return;
-    this.refreshing = (async () => {
-      await this.reload(trace);
+  private ensureFresh(trace: EventTrace = {}, signal?: AbortSignal): Promise<void> {
+    const lifecycle = this.lifecycle;
+    // Source reads and replacement share the lifecycle queue: concurrent callers
+    // recheck the installed generation instead of enqueueing duplicate reloads.
+    return this.enqueue(async () => {
       const deadline = Date.now() + (this.options.observeTimeoutMs ?? 5000);
-      while (this.current.state === "loading" && Date.now() < deadline) {
-        const { promise, resolve } = Promise.withResolvers<void>();
-        setTimeout(resolve, 25);
-        await promise;
+      while (this.active && lifecycle === this.lifecycle) {
+        signal?.throwIfAborted();
+        if (await this.hasSourceChanges()) {
+          if (!this.active || lifecycle !== this.lifecycle) return;
+          await this.replace(trace);
+        } else if (this.current.state !== "loading") return;
+        if (Date.now() >= deadline) throw new Error("Perception freshness timed out while sources or the sampler were loading.");
+        await new Promise<void>(resolve => setTimeout(resolve, 10));
       }
-    })();
-    try { await this.refreshing; } finally { this.refreshing = undefined; }
+    });
   }
 
   private startWatcher(): void {
     if (this.watcher || !this.active) return;
+    const lifecycle = this.lifecycle;
     try {
-      this.watcher = watch(this.workspace, { recursive: true }, (_event, filename) => {
-        const name = String(filename ?? "");
-        if (!name.endsWith(".py")) return;
-        if (name.startsWith(".ludens") || name.startsWith("logs/") || name.startsWith(".git/")
-          || name.includes("__pycache__") || name.startsWith("node_modules/")) return;
+      const watcher = this.watcher = watch(this.workspace, { recursive: true }, (_event, filename) => {
+        if (!this.active || lifecycle !== this.lifecycle) return;
+        const name = String(filename ?? "").replaceAll("\\", "/");
+        if (filename != null && !name.endsWith(".py")) return;
+        if (name.split("/").some(part => [".ludens", "logs", ".git", "__pycache__", "node_modules"].includes(part))) return;
         clearTimeout(this.watcherTimer);
-        this.watcherTimer = setTimeout(() => { void this.ensureFresh(); }, 25);
+        this.watcherTimer = setTimeout(() => {
+          this.watcherTimer = undefined;
+          void this.ensureFresh().catch(error => this.record("perception_reload_error", { error: String(error) }));
+        }, 25);
       });
-    } catch { this.watcher = undefined; }
+      watcher.on("error", error => {
+        if (this.watcher !== watcher) return;
+        this.closeWatcher();
+        this.record("perception_reload_error", { error: String(error) });
+      });
+    } catch (error) {
+      this.watcher = undefined;
+      this.record("perception_reload_error", { error: String(error) });
+    }
   }
 
   private closeWatcher(): void {

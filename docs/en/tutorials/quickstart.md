@@ -52,7 +52,7 @@ When creating a workspace, append `--pet` to the chosen `ludens init --name <nam
 
 You can also use `ludens up --pet` or `ludens up --no-pet` to override just the current start without writing back to `ludens.json`; the two flags are mutually exclusive. Neither `pet: false` nor `--no-pet` shuts down an already-running shared pet — quit it from its tray menu.
 
-The pet needs a working Dashboard and shares the same console and logs as the browser. By default `dashboard: true` starts the Dashboard on demand; with `false` you must start it yourself. For standalone startup or debugging, see [Ludens Pet desktop companion](debugging-and-verification.md).
+The pet needs a working Dashboard and shares the same console and logs as the browser. By default `dashboard: true` starts the Dashboard on demand; with `false` you must start it yourself. For standalone startup or debugging, see [Ludens Pet desktop companion](debugging-and-verification.md#3-ludens-pet-desktop-companion).
 
 ## Starting and stopping workspaces
 

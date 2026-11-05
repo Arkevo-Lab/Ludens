@@ -32,7 +32,7 @@ Look at that **27.9k–35.9k tokens**: across all four measured cycles, foregrou
 
 By the upstream rule, these candidates cannot survive to the threshold: once foreground growth exceeds 20k they are invalidated and recomputed. If the replacement candidate is still `pendingSpec` at the line, upstream aborts it and falls back to synchronous foreground recomputation. Whether that path is actually taken depends on recompute timing and latency; this data set does not directly measure foreground blocking counts on the unpatched version.
 
-And remember, **OMP's main loop is a serial structure**. Once it falls back to foreground synchronous compaction, new model decisions and tool calls wait for the summary to return. The measured 70–93 s background summarization latency implies recomputation can open a noticeable decision gap — though it is not a direct measurement of foreground stall; independent background Action processes and ordinary programs keep running.
+And remember, **OMP's main loop is a serial structure**. Once it falls back to foreground synchronous compaction, new model decisions and tool calls wait for the summary to return. The measured 70–93 s background summarization latency implies recomputation can open a noticeable decision gap — though it is not a direct measurement of foreground stall; the independent resident perception-and-action process and ordinary programs keep running.
 
 ## How we changed the compaction structure
 

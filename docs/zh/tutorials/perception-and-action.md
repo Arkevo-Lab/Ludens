@@ -14,7 +14,9 @@
 - `sample(self)`：需标注 `@observe`、`@record` 与 `@capability`；其中 `@observe` 将其选为工作区的主观测能力。调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用当前状态。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
 - `close(self)`：在 `reload`、`stop` 或 Host 退出时调用，用于释放自建资源。
 
-- **源码修改自动重载**：修改 `perception.py` 或其导入的工作区 `.py` 模块会自动重载常驻进程（非 Python 资源不会触发重载）；显式历史查询在重载后仍然可用，新 generation 会保留历史 generation。如需在不改源码的情况下显式重启，可执行 `ludens perception reload`。
+常驻进程在同一个 Python 进程中运行连续状态机。任何活动能力都可以返回可选的 `effect`（`{"id": "controller/...", "arguments": {...}}` 或此类对象的列表）请求闭环执行，以及可选的 `transition`（`"method_name"` 或 `{"to": "method_name", "arguments": {...}}`）选择下一次 tick 调用的能力。转换目标在同一实例、模块或工作区内解析，无需跨进程，因此实例属性与模块全局变量可在 tick 之间共享内存上下文。
+
+**源码修改自动重载**：修改 `perception.py` 或其导入的工作区 `.py` 模块会自动重载常驻进程（非 Python 资源不会触发重载）；显式历史查询在重载后仍然可用，新 generation 会保留历史 generation。如需在不改源码的情况下显式重启，可执行 `ludens perception reload`。
 
 没有 `Perception` 类时，`perception.py` 也可定义任意名称的顶层 `@observe @record @capability` 函数。实时与离线时空轴默认读取唯一的 `@observe` 通道，包括其他工作区模块中的已记录能力；`@observe` 不会自动调度其他模块。没有标记时，默认通道仍为 `python/perception.py:Perception.sample`。重复标记会为每个冲突声明生成诊断，并阻止常驻进程开始运行。
 
@@ -34,7 +36,7 @@ class Perception:
         """Observe the environment and enter tracking when a target appears."""
         return {
             "text": "target acquired",
-            "effect": {"id": "controller/pad.play", "arguments": {"button": "a"}},
+            "effect": {"id": "controller/pad.play", "arguments": {"inputs": [{"atMs": 0, "durationMs": 120, "key": "a"}]}},
             "transition": {"to": "track", "arguments": {"target": "marker"}},
         }
 
@@ -48,22 +50,22 @@ class Perception:
         pass
 ```
 
-新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 `perception.py`（如采集逻辑或模型权重）后，常驻进程会自动重载并保留历史时空轴；`ludens perception reload` 仍可用于显式重启。
+新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 Python 源码后，常驻进程会自动重载并保留持久历史。修改权重等非 Python 资源后，需要执行 `ludens perception reload`。已停止的常驻进程在源码修改后仍保持停止，直到显式重载。
 
 ### 2. 感知管理与历史查询命令（`ludens observe`）
 
 ```sh
-# 生命周期、状态机控制与自动注入策略管理
+# Lifecycle, state-machine control, and auto-inject policy management
 ludens perception status
 ludens perception state
 ludens perception transition track --args '{"target":"marker"}'
 ludens perception reload
 ludens perception stop
-ludens perception inject          # 查看当前自动注入策略（on / off）
-ludens perception inject off      # 关闭向模型上下文自动追加观测，保留采样与录像
-ludens perception inject on       # 恢复自动追加
+ludens perception inject          # Show current auto-inject policy (on / off)
+ludens perception inject off      # Stop auto-appending observations to model context, keep sampling and recording
+ludens perception inject on       # Resume auto-appending
 
-# 读取时空轴历史（只读已留档记录，绝不触发重新采样）
+# Read timeline history (archived records only, never triggers resampling)
 ludens observe
 ludens observe --id <record-id> --images
 ludens observe --at 2026-10-27T01:00:00Z
@@ -91,7 +93,7 @@ CLI `ludens observe`、Python `Client().observe(query)` 与 OMP 原生 `observe`
 
 宿主进程支持以下环境变量配置时空轴窗口与视频编码参数（当前生效值可通过 `ludens perception status` 的 `history` 字段查看）：
 
-采样率与动作步频仅在对应变量未设置时使用默认值。空字符串、纯空白、非数值、零、负数、NaN 与无穷大会使工作进程启动失败，并返回指明变量名的校验错误；有效数字两侧的空白可以接受。
+采样率仅在对应环境变量未设置时使用默认值。空字符串、纯空白、非数值、零、负数、NaN 与无穷大会使工作进程启动失败，并返回指明变量名的校验错误；有效数字两侧的空白可以接受。
 
 | 环境变量 | 默认值 | 说明 |
 | --- | --- | --- |
@@ -118,4 +120,4 @@ CLI `ludens observe`、Python `Client().observe(query)` 与 OMP 原生 `observe`
 
 ## 租约归属与输入 generation
 
-统一常驻状态机严格绑定启动时的 `epoch` 与 `inputGeneration`。`PerceptionRuntime` 拥有 `inputGeneration` 归属权：授予租约、在自动重载时替换 generation、在 `stop()` 时清空设备输入 generation，从而拒绝旧实例残余调用，同时保留当前控制 `epoch`、OMP 会话与剩余预算。当人工交还（`auto off`）、预算耗尽或设备断连时，租约被撤销并释放设备输入；修复代码后，下一次自动重载或显式 `ludens perception reload` 会重新启用控制，若已交还控制还需再次 `ludens auto on`。
+统一常驻状态机在接管时采用宿主当前控制 `epoch`。`PerceptionRuntime` 在启动替换代码前授予 `inputGeneration`，并在等待旧 Python 进程退出前清空它。重载和 `stop()` 会释放当前设备输入（包含并发 CLI 输入），拒绝旧 generation 的调用，同时保留控制 `epoch`、OMP 会话与剩余预算。如果输入清理失败，Host 会交还控制。人工交还（`auto off`）、预算耗尽或设备断连时撤销租约，感知可继续运行但不再执行设备 effect。执行 `stop()` 后须显式运行 `ludens perception reload` 重启；已交还控制时须运行 `ludens auto on` 再次授予设备控制权。

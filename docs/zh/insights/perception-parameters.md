@@ -44,7 +44,7 @@ class Perception:
    - 在合法的整数秒范围内（`PERCEPTION_LIMITS`）怎么调这三个值，都不会破坏下游能力的正确性，也不会把进程搞 OOM——因为底层的硬字节上限（`LUDENS_PERCEPTION_HOT_BYTES = 1 GiB`）始终在兜底，无论 `hotSeconds` 设多大，超预算时最大通道都会优先缩窗。
 2. **为什么字节上限、队列深度与 `sample_hz` 必须留在宿主基础设施层**：
    - **字节与队列预算**（`HOT_BYTES`、`SEGMENT_BYTES`、`VIDEO_QUEUE_BYTES`、`VIDEO_QUERY_BYTES`）是**宿主机物理护栏**。它们取决于机器本身的内存和磁盘容量，而不是玩的是什么游戏；留在宿主环境变量里可以防止工作区配置或 Agent 失手耗尽宿主机内存。
-   - **采样率与动作步频**（`LUDENS_PERCEPTION_SAMPLE_HZ` 与 `LUDENS_PERCEPTION_SAMPLE_HZ`，默认均为 `30.0` Hz）定义的是 `.ludens/timeline/` 的**时间分辨率契约**。由于 `run_continuously` 在单次采样耗时超过 `1 / sample_hz` 时会自动顺延而不重叠（例如模拟器单次截屏耗时 `190 ms` 时，采样器天然以约 `5.2 Hz` 零休眠全速连采，不会报错也不会积压），`30.0` Hz 对慢速设备而言就是“零额外空转等待”的上限，对快速设备则是标准的 30 帧上限。在工作区代码里调低它，唯一的效果就是在两次截屏之间硬塞进毫无意义的休眠盲区。
+   - **采样率**（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认为 `30.0` Hz）定义的是 `.ludens/timeline/` 的**时间分辨率契约**。由于 `run_continuously` 在单次采样耗时超过 `1 / sample_hz` 时会自动顺延而不重叠（例如模拟器单次截屏耗时 `190 ms` 时，采样器天然以约 `5.2 Hz` 零休眠全速连采，不会报错也不会积压），`30.0` Hz 对慢速设备而言就是“零额外空转等待”的上限，对快速设备则是标准的 30 帧上限。在工作区代码里调低它，唯一的效果就是在两次截屏之间硬塞进毫无意义的休眠盲区。
 
 ## 怎么改的
 

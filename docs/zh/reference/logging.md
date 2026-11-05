@@ -10,7 +10,7 @@
 
 | 模式 | 记录范围 | 落盘位置 |
 | --- | --- | --- |
-| `normal`（默认） | 完整保留模型调用、工具执行、主动能力调用、设备输入及终态（`action_start / action_end`）、控制权变迁、常驻进程生命周期与故障区间；对携带 `trace.recordingPurpose = "continuous-perception"` 或 `"continuous-action"` 的常驻循环内部只读调用链，省略逐次调用事件与日志 RPC（标注 `@record` 的结果仍正常写入 `.ludens/timeline/`）。 | `logs/<run-id>/events.jsonl` 与 Baseware `events/` |
+| `normal`（默认） | 完整保留模型调用、工具执行、主动能力调用、设备输入及终态（`action_start / action_end`）、控制权变迁、常驻进程生命周期与故障区间；对携带 `trace.recordingPurpose = "continuous-perception"` 的常驻循环内部只读调用链，省略逐次调用事件与日志 RPC（标注 `@record` 的结果仍正常写入 `.ludens/timeline/`）。 | `logs/<run-id>/events.jsonl` 与 Baseware `events/` |
 | `full` | 在 `normal` 基础上，额外记录常驻感知/动作循环内部的每一次嵌套 Python 调用与 Baseware 只读查询明细（不重复复制媒体或经历事件）。 | 独立写入 `logs/<run-id>/diagnostics.jsonl` 与 Baseware `diagnostics/` 分段 |
 
 ### 2. 周期聚合统计与故障区间合并
@@ -70,7 +70,7 @@
 | `python_call_start / python_call_end` | 工作区 `@capability` 装饰器函数的实际执行 Span，记录 PID、源码哈希、终态与耗时（不强制序列化原生 Python 入参/返回对象）。`normal` 下省略的常驻父层会在子事件标记 `parentOmitted: true`。 |
 | `command / execution / execution_error` | Baseware 设备操作请求与终态；同次调用产出的媒体摘要直接内嵌于 `execution.observations`。 |
 | `action_start / action_end` | 已提交异步手柄动作（`pad.play`）的独立硬件执行生命周期，携带 `actionId` 并沿用提交时的 `trace / epoch`，不会挂到后续的 `pad.wait / status` 请求下。 |
-| `perception_status / perception_fault / perception_fault_end / perception_stats` | 常驻 `perception.py` 进程的生命周期、故障区间与 5 秒统计；生命周期状态进入 Activity 与桌宠，故障详情与统计归入诊断分类。 |
+| `perception_status / perception_fault / perception_fault_end / perception_stats` | 常驻 `perception.py` 进程的生命周期、故障区间与 5 秒统计；生命周期与故障事件进入 Activity 与桌宠；统计保留在诊断分类。 |
 | `background_start / background_result` | OMP 原生异步 `bash` 任务（`async`）或命名服务（`service`）的启动与完成通知，按 `jobId` 或 `service name + PID` 配对并保留启动时的 `trace / epoch`。 |
 
 **Python 异常链归并规则**：`python_call_end.outcome = "error"` 仅代表该层函数抛出异常（外层调用方可能已 `try/except` 捕获）。分析器与 Dashboard 按显式 Python 父子关系将相邻未捕获的异常归并为一条异常链（`localPythonExceptionGroups`），一旦祖先调用成功返回即截断，不会用内部捕获的异常覆写外层工具的成功状态。
@@ -131,14 +131,14 @@ Dashboard 回放视图（`/api/replay`）将 `.ludens/timeline/` 的连续采样
 从仓库根目录可在不启动 Host 或 Dashboard 的情况下直接读取归档与生成统计报告：
 
 ```sh
-# 生成指定运行与控制周期的完整 JSON 统计报告
+# Emit the full JSON statistics report for a given run and control cycle
 python3 core/scripts/analyze-run.py /path/to/workspace/logs/run-id \
   --epoch epoch-id --output /path/to/analysis.json
 
-# 展开单条事件的归档引用正文（默认媒体仅展示引用摘要；--full 仅恢复仍有原件的媒体字节，视频源保留有损来源标记）
+# Expand one event's archived reference body (media shows reference summary by default; --full restores only media bytes whose originals still exist; video sources keep the lossy-origin mark)
 core/bin/ludens logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
 
-# 按序流式输出 run 声明的全部事实源事件（加 --diagnostics 读取 full 诊断流）
+# Stream all fact-source events declared by the run in order (add --diagnostics to read the full diagnostic stream)
 core/bin/ludens logs events --run /path/to/workspace/logs/run-id
 core/bin/ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
 ```

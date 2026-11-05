@@ -5,7 +5,7 @@ Recursive Self-Adaptation Harness: connects Shiori (currently OMP), Baseware, an
 - [Architecture and Boundaries](../docs/en/reference/architecture.md)
 - [Install and Workspace Lifecycle](../docs/en/tutorials/quickstart.md)
 - [Workspaces and Capability Programming](../docs/en/tutorials/workspace.md)
-- [Resident Perception and Action Loops](../docs/en/tutorials/perception-and-action.md)
+- [Resident Perception-and-Action State Machine](../docs/en/tutorials/perception-and-action.md)
 - [Console Debugging and Verification](../docs/en/tutorials/debugging-and-verification.md)
 - [Logging and Call Chains](../docs/en/reference/logging.md)
 - [OMP Background Compaction Rework](../docs/en/insights/omp-compaction.md)

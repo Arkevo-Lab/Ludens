@@ -6,7 +6,9 @@ import { join, resolve } from "node:path";
 import { PerceptionRuntime, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/core/subsystems/perception.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
-async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv } = {}) {
+async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv;
+  setInputGeneration?: (epoch: string, generation: string | null) => Promise<void>;
+  onCleanupError?: (error: Error) => void } = {}) {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-perception-")));
   const events: { type: string; data: any; trace: any }[] = [];
   const runtime = new PerceptionRuntime({ workspace, runDir: join(workspace, "logs", "run"),
@@ -253,6 +255,8 @@ test("editing python sources auto-reloads the worker, preserves generations, and
     await writeFile(join(f.workspace, "weights.txt"), "old weights");
     expect((await f.observe()).records[0]!.text).toBe("new:new weights");
     const fresh = f.runtime.status();
+    expect(fresh.pid).not.toBe(old.pid);
+    expect(await readFile(join(f.workspace, "closed"), "utf8")).toBe(String(old.pid));
     expect(fresh.state).toBe("ready");
     const history = await f.observe({ at: first.records[0]!.recordedAt });
     expect(history.records[0]?.generation).toBe(old.generation!);
@@ -469,4 +473,194 @@ test("one record carries payload once; model views preserve semantic sources wit
   expect(logged.records[0]).not.toHaveProperty("space");
   expect(logged.records[0]!.media[0]).not.toHaveProperty("data");
   expect(read.records[0]!.media[0]!.data).toBe("bytes");
+});
+
+test("immediate latest reads and concurrent state RPCs coalesce source edits into one generation", async () => {
+  const f = await fixture();
+  try {
+    const code = source('        return {"text": "old"}') + `
+    @capability
+    def hold(self):
+        return {"text": "held"}
+`;
+    const old = await f.load(code);
+    await writeFile(join(f.workspace, "perception.py"), code.replace('"old"', '"new"'));
+    const [read, state] = await Promise.all([
+      f.observe({ at: "", start: null, end: " ", after: null, id: null }),
+      f.runtime.stateMachine(), f.runtime.stateMachine(),
+    ]);
+    expect(read.records[0]?.text).toBe("new");
+    expect(state.state).toBe("python/perception.py:Perception.sample");
+    const fresh = f.runtime.status().generation;
+    expect(fresh).not.toBe(old.generation);
+    expect(new Set(f.events.filter(e => e.type === "perception_status").map(e => e.data.generation)).size).toBe(2);
+    await writeFile(join(f.workspace, "perception.py"), code.replace('def hold(self)', 'def fresh_hold(self)'));
+    expect((await f.runtime.transitionState("fresh_hold")).state).toBe("python/perception.py:Perception.fresh_hold");
+    expect(f.runtime.status().generation).not.toBe(fresh);
+  } finally { await f.cleanup(); }
+});
+
+test("lazy transition modules are tracked and source repair is fresh before the next read", async () => {
+  const f = await fixture();
+  try {
+    const helper = join(f.workspace, "helper.py");
+    const helperCode = `from ludens_tools import capability
+@capability
+def hold():
+    """Keep the active state in this module."""
+    return {}
+`;
+    await writeFile(helper, helperCode);
+    const old = await f.load(source('        return {"text": "initial"}'));
+    await f.runtime.transitionState("python/helper.py:hold");
+    await writeFile(helper, helperCode + "\n# edited after lazy import\n");
+    expect((await f.runtime.stateMachine()).state).toBe("python/perception.py:Perception.sample");
+    expect(f.runtime.status().generation).not.toBe(old.generation);
+    // A syntactically broken imported module is still tracked by its exact bytes.
+    await writeFile(helper, "invalid syntax !\n");
+    await writeFile(join(f.workspace, "perception.py"), "import helper\n" + source('        return {"text": "repaired"}'));
+    expect((await f.observe()).ok).toBe(false);
+    await writeFile(helper, helperCode);
+    expect((await f.observe()).records[0]?.text).toBe("repaired");
+    await rm(helper);
+    expect((await f.observe()).ok).toBe(false);
+    await writeFile(helper, helperCode);
+    expect((await f.observe()).records[0]?.text).toBe("repaired");
+  } finally { await f.cleanup(); }
+});
+
+test("replacement effects use the newly granted generation and revocation clears authority immediately", async () => {
+  const grants: Array<[string, string | null]> = [];
+  const f = await fixture({ setInputGeneration: async (epoch, generation) => { grants.push([epoch, generation]); } });
+  try {
+    await writeFile(join(f.workspace, "effects.py"), `import json
+from pathlib import Path
+from ludens_tools import capability
+from ludens_tools._context import current
+@capability
+def capture():
+    """Capture the authority of an actual resident effect call."""
+    context = current()
+    Path("effect.json").write_text(json.dumps({"epoch": context.get("epoch"), "generation": context["trace"].get("inputGeneration")}))
+`);
+    const code = source('        return {"text": "running", "effect": {"id": "python/effects.py:capture"}}');
+    const old = await f.load(code);
+    await f.runtime.setLease("epoch");
+    await f.runtime.setLease("epoch"); // Repeating the same lease must not reset device inputs.
+    expect(grants).toEqual([["epoch", old.generation]]);
+    await writeFile(join(f.workspace, "perception.py"), code + "\n# replace\n");
+    await f.observe();
+    const generation = f.runtime.status().generation!;
+    await f.wait(() => {
+      try { return JSON.parse(readFileSync(join(f.workspace, "effect.json"), "utf8")).generation === generation; }
+      catch { return false; }
+    });
+    expect(JSON.parse(await readFile(join(f.workspace, "effect.json"), "utf8"))).toEqual({ epoch: "epoch", generation });
+    expect(grants).toEqual([["epoch", old.generation], ["epoch", null], ["epoch", generation]]);
+    expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
+    const revoked = f.runtime.setLease(null);
+    expect(f.runtime.accepts("epoch", generation)).toBe(false);
+    await revoked;
+    expect(grants.at(-1)).toEqual(["epoch", null]);
+    expect((await f.runtime.stateMachine()).epoch).toBeNull();
+  } finally { await f.cleanup(); }
+});
+
+test("stop fences an automatic reload already flushing Python and disables the watcher until explicit reload", async () => {
+  const f = await fixture();
+  try {
+    const code = source('        return {"text": "old"}', "",
+      '        Path("closing").write_text("started")\n        while not Path("release-close").exists():\n            time.sleep(0.01)');
+    const old = await f.load(code);
+    await writeFile(join(f.workspace, "perception.py"), code.replace('"old"', '"new"'));
+    const read = f.observe();
+    await f.wait(() => existsSync(join(f.workspace, "closing")));
+    const stopped = f.runtime.stop();
+    await writeFile(join(f.workspace, "release-close"), "go");
+    await Promise.all([read, stopped]);
+    expect(f.runtime.status()).toMatchObject({ state: "stopped", generation: old.generation, pid: undefined });
+    await writeFile(join(f.workspace, "perception.py"), source('        return {"text": "restarted"}'));
+    await Bun.sleep(100);
+    expect((await f.observe()).error?.code).toBe("UNAVAILABLE");
+    expect(f.runtime.status().generation).toBe(old.generation);
+    await f.runtime.reload();
+    expect((await f.observe()).records[0]?.text).toBe("restarted");
+  } finally {
+    await writeFile(join(f.workspace, "release-close"), "go");
+    await f.cleanup();
+  }
+});
+
+test("stop compensates a delayed device grant without admitting it or leaving a worker", async () => {
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const grants: Array<string | null> = [];
+  const f = await fixture({ setInputGeneration: async (_epoch, generation) => {
+    grants.push(generation);
+    if (generation) { entered.resolve(); await release.promise; }
+  } });
+  try {
+    const old = await f.load(source('        return {"text": "running"}'));
+    const granting = f.runtime.setLease("epoch");
+    await entered.promise;
+    expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
+    const stopped = f.runtime.stop();
+    release.resolve();
+    await Promise.all([granting, stopped]);
+    expect(grants).toEqual([old.generation, null]);
+    expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
+    expect(f.runtime.status()).toMatchObject({ state: "stopped", pid: undefined });
+  } finally { release.resolve(); await f.cleanup(); }
+});
+
+test("failed grants never admit input and failed cleanup still stops Python and reports the failure", async () => {
+  let failGrant = true, failCleanup = false;
+  const failures: Error[] = [];
+  const f = await fixture({ setInputGeneration: async (_epoch, generation) => {
+    if (generation && failGrant) throw new Error("grant failed");
+    if (generation === null && failCleanup) throw new Error("cleanup failed");
+  }, onCleanupError: error => { failures.push(error); } });
+  try {
+    const old = await f.load(source('        return {"text": "running"}'));
+    await expect(f.runtime.setLease("epoch")).rejects.toThrow("grant failed");
+    expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
+    failGrant = false;
+    await f.runtime.setLease("epoch");
+    failCleanup = true;
+    const stopped = f.runtime.stop();
+    expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
+    await expect(stopped).rejects.toThrow("cleanup failed");
+    expect(failures).toHaveLength(1);
+    expect(f.runtime.status()).toMatchObject({ state: "stopped", pid: undefined });
+  } finally { failCleanup = false; await f.cleanup(); }
+});
+
+
+test("unexpected worker exit revokes its device generation", async () => {
+  const grants: Array<string | null> = [];
+  const f = await fixture({ setInputGeneration: async (_epoch, generation) => { grants.push(generation); } });
+  try {
+    const old = await f.load(source('        return {"text": "running"}'));
+    await f.runtime.setLease("epoch");
+    process.kill(old.pid!, "SIGKILL");
+    await f.wait(() => f.runtime.status().state === "error" && grants.at(-1) === null);
+    expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
+    expect(grants).toEqual([old.generation, null]);
+  } finally { await f.cleanup(); }
+});
+
+test("freshness failures keep the observation error envelope and cancellation remains abortable", async () => {
+  const f = await fixture({ observeTimeoutMs: 30 });
+  try {
+    await writeFile(join(f.workspace, "perception.py"), source('        time.sleep(0.2)\n        return {"text": "ready"}'));
+    await f.runtime.reload();
+    const read = await f.observe();
+    expect(read).toMatchObject({ ok: false, records: [], error: { code: "QUERY_FAILED" } });
+    expect(read.error?.message).toContain("freshness timed out");
+    const abort = new AbortController();
+    const cancelled = f.runtime.observe(abort.signal);
+    abort.abort(new Error("cancelled freshness"));
+    await expect(cancelled).rejects.toThrow("cancelled freshness");
+    await f.wait(() => f.runtime.status().state === "ready");
+    expect((await f.observe()).records[0]?.text).toBe("ready");
+  } finally { await f.cleanup(); }
 });

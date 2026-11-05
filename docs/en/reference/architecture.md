@@ -15,13 +15,10 @@ Ludens (RSA, Recursive Self-Adaptation) decouples device drivers, the Agent exec
 ```mermaid
 flowchart LR
     O[Operator] --> H[Ludens Host / Shiori: OMP]
-    H --> P[Workspace resident Perception]
-    H --> X[Workspace resident Action]
+    H --> P[Workspace resident Perception-and-Action State Machine]
     H --> S[OMP native bash / background jobs]
     S --> C[Ludens unified Controller entry]
     P --> C
-    X --> C
-    X --> P
     C --> B[Baseware service]
     B --> D[Driver]
     D --> E[Emulator / desktop / device]
@@ -77,9 +74,9 @@ ludens controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":
 - **Async lifecycle**: `pad.play` returns an `actionId` immediately after submission by default (the action belongs to the current control `epoch`; exiting the short-lived CLI connection does not interrupt a submitted action); passing `"wait": true` or calling `pad.wait / status / cancel` (with `{"actionId": "<id>"}`) waits on, queries, or cancels the action. Only one timeline executes per device at a time; submitting a new timeline while one is in flight returns `BUSY`.
 - **Hardware clock semantics**: time parameters are in milliseconds; poll-driven bridges advance on the monotonic wall clock at input-poll points (minimum span 16ms), while frame-driven bridges round up to frames at the emulated frame rate.
 
-### 3. Resident Action Process and Input Reset
+### 3. Resident State Machine and Input Reset
 
-The unified resident `perception.py` state machine is permanently bound to the `epoch` and `inputGeneration` from startup. When the generation rotates on auto-reload or an explicit `ludens perception reload` occurs inside an `auto` cycle, the system immediately cancels and releases all of this workspace's current inputs through Baseware (including concurrent CLI inputs), bumps `inputGeneration` to reject stale calls from the old instance, and keeps the current `epoch`, remaining budget, and OMP session. See [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts).
+The unified resident `perception.py` state machine adopts the current host control `epoch` on takeover and a new `inputGeneration` on each reload. When the generation rotates on auto-reload or an explicit `ludens perception reload` occurs inside an `auto` cycle, the system immediately cancels and releases all of this workspace's current inputs through Baseware (including concurrent CLI inputs), bumps `inputGeneration` to reject stale calls from the old instance, and keeps the current `epoch`, remaining budget, and OMP session. See [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts).
 
 ## Session and Loop
 
@@ -94,7 +91,7 @@ The Ludens Host reuses a single OMP session per workspace (persisted under `.lud
 Inside an `auto` control cycle, the outer loop runs as follows:
 
 1. **Open a turn**: issues an OMP `prompt` using [continue.md](../../../core/prompts/continue.md) (on first takeover with `auto on --message`, a one-shot reminder is appended).
-2. **Perception and action run in parallel**: the environment keeps running while the model reasons — the resident `Perception.sample()` samples continuously at the host-configured rate (`LUDENS_PERCEPTION_SAMPLE_HZ`, default `30` Hz) into `.ludens/timeline/`, and its in-process capabilities continuously read the spacetime axis and execute high-frequency closed-loop control in the same process; see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md).
+2. **The resident runs alongside model reasoning**: the environment keeps running while the model reasons — the resident `Perception.sample()` samples continuously at the host-configured rate (`LUDENS_PERCEPTION_SAMPLE_HZ`, default `30` Hz) into `.ludens/timeline/`, and its in-process capabilities continuously read the spacetime axis and execute high-frequency closed-loop control in the same process; see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md).
 3. **Automatic context delivery**: the Ludens extension hooks OMP's `before_agent_start` hook (see [extension.ts](../../../core/src/core/agent-omp/extension.ts)). When auto-injection is on (default `inject on`), it automatically appends the latest undelivered primary-channel perception records plus sampler state transitions (`state / codeSHA / error`) at the start of each prompt; tool results are never appended with observations, the `tool_result` hook only records delivery receipts for native tool images, and mid-turn observation is composed explicitly by the model via `observe`. The former end-of-batch channel was removed on 2026-10-29; see [Injection converges to a single per-turn channel](../insights/omp-injection.md).
 4. **Continue or hand over**: when a single `prompt` ends and budget remains, the next turn starts automatically; on human handover or budget exhaustion, the `addBeforeModelCall` gate immediately blocks new model requests and releases device control.
 
@@ -113,7 +110,7 @@ Inside an `auto` control cycle, the outer loop runs as follows:
 Ludens consists of a TypeScript host (`core/src/`) plus a Python toolkit (`core/python/ludens_tools/`):
 
 - **TypeScript side**: owns the Shiori runtime, control leases, OMP session extensions, cross-process RPC, and CLI orchestration.
-- **Python side**: owns `@capability` static discovery and dynamic execution, the resident `Perception` / `Action` loops, PyAV video-segment encoding, and on-demand cold-frame decoding. Continuous perception ingests Baseware's spooled media references (`_StreamMediaRef`) directly from disk without inline Base64 IPC round-trips, automatically binds device observation `sources` provenance onto the timeline record, and short-circuits unchanged latest-frame `Client().observe()` polls via `ifNoneMatchSequence`. Video encode/decode happens inside the resident perception process without introducing a separate streaming service.
+- **Python side**: owns `@capability` static discovery and dynamic execution, the unified resident `Perception` state machine, PyAV video-segment encoding, and on-demand cold-frame decoding. Continuous perception ingests Baseware's spooled media references (`_StreamMediaRef`) directly from disk without inline Base64 IPC round-trips, automatically binds device observation `sources` provenance onto the timeline record, and short-circuits unchanged latest-frame `Client().observe()` polls via `ifNoneMatchSequence`. Video encode/decode happens inside the resident perception process without introducing a separate streaming service.
 
 ## Capability Persistence Boundaries
 
