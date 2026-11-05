@@ -262,6 +262,13 @@ export default function ConsoleShell() {
                   onOpenPerf={() => navigate({ view: "perf" })}
                   onOpenCaps={() => navigate({ view: "caps" })}
                   onOpenReplay={() => navigate({ view: "replay" })}
+                  onOpenReplayAt={(frame) =>
+                    navigate({
+                      ...pinned,
+                      view: "replay",
+                      ...replayEvidencePatch({ kind: "frame", record: frame.record, sequence: frame.sequence }),
+                    })
+                  }
                   onReturnLatest={returnToLatest}
                   renderObservation={({ call: overrideCall, selectedImage: overrideImage, onSelectImage }) => {
                     const effectiveCall =
@@ -280,6 +287,13 @@ export default function ConsoleShell() {
                         call={effectiveCall}
                         selectedImage={effectiveImage}
                         onImage={onSelectImage}
+                        onOpenReplayAt={(frame) =>
+                          navigate({
+                            ...pinned,
+                            view: "replay",
+                            ...replayEvidencePatch({ kind: "frame", record: frame.record, sequence: frame.sequence }),
+                          })
+                        }
                       />
                     );
                   }}

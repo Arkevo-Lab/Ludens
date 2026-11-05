@@ -1783,6 +1783,16 @@
     "provWorkspace": "Workspace",
     "hostStandbyHint": "Workspace host daemon is on standby (no active ludens run process). Launch the host in terminal for live control:",
     "copyLaunchCmd": "Copy launch command",
-    "copiedLaunchCmd": "Command copied"
+    "copiedLaunchCmd": "Command copied",
+    "inputBadge": "INPUT",
+    "inputRequestTag": "Req #{number}",
+    "inputPerceptionTitle": "Perception Input",
+    "inputBgResultTitle": "Background Job Input",
+    "inputFramesCount": "{count} frame(s)",
+    "inputSeqLabel": "Seq #{seq}",
+    "inputSamplingMs": "Sampled {ms}ms",
+    "inputExpandPayload": "View model input payload",
+    "inputPreviewInStage": "Click to inspect in viewport",
+    "jumpToReplayAt": "Replay {time} ↗"
   }
 }

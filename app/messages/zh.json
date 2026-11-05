@@ -1783,6 +1783,16 @@
     "provWorkspace": "工作区目录",
     "hostStandbyHint": "当前工作区宿主待命（未检测到活跃 ludens run 进程）。在终端启动宿主后即可执行实时控制：",
     "copyLaunchCmd": "复制启动命令",
-    "copiedLaunchCmd": "已复制命令"
+    "copiedLaunchCmd": "已复制命令",
+    "inputBadge": "INPUT",
+    "inputRequestTag": "请求 #{number}",
+    "inputPerceptionTitle": "环境感知输入",
+    "inputBgResultTitle": "后台任务回传输入",
+    "inputFramesCount": "{count} 帧画面",
+    "inputSeqLabel": "序列 #{seq}",
+    "inputSamplingMs": "采样 {ms}ms",
+    "inputExpandPayload": "查看传入模型的 Input 详情",
+    "inputPreviewInStage": "点击在右侧放大画面",
+    "jumpToReplayAt": "跳转回放 {time} ↗"
   }
 }

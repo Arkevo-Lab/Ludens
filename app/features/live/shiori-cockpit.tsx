@@ -33,7 +33,7 @@ import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
 import { clockTime } from "@/features/live/run-visuals";
-import type { Call, RunData } from "@/lib/types";
+import type { Call, Observation, RunData } from "@/lib/types";
 import "@/features/live/activity-feed.css";
 
 export type RuntimeControlAction =
@@ -128,8 +128,28 @@ function summarizeStepBlock(block: ActivityBlock): { badge: string; detail: stri
   return { badge: block.source?.component ?? "step", detail: fallbackText };
 }
 
+function isBackgroundResultBlock(block: ActivityBlock): boolean {
+  return block.kind === "system" && block.title === "background_result";
+}
+
+function callHasExternalInput(call: Call): boolean {
+  return (
+    call.inputObservations.length > 0 ||
+    Boolean(call.inputText && call.inputText.trim()) ||
+    Boolean(call.perception)
+  );
+}
+
 type StreamSegment =
   | { kind: "user"; id: string; block: ActivityBlock; text: string; mode: string }
+  | {
+      kind: "input";
+      id: string;
+      call?: Call;
+      observations: Observation[];
+      bgBlock?: ActivityBlock;
+      at: string;
+    }
   | {
       kind: "turn";
       id: string;
@@ -139,12 +159,20 @@ type StreamSegment =
     };
 
 /**
- * Groups raw ActivityBlocks into Codex-style conversational segments:
+ * Groups raw ActivityBlocks and external Call inputs into Codex-style conversational segments:
  * - User bubbles (`user_message`)
+ * - External Agent Loop Input blocks (`CodexInputCard` from `call.inputObservations` / `call.inputText` / `call.perception` / `background_result`)
  * - Collapsed intermediate step groups (`上 N 条消息 / 执行步骤 >`) paired with Shiori's readable prose response
  */
-function buildCodexSegments(rawBlocks: ActivityBlock[]): StreamSegment[] {
+function buildCodexSegments(
+  rawBlocks: ActivityBlock[],
+  calls: Call[] = [],
+  observations: Observation[] = [],
+): StreamSegment[] {
   const blocks = rawBlocks.filter(block => block.kind !== "diagnostic");
+  const callsById = new Map(calls.map(c => [c.id, c]));
+  const obsById = new Map(observations.map(o => [o.id, o]));
+  const emittedCallInputIds = new Set<string>();
   const segments: StreamSegment[] = [];
   let pendingSteps: ActivityBlock[] = [];
 
@@ -240,14 +268,46 @@ function buildCodexSegments(rawBlocks: ActivityBlock[]): StreamSegment[] {
       continue;
     }
 
+    if (isBackgroundResultBlock(block)) {
+      flushTurn();
+      segments.push({
+        kind: "input",
+        id: `input-bg:${block.id}`,
+        observations: [],
+        bgBlock: block,
+        at: block.at,
+      });
+      continue;
+    }
+
+    const callId = block.trace?.modelCallId;
+    if (callId && !emittedCallInputIds.has(callId)) {
+      const call = callsById.get(callId);
+      if (call && callHasExternalInput(call)) {
+        flushTurn();
+        emittedCallInputIds.add(call.id);
+        const resolvedObs = call.inputObservations
+          .map(obsId => obsById.get(obsId))
+          .filter((item): item is Observation => Boolean(item));
+        segments.push({
+          kind: "input",
+          id: `input-call:${call.id}`,
+          call,
+          observations: resolvedObs,
+          at: call.perception?.snapshot?.recordedAt ?? resolvedObs[0]?.at ?? call.at,
+        });
+      }
+    }
+
     if (isAssistantTextBlock(block)) {
       flushTurn(block);
       continue;
     }
 
     pendingSteps.push(block);
-    // Group autonomous loop steps into readable ~6-step conversational turns
+    // Fallback turn split only when calls don't carry turn-boundary input headers
     if (
+      callsById.size === 0 &&
       pendingSteps.length >= 6 &&
       block.kind === "tool" &&
       (pendingSteps.some(item => item.kind === "thinking") || Boolean(block.tool?.intent))
@@ -379,6 +439,206 @@ function CodexStepGroup({
         </div>
       )}
     </div>
+  );
+}
+
+function CodexInputCard({
+  project,
+  run,
+  call,
+  observations,
+  bgBlock,
+  at,
+  isSelected,
+  onSelect,
+  onOpenReplayAt,
+}: {
+  project: string;
+  run: string;
+  call?: Call;
+  observations: Observation[];
+  bgBlock?: ActivityBlock;
+  at: string;
+  isSelected: boolean;
+  onSelect: (imageId?: string) => void;
+  onOpenReplayAt?: (frame: { record: string; sequence: number }) => void;
+}) {
+  const t = useTranslations("shioriCockpit");
+  const [expandedPayload, setExpandedPayload] = useState(false);
+
+  const perception = call?.perception;
+  const snapshot = perception?.snapshot;
+  const timeline = snapshot?.timeline ?? observations[0]?.timeline;
+  const replayRecordId = timeline?.recordId;
+  const replaySequence = timeline?.sequence;
+  const sequence = snapshot?.sequence ?? timeline?.sequence;
+  const capability = snapshot?.capability ?? observations[0]?.origin ?? null;
+  const durationMs = perception?.durationMs;
+
+  const bgData = asRecord(bgBlock?.data);
+  const bgJobId = typeof bgData?.jobId === "string" ? bgData.jobId : null;
+  const bgLabel = typeof bgData?.label === "string" ? bgData.label : bgBlock?.text ?? null;
+  const bgResult = typeof bgData?.result === "string" ? bgData.result : null;
+  const bgDurationMs = typeof bgData?.durationMs === "number" ? bgData.durationMs : null;
+
+  const textSnippets: string[] = [];
+  if (call?.inputText && call.inputText.trim()) {
+    textSnippets.push(call.inputText.trim());
+  }
+  for (const obs of observations) {
+    if (obs.text && obs.text.trim() && !textSnippets.includes(obs.text.trim())) {
+      textSnippets.push(obs.text.trim());
+    }
+  }
+  if (perception?.records) {
+    for (const rec of perception.records) {
+      if (rec.text && rec.text.trim() && !textSnippets.includes(rec.text.trim())) {
+        textSnippets.push(rec.text.trim());
+      }
+    }
+  }
+  if (perception?.deliveryError && perception.deliveryError.trim()) {
+    textSnippets.push(`⚠ ${perception.deliveryError.trim()}`);
+  }
+  if (bgLabel && bgLabel.trim()) {
+    textSnippets.push(bgLabel.trim());
+  }
+  if (bgResult && bgResult.trim() && bgResult.trim() !== bgLabel?.trim()) {
+    textSnippets.push(bgResult.trim());
+  }
+
+  const payloadObject = call
+    ? {
+        callIndex: call.index,
+        callId: call.id,
+        ...(call.inputText ? { inputText: call.inputText } : {}),
+        ...(call.inputObservations.length > 0 ? { inputObservations: call.inputObservations } : {}),
+        ...(call.perception ? { perception: call.perception } : {}),
+      }
+    : bgBlock?.data ?? bgBlock;
+
+  return (
+    <article
+      className="codex-input-card"
+      data-selected={isSelected || undefined}
+      onClick={() => onSelect(observations[0]?.id)}
+    >
+      <header className="codex-input-header">
+        <div className="codex-input-header-left">
+          <span className="codex-input-badge">{t("inputBadge")}</span>
+          {call && (
+            <span className="codex-input-req">
+              {t("inputRequestTag").replace("{number}", String(call.index).padStart(3, "0"))}
+            </span>
+          )}
+          <span className="codex-input-title">
+            {bgBlock
+              ? `${t("inputBgResultTitle")}${bgJobId ? ` · ${bgJobId}` : ""}`
+              : capability || t("inputPerceptionTitle")}
+          </span>
+        </div>
+
+        <div className="codex-input-header-right">
+          {replayRecordId && typeof replaySequence === "number" && onOpenReplayAt ? (
+            <button
+              type="button"
+              className="codex-replay-jump-link"
+              title={t("jumpToReplayAt").replace("{time}", clockTime(at))}
+              onClick={event => {
+                event.stopPropagation();
+                onOpenReplayAt({ record: replayRecordId, sequence: replaySequence });
+              }}
+            >
+              ⏱ {t("jumpToReplayAt").replace("{time}", clockTime(at))}
+            </button>
+          ) : (
+            <time className="font-mono text-[11px] text-muted-foreground">{clockTime(at)}</time>
+          )}
+        </div>
+      </header>
+
+      <div className="codex-input-body">
+        {observations.length > 0 && (
+          <div className="codex-input-thumbs">
+            {observations.map(obs => (
+              <button
+                key={obs.id}
+                type="button"
+                className="codex-input-thumb"
+                title={t("inputPreviewInStage")}
+                onClick={event => {
+                  event.stopPropagation();
+                  onSelect(obs.id);
+                }}
+              >
+                <img
+                  src={`/api/media?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run)}&id=${encodeURIComponent(obs.id)}`}
+                  alt={obs.origin || obs.id}
+                  loading="lazy"
+                />
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div className="codex-input-content">
+          {textSnippets.length > 0 && (
+            <div className="codex-input-text">
+              {textSnippets.map((snippet, idx) => (
+                <p key={idx}>{snippet}</p>
+              ))}
+            </div>
+          )}
+
+          <div className="codex-input-meta-chips">
+            {observations.length > 0 && (
+              <span className="codex-input-chip">
+                🖼 {t("inputFramesCount").replace("{count}", String(observations.length))}
+              </span>
+            )}
+            {sequence != null && (
+              <span className="codex-input-chip">
+                {t("inputSeqLabel").replace("{seq}", String(sequence))}
+              </span>
+            )}
+            {durationMs != null && (
+              <span className="codex-input-chip">
+                {t("inputSamplingMs").replace("{ms}", durationMs.toFixed(1))}
+              </span>
+            )}
+            {bgDurationMs != null && (
+              <span className="codex-input-chip">
+                {(bgDurationMs / 1000).toFixed(1)}s
+              </span>
+            )}
+            <button
+              type="button"
+              className="codex-input-payload-toggle"
+              onClick={event => {
+                event.stopPropagation();
+                setExpandedPayload(prev => !prev);
+              }}
+            >
+              {expandedPayload ? (
+                <ChevronDown className="size-3" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="size-3" aria-hidden="true" />
+              )}
+              <span>{t("inputExpandPayload")}</span>
+            </button>
+          </div>
+
+          {expandedPayload && (
+            <pre
+              className="codex-input-payload-pre"
+              onClick={event => event.stopPropagation()}
+            >
+              {printable(payloadObject)}
+            </pre>
+          )}
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -762,6 +1022,7 @@ export function ShioriWorkbench({
   onOpenPerf,
   onOpenCaps,
   onOpenReplay,
+  onOpenReplayAt,
   onReturnLatest,
   renderObservation,
   observationSlot,
@@ -780,6 +1041,7 @@ export function ShioriWorkbench({
   onOpenPerf(): void;
   onOpenCaps(): void;
   onOpenReplay?(): void;
+  onOpenReplayAt?: (frame: { record: string; sequence: number }) => void;
   onReturnLatest(): void;
   renderObservation?: (options: {
     call: Call | undefined;
@@ -843,7 +1105,10 @@ export function ShioriWorkbench({
   const perceptionInject = perceptionOverride ?? serverPerceptionInject;
   const isAuto = mode === "auto";
 
-  const computedSegments = useMemo(() => buildCodexSegments(feed.blocks), [feed.blocks]);
+  const computedSegments = useMemo(
+    () => buildCodexSegments(feed.blocks, data.calls, data.observations),
+    [feed.blocks, data.calls, data.observations],
+  );
   if (computedSegments.length > 0) {
     cachedSegmentsRef.current = { run: data.run, segments: computedSegments };
   }
@@ -888,6 +1153,21 @@ export function ShioriWorkbench({
     setDockOpen(true);
     setDockTab("stage");
     onSelectBlock?.(block);
+  };
+
+  const handleInspectInput = (segId: string, call?: Call, imageId?: string, at?: string) => {
+    setInspectedTurn(prev =>
+      prev?.blockId === segId && prev?.imageId === (imageId ?? null)
+        ? null
+        : {
+            blockId: segId,
+            callId: call?.id ?? null,
+            imageId: imageId ?? null,
+            at: at ?? call?.at ?? data.updatedAt,
+          },
+    );
+    setDockOpen(true);
+    setDockTab("stage");
   };
 
   const toggleWorkbenchPerception = async () => {
@@ -1083,12 +1363,30 @@ export function ShioriWorkbench({
                   );
                 }
 
+                if (seg.kind === "input") {
+                  const isInputSelected = Boolean(
+                    activeBlockId === seg.id ||
+                      (seg.call && inspectedTurn?.callId === seg.call.id),
+                  );
+                  return (
+                    <CodexInputCard
+                      key={seg.id}
+                      project={project}
+                      run={data.run}
+                      call={seg.call}
+                      observations={seg.observations}
+                      bgBlock={seg.bgBlock}
+                      at={seg.at}
+                      isSelected={isInputSelected}
+                      onSelect={imageId => handleInspectInput(seg.id, seg.call, imageId, seg.at)}
+                      onOpenReplayAt={onOpenReplayAt}
+                    />
+                  );
+                }
+
                 const paragraphs = seg.responseText
                   ? seg.responseText.split(/\n{2,}/).filter(Boolean)
                   : [];
-                const isTurnInspected = Boolean(
-                  seg.responseBlock && activeBlockId === seg.responseBlock.id,
-                );
 
                 return (
                   <article key={seg.id} className="codex-turn-assistant">
@@ -1104,19 +1402,6 @@ export function ShioriWorkbench({
                         {paragraphs.map((para, idx) => (
                           <p key={idx}>{renderInlineFormatting(para)}</p>
                         ))}
-                        {seg.responseBlock && (
-                          <div className="codex-prose-meta">
-                            <button
-                              type="button"
-                              className="codex-trace-link"
-                              data-active={isTurnInspected || undefined}
-                              aria-pressed={isTurnInspected}
-                              onClick={() => handleInspectBlock(seg.responseBlock!, seg.steps)}
-                            >
-                              {"{}"} {t("inspectTurnRecord")} · {clockTime(seg.responseBlock.at)}
-                            </button>
-                          </div>
-                        )}
                       </div>
                     )}
                   </article>
