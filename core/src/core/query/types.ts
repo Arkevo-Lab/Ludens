@@ -42,6 +42,8 @@ export interface RunInfo {
   model: string | null;
   seconds: number;
   drivers: { id: string; version: string }[];
+  startedAt?: string;
+  endedAt?: string;
 }
 export interface Project {
   id: string;

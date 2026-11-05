@@ -46,7 +46,7 @@ export function ContextPicker({ kind, options, value, onChange, label, hideLabel
     <Dialog open={open} onOpenChange={next => { if (!next || !empty) setOpen(next); }}>
       <DialogTrigger asChild>
         <Button id={id} type="button" variant="outline" size="sm"
-          className={`context-picker-trigger ${kind}-picker-trigger min-w-0 max-w-full shrink justify-between text-xs aria-disabled:opacity-50 ${kind === "workspace" ? "w-56 sm:w-64" : "w-60"}`}
+          className={`context-picker-trigger ${kind}-picker-trigger min-w-0 max-w-full shrink justify-between text-xs aria-disabled:opacity-50 ${kind === "workspace" ? "w-56 sm:w-64" : "w-64 sm:w-80"}`}
           aria-disabled={empty} aria-labelledby={`${id}-label ${id}-value`} aria-describedby={`${id}-hint`} title={trigger.title}>
           <span id={`${id}-value`} className="min-w-0 truncate">{trigger.text}</span>
           <ChevronDown aria-hidden="true" />

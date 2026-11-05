@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runIdentity } from "../lib/run-identity";
+import { runIdentity, runWindowSummary } from "../lib/run-identity";
 
 test("run summaries retain the full year, seconds and recorded millisecond precision", () => {
   for (const [id, summary] of [
@@ -59,4 +59,69 @@ test("noncanonical timestamps and custom IDs are never partially parsed or norma
 test("dates needing an era are not presented as a misleading AD timestamp", () => {
   const id = "0000-01-01T00-00-00Z";
   assert.deepEqual(runIdentity(id), { id, summary: null });
+});
+
+test("run window summaries format clean start–end ranges and durations in Asia/Shanghai without millisecond noise", () => {
+  assert.deepEqual(
+    runWindowSummary({
+      id: "2026-11-05T11-46-06.227Z",
+      startedAt: "2026-11-05T11:46:06.234Z",
+      endedAt: "2026-11-05T12:03:26.660Z",
+    }),
+    {
+      id: "2026-11-05T11-46-06.227Z",
+      summary: "2026/11/05 19:46 – 20:03 · 17m",
+    },
+  );
+  assert.deepEqual(
+    runWindowSummary({
+      id: "2026-11-05T11-46-06.227Z",
+      startedAt: "2026-11-05T11:46:06.227Z",
+      endedAt: "2026-11-05T11:46:42.227Z",
+    }),
+    {
+      id: "2026-11-05T11-46-06.227Z",
+      summary: "2026/11/05 19:46:06 – 19:46:42 · 36s",
+    },
+  );
+  assert.deepEqual(
+    runWindowSummary({
+      id: "2026-11-05T15-50-00.000Z",
+      startedAt: "2026-11-05T15:50:00.000Z",
+      endedAt: "2026-11-05T17:20:00.000Z",
+    }),
+    {
+      id: "2026-11-05T15-50-00.000Z",
+      summary: "2026/11/05 23:50 – 11/06 01:20 · 1h 30m",
+    },
+  );
+  assert.deepEqual(
+    runWindowSummary({
+      id: "2026-11-05T11-46-06.227Z",
+    }),
+    {
+      id: "2026-11-05T11-46-06.227Z",
+      summary: "2026/11/05 19:46:06",
+    },
+  );
+  assert.deepEqual(
+    runWindowSummary({
+      id: "custom-run-id",
+      startedAt: "2026-11-05T11:46:06.000Z",
+      endedAt: "2026-11-05T12:03:06.000Z",
+    }),
+    {
+      id: "custom-run-id",
+      summary: "2026/11/05 19:46 – 20:03 · 17m",
+    },
+  );
+  assert.deepEqual(
+    runWindowSummary({
+      id: "custom-run-id",
+    }),
+    {
+      id: "custom-run-id",
+      summary: null,
+    },
+  );
 });

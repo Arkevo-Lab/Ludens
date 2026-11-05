@@ -1,4 +1,4 @@
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, basename, relative } from "node:path";
 import { connect } from "node:net";
 import { selectCycle } from "./aggregate";
@@ -60,6 +60,56 @@ export async function catalog(root = globalHome, includeEmpty = false): Promise<
   catalogCache.set(key, entry);
   return entry.pending;
 }
+async function readEventLogBounds(logFile: string): Promise<{ startedAt?: string; endedAt?: string }> {
+  let handle;
+  try {
+    handle = await open(logFile, "r");
+    const info = await handle.stat();
+    if (info.size === 0) return {};
+    const headLen = Math.min(info.size, 8192);
+    const headBuf = Buffer.alloc(headLen);
+    await handle.read(headBuf, 0, headLen, 0);
+    const headText = headBuf.toString("utf8");
+    const firstNewline = headText.indexOf("\n");
+    const firstLine = (firstNewline >= 0 ? headText.slice(0, firstNewline) : headText).trim();
+    let startedAt: string | undefined;
+    if (firstLine) {
+      const parsed = JSON.parse(firstLine);
+      const raw = parsed?.origin?.at ?? parsed?.at;
+      if (typeof raw === "string" && Number.isFinite(Date.parse(raw))) startedAt = raw;
+    }
+    const tailLen = Math.min(info.size, 32768);
+    const tailOffset = info.size - tailLen;
+    const tailBuf = Buffer.alloc(tailLen);
+    await handle.read(tailBuf, 0, tailLen, tailOffset);
+    const tailText = tailBuf.toString("utf8");
+    const lines = tailText.split("\n");
+    let endedAt: string | undefined;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (i === 0 && tailOffset > 0) break;
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        const raw = parsed?.origin?.at ?? parsed?.at;
+        if (typeof raw === "string" && Number.isFinite(Date.parse(raw))) {
+          endedAt = raw;
+          break;
+        }
+      } catch {
+        // Ignore trailing incomplete JSON line while a run is actively writing.
+      }
+    }
+    return {
+      ...(startedAt ? { startedAt } : {}),
+      ...(endedAt ? { endedAt } : {}),
+    };
+  } catch {
+    return {};
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
 async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project[]> {
   const registered = await listRegisteredWorkspaces(home);
   const projects = await Promise.all(registered.map(async entry => {
@@ -78,8 +128,9 @@ async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project
         const path = await resolveInRoots(id, roots);
         const manifest: Manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
         if (manifest.workspaceId && !archiveIds.has(manifest.workspaceId)) throw new Error("运行记录与工作区身份不一致");
+        const bounds = await readEventLogBounds(join(path, "events.jsonl"));
         return { id, ...(manifest.kind ? { kind: manifest.kind } : {}), model: manifest.model,
-          seconds: manifest.seconds, drivers: manifest.drivers };
+          seconds: manifest.seconds, drivers: manifest.drivers, ...bounds };
       } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
     }));
     project.runs = runs.filter(item => item !== null);
