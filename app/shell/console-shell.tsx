@@ -246,16 +246,28 @@ export default function ConsoleShell() {
                 <ShioriWorkbench
                   project={selection.project}
                   workspace={project?.workspace ?? data.manifest.workspace ?? null}
+                  workspaceTitle={workspaceName(project)}
                   data={data}
+                  feed={activity}
                   isLiveRun={Boolean(!selection.run || selection.run === latest?.id) && !selection.epoch}
                   phaseLabel={!staleStatus ? phase?.label : null}
                   phaseElapsedMs={!staleStatus ? phase?.elapsedMs : null}
+                  selectedBlock={query.get("block") ?? undefined}
+                  onSelectBlock={(block) =>
+                    navigate({
+                      ...pinned,
+                      block: block.id,
+                      call: block.trace?.modelCallId ?? null,
+                      image: null,
+                    })
+                  }
                   onUpdated={() => {
                     setSnapshotRevision(n => n + 1);
                     activity.latest();
                   }}
                   onOpenPerf={() => navigate({ view: "perf" })}
                   onOpenCaps={() => navigate({ view: "caps" })}
+                  onOpenReplay={() => navigate({ view: "replay" })}
                   onReturnLatest={returnToLatest}
                   observationSlot={
                     <ObservationPanel
@@ -266,23 +278,6 @@ export default function ConsoleShell() {
                       onImage={(id) => navigate({ ...pinned, image: id })}
                     />
                   }
-                  renderActivityFeed={(composer) => (
-                    <ActivityFeed
-                      key={scopeKey + "/" + data.selectedEpoch}
-                      feed={activity}
-                      expectedEpoch={data.selectedEpoch}
-                      selectedBlock={query.get("block") ?? undefined}
-                      onSelect={(block) =>
-                        navigate({
-                          ...pinned,
-                          block: block.id,
-                          call: block.trace?.modelCallId ?? null,
-                          image: null,
-                        })
-                      }
-                      composer={composer}
-                    />
-                  )}
                 />
               ) : (
                 <>
@@ -401,15 +396,12 @@ export default function ConsoleShell() {
                   </details>
                 </>
               )}
-              <footer className="page-footer">
-                <span>
-                  ⓘ{" "}
-                  {view === "live"
-                    ? dt("footer.live")
-                    : dt("footer.perf")}
-                </span>
-                <span>{dt("updatedAt")} {clockTime(data.updatedAt)}</span>
-              </footer>
+              {view !== "live" && (
+                <footer className="page-footer">
+                  <span>ⓘ {dt("footer.perf")}</span>
+                  <span>{dt("updatedAt")} {clockTime(data.updatedAt)}</span>
+                </footer>
+              )}
             </>
           )}
         </main>

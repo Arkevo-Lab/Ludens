@@ -367,351 +367,731 @@
   }
 }
 
-/* ── Shiori × Codex Loop Workbench ───────────────────────────── */
-.shiori-workbench {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
+/* ── Codex-Style Chat Stream + Right Workbench Dock ───────────── */
+.page-content.live-page {
+  padding: 0;
+  max-width: none;
 }
 
-.shiori-cockpit {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--primary) 6%, var(--card)) 0%,
-    var(--card) 100%
-  );
-}
-.shiori-cockpit[data-shiori-cockpit="auto"],
-.shiori-cockpit[data-shiori-cockpit="thinking"] {
-  border-color: color-mix(in srgb, var(--success, #16a34a) 45%, var(--border));
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--success, #16a34a) 8%, var(--card)) 0%,
-    var(--card) 100%
-  );
-}
-.shiori-cockpit[data-shiori-cockpit="consolidating"] {
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-}
-
-.shiori-cockpit-main {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px 18px;
-}
-
-.shiori-cockpit-identity {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.shiori-cockpit-orb {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
-  border: 1px solid color-mix(in srgb, var(--primary) 35%, var(--border));
-  background: color-mix(in srgb, var(--primary) 12%, var(--card));
-  color: var(--primary);
-  flex-shrink: 0;
-}
-.shiori-cockpit-orb[data-tone="auto"],
-.shiori-cockpit-orb[data-tone="thinking"] {
-  border-color: color-mix(in srgb, var(--success, #16a34a) 45%, var(--border));
-  background: color-mix(in srgb, var(--success, #16a34a) 15%, var(--card));
-  color: var(--success, #16a34a);
-}
-.shiori-cockpit-pulse {
-  position: absolute;
-  bottom: -2px;
-  right: -2px;
-  width: 9px;
-  height: 9px;
-  border-radius: 999px;
-  border: 2px solid var(--card);
-  background: var(--gold, #d97706);
-}
-.shiori-cockpit-orb[data-tone="auto"] .shiori-cockpit-pulse,
-.shiori-cockpit-orb[data-tone="thinking"] .shiori-cockpit-pulse {
-  background: var(--success, #16a34a);
-}
-.shiori-cockpit-orb[data-tone="standby"] .shiori-cockpit-pulse {
-  background: var(--muted-foreground);
-}
-
-.shiori-cockpit-titles {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-.shiori-cockpit-headline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-.shiori-workbench-tag {
-  padding: 2px 7px;
-  border-radius: 5px;
-  background: color-mix(in srgb, var(--primary) 16%, transparent);
-  color: var(--primary);
-  font: 700 10px/1.35 var(--font-mono);
-  letter-spacing: 0.05em;
-}
-.shiori-cockpit-headline > strong {
-  font-size: 14.5px;
-  font-weight: 600;
-  color: var(--foreground);
-}
-.shiori-phase-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-inset, var(--muted));
-  font: 500 11px/1.35 var(--font-mono);
-  color: var(--foreground);
-}
-.shiori-budget-chip {
-  padding: 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 35%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--success, #16a34a) 10%, transparent);
-  color: var(--success, #16a34a);
-  font: 600 11px/1.35 var(--font-mono);
-}
-.shiori-cockpit-subline {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  font-size: 11.5px;
-  color: var(--muted-foreground);
-}
-.shiori-cockpit-subline > span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-.shiori-cockpit-subline > i {
-  font-style: normal;
-  color: var(--subtle);
-}
-
-.shiori-cockpit-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 7px;
-}
-
-/* 4-Stage Visual Auto-Loop Pipeline */
-.shiori-loop-pipeline {
+.codex-workbench {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
-  gap: 8px;
-  align-items: stretch;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  grid-template-columns: minmax(0, 1fr);
+  min-height: calc(100vh - 57px);
+  background: var(--background);
 }
-.shiori-pipeline-step {
+.codex-workbench[data-dock-open] {
+  grid-template-columns: minmax(0, 1.45fr) minmax(350px, 430px);
+}
+
+/* ── Left / Center Main Chat Pane ── */
+.codex-chat-pane {
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 55%, var(--card));
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+  height: calc(100vh - 57px);
+  min-width: 0;
+  background: var(--background);
 }
-.shiori-pipeline-step:hover {
-  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
-  background: color-mix(in srgb, var(--primary) 7%, var(--card));
-}
-.shiori-pipeline-step[data-active] {
-  border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 11%, var(--card));
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 25%, transparent);
-}
-.shiori-pipeline-step-head {
+
+.codex-thread-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.shiori-pipeline-step-num {
-  font: 700 10px/1 var(--font-mono);
-  color: var(--primary);
-  padding: 2px 5px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--primary) 15%, transparent);
-}
-.shiori-pipeline-step-icon {
-  color: var(--primary);
+  justify-content: space-between;
+  gap: 12px;
+  height: 46px;
+  padding: 0 22px;
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
-.shiori-pipeline-step-head > strong {
-  font-size: 12px;
+.codex-thread-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+}
+.codex-thread-title > strong {
+  font-size: 13.5px;
   font-weight: 600;
   color: var(--foreground);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.shiori-pipeline-step-metric {
-  margin-left: auto;
-  font: 600 10.5px/1.2 var(--font-mono);
+.codex-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface-inset, var(--muted));
+  font-size: 11.5px;
   color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.codex-status-pill[data-tone="auto"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 40%, var(--border));
+  background: color-mix(in srgb, var(--success, #16a34a) 10%, transparent);
+  color: var(--success, #16a34a);
+}
+.codex-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+}
+.codex-phase-inline {
+  font: 500 11px/1.3 var(--font-mono);
+  color: var(--muted-foreground);
+}
+
+.codex-thread-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.codex-header-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.codex-header-btn:hover {
+  background: var(--surface-inset, var(--muted));
+  color: var(--foreground);
+}
+.codex-header-btn[data-active] {
+  border-color: var(--border);
+  background: var(--surface-inset, var(--muted));
+  color: var(--foreground);
+}
+
+/* ── Scrollable Conversation Stream ── */
+.codex-chat-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 26px 28px 18px;
+}
+.codex-chat-column {
+  max-width: 740px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.codex-load-older {
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* User Bubble (Right-Aligned Pill Bubble like ChatGPT / Codex) */
+.codex-turn-user {
+  display: flex;
+  justify-content: flex-end;
+}
+.codex-user-bubble {
+  max-width: min(82%, 520px);
+  padding: 10px 16px;
+  border-radius: 18px;
+  background: color-mix(in srgb, var(--primary) 14%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.6;
+}
+.codex-user-bubble p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.codex-user-mode-tag {
+  display: inline-block;
+  margin-bottom: 4px;
+  font: 600 10.5px/1.2 var(--font-mono);
+  color: var(--primary);
+}
+
+/* Assistant Turn & Collapsed Step Group ("上 N 条消息 >") */
+.codex-turn-assistant {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.codex-step-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.codex-step-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  width: fit-content;
+  padding: 3px 0;
+  border: 0;
+  background: transparent;
+  font-size: 13px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  transition: color 120ms ease;
+}
+.codex-step-group-toggle:hover {
+  color: var(--foreground);
+}
+
+.codex-step-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--border);
+  margin-left: 4px;
+}
+.codex-step-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 9px;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 55%, transparent);
+}
+.codex-step-item[data-selected] {
+  outline: 1px solid var(--primary);
+}
+.codex-step-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.codex-step-main {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.codex-step-badge {
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  font: 600 11px/1.35 var(--font-mono);
+  color: var(--primary);
+}
+.codex-step-detail {
+  font: 12px/1.4 var(--font-mono);
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 440px;
+}
+.codex-step-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
-.shiori-pipeline-step-desc {
+.codex-step-thumb {
+  width: 150px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+  padding: 0;
+  background: var(--card);
+  cursor: pointer;
+}
+.codex-step-thumb img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.codex-step-pre {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.45;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  font: 11.5px/1.55 var(--font-mono);
+  color: var(--muted-foreground);
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Assistant Prose (Clean borderless typography like ChatGPT / Codex) */
+.codex-assistant-prose {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  font-size: 14.5px;
+  line-height: 1.72;
+  color: var(--foreground);
+}
+.codex-assistant-prose p {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.codex-inline-code {
+  padding: 1.5px 6px;
+  border-radius: 5px;
+  background: var(--surface-inset, var(--muted));
+  border: 1px solid var(--border);
+  font: 12.5px/1.35 var(--font-mono);
+  color: var(--foreground);
+}
+.codex-prose-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.codex-trace-link {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: 500 12px/1.4 var(--font-mono);
+  color: var(--primary);
+  cursor: pointer;
+}
+.codex-trace-link:hover {
+  text-decoration: underline;
+}
+
+.codex-live-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
   color: var(--muted-foreground);
 }
-.shiori-pipeline-arrow {
-  display: none;
+.codex-thinking-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--primary);
+  animation: pulse 1.4s infinite ease-in-out;
 }
-.shiori-pipeline-loopback {
+
+.codex-empty-thread {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 64px 20px;
+}
+.codex-empty-thread h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+.codex-empty-thread p {
+  margin: 0;
+  max-width: 440px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--muted-foreground);
+}
+.codex-starter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.codex-starter-chip {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 12.5px;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: border-color 120ms ease;
+}
+.codex-starter-chip:hover {
+  border-color: var(--primary);
+}
+
+/* Floating Scroll-to-Bottom Circle Button */
+.codex-scroll-bottom-btn {
+  position: absolute;
+  bottom: 132px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  cursor: pointer;
+  z-index: 10;
+}
+
+/* ── Bottom Floating Rounded Pill Composer (ChatGPT / Codex style) ── */
+.codex-composer-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 6px 24px 18px;
+  flex-shrink: 0;
+}
+
+.codex-preset-popover {
+  position: absolute;
+  bottom: calc(100% - 4px);
+  left: 24px;
+  width: min(420px, calc(100% - 48px));
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  padding: 8px 12px;
-  border: 1px dashed color-mix(in srgb, var(--primary) 45%, var(--border));
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--primary) 6%, transparent);
+}
+.codex-preset-popover-title {
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted-foreground);
+}
+.codex-preset-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.codex-preset-item:hover {
+  background: var(--surface-inset, var(--muted));
+}
+.codex-preset-item > span {
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--foreground);
+}
+.codex-preset-item > small {
+  font-size: 11px;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.codex-pill-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px 10px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: var(--card);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
+  transition: border-color 140ms ease;
+}
+.codex-pill-composer:focus-within {
+  border-color: color-mix(in srgb, var(--primary) 55%, var(--border));
+}
+
+.codex-composer-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--surface-inset, var(--muted));
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.codex-notice-link {
+  border: 0;
+  background: transparent;
   color: var(--primary);
-  font: 600 10.5px/1.2 var(--font-mono);
+  font-size: 11.5px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.codex-pill-textarea {
+  width: 100%;
+  border: 0;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 14px;
+  line-height: 1.55;
+  resize: none;
+  min-height: 44px;
+  max-height: 140px;
+}
+.codex-pill-textarea:focus {
+  outline: none;
+}
+
+.codex-pill-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.codex-pill-left,
+.codex-pill-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.codex-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.codex-icon-btn:hover {
+  background: var(--surface-inset, var(--muted));
+  color: var(--foreground);
+}
+
+/* Orange/Green Mode Pill like "完全访问" in the screenshot */
+.codex-access-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, #ea580c 35%, var(--border));
+  background: color-mix(in srgb, #ea580c 12%, transparent);
+  color: #ea580c;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.codex-access-pill[data-mode="steer"] {
+  border-color: color-mix(in srgb, var(--success, #16a34a) 40%, var(--border));
+  background: color-mix(in srgb, var(--success, #16a34a) 12%, transparent);
+  color: var(--success, #16a34a);
+}
+.codex-access-pill[data-mode="follow_up"] {
+  border-color: color-mix(in srgb, var(--primary) 40%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+
+.codex-subtle-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  cursor: pointer;
+}
+.codex-subtle-pill:hover {
+  background: var(--surface-inset, var(--muted));
+  color: var(--foreground);
+}
+.codex-subtle-pill[data-active] {
+  color: var(--foreground);
+}
+
+.codex-model-label {
+  font-size: 12px;
+  color: var(--muted-foreground);
   white-space: nowrap;
 }
 
-/* Interactive 3-Card Design Guidance Strip */
-.shiori-guide-strip {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-.shiori-guide-card {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card);
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 140ms ease, background-color 140ms ease;
-}
-.shiori-guide-card:hover {
-  border-color: var(--primary);
-  background: color-mix(in srgb, var(--primary) 5%, var(--card));
-}
-.shiori-guide-card-top {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-.shiori-guide-badge {
-  font: 700 10px/1.2 var(--font-mono);
-  letter-spacing: 0.04em;
-  color: var(--primary);
-}
-.shiori-guide-cta {
+.codex-send-circle {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  font-size: 11px;
-  font-weight: 500;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: 0;
+  background: #2563eb;
+  color: #ffffff;
+  cursor: pointer;
+  transition: opacity 120ms ease, transform 120ms ease;
+}
+.codex-send-circle:hover:not(:disabled) {
+  transform: scale(1.04);
+}
+.codex-send-circle:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.codex-composer-feedback {
+  margin: 6px 10px 0;
+  font-size: 11.5px;
   color: var(--muted-foreground);
 }
-.shiori-guide-card:hover .shiori-guide-cta {
-  color: var(--primary);
+.codex-composer-feedback-err {
+  color: var(--destructive);
 }
-.shiori-guide-card-title {
+
+/* ── RIGHT WORKBENCH DOCK (Matches the right pane in the screenshot) ── */
+.codex-right-dock {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 57px);
+  border-left: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 35%, var(--background));
+  min-width: 0;
+}
+
+.codex-dock-tabs {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
+  height: 46px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
-.shiori-guide-card-title > strong {
-  font-size: 13px;
-  font-weight: 600;
+.codex-dock-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.codex-dock-tab:hover {
   color: var(--foreground);
 }
-.shiori-guide-card-desc {
+.codex-dock-tab[data-active] {
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 500;
+}
+
+.codex-dock-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.codex-dock-viewport {
+  min-width: 0;
+}
+.codex-dock-viewport .observation-panel {
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.codex-dock-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.codex-dock-heading {
   margin: 0;
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--muted-foreground);
 }
-
-/* Codex 2-Pane Split: Left = Shiori Thread + Composer | Right = Sticky Environment Stage */
-.shiori-workbench-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.9fr);
-  gap: 16px;
-  align-items: start;
-}
-.shiori-thread-column {
-  min-width: 0;
-}
-.shiori-thread-column .feed-panel {
-  max-height: calc(100vh - 230px);
-  min-height: 620px;
-}
-.shiori-stage-column {
-  position: sticky;
-  top: 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  min-width: 0;
-}
-.shiori-stage-viewport {
-  min-width: 0;
+.codex-tool-err {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--destructive);
 }
 
-/* Telemetry & Budget Card inside Right Stage Column */
-.shiori-telemetry-card {
+/* Tool Rows (Styled like "工具: 变更 / 终端 / 文件 / 新建页面" in the screenshot) */
+.codex-tool-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 14px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--card);
+  gap: 6px;
 }
-.shiori-telemetry-head {
+.codex-tool-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 10px;
+  padding: 10px 13px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--foreground);
   font-size: 13px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
 }
+.codex-tool-row:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: color-mix(in srgb, var(--primary) 4%, var(--card));
+}
+.codex-tool-row:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.codex-tool-row-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 500;
+}
+.codex-tool-kbd {
+  font: 500 11px/1.2 var(--font-mono);
+  color: var(--muted-foreground);
+}
+
 .shiori-budget-bar {
   height: 6px;
   border-radius: 999px;
@@ -722,246 +1102,47 @@
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, var(--primary), var(--success, #16a34a));
-  transition: width 240ms ease;
 }
-.shiori-telemetry-grid {
+
+.codex-stat-cards {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
 }
-.shiori-telemetry-tile {
+.codex-stat-card {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 9px 11px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 55%, var(--card));
+  border-radius: 10px;
+  background: var(--card);
 }
-.shiori-telemetry-label {
+.codex-stat-card > span {
   font-size: 11px;
   color: var(--muted-foreground);
 }
-.shiori-telemetry-val {
-  font: 700 17px/1.25 var(--font-mono);
+.codex-stat-card > strong {
+  font: 700 16px/1.3 var(--font-mono);
   color: var(--foreground);
 }
-.shiori-telemetry-tile > small {
+.codex-stat-card > small {
   font-size: 10.5px;
   color: var(--subtle);
 }
-.shiori-telemetry-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-}
 
-/* Codex Semantic Block Enhancements */
-.block-user-turn {
-  background: color-mix(in srgb, var(--primary) 7%, var(--card));
-  border-left: 3px solid var(--primary);
-}
-.codex-user-badge {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--primary) 18%, transparent);
-  color: var(--primary);
-  font: 600 10px/1.35 var(--font-mono);
-  letter-spacing: 0.03em;
-}
-.codex-user-badge[data-mode="steer"] {
-  background: color-mix(in srgb, var(--success, #16a34a) 18%, transparent);
-  color: var(--success, #16a34a);
-}
-.codex-user-prompt-text {
-  margin: 6px 0 8px;
-  padding: 8px 11px;
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
-  border-radius: 6px;
-  background: var(--card);
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--foreground);
-  white-space: pre-wrap;
-}
-.codex-tool-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  max-width: min(100%, 340px);
-  padding: 1px 7px;
-  border: 1px solid var(--border);
-  border-radius: 5px;
-  background: var(--surface-inset, var(--muted));
-  font: 11px/1.4 var(--font-mono);
-}
-.codex-tool-pill b {
-  color: var(--primary);
-  font-weight: 600;
-  flex-shrink: 0;
-}
-.codex-tool-pill code {
-  color: var(--foreground);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.codex-system-pill {
-  padding: 1px 7px;
-  border: 1px solid color-mix(in srgb, var(--success, #16a34a) 35%, var(--border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--success, #16a34a) 8%, transparent);
-  color: var(--foreground);
-  font: 500 11px/1.35 var(--font-mono);
-}
-
-/* Shiori Composer Dock (Always Visible) */
-.shiori-composer {
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-  padding: 12px 16px;
-  border-top: 2px solid color-mix(in srgb, var(--primary) 35%, var(--border));
-  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 70%, var(--card));
-}
-.shiori-composer[data-shiori-composer="steer"] {
-  border-top-color: color-mix(in srgb, var(--success, #16a34a) 50%, var(--border));
-}
-.shiori-composer-banner {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 1px solid color-mix(in srgb, var(--primary) 30%, var(--border));
-  border-radius: 7px;
-  background: color-mix(in srgb, var(--primary) 8%, var(--card));
-  font-size: 11.5px;
-  color: var(--muted-foreground);
-}
-.shiori-composer-cli {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--card);
-  border: 1px solid var(--border);
-  font: 600 11px/1.3 var(--font-mono);
-  color: var(--primary);
-}
-.shiori-composer-toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px 10px;
-}
-.shiori-composer-mode {
-  display: inline-flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-}
-.shiori-mode-tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 4px 9px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  font-size: 11.5px;
-  color: var(--muted-foreground);
-  cursor: pointer;
-  transition: background-color 120ms ease, color 120ms ease;
-}
-.shiori-mode-tab:hover {
-  color: var(--foreground);
-}
-.shiori-mode-tab[data-active] {
-  background: color-mix(in srgb, var(--primary) 16%, var(--card));
-  color: var(--primary);
-  font-weight: 600;
-}
-.shiori-composer-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-.shiori-preset-chip {
-  padding: 2px 8px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--card);
-  color: var(--muted-foreground);
-  font-size: 11px;
-  cursor: pointer;
-  transition: border-color 120ms ease, color 120ms ease;
-}
-.shiori-preset-chip:hover:not(:disabled) {
-  border-color: var(--primary);
-  color: var(--foreground);
-}
-.shiori-composer-input-row {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-.shiori-composer-textarea {
-  flex: 1;
-  min-width: 0;
-  padding: 8px 11px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  color: var(--foreground);
-  font-size: 13px;
-  line-height: 1.5;
-  resize: vertical;
-  min-height: 56px;
-  max-height: 140px;
-}
-.shiori-composer-textarea:focus {
-  outline: none;
-  border-color: var(--primary);
-}
-.shiori-composer-send {
-  flex-shrink: 0;
-  height: 38px;
-}
-.shiori-composer-error {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--destructive);
-}
-.shiori-composer-sent {
-  margin: 0;
-  font-size: 11.5px;
-  color: var(--muted-foreground);
-}
-.shiori-composer-sent code {
-  font-family: var(--font-mono);
-  color: var(--foreground);
-}
-
-@media (max-width: 1150px) {
-  .shiori-loop-pipeline {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .shiori-guide-strip {
+@media (max-width: 1100px) {
+  .codex-workbench[data-dock-open] {
     grid-template-columns: 1fr;
   }
-  .shiori-workbench-grid {
-    grid-template-columns: 1fr;
+  .codex-chat-pane,
+  .codex-right-dock {
+    height: auto;
+    min-height: 540px;
   }
-  .shiori-stage-column {
-    position: static;
+  .codex-right-dock {
+    border-left: 0;
+    border-top: 1px solid var(--border);
   }
 }
 
