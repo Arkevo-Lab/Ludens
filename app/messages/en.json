@@ -4,7 +4,7 @@
     "replay": "Replay",
     "perf": "Performance",
     "caps": "Capabilities",
-    "perception": "Perception",
+    "perception": "Config & Studio",
     "workspaces": "Workspaces",
     "docs": "Docs",
     "settings": "Settings",
@@ -31,8 +31,8 @@
       "description": "Inspect the workspace's Capability – Eval – Env triad, adaptation history, and device snapshot."
     },
     "perception": {
-      "title": "Perception Recording",
-      "description": "Tune recording segments and the memory acceleration window for the current workspace."
+      "title": "Workspace Config & Studio",
+      "description": "Manage model & budget, transport, runtime services, Shiori sessions, perception recording, and loop simulation."
     },
     "workspaces": {
       "title": "Workspace Management",
@@ -44,7 +44,7 @@
     },
     "settings": {
       "title": "Global Settings",
-      "description": "Preferences for this console, with optional desktop companion controls. Workspace options live on their own pages."
+      "description": "Preferences for this console, global creation defaults, and desktop companion controls."
     },
     "dev": {
       "title": "Loop Lab",
@@ -56,8 +56,29 @@
     "languageDescription": "Console and desktop pet display language. Follows your browser by default.",
     "languageEnglish": "English",
     "languageChinese": "中文",
-    "consoleDescription": "Display preferences for this console. Workspace options live on their own pages.",
-    "consoleTitle": "Console"
+    "consoleDescription": "Display preferences for this console, global creation defaults, and default multimodal transport.",
+    "consoleTitle": "Console",
+    "globalDefaults": {
+      "title": "Global Workspace Creation Defaults",
+      "description": "Default parameters written into ~/.ludens/config.json (defaults.*) and applied whenever you initialize a new workspace.",
+      "modelLabel": "Default model (defaults.model)",
+      "modelHint": "Provider/model identifier used when creating a new workspace without --model.",
+      "secondsLabel": "Default cycle budget (seconds)",
+      "requestsLabel": "Default request cap (requests)",
+      "compactionLabel": "Default compaction token threshold (tokens)",
+      "compactionPlaceholder": "Leave blank for model default",
+      "petLabel": "Launch Ludens Pet on ludens run (defaults.pet)",
+      "petHint": "When enabled, ludens run automatically launches or connects the desktop companion pet unless --no-pet is passed.",
+      "unsaved": "Unsaved global defaults draft.",
+      "synced": "Synced with ~/.ludens/config.json.",
+      "discard": "Discard changes",
+      "save": "Save global defaults",
+      "saving": "Saving…",
+      "savedTitle": "Global defaults saved to ~/.ludens/config.json.",
+      "savedHint": "Future workspaces initialized via CLI or the Workspaces page will inherit these values.",
+      "loadFailed": "Failed to read global defaults",
+      "saveFailed": "Failed to save global defaults"
+    }
   },
   "connectionSettings": {
     "title": "Model Connection & Multimodal Transport",
@@ -1496,6 +1517,7 @@
     "unavailable": "Location unavailable",
     "open": "Open",
     "openWorkspace": "Open workspace",
+    "configure": "Configure",
     "remove": "Remove from list",
     "removing": "Removing…",
     "reconnect": "Add new location",
@@ -1885,5 +1907,91 @@
     "inputExpandPayload": "View model input payload",
     "inputPreviewInStage": "Click to inspect in viewport",
     "jumpToReplayAt": "Replay {time} ↗"
+  },
+  "workspaceStudio": {
+    "title": "Workspace Config & Runtime Studio",
+    "subtitle": "Unified control plane for workspace model & budget, multimodal transport, background services, Shiori sessions, perception recording, and loop context simulation.",
+    "stopped": "Stopped",
+    "refresh": "Refresh",
+    "refreshing": "Refreshing…",
+    "loadFailed": "Failed to load workspace studio",
+    "retry": "Retry",
+    "selectWorkspace": "Select a workspace from the header to inspect and configure its studio.",
+    "loading": "Loading workspace studio…",
+    "tabs": {
+      "model": "Model & Budget",
+      "connection": "Connection & Transport",
+      "services": "Services & Session",
+      "perception": "Perception Recording",
+      "simulator": "Loop Simulator"
+    },
+    "modelSection": {
+      "title": "Model, Loop Budget & Driver Contract (ludens.json)",
+      "description": "Edit the workspace's primary reasoning model, takeover cycle budget, context compaction threshold, and driver launch parameters.",
+      "configureTransport": "Configure Transport",
+      "modelLabel": "Workspace model (model)",
+      "modelHint": "Provider/model identifier used by the Shiori OMP session in this workspace.",
+      "secondsLabel": "Cycle time budget (seconds)",
+      "secondsHint": "Time budget per autonomous control cycle before the host hands back or starts a new epoch.",
+      "requestsLabel": "Cycle request cap (requests)",
+      "requestsUnit": "reqs",
+      "requestsHint": "Maximum main-loop model requests allowed per cycle.",
+      "compactionLabel": "Context compaction token threshold (compactionThreshold)",
+      "compactionPlaceholder": "Leave blank for model default (contextWindow - reserve)",
+      "compactionHint": "Token count threshold that triggers automatic history compaction. Lower values (e.g. 24,000–48,000 tokens) reduce vision re-encoding cost on stateless HTTP endpoints.",
+      "openLoopSimulator": "Simulate in Loop Lab",
+      "diagnosticsLabel": "Diagnostics logging (logging.diagnostics)",
+      "diagnosticsNormal": "Normal — standard structured events",
+      "diagnosticsFull": "Full — retain raw payloads & deep traces",
+      "diagnosticsHint": "Controls diagnostic verbosity for Host and Baseware.",
+      "dashboardSwitch": "Auto-start Dashboard (dashboard)",
+      "dashboardHint": "Ensure the web console is running on ludens up.",
+      "petSwitch": "Auto-start Ludens Pet (pet)",
+      "petHint": "Launch or attach the desktop companion pet on ludens up.",
+      "portLabel": "Bridge port (port)",
+      "gameLabel": "Game / ROM path (game)",
+      "gamePlaceholder": "Leave blank to attach to a manually started environment"
+    },
+    "savedTitle": "Workspace configuration saved to ludens.json.",
+    "savedHint": "Restart the workspace host while keeping the environment open to apply updated model or budget settings.",
+    "unsavedChanges": "Unsaved workspace configuration changes.",
+    "syncedWithDisk": "Synced with workspace ludens.json.",
+    "discard": "Discard changes",
+    "saveConfig": "Save workspace config",
+    "saving": "Saving…",
+    "saveFailed": "Failed to save workspace config",
+    "reloadHostTitle": "Apply updated model or connection config to a running workspace:",
+    "copyReload": "Copy reload command",
+    "copied": "Copied",
+    "copy": "Copy",
+    "operationFailed": "Operation failed",
+    "servicesSection": {
+      "title": "Background Services & Process Diagnostics",
+      "description": "Live status of the workspace's launchd background jobs (emulator, baseware, host, dashboard, pet) and recent log tails.",
+      "state": "State",
+      "viewLogs": "View log tail",
+      "cmdUp": "Start workspace services (ludens up)",
+      "cmdReload": "Hot-reload Host & Baseware (keep emulator)",
+      "cmdDown": "Stop workspace services (ludens down)"
+    },
+    "shioriSection": {
+      "title": "Shiori Session & Context History",
+      "description": "Manage the active OMP session pointer (.ludens/shiori/current-session.json) or switch between recorded session transcripts in .ludens/shiori/sessions/.",
+      "startFreshNext": "Start Fresh Session Next Run",
+      "newSessionReady": "Cleared active session pointer. The next run will start a fresh Shiori session.",
+      "currentPointer": "Active session pointer (.ludens/shiori/current-session.json)",
+      "freshOnNextStart": "None (Next run will initialize a fresh session)",
+      "noSessions": "No recorded session files found in .ludens/shiori/sessions/ yet.",
+      "activePointer": "Active",
+      "resumeThis": "Set active",
+      "sessionSelected": "Switched active Shiori session pointer."
+    },
+    "memorySection": {
+      "title": "Workspace Long-Term Memory (MEMORY.md)",
+      "description": "Persistent domain knowledge and environment notes injected into Shiori's context across sessions.",
+      "placeholder": "# Workspace Memory\n\nRecord key mechanics, verified strategies, and environment invariants here…",
+      "saved": "Saved MEMORY.md to workspace root.",
+      "save": "Save MEMORY.md"
+    }
   }
 }

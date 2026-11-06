@@ -4,7 +4,7 @@
     "replay": "回放",
     "perf": "性能",
     "caps": "能力",
-    "perception": "感知",
+    "perception": "配置与服务",
     "workspaces": "工作区",
     "docs": "文档",
     "settings": "设置",
@@ -31,8 +31,8 @@
       "description": "查看当前工作区的 Capability – Eval – Env 三元拓扑、自演化历史与设备接口快照。"
     },
     "perception": {
-      "title": "感知录制设置",
-      "description": "调整当前工作区的录像分段与内存加速窗口。"
+      "title": "工作区配置与服务",
+      "description": "集中管理工作区的模型与预算、多模态传输、后台服务诊断、Shiori 会话与记忆、感知录制及上下文推演。"
     },
     "workspaces": {
       "title": "工作区管理",
@@ -44,7 +44,7 @@
     },
     "settings": {
       "title": "全局设置",
-      "description": "此控制台的偏好设置，以及可选的桌面陪伴控制。工作区选项在各自页面中设置。"
+      "description": "此控制台的偏好设置、新建工作区全局默认项，以及桌面陪伴控制。"
     },
     "dev": {
       "title": "Loop 实验室",
@@ -56,8 +56,29 @@
     "languageDescription": "控制台与桌宠显示语言。默认跟随浏览器。",
     "languageEnglish": "English",
     "languageChinese": "中文",
-    "consoleDescription": "此控制台的显示偏好。工作区选项在各自页面中设置。",
-    "consoleTitle": "控制台"
+    "consoleDescription": "此控制台的显示偏好、新建工作区全局默认参数与多模态传输配置。",
+    "consoleTitle": "控制台",
+    "globalDefaults": {
+      "title": "新建工作区全局默认参数 (defaults)",
+      "description": "写入 ~/.ludens/config.json 的 defaults.* 字段，新建工作区时未显式指定的参数将自动继承此处设置。",
+      "modelLabel": "默认推理模型 (defaults.model)",
+      "modelHint": "新建工作区未传 --model 时默认写入 ludens.json 的模型标识。",
+      "secondsLabel": "默认单轮接管时长 (seconds)",
+      "requestsLabel": "默认单轮请求上限 (requests)",
+      "compactionLabel": "默认上下文压缩阈值 (tokens)",
+      "compactionPlaceholder": "留空跟随模型默认",
+      "petLabel": "启动时自动拉起 Ludens Pet 桌宠 (defaults.pet)",
+      "petHint": "开启后，运行 ludens run 时会自动连接或启动桌面陪伴桌宠（传 --no-pet 可跳过）。",
+      "unsaved": "当前有未保存的全局默认参数草稿。",
+      "synced": "已与 ~/.ludens/config.json 同步。",
+      "discard": "放弃未保存修改",
+      "save": "保存全局默认项",
+      "saving": "正在保存…",
+      "savedTitle": "全局默认参数已写入 ~/.ludens/config.json。",
+      "savedHint": "后续通过 CLI 或「工作区」页面新建的工作区将自动继承这些默认参数。",
+      "loadFailed": "读取全局默认参数失败",
+      "saveFailed": "保存全局默认参数失败"
+    }
   },
   "connectionSettings": {
     "title": "模型连接与多模态传输",
@@ -1496,6 +1517,7 @@
     "unavailable": "位置不可用",
     "open": "打开",
     "openWorkspace": "打开工作区",
+    "configure": "配置与服务",
     "remove": "从列表移除",
     "removing": "正在移除…",
     "reconnect": "添加新位置",
@@ -1885,5 +1907,91 @@
     "inputExpandPayload": "查看传入模型的 Input 详情",
     "inputPreviewInStage": "点击在右侧放大画面",
     "jumpToReplayAt": "跳转回放 {time} ↗"
+  },
+  "workspaceStudio": {
+    "title": "工作区配置与运行工作台",
+    "subtitle": "一站式管理当前工作区的模型与预算、多模态传输策略、后台服务状态、Shiori 会话与长期记忆、感知录制参数及上下文容量推演。",
+    "stopped": "已停止",
+    "refresh": "刷新状态",
+    "refreshing": "正在刷新…",
+    "loadFailed": "加载工作区工作台失败",
+    "retry": "重试",
+    "selectWorkspace": "请先在顶部导航栏选择一个工作区以查看和配置其参数与服务。",
+    "loading": "正在读取工作区配置与服务状态…",
+    "tabs": {
+      "model": "模型与预算",
+      "connection": "连接与多模态传输",
+      "services": "后台服务与会话",
+      "perception": "感知录制参数",
+      "simulator": "上下文容量推演"
+    },
+    "modelSection": {
+      "title": "模型、循环预算与环境驱动契约 (ludens.json)",
+      "description": "配置当前工作区 Shiori 主循环使用的推理模型、单次接管周期预算、上下文自动压缩阈值及驱动启动参数。",
+      "configureTransport": "配置多模态传输",
+      "modelLabel": "工作区推理模型 (model)",
+      "modelHint": "当前工作区 Shiori (OMP) 会话调用的提供商/模型标识。",
+      "secondsLabel": "单轮控制时长预算 (seconds)",
+      "secondsHint": "每次自动接管周期的持续秒数上限，到期后交回控制权或进入下一周期。",
+      "requestsLabel": "单轮模型请求上限 (requests)",
+      "requestsUnit": "次请求",
+      "requestsHint": "单次接管周期内允许的最大主循环模型请求数。",
+      "compactionLabel": "上下文自动压缩阈值 (compactionThreshold · tokens)",
+      "compactionPlaceholder": "留空跟随模型默认 (contextWindow - reserve)",
+      "compactionHint": "触发历史消息自动压缩的上下文 Token 阈值。使用无状态 HTTP 多模态端点时建议调低至 24,000–48,000 tokens 以减少历史图片重复视觉编码耗时。",
+      "openLoopSimulator": "打开容量推演",
+      "diagnosticsLabel": "诊断日志级别 (logging.diagnostics)",
+      "diagnosticsNormal": "Normal — 标准结构化事件日志",
+      "diagnosticsFull": "Full — 保留完整原始载荷与深度追踪",
+      "diagnosticsHint": "控制 Host 与 Baseware 的诊断日志详尽程度。",
+      "dashboardSwitch": "随工作区拉起控制台 (dashboard)",
+      "dashboardHint": "运行 ludens up 时自动确保 Web 控制台已启动。",
+      "petSwitch": "随工作区拉起桌宠 (pet)",
+      "petHint": "运行 ludens up 时自动启动或连接 Ludens Pet 桌面陪伴。",
+      "portLabel": "桥接端口 (port)",
+      "gameLabel": "游戏 / ROM 路径 (game)",
+      "gamePlaceholder": "留空则连接你手动启动的游戏或环境"
+    },
+    "savedTitle": "工作区配置已保存到 ludens.json。",
+    "savedHint": "若工作区正在运行，可在不断开模拟器的前提下热重载 Host 使新模型或预算参数生效。",
+    "unsavedChanges": "当前有未保存的工作区配置修改。",
+    "syncedWithDisk": "已与磁盘 ludens.json 同步。",
+    "discard": "放弃未保存修改",
+    "saveConfig": "保存工作区配置",
+    "saving": "正在保存…",
+    "saveFailed": "保存工作区配置失败",
+    "reloadHostTitle": "在不关闭游戏/模拟器的前提下热重载工作区 Host 使配置生效：",
+    "copyReload": "复制热重载命令",
+    "copied": "已复制",
+    "copy": "复制",
+    "operationFailed": "操作未能完成",
+    "servicesSection": {
+      "title": "后台守护服务与进程诊断",
+      "description": "实时探查当前工作区的后台守护任务（emulator、baseware、host、dashboard、pet）运行状态与最近日志尾部。",
+      "state": "状态",
+      "viewLogs": "查看日志尾部",
+      "cmdUp": "启动工作区后台服务 (ludens up)",
+      "cmdReload": "热重载 Host 与 Baseware（保留模拟器）",
+      "cmdDown": "停止工作区后台服务 (ludens down)"
+    },
+    "shioriSection": {
+      "title": "Shiori 会话指针与历史会话",
+      "description": "管理当前工作区的活跃 OMP 会话指针（.ludens/shiori/current-session.json），或在 .ludens/shiori/sessions/ 已录制的会话间快速切换。",
+      "startFreshNext": "重置为下次启动开启新会话",
+      "newSessionReady": "已清除活跃会话指针。下次运行将初始化全新的 Shiori 会话。",
+      "currentPointer": "当前关联的活跃会话指针 (.ludens/shiori/current-session.json)",
+      "freshOnNextStart": "无（下次启动将自动创建全新会话）",
+      "noSessions": ".ludens/shiori/sessions/ 下暂未发现已记录的会话文件。",
+      "activePointer": "当前活跃",
+      "resumeThis": "设为当前会话",
+      "sessionSelected": "已切换当前活跃的 Shiori 会话指针。"
+    },
+    "memorySection": {
+      "title": "工作区长期记忆 (MEMORY.md)",
+      "description": "跨会话持久化的环境规律、已验证策略与关键笔记，会在 Shiori 会话中作为长期背景注入。",
+      "placeholder": "# 工作区长期记忆 (MEMORY.md)\n\n在此记录游戏机制、已验证策略与环境不变量…",
+      "saved": "已保存工作区根目录 MEMORY.md。",
+      "save": "保存 MEMORY.md"
+    }
   }
 }

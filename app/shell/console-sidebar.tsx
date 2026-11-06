@@ -11,7 +11,6 @@ export type ConsoleView = typeof consoleViewIds[number];
 const navSections: Array<{ label: string; ids: ConsoleView[] }> = [
   { label: "navSectionWorkspace", ids: ["live", "replay", "perf", "caps", "perception"] },
   { label: "navSectionGlobal", ids: ["workspaces", "docs"] },
-  { label: "navSectionDev", ids: ["dev"] },
 ];
 
 function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
@@ -46,7 +45,7 @@ function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
         </>
       ) : kind === "perception" ? (
         <>
-          <circle cx="12" cy="12" r="3.4" /><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z" />
+          <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
         </>
       ) : kind === "perf" ? (
         <path d="M4 19V11M10 19V5M16 19V8M22 19V2" strokeWidth="3" />

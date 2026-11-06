@@ -6,7 +6,12 @@ export const maxDuration = 60;
 export async function GET(request: Request) {
   try {
     localRequest(request);
-    const workspaceId = new URL(request.url).searchParams.get("workspaceId");
+    const searchParams = new URL(request.url).searchParams;
+    const studioId = searchParams.get("studio");
+    if (studioId) {
+      return Response.json(await dashboardWorker().call("workspaceStudio", [studioId], request.signal), { headers: { "Cache-Control": "no-store" } });
+    }
+    const workspaceId = searchParams.get("workspaceId");
     if (workspaceId) {
       return Response.json(await dashboardWorker().call("workspaceConnection", [workspaceId], request.signal), { headers: { "Cache-Control": "no-store" } });
     }
@@ -32,8 +37,17 @@ export async function PUT(request: Request) {
     if (body?.action === "globalConnection") {
       return Response.json(await worker.call("updateGlobalConnection", [body.connection], request.signal));
     }
+    if (body?.action === "globalDefaults") {
+      return Response.json(await worker.call("updateGlobalDefaults", [body.defaults], request.signal));
+    }
     if (body?.action === "workspaceConnection") {
       return Response.json(await worker.call("updateWorkspaceConnection", [body.id, body.connection], request.signal));
+    }
+    if (body?.action === "workspaceStudioConfig") {
+      return Response.json(await worker.call("updateWorkspaceStudioConfig", [body.id, body.patch], request.signal));
+    }
+    if (body?.action === "workspaceShiori") {
+      return Response.json(await worker.call("updateWorkspaceShiori", [body.id, body.shiori], request.signal));
     }
     return Response.json(await worker.call("updateWorkspaceRoot", [body?.workspaceRoot], request.signal));
   } catch (error) { return errorResponse(error); }
