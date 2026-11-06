@@ -10,15 +10,32 @@ import type { RunPage } from "./run-index";
 import type { diagnosticEvents, DiagnosticQuery } from "./diagnostic-events";
 import type { indexCacheStats } from "./log-index";
 import type { PerceptionSettings, PerceptionSettingsPatch, PerceptionRuntimeSnapshot } from "./perception-config";
-import type { workspaceSettings, updateWorkspaceRoot, updateGlobalConnection, workspaceConnection, updateWorkspaceConnection, openWorkspace, removeWorkspace, createWorkspace } from "./workspaces";
+import type {
+  workspaceSettings,
+  updateWorkspaceRoot,
+  updateGlobalConnection,
+  updateGlobalDefaults,
+  workspaceConnection,
+  updateWorkspaceConnection,
+  workspaceStudio,
+  updateWorkspaceStudioConfig,
+  updateWorkspaceShiori,
+  openWorkspace,
+  removeWorkspace,
+  createWorkspace,
+} from "./workspaces";
 
 /** Only existing Dashboard operations cross the worker boundary, never arbitrary code or paths. */
 export interface DashboardMethods {
   workspaceSettings: { args: []; result: Awaited<ReturnType<typeof workspaceSettings>> };
   updateWorkspaceRoot: { args: [path: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceRoot>> };
   updateGlobalConnection: { args: [connection: unknown]; result: Awaited<ReturnType<typeof updateGlobalConnection>> };
+  updateGlobalDefaults: { args: [patch: unknown]; result: Awaited<ReturnType<typeof updateGlobalDefaults>> };
   workspaceConnection: { args: [id: unknown]; result: Awaited<ReturnType<typeof workspaceConnection>> };
   updateWorkspaceConnection: { args: [id: unknown, connection: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceConnection>> };
+  workspaceStudio: { args: [id: unknown]; result: Awaited<ReturnType<typeof workspaceStudio>> };
+  updateWorkspaceStudioConfig: { args: [id: unknown, patch: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceStudioConfig>> };
+  updateWorkspaceShiori: { args: [id: unknown, input: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceShiori>> };
   openWorkspace: { args: [path: unknown]; result: Awaited<ReturnType<typeof openWorkspace>> };
   removeWorkspace: { args: [id: unknown]; result: Awaited<ReturnType<typeof removeWorkspace>> };
   createWorkspace: { args: [input: unknown]; result: Awaited<ReturnType<typeof createWorkspace>> };

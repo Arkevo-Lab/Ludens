@@ -6,7 +6,7 @@ import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ActivityFeed } from "@/features/live/activity-feed";
 import { ShioriWorkbench } from "@/features/live/shiori-cockpit";
-import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
+import { WorkspaceStudioView } from "@/features/workspaces/workspace-studio-view";
 import { ConsoleSidebar, type ConsoleView as View } from "@/shell/console-sidebar";
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
 import { RunPicker } from "@/features/workspaces/run-picker";
@@ -165,6 +165,7 @@ export default function ConsoleShell() {
           </section>}
           {view === "workspaces" ? (
             <WorkspacesView onChanged={refreshCatalog} onOpen={id => navigateUrl("/?" + new URLSearchParams({ view: "live", project: id }))}
+              onConfigure={id => navigateUrl("/?" + new URLSearchParams({ view: "perception", project: id }))}
               catalogError={catalogError} catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog}
               createIntent={query.get("create") === "1" ? { driverPackage: query.get("driverPackage") ?? "",
                 driver: verifiedCreationDriver?.spec === query.get("driverPackage") ? verifiedCreationDriver : undefined } : null}
@@ -174,8 +175,9 @@ export default function ConsoleShell() {
           ) : view === "dev" ? (
             <DevPanel navigate={navigate} />
           ) : view === "perception" ? (
-            <PerceptionSettingsPanel project={selection.project} projects={projects}
-              ready={catalogReady} catalogError={catalogError} catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog} />
+            <WorkspaceStudioView project={selection.project} projects={projects}
+              ready={catalogReady} catalogError={catalogError} catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog}
+              initialTab={query.get("studioTab")} navigate={navigate} />
           ) : view === "docs" ? (
             <DocsView search={search} navigate={navigate} />
           ) : view === "caps" ? (

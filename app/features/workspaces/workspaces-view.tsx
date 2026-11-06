@@ -29,8 +29,8 @@ async function request<T>(fallback: string, method = "GET", body?: unknown, sign
   return value;
 }
 
-export function WorkspacesView({ onChanged, onOpen, catalogError, catalogLoading, onRetryCatalog, createIntent, onCloseCreateIntent }: {
-  onChanged(): void; onOpen(id: string): void;
+export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, catalogLoading, onRetryCatalog, createIntent, onCloseCreateIntent }: {
+  onChanged(): void; onOpen(id: string): void; onConfigure?(id: string): void;
   catalogError?: string; catalogLoading?: boolean; onRetryCatalog?(): void;
   createIntent?: WorkspaceCreationIntent | null;
   onCloseCreateIntent?(): void;
@@ -266,23 +266,51 @@ export function WorkspacesView({ onChanged, onOpen, catalogError, catalogLoading
               </CardHeader>
               <CardContent>
                 <ul className="grid gap-3" aria-label={t("collectionTitle")}>
-                  {matches.map(entry => <li key={entry.id} className="rounded-md border bg-[var(--surface-inset)] p-4">
-                    <div className="flex flex-wrap items-center gap-3.5">
-                      <div aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--panel)] text-[var(--gold)]"><Folder className="size-4" /></div>
-                      <div className="min-w-0 flex-1 basis-40 space-y-1"><strong className="block break-words text-sm font-semibold">{entry.name}</strong><p className="break-all font-mono text-xs leading-relaxed text-muted-foreground">{entry.workspace}</p></div>
-                      <Badge variant="outline" className={entry.available ? "border-success/25 bg-success/5 text-success" : "text-muted-foreground"}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{entry.available ? t("available") : t("unavailable")}</Badge>
-                      <div className="flex w-full flex-wrap items-center gap-2 min-[1200px]:w-auto">
-                        <Button type="button" variant="outline" size="sm" disabled={!!pending || !entry.available} onClick={() => onOpen(entry.id)}>{t("open")}<ArrowRight /></Button>
-                        {!entry.available && <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget, entry.workspace)}>{t("reconnect")}</Button>}
-                        <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" disabled={!!pending} onClick={() => void mutate(entry.id, () => request<WorkspaceRemovalResult>(t("operationFailed"), "DELETE", { id: entry.id }), value => {
-                          setSettings(previous => previous && ({ ...previous, workspaces: previous.workspaces.filter(item => item.id !== entry.id) }));
-                          setRemoved(value.removed); setAlreadyRemoved(!value.removed); setCompletion(null); setSavedRoot(null);
-                          requestAnimationFrame(() => (undoButton.current ?? removedNotice.current)?.focus());
-                        })}>{pending === entry.id ? t("removing") : t("remove")}</Button>
+                  {matches.map(entry => {
+                    const summary = settings.summaries?.[entry.id];
+                    return <li key={entry.id} className="rounded-md border bg-[var(--surface-inset)] p-4">
+                      <div className="flex flex-wrap items-center gap-3.5">
+                        <div aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--panel)] text-[var(--gold)]"><Folder className="size-4" /></div>
+                        <div className="min-w-0 flex-1 basis-40 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <strong className="block break-words text-sm font-semibold">{entry.name}</strong>
+                            {summary && <>
+                              <Badge variant="outline" className="border-primary/35 bg-primary/10 font-mono text-[11px] text-primary">{summary.driver}</Badge>
+                              <Badge variant="secondary" className="font-mono text-[11px]">{summary.model}</Badge>
+                              <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground">
+                                {Math.round(summary.seconds / 60)}m · {summary.requests} req
+                              </Badge>
+                              {summary.compactionThreshold && (
+                                <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground">
+                                  compact {Math.round(summary.compactionThreshold / 1000)}k
+                                </Badge>
+                              )}
+                              {summary.connection?.imageUrls?.enabled && (
+                                <Badge variant="outline" className="border-success/30 bg-success/10 font-mono text-[11px] text-success">
+                                  blob-broker ({summary.connection.imageUrls.backends?.[0] ?? "auto"})
+                                </Badge>
+                              )}
+                            </>}
+                          </div>
+                          <p className="break-all font-mono text-xs leading-relaxed text-muted-foreground">{entry.workspace}</p>
+                        </div>
+                        <Badge variant="outline" className={entry.available ? "border-success/25 bg-success/5 text-success" : "text-muted-foreground"}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{entry.available ? t("available") : t("unavailable")}</Badge>
+                        <div className="flex w-full flex-wrap items-center gap-2 min-[1200px]:w-auto">
+                          <Button type="button" variant="outline" size="sm" disabled={!!pending || !entry.available} onClick={() => onOpen(entry.id)}>{t("open")}<ArrowRight /></Button>
+                          {onConfigure && entry.available && (
+                            <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => onConfigure(entry.id)}>{t("configure")}</Button>
+                          )}
+                          {!entry.available && <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget, entry.workspace)}>{t("reconnect")}</Button>}
+                          <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" disabled={!!pending} onClick={() => void mutate(entry.id, () => request<WorkspaceRemovalResult>(t("operationFailed"), "DELETE", { id: entry.id }), value => {
+                            setSettings(previous => previous && ({ ...previous, workspaces: previous.workspaces.filter(item => item.id !== entry.id) }));
+                            setRemoved(value.removed); setAlreadyRemoved(!value.removed); setCompletion(null); setSavedRoot(null);
+                            requestAnimationFrame(() => (undoButton.current ?? removedNotice.current)?.focus());
+                          })}>{pending === entry.id ? t("removing") : t("remove")}</Button>
+                        </div>
                       </div>
-                    </div>
-                    {!entry.available && <p className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed text-muted-foreground">{t("unavailableHint")}</p>}
-                  </li>)}
+                      {!entry.available && <p className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed text-muted-foreground">{t("unavailableHint")}</p>}
+                    </li>;
+                  })}
                 </ul>
                 {!matches.length && <div className="space-y-3 py-10 text-center"><p className="text-sm text-muted-foreground">{t("noMatches")}</p><Button type="button" size="sm" variant="outline" onClick={() => { setFilter(""); searchInput.current?.focus(); }}>{t("clearSearch")}</Button></div>}
                 <p className="mt-5 border-t pt-4 text-xs leading-relaxed text-muted-foreground">{t("removeHint")}</p>

@@ -58,7 +58,15 @@ export function reloadWorkspaceHostCommand(workspace: string): string {
   return `env -u LUDENS_WORKSPACE -u LUDENS_SOCKET ludens --workspace ${quoted} down --keep-emulator && env -u LUDENS_WORKSPACE -u LUDENS_SOCKET ludens --workspace ${quoted} up`;
 }
 
-export function ConnectionSettings({ projects }: { projects: Project[] }) {
+export function ConnectionSettings({
+  projects,
+  initialScope = "global",
+  onSaved,
+}: {
+  projects: Project[];
+  initialScope?: string;
+  onSaved?: () => void;
+}) {
   const t = useTranslations("connectionSettings");
   const { locale } = useLocale();
   const titleId = useId();
@@ -69,7 +77,7 @@ export function ConnectionSettings({ projects }: { projects: Project[] }) {
   const imageModeId = useId();
 
   const availableProjects = projects.filter(item => item.workspace);
-  const [scope, setScope] = useState<string>("global");
+  const [scope, setScope] = useState<string>(initialScope || "global");
   const [saved, setSaved] = useState<ModelConnectionConfig>({});
   const [draft, setDraft] = useState<ModelConnectionConfig>({});
   const [workspaceMeta, setWorkspaceMeta] = useState<{ workspace: string; model: string | null } | null>(null);
@@ -83,7 +91,13 @@ export function ConnectionSettings({ projects }: { projects: Project[] }) {
   const requestVersion = useRef(0);
 
   useEffect(() => {
-    if (scope !== "global" && !availableProjects.some(item => item.id === scope)) {
+    if (initialScope && (initialScope === "global" || availableProjects.some(item => item.id === initialScope))) {
+      setScope(initialScope);
+    }
+  }, [initialScope, availableProjects]);
+
+  useEffect(() => {
+    if (scope !== "global" && availableProjects.length > 0 && !availableProjects.some(item => item.id === scope)) {
       setScope("global");
     }
   }, [availableProjects, scope]);
@@ -213,6 +227,7 @@ export function ConnectionSettings({ projects }: { projects: Project[] }) {
       setSaved(committed);
       setDraft(committed);
       setJustSaved(true);
+      onSaved?.();
     } catch (error) {
       if (version === requestVersion.current) {
         setWriteError(error instanceof Error ? error.message : String(error));

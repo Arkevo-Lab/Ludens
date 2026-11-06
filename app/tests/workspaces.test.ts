@@ -276,5 +276,70 @@ test("worker reads and updates global and workspace model connection transport c
       openaiWebsockets: "off",
       imageUrls: { enabled: false },
     });
+
+    const defaultsResult = await worker.call("updateGlobalDefaults", [{
+      model: "openai-codex/gpt-5.4",
+      seconds: 240,
+      requests: 30,
+      compactionThreshold: 48000,
+      pet: false,
+    }]);
+    assert.equal(defaultsResult.config.defaults.model, "openai-codex/gpt-5.4");
+    assert.equal(defaultsResult.config.defaults.seconds, 240);
+    assert.equal(defaultsResult.config.defaults.requests, 30);
+    assert.equal(defaultsResult.config.defaults.compactionThreshold, 48000);
+    assert.equal(defaultsResult.config.defaults.pet, false);
+    assert.deepEqual(defaultsResult.config.defaults.connection, {
+      openaiWebsockets: "auto",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    });
+
+    const settingsSnap = await worker.call("workspaceSettings", []);
+    assert.ok(settingsSnap.summaries[entry.id]);
+    assert.equal(settingsSnap.summaries[entry.id]?.driver, "cua");
+
+    await mkdir(join(workspace, ".ludens/shiori/sessions"), { recursive: true });
+    const sessionA = join(workspace, ".ludens/shiori/sessions/2026-11-06_a.jsonl");
+    await writeFile(sessionA, '{"type":"session"}\n');
+
+    const studioInitial = await worker.call("workspaceStudio", [entry.id]);
+    assert.equal(studioInitial.id, entry.id);
+    assert.equal(studioInitial.config?.driver, "cua");
+    assert.equal(studioInitial.services.jobs.length, 5);
+    assert.equal(studioInitial.shiori.sessions.length, 1);
+
+    const studioUpdated = await worker.call("updateWorkspaceStudioConfig", [entry.id, {
+      model: "anthropic/claude-sonnet-4-6",
+      seconds: 300,
+      requests: 25,
+      compactionThreshold: 24000,
+      diagnostics: "full",
+      pet: true,
+    }]);
+    assert.equal(studioUpdated.config?.model, "anthropic/claude-sonnet-4-6");
+    assert.equal(studioUpdated.config?.seconds, 300);
+    assert.equal(studioUpdated.config?.requests, 25);
+    assert.equal(studioUpdated.config?.compactionThreshold, 24000);
+    assert.equal(studioUpdated.config?.diagnostics, "full");
+    assert.equal(studioUpdated.config?.pet, true);
+
+    const afterSelect = await worker.call("updateWorkspaceShiori", [entry.id, {
+      kind: "selectSession",
+      sessionFile: ".ludens/shiori/sessions/2026-11-06_a.jsonl",
+    }]);
+    assert.equal(afterSelect.currentSessionFile, ".ludens/shiori/sessions/2026-11-06_a.jsonl");
+
+    const afterMemory = await worker.call("updateWorkspaceShiori", [entry.id, {
+      kind: "saveMemory",
+      content: "# Custom Memory\nVerified note.\n",
+    }]);
+    assert.equal(afterMemory.memory.content, "# Custom Memory\nVerified note.\n");
+
+    const afterReset = await worker.call("updateWorkspaceShiori", [entry.id, {
+      kind: "newSession",
+    }]);
+    assert.equal(afterReset.currentSessionFile, null);
   } finally { await worker.close(); await rm(root, { recursive: true, force: true }); }
 });
