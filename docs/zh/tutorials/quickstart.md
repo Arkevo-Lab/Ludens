@@ -94,18 +94,23 @@ ludens auto on
 
 ### 全局设置与默认目录
 
-`$LUDENS_HOME/config.json` 的结构为 `{ "version": 1, "workspaceRoot": "/absolute/path", "defaults": { ... } }`。`defaults` 支持 `model`、`seconds`、`requests`、`compactionThreshold`、`dashboard`、`pet`，只在创建工作区时使用；显式初始化参数优先。修改父目录只影响之后新建的工作区，不搬动已登记目录：
+`$LUDENS_HOME/config.json` 的结构为 `{ "version": 1, "workspaceRoot": "/absolute/path", "defaults": { ... } }`。`defaults` 支持 `model`、`seconds`、`requests`、`compactionThreshold`、`dashboard`、`pet` 以及 `connection`（`openaiWebsockets`、`cacheRetention`、`appendOnlyContext`、`imageUrls.enabled`、`imageUrls.backends`）。创建类字段在初始化工作区时写入，而 `defaults.connection` 同时作为未在 `ludens.json` 中显式覆盖对应 `connection` 字段的工作区的默认模型传输策略。修改父目录只影响之后新建的工作区，不搬动已登记目录：
 
 ```sh
 ludens config show
 ludens config set workspaceRoot "$HOME/Ludens Workspaces"
 ludens config set defaults.seconds 1800
 ludens config set defaults.pet false
+ludens config set defaults.connection.openaiWebsockets auto
+ludens config set defaults.connection.cacheRetention long
+ludens config set defaults.connection.appendOnlyContext on
+ludens config set defaults.connection.imageUrls.enabled true
+ludens config set defaults.connection.imageUrls.backends uguu,tmpfiles
 ludens init --name desktop-task --driver cua
 ludens workspace list
 ```
 
-Dashboard 的“工作区”页提供创建（可选目录）、登记已有目录、移除索引和设置默认父目录。CLI、Dashboard 与桌宠应使用相同的 `LUDENS_HOME`；修改环境变量后需重新启动相应进程才会生效。
+Dashboard 的“工作区”页提供创建（可选目录）、登记已有目录、移除索引和设置默认父目录；“设置”页支持统一配置全局默认与单工作区覆盖的模型连接与多模态传输选项。CLI、Dashboard 与桌宠应使用相同的 `LUDENS_HOME`；修改环境变量后需重新启动相应进程才会生效。
 
 ### 已有工作区登记与迁移
 
@@ -139,6 +144,7 @@ ludens workspace import /absolute/path/to/workspace \
 | `seconds` | `1800` | 单次 `auto on` 控制周期的时长预算（秒），每次接管重置。 |
 | `requests` | `1000` | 单次 `auto on` 控制周期的模型请求次数上限，与 `seconds` 先到即交还控制。 |
 | `compactionThreshold` | 不设 | OMP 上下文压缩触发阈值（token 数）；省略时跟随所选模型的 OMP 原生阈值（`contextWindow - reserve`）。 |
+| `connection` | 继承 `defaults.connection` | 可选的模型传输与多模态缓存覆盖项（`openaiWebsockets`：`"auto" \| "on" \| "off"`，`cacheRetention`：`"auto" \| "short" \| "long" \| "none"`，`appendOnlyContext`：`"auto" \| "on" \| "off"`，`imageUrls`：`{ enabled?: boolean, backends?: string[] }`）；详见 [WS 恢复测试依据](../insights/ws-recovery.md#三层多模态传输架构对比-有状态-ws-增量-vs-无状态-http-kv-缓存-vs-图床-url-卸载)。 |
 | `dashboard` | `true` | `ludens up` 时是否确保本地 Dashboard 服务运行。 |
 | `pet` | `false` | 是否在 `ludens up` 时拉起共享 Ludens Pet；需先安装可选组件并确保 Dashboard 可用。`ludens init --pet` 会写入 `true`，已有显式 `true` 不变；`ludens up --pet` / `--no-pet` 仅覆盖当次启动。 |
 | `logging.diagnostics` | `"normal"` | 日志详细度，可选 `"normal"` 或 `"full"`；详见 [记录模式](../reference/logging.md#记录模式)。 |

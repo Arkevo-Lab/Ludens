@@ -19,6 +19,26 @@ The OpenAI Codex Responses API's **WebSocket mode supports delta transport**: as
 
 WebSocket delta transport is therefore **essential for sustaining throughput in long-horizon multimodal runs**. If a transient disconnect permanently degrades the session to full HTTP retransmission, transport overhead escalates for the remainder of the run.
 
+## Three multimodal transport tiers: Stateful WS vs. Stateless HTTP + KV Cache vs. Image URL Offloading
+
+When switching beyond `openai-codex` to OpenAI-compatible or Anthropic HTTP SSE providers, three distinct bottlenecks must be separated: **(1) client outbound wire upload size**, **(2) server-side vision preprocessing latency**, and **(3) LLM token KV cache hits**.
+
+| Transport & caching tier | Wire payload per turn | Server vision preprocessor | LLM token KV cache | Typical behavior at 60+ screenshots |
+| --- | --- | --- | --- | --- |
+| **Tier 1 · Stateful WebSocket Delta (`previous_response_id`)** | Only the new turn's delta (`~80–150 KB`) | Encodes only the newly sampled image (`1×`) | Reuses server-side response state directly | Sub-second transport overhead; latency stays flat with turn count. |
+| **Tier 2 · Stateless HTTP SSE + Inline Base64 + Prefix KV Cache** | Re-uploads all historical base64 images (`8–15 MB+`) | Many OpenAI-compatible gateways re-decode and run vision preprocessing on **all `N` images** before checking the token KV cache | Hits prefix KV cache (`cache_read_input_tokens`) only if `messages[]` prefix is byte-identical | Upload bandwidth grows linearly (`O(N)`); gateways without image-hash short-circuiting add `N × 300–400 ms` (`20s+` TTFB) even when `cache_read` reports 99% token hits. |
+| **Tier 3 · Stateless HTTP SSE + Image URL Offloading (`blob-broker`)** | Replaces inline `data:image/...;base64` with compact `https://...` URLs (`~400 KB`, **~95% wire reduction**) | Gateway still fetches or validates the `N` image URLs and runs vision preprocessing unless it caches vision embeddings by URL/hash | Preserves prefix KV cache when combined with `appendOnlyContext` and `cacheRetention` | Solves client uplink bandwidth bottlenecks (`8.9 MB → 403 KB`), but **cannot fix** stateless gateways that re-run vision preprocessing on every historical image before checking the token KV cache. |
+
+Because of these architectural differences, Ludens surfaces `connection` settings at both the global (`defaults.connection`) and workspace (`ludens.json` `connection`) levels, as well as in the Dashboard **Settings** view:
+
+- **`openaiWebsockets` (`"auto" | "on" | "off"`)**: Controls stateful WebSocket delta transport for providers that support it (`openai-codex` defaults to WebSocket delta in `"auto"`, while `openai` defaults to SSE unless `"on"`).
+- **`cacheRetention` (`"auto" | "short" | "long" | "none"`)**: Controls prompt prefix KV cache retention (`"long"` enables 1h extended cache on Anthropic and 24h retention on OpenAI).
+- **`appendOnlyContext` (`"auto" | "on" | "off"`)**: Preserves byte-identical `messages[]` prefixes across turns instead of mutating earlier tool-result messages in place, preventing accidental prefix KV cache invalidation on stateless HTTP endpoints.
+- **`imageUrls` (`{ enabled, backends }`)**: Enables OMP's SHA-256 deduplicated image URL offloader (`blob-broker`), replacing inline base64 screenshots with external URLs via `"provider-files"`, tunnels (`"cloudflared"`, `"tailscale"`, `"pinggy"`, `"localhost-run"`), or anonymous file hosts (`"uguu"`, `"tmpfiles"`, `"litterbox"`, `"0x0"`, `"catbox"`).
+
+> [!IMPORTANT]
+> If a stateless HTTP provider still exhibits 15–25s pre-first-token latency (`fetchToHeadersMs`) after enabling `imageUrls`, `cacheRetention`, and `appendOnlyContext` — even while reporting high `cache_read` token counts — the bottleneck is inside the provider's stateless multimodal gateway re-encoding historical images on every request, and requires either a stateful transport provider or aggressive context compaction (`compactionThreshold`).
+
 ## Three disconnect scenarios observed in long runs (R1 / R2 / R3)
 
 Across six- to eight-hour continuous runs, three distinct disconnect boundary conditions surfaced:

@@ -237,3 +237,44 @@ test("worker preserves committed result contracts when independent settings read
     assert.equal((await registeredWorkspace(entry.id, home)).workspace, workspace);
   } finally { await worker.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("worker reads and updates global and workspace model connection transport configs", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-worker-conn-")));
+  const home = join(root, "home"), workspace = join(root, "workspace");
+  const entry = await registerFixture(home, "conn-ws", workspace);
+  await writeFile(join(workspace, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.1-sol" }, null, 2));
+  const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: home } });
+  try {
+    const globalResult = await worker.call("updateGlobalConnection", [{
+      openaiWebsockets: "auto",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    }]);
+    assert.deepEqual(globalResult.config.defaults.connection, {
+      openaiWebsockets: "auto",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    });
+
+    const initial = await worker.call("workspaceConnection", [entry.id]);
+    assert.equal(initial.id, entry.id);
+    assert.deepEqual(initial.connection, {});
+    assert.deepEqual(initial.defaults, {
+      openaiWebsockets: "auto",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    });
+
+    const updated = await worker.call("updateWorkspaceConnection", [entry.id, {
+      openaiWebsockets: "off",
+      imageUrls: { enabled: false },
+    }]);
+    assert.deepEqual(updated.connection, {
+      openaiWebsockets: "off",
+      imageUrls: { enabled: false },
+    });
+  } finally { await worker.close(); await rm(root, { recursive: true, force: true }); }
+});

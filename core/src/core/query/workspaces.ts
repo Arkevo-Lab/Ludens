@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { repoRoot } from "./repo";
 import { readGlobalConfig, updateGlobalConfig, listRegisteredWorkspaces, registerWorkspace, forgetWorkspace,
-  registeredWorkspace, readWorkspaceIdentity, type LudensConfig, type WorkspaceRegistration } from "@ludens/protocol/ludens";
+  registeredWorkspace, readWorkspaceIdentity, validateConnectionConfig, withWorkspaceRegistrationLock,
+  type LudensConfig, type ModelConnectionConfig, type WorkspaceRegistration } from "@ludens/protocol/ludens";
 import { globalHome, clearCatalogCache } from "./data";
 
 export interface CreateWorkspaceInput {
@@ -29,6 +32,68 @@ export async function updateWorkspaceRoot(input: unknown, home = globalHome): Pr
   // separate read and must never turn a successful save into a failed write.
   const config = await updateGlobalConfig(config => ({ ...config, workspaceRoot }), home);
   return { config };
+}
+export interface GlobalConnectionResult { config: LudensConfig }
+export async function updateGlobalConnection(input: unknown, home = globalHome): Promise<GlobalConnectionResult> {
+  const connection = input === null || input === undefined ? {} : validateConnectionConfig(input, "defaults.connection");
+  const config = await updateGlobalConfig(current => {
+    const defaults = { ...current.defaults };
+    if (Object.keys(connection).length > 0) defaults.connection = connection;
+    else delete defaults.connection;
+    return { ...current, defaults };
+  }, home);
+  return { config };
+}
+export interface WorkspaceConnectionSnapshot {
+  id: string;
+  workspace: string;
+  model: string | null;
+  connection: ModelConnectionConfig;
+  defaults: ModelConnectionConfig;
+}
+export async function workspaceConnection(id: unknown, home = globalHome): Promise<WorkspaceConnectionSnapshot> {
+  if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
+  const [entry, globalConfig] = await Promise.all([registeredWorkspace(id, home), readGlobalConfig(home)]);
+  const raw = JSON.parse(await readFile(join(entry.workspace, "ludens.json"), "utf8")) as Record<string, unknown>;
+  const connection = raw.connection === undefined ? {} : validateConnectionConfig(raw.connection, "connection");
+  return {
+    id: entry.id,
+    workspace: entry.workspace,
+    model: typeof raw.model === "string" ? raw.model : null,
+    connection,
+    defaults: globalConfig.defaults.connection ?? {},
+  };
+}
+export async function updateWorkspaceConnection(
+  id: unknown,
+  input: unknown,
+  home = globalHome,
+): Promise<WorkspaceConnectionSnapshot> {
+  if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
+  const connection = input === null || input === undefined ? {} : validateConnectionConfig(input, "connection");
+  return withWorkspaceRegistrationLock(home, id, async () => {
+    const [entry, globalConfig] = await Promise.all([registeredWorkspace(id, home), readGlobalConfig(home)]);
+    const configPath = join(entry.workspace, "ludens.json");
+    const raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("ludens.json 必须是 JSON 对象");
+    const next = { ...raw };
+    if (Object.keys(connection).length > 0) next.connection = connection;
+    else delete next.connection;
+    const temporary = `${configPath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+      await rename(temporary, configPath);
+    } finally {
+      await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
+    }
+    return {
+      id: entry.id,
+      workspace: entry.workspace,
+      model: typeof next.model === "string" ? next.model : null,
+      connection,
+      defaults: globalConfig.defaults.connection ?? {},
+    };
+  });
 }
 export async function openWorkspace(input: unknown, home = globalHome) {
   const workspace = absolutePath(input, "工作区目录");

@@ -11,6 +11,7 @@ export const GLOBAL_HELP = `Ludens settings and workspace registry:
 ludens config [show]
 ludens config set workspaceRoot <directory>
 ludens config set defaults.<model|seconds|requests|compactionThreshold|dashboard|pet> <value>
+ludens config set defaults.connection.<openaiWebsockets|cacheRetention|appendOnlyContext|imageUrls.enabled|imageUrls.backends> <value>
 ludens workspace list
 ludens workspace open <directory> [--new-id]
 ludens workspace forget <id>
@@ -53,7 +54,19 @@ export async function globalCommand(command: string, args: string[], home = lude
     if (action !== "set" || !field || value === undefined || extra.length) throw new Error("Use ludens config set <field> <value>");
     const config = await updateGlobalConfig(config => {
       if (field === "workspaceRoot") config.workspaceRoot = directory(value);
-      else if (field.startsWith("defaults.")) {
+      else if (field.startsWith("defaults.connection.")) {
+        const subkey = field.slice("defaults.connection.".length);
+        const current = { ...config.defaults.connection };
+        if (subkey === "openaiWebsockets" || subkey === "cacheRetention" || subkey === "appendOnlyContext") {
+          (current as Record<string, unknown>)[subkey] = value;
+        } else if (subkey === "imageUrls.enabled") {
+          current.imageUrls = { ...current.imageUrls, enabled: value === "true" ? true : value === "false" ? false : (value as unknown as boolean) };
+        } else if (subkey === "imageUrls.backends") {
+          const parsed = value.trim().startsWith("[") ? JSON.parse(value) : value.split(",").map(s => s.trim()).filter(Boolean);
+          current.imageUrls = { ...current.imageUrls, backends: parsed };
+        } else throw new Error(`Unknown global connection setting: ${field}`);
+        config.defaults = { ...config.defaults, connection: current };
+      } else if (field.startsWith("defaults.")) {
         const key = field.slice("defaults.".length);
         const setting = key === "model" ? value : ["pet", "dashboard"].includes(key)
           ? value === "true" ? true : value === "false" ? false : value : Number(value);

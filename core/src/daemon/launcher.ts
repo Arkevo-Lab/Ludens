@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { defaultSocket } from "@ludens/baseware/address";
-import { ludensHome } from "@ludens/protocol/ludens";
+import { ludensHome, validateConnectionConfig, type ModelConnectionConfig } from "@ludens/protocol/ludens";
 
 export interface DriverManifest {
   id: string;
@@ -26,6 +26,7 @@ export interface LaunchConfig {
   requests: number;
   /** OMP native compaction trigger override; undefined follows the selected model's native OMP default. */
   compactionThreshold?: number;
+  connection?: ModelConnectionConfig;
   dashboard: boolean;
   pet: boolean;
   logging: { diagnostics: "normal" | "full" };
@@ -34,7 +35,7 @@ export interface LaunchConfig {
 export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("ludens.json must be an object");
   const config = value as Record<string, unknown>;
-  const allowed = ["driver", "driverPackage", "game", "port", "cuaCommand", "model", "seconds", "requests", "compactionThreshold", "dashboard", "pet", "logging"];
+  const allowed = ["driver", "driverPackage", "game", "port", "cuaCommand", "model", "seconds", "requests", "compactionThreshold", "connection", "dashboard", "pet", "logging"];
   for (const key of Object.keys(config)) if (!allowed.includes(key)) throw new Error(`Unknown ludens.json field: ${key}`);
   if (typeof config.driver !== "string" || !config.driver.trim()) throw new Error("ludens.json driver must be a non-empty driver id");
   if (config.driverPackage !== undefined && (typeof config.driverPackage !== "string" || !config.driverPackage.trim())) {
@@ -59,6 +60,11 @@ export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchCo
   }
   if (result.compactionThreshold !== undefined && (!Number.isInteger(result.compactionThreshold) || result.compactionThreshold <= 0)) {
     throw new Error("compactionThreshold must be a positive integer");
+  }
+  if (config.connection !== undefined) {
+    const validated = validateConnectionConfig(config.connection, "connection");
+    if (Object.keys(validated).length > 0) result.connection = validated;
+    else delete result.connection;
   }
   if (bridge && result.port === undefined) throw new Error(`${config.driver} requires a bridge port; set port in ludens.json or defaultPort in its driver manifest`);
   if (result.port !== undefined && (!Number.isInteger(result.port) || result.port <= 0 || result.port > 65535)) throw new Error("port must be an integer from 1 to 65535");

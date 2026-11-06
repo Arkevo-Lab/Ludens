@@ -12,11 +12,14 @@ import { closeLogIndexes, indexCacheStats } from "./log-index";
 import { workerFailure, type DashboardMethods, type DashboardMethod, type WorkerRequest, type WorkerResponse } from "./dashboard-protocol";
 import { perceptionSettings, updatePerceptionSettings, perceptionRuntime } from "./perception-config";
 import { closeArchiveBuilds } from "./cold-build";
-import { workspaceSettings, updateWorkspaceRoot, openWorkspace, removeWorkspace, createWorkspace } from "./workspaces";
+import { workspaceSettings, updateWorkspaceRoot, updateGlobalConnection, workspaceConnection, updateWorkspaceConnection, openWorkspace, removeWorkspace, createWorkspace } from "./workspaces";
 const port = parentPort!;
 const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], signal: AbortSignal) => unknown } = {
   workspaceSettings: () => workspaceSettings(),
   updateWorkspaceRoot: ([path]) => updateWorkspaceRoot(path),
+  updateGlobalConnection: ([connection]) => updateGlobalConnection(connection),
+  workspaceConnection: ([id]) => workspaceConnection(id),
+  updateWorkspaceConnection: ([id, connection]) => updateWorkspaceConnection(id, connection),
   openWorkspace: ([path]) => openWorkspace(path),
   removeWorkspace: ([id]) => removeWorkspace(id),
   createWorkspace: ([input], signal) => createWorkspace(input, signal),

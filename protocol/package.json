@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./activity": "./src/activity.ts",
+    "./connection": "./src/connection.ts",
     "./event-sources": "./src/event-sources.ts",
     "./log-archive": "./src/log-archive.ts",
     "./ludens": "./src/ludens.ts",
