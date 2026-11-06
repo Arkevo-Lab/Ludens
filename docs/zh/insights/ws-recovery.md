@@ -19,6 +19,26 @@
 
 所以对我们来说，WebSocket 不是单纯的“锦上添花”，而是**多模态长周期运行能否保持可用吞吐的关键**。一旦中途因为网络抖动或边界条件导致 WS 掉了之后再也回不去、永久退化成 HTTP 全量重传，后续轮次的传输开销就会急剧恶化。
 
+## 三层多模态传输架构对比：有状态 WS 增量 vs. 无状态 HTTP + KV 缓存 vs. 图床 URL 卸载
+
+当从 `openai-codex` 切换到其他 OpenAI 兼容或 Anthropic HTTP SSE 端点时，必须区分三处相互独立的性能瓶颈：**（1）客户端出站请求体上传体积**、**（2）服务端视觉预处理器（Vision Preprocessor）耗时**，以及 **（3）LLM Token 前缀 KV 缓存命中**。
+
+| 传输与缓存层级 | 每轮出站请求体（Wire） | 服务端视觉预处理器 | LLM Token KV 缓存 | 累积 60+ 张截图时的典型表现 |
+| --- | --- | --- | --- | --- |
+| **第一层 · 有状态 WebSocket 增量（`previous_response_id`）** | 仅发送本轮增量（`~80–150 KB`） | 仅编码本轮新采样的单张图片（`1×`） | 直接复用服务端驻留的响应状态 | 传输开销保持亚秒级，时延不随轮次增长。 |
+| **第二层 · 无状态 HTTP SSE + 内联 Base64 + 前缀 KV 缓存** | 每轮重传全部历史 Base64 图片（`8–15 MB+`） | 许多 OpenAI 兼容网关在查对 Token KV 缓存**之前**，会先把 `messages[]` 里的 **全部 `N` 张图片**重新解码并跑一遍视觉预处理 | 仅当 `messages[]` 前缀字节完全一致时命中前缀 KV 缓存（`cache_read_input_tokens`） | 上行带宽随轮次线性膨胀（`O(N)`）；未做图片哈希短路的无状态网关即使 `cache_read` 命中率达 99%，仍会因逐图预处理额外消耗 `N × 300–400 ms`（首包等待 `20s+`）。 |
+| **第三层 · 无状态 HTTP SSE + 图床 URL 卸载（`blob-broker`）** | 将内联 `data:image/...;base64` 替换为短链接 `https://...`（`~400 KB`，**出站体积缩减约 95%**） | 除非服务端按图片 URL/哈希缓存视觉特征，否则网关仍需拉取或校验这 `N` 个 URL 并逐张运行视觉预处理 | 配合 `appendOnlyContext` 与 `cacheRetention` 可保持前缀 KV 缓存命中 | 彻底解决客户端上行带宽瓶颈（如 `8.9 MB → 403 KB`），但**无法消除**无状态网关在进入 LLM KV 缓存前对历史图片逐张重复做视觉预处理的固定延迟。 |
+
+基于上述架构差异，Ludens 在全局默认配置（`defaults.connection`）、工作区配置（`ludens.json` 的 `connection`）以及 Dashboard **设置**页同步暴露了模型连接与多模态传输配置：
+
+- **`openaiWebsockets`（`"auto" | "on" | "off"`）**：控制支持有状态 WebSocket 的提供商是否启用增量传输（`"auto"` 下 `openai-codex` 默认启用 WebSocket 增量，`openai` 除非设为 `"on"` 默认走 SSE）。
+- **`cacheRetention`（`"auto" | "short" | "long" | "none"`）**：控制提示词前缀 KV 缓存驻留策略（`"long"` 启用 Anthropic 1 小时扩展缓存与 OpenAI 24 小时缓存驻留）。
+- **`appendOnlyContext`（`"auto" | "on" | "off"`）**：跨轮次保持 `messages[]` 前缀严格只追加、不原地改写历史工具结果，防止无状态 HTTP 端点因前缀字节变动而使 KV 缓存失效。
+- **`imageUrls`（`{ enabled, backends }`）**：启用 OMP 基于 SHA-256 去重的图片外链卸载器（`blob-broker`），按顺序通过文件 API（`"provider-files"`）、内网穿透（`"cloudflared"`、`"tailscale"`、`"pinggy"`、`"localhost-run"`）或匿名图床（`"uguu"`、`"tmpfiles"`、`"litterbox"`、`"0x0"`、`"catbox"`）将内联 Base64 截图替换为外部 URL。
+
+> [!IMPORTANT]
+> 如果无状态 HTTP 提供商在同时开启 `imageUrls`、`cacheRetention` 与 `appendOnlyContext` 后，账单里已显示高额 `cache_read` 命中，但首包响应前耗时（`fetchToHeadersMs`）仍高达 15–25 秒，说明瓶颈位于服务商多模态网关在进入 Token 缓存前对历史图片的重复视觉编码——此时需切换至支持有状态传输的提供商，或调低 `compactionThreshold` 控制上下文中的历史截图数量。
+
 ## 真机长跑暴露的三类断连问题（R1 / R2 / R3）
 
 在连续六至八小时的实测运行中，我们先后遇到了三类断连边界情况：

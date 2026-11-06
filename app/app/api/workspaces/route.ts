@@ -6,6 +6,10 @@ export const maxDuration = 60;
 export async function GET(request: Request) {
   try {
     localRequest(request);
+    const workspaceId = new URL(request.url).searchParams.get("workspaceId");
+    if (workspaceId) {
+      return Response.json(await dashboardWorker().call("workspaceConnection", [workspaceId], request.signal), { headers: { "Cache-Control": "no-store" } });
+    }
     return Response.json(await dashboardWorker().call("workspaceSettings", [], request.signal), { headers: { "Cache-Control": "no-store" } });
   } catch (error) { return errorResponse(error); }
 }
@@ -24,7 +28,14 @@ export async function PUT(request: Request) {
   try {
     localRequest(request, true);
     const body = await request.json();
-    return Response.json(await dashboardWorker().call("updateWorkspaceRoot", [body?.workspaceRoot], request.signal));
+    const worker = dashboardWorker();
+    if (body?.action === "globalConnection") {
+      return Response.json(await worker.call("updateGlobalConnection", [body.connection], request.signal));
+    }
+    if (body?.action === "workspaceConnection") {
+      return Response.json(await worker.call("updateWorkspaceConnection", [body.id, body.connection], request.signal));
+    }
+    return Response.json(await worker.call("updateWorkspaceRoot", [body?.workspaceRoot], request.signal));
   } catch (error) { return errorResponse(error); }
 }
 export async function DELETE(request: Request) {

@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createAgentSession, discoverAuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession } from "@oh-my-pi/pi-coding-agent";
 import type { Model } from "@oh-my-pi/pi-ai";
+import { mergeConnectionConfig, readGlobalConfig, validateConnectionConfig, type ModelConnectionConfig } from "@ludens/protocol/ludens";
 import type { AgentRunner } from "../shiori/runtime.ts";
 import { Workspace } from "../storage/workspace.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
@@ -54,12 +55,35 @@ export async function createOmpSession(options: Parameters<typeof createAgentSes
   return result;
 }
 
+export function ompSettingsOverrides(options: {
+  compactionThreshold?: number;
+  connection?: ModelConnectionConfig;
+}): Record<string, unknown> {
+  const connection = options.connection;
+  return {
+    // Host invariant: fallback models may lack image input, and device control
+    // plus run attribution require the selected model to stay sticky.
+    "retry.modelFallback": false,
+    // Headless host: title generation is a stray model call outside control cycles.
+    "title.refreshOnReplan": false,
+    // Experiment with the existing OMP compactor; keep its native history,
+    // background preparation and image retention policy intact.
+    ...(options.compactionThreshold === undefined ? {} : { "compaction.thresholdTokens": options.compactionThreshold }),
+    ...(connection?.openaiWebsockets === undefined ? {} : { "providers.openaiWebsockets": connection.openaiWebsockets }),
+    ...(connection?.cacheRetention === undefined ? {} : { "providers.cacheRetention": connection.cacheRetention }),
+    ...(connection?.appendOnlyContext === undefined ? {} : { "provider.appendOnlyContext": connection.appendOnlyContext }),
+    ...(connection?.imageUrls?.enabled === undefined ? {} : { "images.urls.enabled": connection.imageUrls.enabled }),
+    ...(connection?.imageUrls?.backends === undefined ? {} : { "images.urls.backends": [...connection.imageUrls.backends] }),
+  };
+}
+
 export async function createOmpAgent(options: {
   runtime: ExtensionHost; workspace: string; runDir: string; basewareSocket: string; ludensSocket: string;
   state: WorkspaceState;
   binDir: string; model: string; maxRequests: number;
   resume?: string;
   compactionThreshold?: number;
+  connection?: ModelConnectionConfig;
   log: EventLog;
 }): Promise<AgentRunner> {
   let cycle: Cycle | undefined;
@@ -71,19 +95,27 @@ export async function createOmpAgent(options: {
       return cycle;
     },
   });
+  const globalConfig = await readGlobalConfig().catch(() => undefined);
+  const workspaceConfig = await readFile(join(options.workspace, "ludens.json"), "utf8")
+    .then(text => JSON.parse(text) as Record<string, unknown>)
+    .catch(error => {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+      throw error;
+    });
+  const workspaceConnection = workspaceConfig?.connection === undefined
+    ? undefined
+    : validateConnectionConfig(workspaceConfig.connection, "ludens.json connection");
+  const connection = mergeConnectionConfig(
+    mergeConnectionConfig(globalConfig?.defaults.connection, workspaceConnection),
+    options.connection,
+  );
   // Superset shell: override only what this host owns. Keys whose value equals
   // the OMP default (memory.backend off, autolearn off, includeWorkspaceTree
   // off, providers.openaiWebsockets auto, async/launch enabled) stay unset.
-  const settings = Settings.isolated({
-    // Host invariant: fallback models may lack image input, and device control
-    // plus run attribution require the selected model to stay sticky.
-    "retry.modelFallback": false,
-    // Headless host: title generation is a stray model call outside control cycles.
-    "title.refreshOnReplan": false,
-    // Experiment with the existing OMP compactor; keep its native history,
-    // background preparation and image retention policy intact.
-    ...(options.compactionThreshold === undefined ? {} : { "compaction.thresholdTokens": options.compactionThreshold }),
-  });
+  const settings = Settings.isolated(ompSettingsOverrides({
+    compactionThreshold: options.compactionThreshold,
+    connection,
+  }));
   const authStorage = await discoverAuthStorage(undefined, { settings, cwd: options.workspace });
   // OMP's remote/background compactor bypasses agent.streamFn. This host-local
   // observer leaves its native requests and response streams untouched.

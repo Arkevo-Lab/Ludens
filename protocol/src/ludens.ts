@@ -5,6 +5,23 @@ import { link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rmdir, unlin
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
+export {
+  OPENAI_WEBSOCKETS_MODES,
+  CACHE_RETENTION_MODES,
+  APPEND_ONLY_CONTEXT_MODES,
+  IMAGE_URL_BACKENDS,
+  DEFAULT_IMAGE_URL_BACKENDS,
+  validateConnectionConfig,
+  mergeConnectionConfig,
+  type OpenaiWebsocketsMode,
+  type CacheRetentionMode,
+  type AppendOnlyContextMode,
+  type ImageUrlBackend,
+  type ImageUrlsConfig,
+  type ModelConnectionConfig,
+} from "./connection";
+import { validateConnectionConfig, type ModelConnectionConfig } from "./connection";
+
 export interface WorkspaceDefaults {
   model?: string;
   seconds?: number;
@@ -12,6 +29,7 @@ export interface WorkspaceDefaults {
   compactionThreshold?: number;
   dashboard?: boolean;
   pet?: boolean;
+  connection?: ModelConnectionConfig;
 }
 export interface LudensConfig { version: 1; workspaceRoot: string; defaults: WorkspaceDefaults }
 export interface WorkspaceIdentity { version: 1; id: string; historyIds?: string[] }
@@ -39,17 +57,24 @@ export function validateGlobalConfig(value: unknown): LudensConfig {
   }
   if (typeof value.workspaceRoot !== "string" || !isAbsolute(value.workspaceRoot)) throw new Error("workspaceRoot must be an absolute directory");
   if (!object(value.defaults)) throw new Error("defaults must be an object");
+  const defaults: WorkspaceDefaults = {};
   for (const [key, setting] of Object.entries(value.defaults)) {
     if (["seconds", "requests", "compactionThreshold"].includes(key)) {
       if (typeof setting !== "number" || !Number.isSafeInteger(setting) || setting <= 0) throw new Error(`defaults.${key} must be a positive integer`);
       if (key === "seconds" && setting * 1000 > 2_147_483_647) throw new Error("defaults.seconds exceeds the control timer range");
+      defaults[key as "seconds" | "requests" | "compactionThreshold"] = setting;
     } else if (["pet", "dashboard"].includes(key)) {
       if (typeof setting !== "boolean") throw new Error(`defaults.${key} must be boolean`);
+      defaults[key as "pet" | "dashboard"] = setting;
     } else if (key === "model") {
       if (typeof setting !== "string" || !setting.trim()) throw new Error("defaults.model must be non-empty");
+      defaults.model = setting;
+    } else if (key === "connection") {
+      const validated = validateConnectionConfig(setting, "defaults.connection");
+      if (Object.keys(validated).length > 0) defaults.connection = validated;
     } else throw new Error(`Unknown global default: ${key}`);
   }
-  return { version: 1, workspaceRoot: resolve(value.workspaceRoot), defaults: { ...value.defaults } };
+  return { version: 1, workspaceRoot: resolve(value.workspaceRoot), defaults };
 }
 export async function readGlobalConfig(home = ludensHome()): Promise<LudensConfig> {
   try { return validateGlobalConfig(JSON.parse(await readFile(join(home, "config.json"), "utf8"))); }

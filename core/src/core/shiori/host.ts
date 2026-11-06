@@ -4,12 +4,14 @@ import { WorkspaceController } from "../subsystems/controller.ts";
 import { PerceptionRuntime } from "../subsystems/perception.ts";
 import type { EventLog, RecordEvent } from "../storage/events.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
+import type { ModelConnectionConfig } from "@ludens/protocol/ludens";
 
 /** The Host assembly used by daily play and evaluated agents. Transports remain owned by the caller. */
 export async function createHostRuntime(options: {
   devices: DeviceSession; workspace: string; runDir: string; state: WorkspaceState;
   log: EventLog; record?: RecordEvent; ludensSocket: string; basewareSocket: string;
   seconds: number; model?: string; maxRequests: number; resume?: string; compactionThreshold?: number;
+  connection?: ModelConnectionConfig;
   budget?: SharedBudget;
 }) {
   const { devices, workspace, runDir, state, log, ludensSocket, basewareSocket } = options;
@@ -42,7 +44,7 @@ export async function createHostRuntime(options: {
       const { createOmpAgent } = await import("../agent-omp/session.ts");
       runtime.attach({ agent: await createOmpAgent({ runtime, workspace, runDir, state, log, binDir, ludensSocket, basewareSocket,
         model: options.model, maxRequests: options.maxRequests, resume: options.resume,
-        compactionThreshold: options.compactionThreshold }) });
+        compactionThreshold: options.compactionThreshold, connection: options.connection }) });
     }
     return runtime;
   } catch (error) { await runtime.close(); throw error; }

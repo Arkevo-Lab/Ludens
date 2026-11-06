@@ -94,18 +94,23 @@ To operate on a workspace from another directory, prefix any command with `luden
 
 ### Global settings and the default directory
 
-`$LUDENS_HOME/config.json` has the shape `{ "version": 1, "workspaceRoot": "/absolute/path", "defaults": { ... } }`. `defaults` supports `model`, `seconds`, `requests`, `compactionThreshold`, `dashboard`, and `pet`, and applies only at creation; explicit initialization arguments take precedence. Changing the parent affects future workspaces without moving registered directories:
+`$LUDENS_HOME/config.json` has the shape `{ "version": 1, "workspaceRoot": "/absolute/path", "defaults": { ... } }`. `defaults` supports `model`, `seconds`, `requests`, `compactionThreshold`, `dashboard`, `pet`, and `connection` (`openaiWebsockets`, `cacheRetention`, `appendOnlyContext`, `imageUrls.enabled`, `imageUrls.backends`). Creation fields apply at workspace initialization, while `defaults.connection` also serves as the fallback model transport policy for workspaces that do not override a given `connection` field in `ludens.json`. Changing the parent affects future workspaces without moving registered directories:
 
 ```sh
 ludens config show
 ludens config set workspaceRoot "$HOME/Ludens Workspaces"
 ludens config set defaults.seconds 1800
 ludens config set defaults.pet false
+ludens config set defaults.connection.openaiWebsockets auto
+ludens config set defaults.connection.cacheRetention long
+ludens config set defaults.connection.appendOnlyContext on
+ludens config set defaults.connection.imageUrls.enabled true
+ludens config set defaults.connection.imageUrls.backends uguu,tmpfiles
 ludens init --name desktop-task --driver cua
 ludens workspace list
 ```
 
-The Dashboard Workspaces page supports creation with an optional directory, registration of existing directories, removal from the index, and editing the default parent directory. The CLI, Dashboard, and pet should use the same `LUDENS_HOME`; restart the relevant processes after changing it.
+The Dashboard Workspaces page supports creation with an optional directory, registration of existing directories, removal from the index, and editing the default parent directory; the Settings page configures both global and workspace-level model connection & multimodal transport options. The CLI, Dashboard, and pet should use the same `LUDENS_HOME`; restart the relevant processes after changing it.
 
 ### Registering and migrating existing workspaces
 
@@ -139,6 +144,7 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 | `seconds` | `1800` | Time budget (seconds) per `auto on` control cycle, reset on each takeover. |
 | `requests` | `1000` | Model request cap per `auto on` control cycle; whichever of `seconds`/`requests` runs out first hands back control. |
 | `compactionThreshold` | unset | OMP context-compaction trigger threshold (tokens); follows the selected model's native OMP threshold (`contextWindow - reserve`) when omitted. |
+| `connection` | inherits `defaults.connection` | Optional model transport & multimodal caching overrides (`openaiWebsockets`: `"auto" \| "on" \| "off"`, `cacheRetention`: `"auto" \| "short" \| "long" \| "none"`, `appendOnlyContext`: `"auto" \| "on" \| "off"`, `imageUrls`: `{ enabled?: boolean, backends?: string[] }`); see [WS Recovery Test Rationale](../insights/ws-recovery.md#three-multimodal-transport-tiers-stateful-ws-vs-stateless-http-kv-cache-vs-image-url-offloading). |
 | `dashboard` | `true` | Whether `ludens up` ensures the local Dashboard service is running. |
 | `pet` | `false` | Whether `ludens up` starts the shared Ludens Pet; requires the optional component installed and an available Dashboard. `ludens init --pet` writes `true`, an existing explicit `true` is left alone; `ludens up --pet` / `--no-pet` override only the current start. |
 | `logging.diagnostics` | `"normal"` | Log verbosity, `"normal"` or `"full"`; see [Recording modes](../reference/logging.md#recording-modes). |

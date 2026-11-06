@@ -2,6 +2,7 @@
 import { useId } from "react";
 import { Monitor } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
+import { ConnectionSettings } from "@/features/workspaces/connection-settings";
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
@@ -32,6 +33,7 @@ export function SettingsView({ follow, projects }: { follow: PetFollow; projects
         </div>
       </CardContent>
     </Card>
+    <ConnectionSettings projects={projects} />
     <PetSettings follow={follow} projects={projects} />
   </section>;
 }

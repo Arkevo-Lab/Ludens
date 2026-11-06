@@ -5,7 +5,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { launchPlan, parseConfig, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
 import { getDriver } from "@ludens/baseware/drivers/registry.ts";
-import { ensureWorkspaceIdentity, ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
+import { ensureWorkspaceIdentity, ludensHome, mergeConnectionConfig, registerWorkspace, validateConnectionConfig } from "@ludens/protocol/ludens";
+import { ompSettingsOverrides } from "../src/core/agent-omp/session.ts";
+import { updateGlobalConnection, updateWorkspaceConnection, workspaceConnection } from "../src/core/query/workspaces.ts";
 
 const fixtureManifests: Record<string, DriverManifest> = {
   "bridge-fixture": { id: "bridge-fixture", transport: "bridge", defaultPort: 47991, needsGame: true,
@@ -695,4 +697,108 @@ test("a package-linked CLI initializes a workspace through mixed symlink chains"
     expect(JSON.parse(await readFile(created.configPath, "utf8")).driver).toBe("cua");
     expect(JSON.parse(await readFile(join(workspace, ".ludens/workspace.json"), "utf8")).id).toBe(created.id);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("model connection config validates, merges, maps to OMP isolated settings, and persists at global and workspace scopes", async () => {
+  expect(validateConnectionConfig({
+    openaiWebsockets: "off",
+    cacheRetention: "long",
+    appendOnlyContext: "on",
+    imageUrls: { enabled: true, backends: ["uguu", "tmpfiles", "uguu"] },
+  })).toEqual({
+    openaiWebsockets: "off",
+    cacheRetention: "long",
+    appendOnlyContext: "on",
+    imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+  });
+
+  expect(() => validateConnectionConfig({ openaiWebsockets: "invalid" })).toThrow("openaiWebsockets must be one of");
+  expect(() => validateConnectionConfig({ imageUrls: { backends: ["not-a-backend"] } })).toThrow("imageUrls.backends must be an array of supported backends");
+
+  const merged = mergeConnectionConfig(
+    { openaiWebsockets: "auto", cacheRetention: "short", imageUrls: { enabled: false, backends: ["uguu"] } },
+    { cacheRetention: "long", appendOnlyContext: "on", imageUrls: { enabled: true } },
+  );
+  expect(merged).toEqual({
+    openaiWebsockets: "auto",
+    cacheRetention: "long",
+    appendOnlyContext: "on",
+    imageUrls: { enabled: true, backends: ["uguu"] },
+  });
+
+  expect(ompSettingsOverrides({ compactionThreshold: 64000, connection: merged })).toEqual({
+    "title.refreshOnReplan": false,
+    "retry.modelFallback": false,
+    "compaction.thresholdTokens": 64000,
+    "providers.openaiWebsockets": "auto",
+    "providers.cacheRetention": "long",
+    "provider.appendOnlyContext": "on",
+    "images.urls.enabled": true,
+    "images.urls.backends": ["uguu"],
+  });
+
+  const parsed = parseConfig({
+    driver: "cua",
+    connection: {
+      openaiWebsockets: "on",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    },
+  }, manifestFor("cua"));
+  expect(parsed.connection).toEqual({
+    openaiWebsockets: "on",
+    cacheRetention: "long",
+    appendOnlyContext: "on",
+    imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+  });
+
+  const directory = await mkdtemp(join(tmpdir(), "ludens-connection-config-"));
+  const home = join(directory, "home");
+  const wsDir = join(directory, "conn-ws");
+  try {
+    const globalResult = await updateGlobalConnection({
+      openaiWebsockets: "auto",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    }, home);
+    expect(globalResult.config.defaults.connection).toEqual({
+      openaiWebsockets: "auto",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    });
+
+    await mkdir(wsDir, { recursive: true });
+    await writeFile(join(wsDir, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.1-sol" }, null, 2));
+    await ensureWorkspaceIdentity(wsDir);
+    const entry = await registerWorkspace(wsDir, home);
+
+    const initialSnap = await workspaceConnection(entry.id, home);
+    expect(initialSnap.connection).toEqual({});
+    expect(initialSnap.defaults).toEqual({
+      openaiWebsockets: "auto",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
+    });
+
+    const updatedSnap = await updateWorkspaceConnection(entry.id, {
+      openaiWebsockets: "off",
+      imageUrls: { enabled: false },
+    }, home);
+    expect(updatedSnap.connection).toEqual({
+      openaiWebsockets: "off",
+      imageUrls: { enabled: false },
+    });
+    expect(mergeConnectionConfig(updatedSnap.defaults, updatedSnap.connection)).toEqual({
+      openaiWebsockets: "off",
+      cacheRetention: "long",
+      appendOnlyContext: "on",
+      imageUrls: { enabled: false, backends: ["uguu", "tmpfiles"] },
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
