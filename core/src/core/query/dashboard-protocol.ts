@@ -23,6 +23,11 @@ import type {
   openWorkspace,
   removeWorkspace,
   createWorkspace,
+  basewareOverview,
+  upsertBasewareMachine,
+  removeBasewareMachine,
+  updateWorkspaceMachines,
+  probeBasewareMachine,
 } from "./workspaces";
 
 /** Only existing Dashboard operations cross the worker boundary, never arbitrary code or paths. */
@@ -39,6 +44,11 @@ export interface DashboardMethods {
   openWorkspace: { args: [path: unknown]; result: Awaited<ReturnType<typeof openWorkspace>> };
   removeWorkspace: { args: [id: unknown]; result: Awaited<ReturnType<typeof removeWorkspace>> };
   createWorkspace: { args: [input: unknown]; result: Awaited<ReturnType<typeof createWorkspace>> };
+  basewareOverview: { args: [workspaceId?: unknown]; result: Awaited<ReturnType<typeof basewareOverview>> };
+  upsertBasewareMachine: { args: [input: unknown]; result: Awaited<ReturnType<typeof upsertBasewareMachine>> };
+  removeBasewareMachine: { args: [id: unknown]; result: Awaited<ReturnType<typeof removeBasewareMachine>> };
+  updateWorkspaceMachines: { args: [id: unknown, input: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceMachines>> };
+  probeBasewareMachine: { args: [input: unknown]; result: Awaited<ReturnType<typeof probeBasewareMachine>> };
   archiveBuild: { args: [project: string, run: string, action?: "cancel" | "retry", buildId?: string]; result: Awaited<ReturnType<typeof archiveBuild>> };
   diagnosticEvents: { args: [project: string, run: string, query?: DiagnosticQuery]; result: Awaited<ReturnType<typeof diagnosticEvents>> };
   diagnostics: { args: []; result: { memory: NodeJS.MemoryUsage; index: ReturnType<typeof indexCacheStats>; activeRequests: number } };

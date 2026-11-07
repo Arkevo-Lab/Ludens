@@ -25,6 +25,11 @@ import {
   openWorkspace,
   removeWorkspace,
   createWorkspace,
+  basewareOverview,
+  upsertBasewareMachine,
+  removeBasewareMachine,
+  updateWorkspaceMachines,
+  probeBasewareMachine,
 } from "./workspaces";
 const port = parentPort!;
 const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], signal: AbortSignal) => unknown } = {
@@ -40,6 +45,11 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   openWorkspace: ([path]) => openWorkspace(path),
   removeWorkspace: ([id]) => removeWorkspace(id),
   createWorkspace: ([input], signal) => createWorkspace(input, signal),
+  basewareOverview: ([workspaceId]) => basewareOverview(workspaceId),
+  upsertBasewareMachine: ([input]) => upsertBasewareMachine(input),
+  removeBasewareMachine: ([id]) => removeBasewareMachine(id),
+  updateWorkspaceMachines: ([id, input]) => updateWorkspaceMachines(id, input),
+  probeBasewareMachine: ([input]) => probeBasewareMachine(input),
   diagnosticEvents: ([project, run, query], signal) => diagnosticEvents(project, run, query, signal),
   diagnostics: () => ({ memory: process.memoryUsage(), index: indexCacheStats(), activeRequests: requests.size - 1 }),
   catalog: ([includeEmpty]) => catalog(undefined, includeEmpty),

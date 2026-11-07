@@ -11,11 +11,17 @@ export interface DriverProvider {
 
 export interface DriverCreateOptions {
   port?: number;
+  host?: string;
   command?: string;
+  args?: string[];
+  transportMode?: "stdio" | "bridge" | "ssh" | "http" | "sse";
+  ssh?: { host: string; user?: string; port?: number; identityFile?: string; command?: string };
+  url?: string;
+  headers?: Record<string, string>;
   clock: Clock;
 }
 
-export type DriverTransport = "bridge" | "stdio";
+export type DriverTransport = "bridge" | "stdio" | "ssh" | "http" | "sse";
 
 /** Loader-authored provenance, not a claim supplied by the package registration. */
 export type DriverSource =
@@ -70,4 +76,7 @@ export function getDriver(id: string): DriverRegistration {
 // Emulator implementations are optional external packages; only desktop CUA is built in.
 registerDriver({ id: "cua", transport: "stdio",
   launchHint: "Starts the installed Cua Driver (cua-driver by default); it needs no emulator or bridge port.",
-  load: options => createCuaProvider({ command: options.command, clock: options.clock }) });
+  load: options => createCuaProvider({ command: options.command, args: options.args,
+    // CUA has no bridge mode; every remaining transport passes straight through.
+    transportMode: options.transportMode === "bridge" ? undefined : options.transportMode,
+    ssh: options.ssh, url: options.url, headers: options.headers, clock: options.clock }) });

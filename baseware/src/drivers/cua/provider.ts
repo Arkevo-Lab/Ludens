@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { CallToolResultSchema, ListToolsResultSchema, type CallToolResult, type ListToolsResult, type Tool } from "@modelcontextprotocol/sdk/types.js";
@@ -28,7 +29,7 @@ export async function listCuaTools(client: Pick<Client, "request">): Promise<Too
 }
 
 /** Keep upstream tools and schemas intact; Baseware owns admission and the transport session. */
-export function cuaCapabilities(options: { tools: Tool[]; client: CuaClient; clock: Clock }) {
+export function cuaCapabilities(options: { tools: Tool[]; client: CuaClient; clock: Clock }, isRemote?: boolean) {
   const { client, clock } = options;
   const sessions = new Map<string | undefined, Promise<void>>();
   let owner: string | undefined;
@@ -97,10 +98,15 @@ export function cuaCapabilities(options: { tools: Tool[]; client: CuaClient; clo
       // Explicit native file output belongs to the caller; do not copy or delete it.
       const screenshot = result.structuredContent?.screenshot_file_path;
       if (!result.isError && typeof screenshot === "string") {
-        const mediaType = typeof result.structuredContent?.screenshot_mime_type === "string"
-          ? result.structuredContent.screenshot_mime_type : "image/png";
-        observations.push({ id: crypto.randomUUID(), controllerId: tool.name, mediaType,
-          path: screenshot, timing: execution.timing });
+        // On a remote machine the path names a file over there, not here; without inline
+        // media to fall back on the caller still needs the path to fetch it.
+        const inline = observations.some(observation => observation.contentIndex !== undefined);
+        if (!isRemote || existsSync(screenshot) || !inline) {
+          const mediaType = typeof result.structuredContent?.screenshot_mime_type === "string"
+            ? result.structuredContent.screenshot_mime_type : "image/png";
+          observations.push({ id: crypto.randomUUID(), controllerId: tool.name, mediaType,
+            path: screenshot, timing: execution.timing });
+        }
       }
       return { ...execution, ...(observations.length ? { observations } : {}) };
     },
@@ -108,8 +114,50 @@ export function cuaCapabilities(options: { tools: Tool[]; client: CuaClient; clo
   return { controllers } satisfies Capabilities;
 }
 
-export async function createCuaProvider(options: { command?: string; clock: Clock }) {
-  const transport = new StdioClientTransport({ command: options.command ?? "cua-driver", args: ["mcp"] });
+export type CuaTransportMode = "stdio" | "ssh" | "http" | "sse";
+
+export interface CuaProviderOptions {
+  command?: string;
+  args?: string[];
+  transportMode?: CuaTransportMode;
+  ssh?: { host: string; user?: string; port?: number; identityFile?: string; command?: string };
+  url?: string;
+  headers?: Record<string, string>;
+  clock: Clock;
+}
+
+async function cuaTransport(options: CuaProviderOptions) {
+  if (options.transportMode === "ssh" || options.ssh) {
+    if (!options.ssh) throw new Error("ssh transport requires ssh host configuration");
+    const sshArgs = ["-o", "BatchMode=yes"];
+    if (options.ssh.port) sshArgs.push("-p", String(options.ssh.port));
+    if (options.ssh.identityFile) sshArgs.push("-i", options.ssh.identityFile);
+    sshArgs.push(options.ssh.user ? `${options.ssh.user}@${options.ssh.host}` : options.ssh.host);
+    sshArgs.push(options.ssh.command ?? options.command ?? "cua-driver mcp");
+    return new StdioClientTransport({ command: "ssh", args: sshArgs });
+  }
+  if (options.transportMode === "http" || options.transportMode === "sse") {
+    if (!options.url) throw new Error(`${options.transportMode} transport requires url`);
+    if (options.transportMode === "http") {
+      // Lazy import: the http/sse client modules are only needed on remote transports,
+      // and loading them statically would pull eventsource plumbing into every stdio start.
+      const { StreamableHTTPClientTransport } = await import("@modelcontextprotocol/sdk/client/streamableHttp.js");
+      return new StreamableHTTPClientTransport(new URL(options.url),
+        options.headers ? { requestInit: { headers: options.headers } } : {});
+    }
+    const { SSEClientTransport } = await import("@modelcontextprotocol/sdk/client/sse.js");
+    return new SSEClientTransport(new URL(options.url));
+  }
+  return new StdioClientTransport({
+    command: options.command ?? "cua-driver",
+    args: options.args?.length ? options.args : ["mcp"],
+  });
+}
+
+export async function createCuaProvider(options: CuaProviderOptions) {
+  const transport = await cuaTransport(options);
+  const isRemote = options.transportMode === "ssh" || options.ssh !== undefined
+    || options.transportMode === "http" || options.transportMode === "sse";
   const client = new Client({ name: "ludens-baseware", version: "0.1.0" }, { capabilities: {} });
   let onDisconnect: ((error: Error) => void) | undefined;
   let closed = false;
@@ -118,7 +166,7 @@ export async function createCuaProvider(options: { command?: string; clock: Cloc
     await client.connect(transport);
     const tools = await listCuaTools(client);
     return {
-      capabilities: cuaCapabilities({ ...options, tools, client }),
+      capabilities: cuaCapabilities({ tools, client, clock: options.clock }, isRemote),
       version: client.getServerVersion()?.version ?? "unknown",
       onDisconnect(handler: (error: Error) => void) { onDisconnect = handler; },
       async close() { closed = true; await client.close(); },

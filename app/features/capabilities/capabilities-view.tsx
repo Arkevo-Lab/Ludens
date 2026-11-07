@@ -971,25 +971,6 @@ function SurrogateEnvsCatalog({ envs }: { envs: CapabilityEnvEntry[] }) {
   );
 }
 
-function DeviceCapabilityDeclarations({ items, title }: { items: CapabilityEntry[]; title: string }) {
-  const t = useTranslations("capabilitiesView");
-  return <div className="capability-declarations">
-    <div className="capability-declaration-columns" aria-hidden="true"><span>{t("capabilityCol")}</span><span>{t("descriptionCol")}</span><span>{t("controlCol")}</span></div>
-    <ul className="capability-declaration-list" role="list" aria-label={title}>
-      {items.map(item => <li key={item.id} className="capability-declaration" data-capability-declaration={item.id}>
-        <h4 className="capability-declaration-name"><code>{item.id}</code></h4>
-        <div className="capability-declaration-description">
-          <p>{item.description || <span className="text-muted-foreground">{t("noDescription")}</span>}</p>
-        </div>
-        <dl className="capability-declaration-control"><dt>{t("controlCol")}</dt><dd>
-          <span data-capability-control>{item.requiresControl === null ? "—" : t(item.requiresControl ? "needsControl" : "noControl")}</span>
-          {item.readOnly !== null && <span data-capability-read-only>{t(item.readOnly ? "readOnlySuffix" : "sideEffectsSuffix")}</span>}
-        </dd></dl>
-      </li>)}
-    </ul>
-  </div>;
-}
-
 function ConnectionCheck({ project, workspace }: { project: string; workspace: string }) {
   const t = useTranslations("capabilitiesView");
   const [value, setValue] = useState<CapabilityRuntime | null>(null), [error, setError] = useState("");
@@ -1111,63 +1092,25 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
 
       <SurrogateEnvsCatalog envs={envs} />
 
-      <Card className="min-w-0" data-capability-source="device">
-        <CardContent className="min-w-0 space-y-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-2">
-              <h3 className="flex items-center gap-3 text-base font-semibold">
-                <Monitor className="size-5 shrink-0 text-primary" />
-                {t("groupTitles.device")}
-              </h3>
-              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline">{t(`sourceStates.${caps.sources.device.status}`)}</Badge>
-                <span>
-                  {caps.sources.device.status === "error" || caps.sources.device.status === "missing"
-                    ? "—"
-                    : String(deviceItems.length)}{" "}
-                  {t("capabilitiesUnit")}
-                </span>
-              </div>
-            </div>
-            <NavigationLink href={guide(links.device.doc)} onNavigate={onNavigate}>
-              <BookOpen />{t(links.device.label)}
-            </NavigationLink>
+      <Card className="min-w-0" data-capability-source="device-relocated">
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 py-4">
+          <div className="min-w-0 space-y-1">
+            <h3 className="flex items-center gap-2.5 text-sm font-semibold">
+              <Monitor className="size-4 shrink-0 text-primary" aria-hidden="true" />
+              {t("groupTitles.device")}
+              <Badge variant="outline" className="text-xs">
+                {deviceItems.length} {t("capabilitiesUnit")}
+              </Badge>
+            </h3>
+            <p className="text-xs text-muted-foreground">{t("relocatedToBasewareHint")}</p>
           </div>
-          <p className="text-xs leading-relaxed text-muted-foreground">{t("sourceDescriptions.device")}</p>
-          {caps.deviceSnapshot && (
-            <div className="space-y-1 text-xs text-muted-foreground">
-              <p>
-                {caps.deviceSnapshot.generatedAt ? (
-                  <>
-                    {t("snapshotAt")}{" "}
-                    <time dateTime={caps.deviceSnapshot.generatedAt}>
-                      {new Date(caps.deviceSnapshot.generatedAt).toLocaleString()}
-                    </time>
-                  </>
-                ) : (
-                  t("snapshotTimeUnknown")
-                )}
-              </p>
-              {caps.deviceSnapshot.drivers.length > 0 && (
-                <p className="break-words">
-                  {t("recordedDrivers")}:{" "}
-                  {caps.deviceSnapshot.drivers
-                    .map(driver => `${driver.id}${driver.version ? ` (${driver.version})` : ""}`)
-                    .join(", ")}
-                </p>
-              )}
-            </div>
-          )}
-          {caps.sources.device.status === "error" ? (
-            <p className="text-sm text-destructive">{t("sourceFailure")}</p>
-          ) : deviceItems.length === 0 ? (
-            <p className="text-sm text-muted-foreground">{t("sourceEmpty.device")}</p>
-          ) : (
-            <DeviceCapabilityDeclarations items={deviceItems} title={t("groupTitles.device")} />
-          )}
-          {caps.sources.device.issueCount > 0 && (
-            <p className="text-xs text-muted-foreground">{t("diagnosticsTitle")}: {caps.sources.device.issueCount}</p>
-          )}
+          <NavigationLink
+            href={"?" + new URLSearchParams({ view: "baseware", ...(project ? { project } : {}) })}
+            onNavigate={onNavigate}
+          >
+            {t("openBasewareView")}
+            <ArrowRight className="size-3.5" aria-hidden="true" />
+          </NavigationLink>
         </CardContent>
       </Card>
 

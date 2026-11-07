@@ -21,6 +21,30 @@ export {
   type ModelConnectionConfig,
 } from "./connection";
 import { validateConnectionConfig, type ModelConnectionConfig } from "./connection";
+export {
+  MACHINE_TRANSPORT_KINDS,
+  BUILTIN_LOCAL_DESKTOP_MACHINE,
+  validMachineId,
+  validateMachineTransport,
+  validateMachineSpec,
+  validateWorkspaceMachinesBinding,
+  type MachineTransportKind,
+  type MachineStdioTransport,
+  type MachineBridgeTransport,
+  type MachineSshTransport,
+  type MachineHttpTransport,
+  type MachineTransportConfig,
+  type BasewareMachineSpec,
+  type WorkspaceMachinesBinding,
+  type MachinesRegistryFile,
+} from "./machines";
+import {
+  BUILTIN_LOCAL_DESKTOP_MACHINE,
+  validMachineId,
+  validateMachineSpec,
+  type BasewareMachineSpec,
+  type MachinesRegistryFile,
+} from "./machines";
 
 export interface WorkspaceDefaults {
   model?: string;
@@ -276,5 +300,67 @@ export async function renewWorkspaceIdentity(workspacePath: string, home = luden
     await unlink(join(workspace, ".ludens", "shiori", "current-session.json")).catch(error => { if (error.code !== "ENOENT") throw error; });
     if (ownsRegistration) await unlink(registrationPath(previous.id, home));
     return value;
+  });
+}
+
+function validateMachinesRegistry(value: unknown): MachinesRegistryFile {
+  if (!object(value) || value.version !== 1 || !Array.isArray(value.machines)) {
+    throw new Error("machines.json must contain version: 1 and machines array");
+  }
+  const byId = new Map<string, BasewareMachineSpec>();
+  byId.set(BUILTIN_LOCAL_DESKTOP_MACHINE.id, BUILTIN_LOCAL_DESKTOP_MACHINE);
+  for (const item of value.machines) {
+    const validated = validateMachineSpec(item);
+    byId.set(validated.id, {
+      ...validated,
+      ...(validated.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id ? { builtin: true } : {}),
+    });
+  }
+  return { version: 1, machines: [...byId.values()] };
+}
+
+export async function readMachinesConfig(home = ludensHome()): Promise<MachinesRegistryFile> {
+  try {
+    return validateMachinesRegistry(JSON.parse(await readFile(join(home, "machines.json"), "utf8")));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return { version: 1, machines: [BUILTIN_LOCAL_DESKTOP_MACHINE] };
+  }
+}
+
+export async function upsertMachineConfig(
+  input: unknown,
+  home = ludensHome(),
+): Promise<MachinesRegistryFile> {
+  const spec = validateMachineSpec(input);
+  return withStateLock(join(home, "machines.json.lock"), async () => {
+    const current = await readMachinesConfig(home);
+    const nextList = current.machines.filter(item => item.id !== spec.id);
+    nextList.push({
+      ...spec,
+      updatedAt: new Date().toISOString(),
+      ...(spec.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id ? { builtin: true } : {}),
+    });
+    const validated = validateMachinesRegistry({ version: 1, machines: nextList });
+    await atomicJson(join(home, "machines.json"), validated);
+    return validated;
+  });
+}
+
+export async function removeMachineConfig(
+  id: unknown,
+  home = ludensHome(),
+): Promise<{ removed: BasewareMachineSpec | null; registry: MachinesRegistryFile }> {
+  if (!validMachineId(id)) throw new Error("Invalid machine ID");
+  if (id === BUILTIN_LOCAL_DESKTOP_MACHINE.id) {
+    throw new Error("The built-in local-desktop machine cannot be removed");
+  }
+  return withStateLock(join(home, "machines.json.lock"), async () => {
+    const current = await readMachinesConfig(home);
+    const removed = current.machines.find(item => item.id === id) ?? null;
+    const nextList = current.machines.filter(item => item.id !== id);
+    const validated = validateMachinesRegistry({ version: 1, machines: nextList });
+    await atomicJson(join(home, "machines.json"), validated);
+    return { removed, registry: validated };
   });
 }

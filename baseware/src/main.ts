@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-import { basename, join, resolve } from "node:path";
-import { parseArgs } from "node:util";
 import { ludensHome } from "@ludens/protocol/ludens";
+import { parseArgs } from "node:util";
+import { basename, join, resolve } from "node:path";
+import { MACHINE_TRANSPORT_KINDS as TRANSPORTS, type MachineTransportKind } from "@ludens/protocol/machines";
 import { cli, HELP } from "./cli.ts";
 import { defaultSocket } from "./address.ts";
 import { BasewareCore } from "./core.ts";
@@ -20,14 +21,29 @@ export async function main(args = process.argv.slice(2)) {
     driver: { type: "string" }, "driver-package": { type: "string" }, port: { type: "string" },
     socket: { type: "string", default: socket }, "data-dir": { type: "string" },
     "cua-command": { type: "string" }, diagnostics: { type: "string", default: "normal" },
+    host: { type: "string" }, transport: { type: "string" }, url: { type: "string" },
+    "ssh-host": { type: "string" }, "ssh-user": { type: "string" }, "ssh-port": { type: "string" },
+    "ssh-identity": { type: "string" }, "ssh-command": { type: "string" },
   } });
   if (!values.driver?.trim()) throw new Error("serve requires --driver <id>; emulator drivers also require --driver-package <spec>");
   const registration = await resolveDriver(values.driver, values["driver-package"], defaultDriverCacheRoot());
   if (values["cua-command"] && registration.defaultPort !== undefined) throw new Error("--cua-command is only for drivers without a bridge port");
   if (values.diagnostics !== "normal" && values.diagnostics !== "full") throw new Error("--diagnostics must be normal or full");
+  const transportMode = values.transport as MachineTransportKind | undefined;
+  if (transportMode !== undefined && !TRANSPORTS.includes(transportMode)) {
+    throw new Error(`--transport must be one of ${TRANSPORTS.join(", ")}`);
+  }
+  const sshPort = values["ssh-port"] === undefined ? undefined : Number(values["ssh-port"]);
+  if (sshPort !== undefined && (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535)) {
+    throw new Error("--ssh-port must be between 1 and 65535");
+  }
   const portValue = values.port ?? registration.defaultPort;
   const port = portValue === undefined ? undefined : Number(portValue);
   if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) throw new Error("--port must be between 1 and 65535");
+  const ssh = values["ssh-host"] === undefined ? undefined : {
+    host: values["ssh-host"], user: values["ssh-user"], port: sshPort,
+    identityFile: values["ssh-identity"], command: values["ssh-command"],
+  };
   const dataDir = resolve(values["data-dir"] ?? join(ludensHome(), "logs", "baseware", basename(values.socket!, ".sock")));
   let core: BasewareCore | undefined;
   let provider: DriverProvider | undefined;
@@ -40,7 +56,8 @@ export async function main(args = process.argv.slice(2)) {
     const serviceId = crypto.randomUUID();
     const clock = { id: serviceId, now: () => performance.now() };
     const log = new EventLog(dataDir, serviceId);
-    provider = await registration.load({ port, command: values["cua-command"], clock });
+    provider = await registration.load({ port, host: values.host, command: values["cua-command"],
+      transportMode, ssh, url: values.url, clock });
     core = new BasewareCore({ capabilities: provider.capabilities, record: log.record, serviceId, source: log.source,
       diagnostics: values.diagnostics, streamDir: join(dataDir, "stream"),
       streamPrefetch: process.env.LUDENS_BASEWARE_STREAM_PREFETCH !== "0",

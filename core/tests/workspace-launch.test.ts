@@ -7,7 +7,15 @@ import { launchPlan, parseConfig, WorkspaceLauncher, type DriverManifest, type L
 import { getDriver } from "@ludens/baseware/drivers/registry.ts";
 import { ensureWorkspaceIdentity, ludensHome, mergeConnectionConfig, registerWorkspace, validateConnectionConfig } from "@ludens/protocol/ludens";
 import { ompSettingsOverrides } from "../src/core/agent-omp/session.ts";
-import { updateGlobalConnection, updateWorkspaceConnection, workspaceConnection } from "../src/core/query/workspaces.ts";
+import {
+  updateGlobalConnection,
+  updateWorkspaceConnection,
+  workspaceConnection,
+  upsertBasewareMachine,
+  basewareOverview,
+  updateWorkspaceMachines,
+  removeBasewareMachine,
+} from "../src/core/query/workspaces.ts";
 
 const fixtureManifests: Record<string, DriverManifest> = {
   "bridge-fixture": { id: "bridge-fixture", transport: "bridge", defaultPort: 47991, needsGame: true,
@@ -697,6 +705,52 @@ test("a package-linked CLI initializes a workspace through mixed symlink chains"
     expect(JSON.parse(await readFile(created.configPath, "utf8")).driver).toBe("cua");
     expect(JSON.parse(await readFile(join(workspace, ".ludens/workspace.json"), "utf8")).id).toBe(created.id);
   } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test("Baseware machine bindings validate and persist across registry and workspace updates", async () => {
+  expect(parseConfig({
+    driver: "cua",
+    machines: { active: "local-desktop", allowed: ["local-desktop"] },
+  }, manifestFor("cua")).machines).toEqual({ active: "local-desktop", allowed: ["local-desktop"] });
+  expect(() => parseConfig({ driver: "cua", machines: { allowed: ["bad id"] } }, manifestFor("cua"))).toThrow("machines.allowed");
+
+  const directory = await mkdtemp(join(tmpdir(), "ludens-baseware-machines-"));
+  const home = join(directory, "home");
+  const workspace = join(directory, "workspace");
+  try {
+    await mkdir(workspace, { recursive: true });
+    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.1-sol" }, null, 2));
+    await ensureWorkspaceIdentity(workspace);
+    const entry = await registerWorkspace(workspace, home);
+
+    const upserted = await upsertBasewareMachine({
+      id: "test-machine",
+      name: "Test Machine",
+      driver: "bridge-fixture",
+      transport: { kind: "bridge", host: "127.0.0.1", port: 47991 },
+    }, home);
+    expect(upserted.machine.id).toBe("test-machine");
+    expect(upserted.machines.map(machine => machine.id)).toEqual(["local-desktop", "test-machine"]);
+
+    const initial = await basewareOverview(entry.id, home);
+    expect(initial.workspaceId).toBe(entry.id);
+    expect(initial.binding).toEqual({ active: "workspace-default", allowed: ["workspace-default", "local-desktop"] });
+    expect(initial.implicitMachine).toMatchObject({ id: "workspace-default", driver: "cua", transport: { kind: "stdio", command: "cua-driver" } });
+    expect(initial.activeMachine?.id).toBe("workspace-default");
+    expect(initial.machines.find(machine => machine.id === "local-desktop")?.usedByWorkspaceIds).toEqual([entry.id]);
+
+    const updated = await updateWorkspaceMachines(entry.id, { active: "test-machine", allowed: ["test-machine"] }, home);
+    expect(updated.binding).toEqual({ active: "test-machine", allowed: ["test-machine"] });
+    expect(updated.activeMachine?.id).toBe("test-machine");
+    expect(updated.machines.find(machine => machine.id === "test-machine")?.usedByWorkspaceIds).toEqual([entry.id]);
+    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).machines).toEqual(updated.binding);
+
+    const removed = await removeBasewareMachine("test-machine", home);
+    expect(removed.removed?.id).toBe("test-machine");
+    expect(removed.machines.map(machine => machine.id)).toEqual(["local-desktop"]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("model connection config validates, merges, maps to OMP isolated settings, and persists at global and workspace scopes", async () => {
