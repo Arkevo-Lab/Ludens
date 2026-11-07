@@ -5,13 +5,15 @@ import type { Catalog, Request } from "./protocol.ts";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-export const HELP = `baseware serve --driver <id> [--driver-package <npm|github:org/repo#rev|https://github.com/org/repo#rev|file:path>] [--port <n>] [--host <host>] [--transport stdio|bridge|ssh|http|sse] [--ssh-host <host>] [--ssh-user <user>] [--ssh-port <n>] [--ssh-identity <path>] [--ssh-command <cmd>] [--url <url>] [--cua-command <path>] [--socket <path>] [--data-dir <path>] [--diagnostics normal|full]
+export const HELP = `baseware serve --driver <id> [--driver-package <npm|github:org/repo#rev|https://github.com/org/repo#rev|file:path>] [--port <n>] [--host <host>] [--transport stdio|bridge|ssh|http|sse] [--ssh-host <host>] [--ssh-user <user>] [--ssh-port <n>] [--ssh-identity <path>] [--ssh-command <cmd>] [--url <url>] [--cua-command <path>] [--socket <path>] [--data-dir <path>] [--machine-id <id>] [--diagnostics normal|full]
 baseware status
 baseware list
 baseware export [--output <path>]
 baseware driver list
 baseware driver discover --package <npm|github:org/repo#rev|https://github.com/org/repo#rev|file:path>
-baseware controller list | <id> --help | <name> [--args '<JSON object>' | --file <arguments.json>]
+baseware controller list | <id> --help | <name> [--machine <id>] [--args '<JSON object>' | --file <arguments.json>]
+baseware reconnect [--machine <id>]
+baseware machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>
 baseware revoke
 baseware mcp
 
@@ -49,14 +51,38 @@ export async function cli(argv: string[], socket: string) {
   } else if (kind === "status" || kind === "revoke" || kind === "list") {
     if (argv.length !== 1) throw new Error(`Usage: baseware ${kind}`);
     request = { kind };
+  } else if (kind === "reconnect") {
+    const { values } = parseArgs({ args: argv.slice(1), options: { machine: { type: "string" } } });
+    request = { kind: "reconnect", ...(values.machine ? { id: values.machine } : {}) };
+  } else if (kind === "machine") {
+    if (id === "list" && !args.length) request = { kind: "machines", action: "list" };
+    else if (id === "use" || id === "disconnect") {
+      if (args.length !== 1) throw new Error(`Usage: baseware machine ${id} <id>`);
+      request = { kind: "machines", action: id, id: args[0] };
+    } else if (id === "connect") {
+      if (!args.length) throw new Error("Usage: baseware machine connect <id> [<id2> ...]");
+      request = { kind: "machines", action: "connect", ids: args };
+    } else throw new Error("Usage: baseware machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>");
   } else if (["driver", "controller"].includes(kind!)) {
     if (id === "list" && !args.length) {
       select = kind === "driver" ? "drivers" : "controllers";
       request = { kind: "list" };
     } else if (kind === "controller" && id) {
-      request = args.length === 1 && args[0] === "--help"
+      if (id === "--help" && !args.length) throw new Error("Missing capability ID; see baseware --help");
+      let rest = args;
+      let machineId: string | undefined;
+      const equals = args.findIndex(arg => arg.startsWith("--machine="));
+      const flag = args.indexOf("--machine");
+      if (equals !== -1) { machineId = args[equals].slice("--machine=".length); rest = args.filter((_, index) => index !== equals); }
+      else if (flag !== -1) {
+        if (flag + 1 >= args.length) throw new Error("--machine requires a machine id");
+        machineId = args[flag + 1];
+        rest = args.filter((_, index) => index !== flag && index !== flag + 1);
+      }
+      request = rest.length === 1 && rest[0] === "--help"
         ? { kind: "help", id }
-        : { kind, id, arguments: await readToolArguments(args), epoch: process.env.BASEWARE_EPOCH,
+        : { kind, id, arguments: await readToolArguments(rest), epoch: process.env.BASEWARE_EPOCH,
+          ...(machineId ? { machine: machineId } : {}),
           trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined, origin: "cli" };
     } else throw new Error("Missing capability ID; see baseware --help");
   } else if (kind === "help" && id) request = { kind: "help", id };

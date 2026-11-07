@@ -1,14 +1,35 @@
 import { randomBytes } from "node:crypto";
 import type { Capabilities, ExecutionResult, Observation, ToolArguments } from "./contracts.ts";
 import { argumentValidator, archivedToolResult, observationMetadata } from "./tool-contract.ts";
-import type { Catalog, DeviceEvent, EventMetadata, RecordEvent, Request, Trace } from "./protocol.ts";
+import type { BasewareMountedMachineStatus, Catalog, DeviceEvent, EventMetadata, RecordEvent, Request, Trace } from "./protocol.ts";
 import type { DriverManifest } from "./drivers/registry.ts";
 import type { EventSourceDescriptor } from "@ludens/protocol/event-sources";
 import { SamplingStats } from "./sampling-stats.ts";
 import { ObservationStreamSpool } from "./stream.ts";
 
 export type DriverInfo = Pick<DriverManifest, "id" | "transport" | "defaultPort" | "needsGame" | "launchHint" | "launchCommand" | "launchEnv" | "source"> & { version: string };
+export type MachinesAction = "list" | "use" | "connect" | "disconnect";
+export interface MountedMachineEntry {
+  id: string;
+  label: string;
+  driver: string;
+  transport: string;
+  connected: boolean;
+  reason: string;
+  isPrimary: boolean;
+  capabilities: Capabilities;
+  drivers: DriverInfo[];
+}
 export interface ClientContext { id: string; onEvent?(event: DeviceEvent): void }
+
+/** A namespaced secondary registration of an already-exposed controller. */
+function aliasController(controller: Capabilities["controllers"][number], machineId: string, keepHooks: boolean): Capabilities["controllers"][number] {
+  return { tool: { ...controller.tool, name: `${machineId}/${controller.tool.name}` }, requiresControl: controller.requiresControl,
+    ...(controller.mediaTypes ? { mediaTypes: controller.mediaTypes } : {}),
+    execute: (args, context) => controller.execute(args, context),
+    ...(keepHooks && controller.acquire ? { acquire: epoch => controller.acquire!(epoch) } : {}),
+    ...(keepHooks && controller.release ? { release: epoch => controller.release!(epoch) } : {}) };
+}
 
 function operationTrace(parent: Trace, operationId: string): Trace {
   return { ...parent, operationId, traceId: parent.traceId ?? randomBytes(16).toString("hex"),
@@ -18,10 +39,16 @@ function operationTrace(parent: Trace, operationId: string): Trace {
 /** Device ownership and observations, independent of agents and their workspaces. */
 export class BasewareCore {
   readonly capabilities: Capabilities;
+  private drivers: DriverInfo[];
   readonly serviceId: string;
   readonly source?: EventSourceDescriptor;
   readonly diagnostics: "normal" | "full";
-  private drivers: DriverInfo[];
+  private machines = new Map<string, MountedMachineEntry>();
+  private primaryCapabilities: Capabilities;
+  private controllerMachine = new Map<string, string>();
+  private onReconnect?: (machineId?: string) => Promise<boolean>;
+  private onMachines?: (action: MachinesAction, payload: { id?: string; ids?: string[] }) => Promise<unknown>;
+  activeMachineId?: string;
   private sink: RecordEvent;
   private clients = new Map<string, ClientContext>();
   private owner?: ClientContext;
@@ -52,8 +79,12 @@ export class BasewareCore {
   private logFailure?: { firstSeq: number; lastSeq: number; count: number; error: string };
 
   constructor(options: { capabilities: Capabilities; drivers: DriverInfo[]; record?: RecordEvent; serviceId?: string;
-    source?: EventSourceDescriptor; diagnostics?: "normal" | "full"; inputResetTimeoutMs?: number; streamDir?: string; streamPrefetch?: boolean }) {
-    this.capabilities = options.capabilities;
+    source?: EventSourceDescriptor; diagnostics?: "normal" | "full"; inputResetTimeoutMs?: number; streamDir?: string; streamPrefetch?: boolean;
+    onReconnect?: (machineId?: string) => Promise<boolean>;
+    onMachines?: (action: MachinesAction, payload: { id?: string; ids?: string[] }) => Promise<unknown>;
+    activeMachineId?: string }) {
+    // Machine mounting rewrites this list; never alias the caller's capabilities object.
+    this.capabilities = { controllers: [...options.capabilities.controllers] };
     this.drivers = options.drivers;
     this.sink = options.record ?? (() => {});
     this.serviceId = options.serviceId ?? crypto.randomUUID();
@@ -64,13 +95,16 @@ export class BasewareCore {
     for (const ids of [options.drivers.map(d => d.id), options.capabilities.controllers.map(c => c.tool.name)]) {
       if (new Set(ids).size !== ids.length) throw new Error("Duplicate capability or driver ID");
     }
-    for (const controller of this.capabilities.controllers) this.validators.set(controller.tool.name, argumentValidator(controller.tool));
+    this.primaryCapabilities = options.capabilities;
+    this.onReconnect = options.onReconnect;
+    this.onMachines = options.onMachines;
+    this.activeMachineId = options.activeMachineId;
+    this.rebuildControllers();
     this.sampling = new SamplingStats(this.record);
     this.stream = new ObservationStreamSpool({ streamDir: options.streamDir, prefetch: options.streamPrefetch });
     this.statsTimer = setInterval(() => this.sampling.flush(), this.sampling.periodMs);
     this.statsTimer.unref();
   }
-
   readonly record: RecordEvent = (type, data, trace = {}, options = {}) => {
     const seq = ++this.sequence;
     const metadata: Required<Pick<EventMetadata, "source" | "origin">> & EventMetadata = {
@@ -99,19 +133,76 @@ export class BasewareCore {
     if (recovered) this.record("event_storage_gap", recovered, trace);
   };
 
+  /** Merge primary (unprefixed plus <id>/ aliases) and mounted machines' <id>/ controllers. */
+  private rebuildControllers() {
+    const merged: Capabilities["controllers"] = [];
+    const machineOf = new Map<string, string>();
+    const primary = [...this.machines.values()].find(m => m.isPrimary);
+    const primaryControllers = primary ? primary.capabilities.controllers : this.primaryCapabilities.controllers;
+    const primaryId = primary ? primary.id : this.activeMachineId;
+    if (primaryId) for (const controller of primaryControllers) {
+      merged.push(aliasController(controller, primaryId, false));
+      machineOf.set(`${primaryId}/${controller.tool.name}`, primaryId);
+    }
+    for (const machine of this.machines.values()) {
+      if (machine.isPrimary) continue;
+      for (const controller of machine.capabilities.controllers) {
+        merged.push(aliasController(controller, machine.id, true));
+        machineOf.set(`${machine.id}/${controller.tool.name}`, machine.id);
+      }
+    }
+    merged.push(...primaryControllers);
+    const names = merged.map(c => c.tool.name);
+    if (new Set(names).size !== names.length) throw new Error("Duplicate capability or driver ID");
+    this.capabilities.controllers = merged;
+    this.controllerMachine = machineOf;
+    this.validators = new Map(merged.map(c => [c.tool.name, argumentValidator(c.tool)]));
+  }
+
+  mountMachine(entry: MountedMachineEntry): void {
+    if (entry.isPrimary) { for (const machine of this.machines.values()) machine.isPrimary = false; this.activeMachineId = entry.id; }
+    this.machines.set(entry.id, entry);
+    this.rebuildControllers();
+  }
+
+  unmountMachine(id: string): void {
+    const wasPrimary = this.machines.get(id)?.isPrimary ?? false;
+    this.machines.delete(id);
+    if (wasPrimary && this.activeMachineId === id) this.activeMachineId = undefined;
+    this.rebuildControllers();
+  }
+
+  setPrimaryMachine(id: string): void {
+    const target = this.machines.get(id);
+    if (!target) throw new Error(`Unknown machine: ${id}`);
+    for (const machine of this.machines.values()) machine.isPrimary = machine.id === id;
+    this.activeMachineId = id;
+    this.rebuildControllers();
+  }
+
+  getMountedMachines(): BasewareMountedMachineStatus[] {
+    return [...this.machines.values()].map(machine => ({ id: machine.id, label: machine.label, driver: machine.driver,
+      transport: machine.transport, connected: machine.connected, reason: machine.reason, isPrimary: machine.isPrimary,
+      controllers: machine.capabilities.controllers.map(c => c.tool.name) }));
+  }
+
   status() {
     return { serviceId: this.serviceId, source: this.source, seq: this.sequence, diagnostics: this.diagnostics,
       storageError: this.logFailure ?? null, mode: this.mode, epoch: this.mode === "auto" ? this.epoch ?? null : null,
       inputGeneration: this.inputGeneration, inputResetting: this.inputResetting,
       connected: this.connected, reason: this.reason,
+      activeMachineId: this.activeMachineId ?? null, machines: this.getMountedMachines(),
       remainingSeconds: this.mode === "auto" ? Math.max(0, Math.ceil((this.deadline - performance.now()) / 1000)) : null };
   }
 
   list(): Catalog {
     return { drivers: this.drivers,
       controllers: this.capabilities.controllers.map(c => ({ ...c.tool, requiresControl: c.requiresControl,
-        ...(c.mediaTypes ? { mediaTypes: c.mediaTypes } : {}) })) };
+        ...(c.mediaTypes ? { mediaTypes: c.mediaTypes } : {}),
+        ...(this.controllerMachine.has(c.tool.name) ? { machineId: this.controllerMachine.get(c.tool.name)! } : {}) })),
+      activeMachineId: this.activeMachineId, machines: this.getMountedMachines() };
   }
+
 
   help(id: string) {
     const tool = this.list().controllers.find(c => c.name === id);
@@ -302,9 +393,34 @@ export class BasewareCore {
 
   async disconnected(error: Error) {
     this.connected = false;
+    const machine = this.activeMachineId ? this.machines.get(this.activeMachineId) : undefined;
+    if (machine) { machine.connected = false; machine.reason = error.message; }
     this.record("baseware_disconnected", error.message, this.controlTrace);
     await this.release(this.epoch, error.message);
   }
+
+  /** Restore state after a transport came back; callers pass the fresh capabilities. */
+  reconnected(update?: { capabilities?: Capabilities; drivers?: DriverInfo[]; machineId?: string }) {
+    if (update?.capabilities) {
+      const machine = update.machineId ? this.machines.get(update.machineId) : undefined;
+      if (machine) {
+        machine.capabilities = update.capabilities;
+        machine.connected = true;
+        machine.reason = "reconnected";
+        if (machine.isPrimary) this.primaryCapabilities = update.capabilities;
+      } else if (!update.machineId || update.machineId === this.activeMachineId) this.primaryCapabilities = update.capabilities;
+      this.rebuildControllers();
+    }
+    const machine = this.machines.get(update?.machineId ?? this.activeMachineId ?? "");
+    if (machine) { machine.connected = true; machine.reason = "reconnected"; }
+    if (update?.drivers) this.drivers = update.drivers;
+    this.connected = true;
+    this.reason = "reconnected";
+    this.record("baseware_reconnected", { ...this.status(), ...(update?.machineId ? { machineId: update.machineId } : {}) }, this.controlTrace);
+    this.record("baseware_control", this.status(), this.controlTrace);
+    return this.status();
+  }
+
 
   private observationDetails(observations: Observation[], args: ToolArguments, origin: string, execution: typeof this.lastExecution) {
     return observations.map(observation => {
@@ -329,16 +445,21 @@ export class BasewareCore {
     });
   }
 
-  async execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, parent: Trace = {}, operationId: string = crypto.randomUUID(), origin = "cli", options?: { omitInlineMedia?: boolean }) {
+  async execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, parent: Trace = {}, operationId: string = crypto.randomUUID(), origin = "cli", options?: { omitInlineMedia?: boolean; machine?: string }) {
     const trace = operationTrace({ ...parent, ...(epoch ? { epoch } : {}) }, operationId);
-    const controller = this.capabilities.controllers.find(c => c.tool.name === id);
+    const targetId = options?.machine && options.machine !== this.activeMachineId && !id.startsWith(`${options.machine}/`)
+      ? `${options.machine}/${id}`
+      : id;
+    const controller = this.capabilities.controllers.find(c => c.tool.name === targetId);
+    if (controller) id = controller.tool.name;
     const readOnly = controller?.tool.annotations?.readOnlyHint === true;
     const continuous = trace.recordingPurpose === "continuous-perception";
     if (continuous && this.diagnostics === "normal" && trace.parentSpanId) trace.parentOmitted = true;
     const metadata: EventMetadata = readOnly ? { channel: "diagnostic" } : {};
     const detailed = !readOnly || this.diagnostics === "full";
     const previousExecution = this.lastExecution;
-    const operation = { controllerId: id, arguments: args, epoch, requiresControl: controller?.requiresControl, readOnly, origin };
+    const operation = { controllerId: id, arguments: args, epoch, requiresControl: controller?.requiresControl, readOnly, origin,
+      ...(options?.machine ? { machine: options.machine } : {}) };
     if (detailed) this.record("command", operation, trace, metadata);
     const startedAtMs = performance.now();
     let combined = signal;
@@ -421,10 +542,17 @@ export class BasewareCore {
           if (request.generation === undefined) throw new Error("input_generation requires generation or null");
           return await this.setInputGeneration(request.epoch, request.generation, client, request.trace);
         case "revoke": return await this.release(undefined, "human");
+        case "reconnect":
+          if (this.onReconnect) await this.onReconnect(request.id);
+          return this.status();
+        case "machines":
+          if (this.onMachines) return await this.onMachines(request.action ?? "list", { id: request.id, ids: request.ids });
+          return { activeMachineId: this.activeMachineId ?? null, machines: this.getMountedMachines() };
         case "controller":
           if (!request.id) throw new Error("Missing controller ID");
           deviceOperation = true;
-          return await this.execute(request.id, request.arguments === undefined ? {} : request.arguments, request.epoch, signal, request.trace, request.operationId, request.origin, { omitInlineMedia: request.omitInlineMedia });
+          return await this.execute(request.id, request.arguments === undefined ? {} : request.arguments, request.epoch, signal, request.trace, request.operationId, request.origin,
+            { omitInlineMedia: request.omitInlineMedia, machine: request.machine });
         default: throw new Error(`Unknown request kind: ${request.kind}`);
       }
     } catch (error) {

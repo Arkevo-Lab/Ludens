@@ -192,6 +192,7 @@ export async function launchPlan(
     commands: {
       ...(emulatorCmd ? { emulator: emulatorCmd } : {}),
       baseware: [baseware, "serve", "--driver", effectiveDriver,
+        ...(activeMachine ? ["--machine-id", activeMachine.id] : []),
         ...(resolvedPackage ? ["--driver-package", resolvedPackage] : []),
         ...transportArgs, "--socket", basewareSocket,
         "--data-dir", join(workspace, "logs/baseware"), "--diagnostics", config.logging.diagnostics],

@@ -11,12 +11,20 @@ interface ControlStatus { mode: string; epoch: string | null; connected: boolean
   source?: EventSourceDescriptor; seq?: number; diagnostics?: "normal" | "full" }
 
 /** One persistent control connection; shell/API clients share its epoch. */
-export async function connectBaseware(options: { socket: string; seconds: number; runDir: string; record: RecordEvent }) {
+export async function connectBaseware(options: { socket: string; seconds: number; runDir: string; record: RecordEvent; reconnectAttempts?: number; reconnectDelayMs?: number }) {
   let owner: string | undefined;
   let pendingOwner: string | undefined;
   let disconnected: Error | undefined;
   let onDisconnect: ((error: Error) => void) | undefined;
+  let onReconnect: (() => void) | undefined;
   let onHandback: ((reason: string) => void) | undefined;
+  let reconnecting: Promise<void> | undefined;
+  let closed = false;
+  let catalog: Catalog | undefined;
+  const maxReconnectAttempts = options.reconnectAttempts ?? 3;
+  const reconnectDelayMs = options.reconnectDelayMs ?? 1000;
+  if (!Number.isInteger(maxReconnectAttempts) || maxReconnectAttempts < 0) throw new Error("reconnectAttempts must be a non-negative integer");
+  if (!Number.isFinite(reconnectDelayMs) || reconnectDelayMs < 0) throw new Error("reconnectDelayMs must be non-negative");
   const recordingId = basename(options.runDir);
   const eventSources: SourceDependency[] = [];
   let dirty = false;
@@ -45,7 +53,56 @@ export async function connectBaseware(options: { socket: string; seconds: number
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.error(`Event source manifest: ${String(error)}`);
     }
   };
+  let recovering: Promise<void> | undefined;
+  const refreshCatalog = async () => {
+    const fresh = await client.request({ kind: "list" }) as Catalog;
+    if (!catalog) return;
+    catalog.drivers = fresh.drivers;
+    catalog.controllers = fresh.controllers;
+    catalog.machines = fresh.machines;
+    catalog.activeMachineId = fresh.activeMachineId;
+  };
+  const recovered = (source: "reconnect_loop" | "baseware_event", attempt?: number) => {
+    if (!disconnected || closed) return;
+    recovering ??= (async () => {
+      await refreshCatalog();
+      if (!disconnected || closed) return;
+      disconnected = undefined;
+      options.record("device_reconnected", { ...(attempt === undefined ? {} : { attempt }), source });
+      onReconnect?.();
+    })().finally(() => { recovering = undefined; });
+    return recovering;
+  };
+  const recoverFromEvent = () => {
+    void recovered("baseware_event")?.catch(error => options.record("error", String(error)));
+  };
+  const deviceDisconnected = (error: Error) => {
+    if (disconnected || closed) return;
+    disconnected = error;
+    options.record("device_disconnected", { reason: error.message });
+    reconnecting = (async () => {
+      for (let attempt = 1; attempt <= maxReconnectAttempts; attempt++) {
+        if (reconnectDelayMs !== 0) await Bun.sleep(reconnectDelayMs);
+        if (!disconnected || closed) return;
+        options.record("device_reconnect_attempt", { attempt, maxAttempts: maxReconnectAttempts });
+        try {
+          const state = await client.request({ kind: "reconnect" }) as { connected: boolean };
+          if (state.connected) {
+            await recovered("reconnect_loop", attempt);
+            return;
+          }
+        } catch {
+          // A still-live Baseware socket can reject individual reconnect attempts.
+        }
+      }
+      if (!disconnected || closed) return;
+      options.record("device_reconnect_failed", { attempts: maxReconnectAttempts, error: error.message });
+      onDisconnect?.(new Error(`Device disconnected after ${maxReconnectAttempts} reconnect attempts: ${error.message}`));
+    })().finally(() => { reconnecting = undefined; });
+    void reconnecting.catch(error => { if (!closed) disconnect(error instanceof Error ? error : new Error(String(error))); });
+  };
   const disconnect = (error: Error) => { if (disconnected) return; disconnected = error; onDisconnect?.(error); };
+  const socketDisconnect = (error: Error) => { if (disconnected) onDisconnect?.(error); else disconnect(error); };
   const client = await BasewareClient.connect(options.socket, {
     onEvent(event) {
       // The device service owns its facts. Ludens only keeps source dependencies
@@ -66,20 +123,28 @@ export async function connectBaseware(options: { socket: string; seconds: number
       }
       if (event.type === "baseware_control") {
         const state = event.data as { mode: string; connected: boolean; reason?: string };
-        if (state.mode === "manual" && (event.trace.epoch === owner || event.trace.epoch === pendingOwner)
-          && typeof event.trace.epoch === "string") {
-          owner = undefined;
-          pendingOwner = undefined;
-          onHandback?.(state.reason ?? "Baseware released control");
+        if (!state.connected) {
+          deviceDisconnected(new Error(state.reason ?? "Baseware driver disconnected"));
+        } else {
+          if (state.mode === "manual" && (event.trace.epoch === owner || event.trace.epoch === pendingOwner)
+            && typeof event.trace.epoch === "string") {
+            owner = undefined;
+            pendingOwner = undefined;
+            onHandback?.(state.reason ?? "Baseware released control");
+          }
+          if (disconnected) recoverFromEvent();
         }
-        if (!state.connected) disconnect(new Error("Baseware driver disconnected"));
       }
-      if (event.type === "baseware_disconnected") disconnect(new Error("Baseware driver disconnected"));
+      if (event.type === "baseware_disconnected") {
+        const message = typeof event.data === "string" ? event.data : "Baseware driver disconnected";
+        deviceDisconnected(new Error(message));
+      }
+      if (event.type === "baseware_reconnected" && disconnected) recoverFromEvent();
     },
-    onDisconnect: disconnect,
+    onDisconnect: socketDisconnect,
   });
   try {
-    const catalog = await client.request({ kind: "list" }) as Catalog;
+    catalog = await client.request({ kind: "list" }) as Catalog;
     const initial = await client.request({ kind: "status" }) as ControlStatus;
     if (!initial.connected || disconnected) throw disconnected ?? new Error("Baseware driver disconnected");
     if (initial.source) eventSources.push({ ...initial.source, recordingId,
@@ -112,25 +177,33 @@ export async function connectBaseware(options: { socket: string; seconds: number
       }
     }
     const session: DeviceSession = {
-      catalog, acquire, release, diagnostics: initial.diagnostics ?? "normal",
+      catalog: catalog!, acquire, release, diagnostics: initial.diagnostics ?? "normal",
+      async machines(action, payload) {
+        const result = await client.request({ kind: "machines", action, id: payload?.id, ids: payload?.ids });
+        await refreshCatalog();
+        return result;
+      },
       async setInputGeneration(epoch, generation) {
         await client.request({ kind: "input_generation", epoch, generation, trace: { recordingId } });
       },
-      async execute(id, args, epoch, signal, trace, origin) {
+      async execute(id, args, epoch, signal, trace, origin, machine) {
         const omitInlineMedia = trace?.recordingPurpose === "continuous-perception";
         const result = await client.request({ kind: "controller", id, arguments: args, epoch, trace: { ...trace, recordingId }, origin,
+          ...(machine ? { machine } : {}),
           ...(omitInlineMedia ? { omitInlineMedia: true } : {}) }, signal) as ExecutionResult;
         return result;
       },
     };
     return { ...session, eventSources,
-      onDisconnect(handler: (error: Error) => void) { onDisconnect = handler; if (disconnected) handler(disconnected); },
+      onDisconnect(handler: (error: Error) => void) { onDisconnect = handler; if (disconnected && !reconnecting) handler(disconnected); },
+      onReconnect(handler: () => void) { onReconnect = handler; },
       onHandback(handler: (reason: string) => void) { onHandback = handler; },
       close() {
+        closed = true;
         clearInterval(watermark); persistSources();
         if (gap) { recordGap({ ...gap, phase: "end", reason: "host_closed" }); gap = undefined; }
         client.close();
       },
     };
-  } catch (error) { client.close(); throw error; }
+  } catch (error) { closed = true; client.close(); throw error; }
 }

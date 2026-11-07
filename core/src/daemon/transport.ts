@@ -117,6 +117,15 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       });
     return null;
   }
+  if (kind === "machine") {
+    const action = argv[0];
+    if (!action || !["list", "use", "connect", "disconnect"].includes(action))
+      throw new Error("Usage: ludens machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>");
+    if ((action === "list" && argv.length !== 1) || ((action === "use" || action === "disconnect") && argv.length !== 2)
+      || (action === "connect" && argv.length < 2))
+      throw new Error("Usage: ludens machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>");
+    return runtime.manageMachines(action as "list" | "use" | "connect" | "disconnect", { id: argv[1], ids: argv.slice(1) }, process.cwd());
+  }
   if (kind === "controller") {
     // One span owns the public call, including rejected calls. The Python
     // runner reuses it; the entry function and nested calls have child spans.
