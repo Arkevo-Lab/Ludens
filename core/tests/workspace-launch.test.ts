@@ -693,8 +693,10 @@ test("a package-linked CLI initializes a workspace through mixed symlink chains"
     const home = join(directory, "home"), workspace = join(directory, "workspace with spaces");
     await symlink(resolve(import.meta.dir, "../bin/ludens"), join(directory, "absolute-cli"));
     await symlink("absolute-cli", join(directory, "ludens"));
+    const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
+    delete env.LUDENS_WORKSPACE; delete env.LUDENS_SOCKET; delete env.BASEWARE_SOCKET;
     const child = Bun.spawn([join(directory, "ludens"), "init", "--workspace", workspace, "--driver", "cua"], {
-      cwd: directory, env: { ...process.env, LUDENS_HOME: home }, stdout: "pipe", stderr: "pipe",
+      cwd: directory, env, stdout: "pipe", stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([
       child.exited, new Response(child.stdout).text(), new Response(child.stderr).text(),
