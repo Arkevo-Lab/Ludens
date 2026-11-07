@@ -553,7 +553,7 @@
     "sourcesTitle": "Workspace sources",
     "sourcesDescription": "Each source is read independently. Counts describe recorded or declared items, not successful execution.",
     "groupTitles": {
-      "device": "Device snapshot",
+      "device": "Controller Interfaces",
       "workspace": "Workspace declarations"
     },
     "sourceStates": {
