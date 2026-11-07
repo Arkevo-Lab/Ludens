@@ -4,7 +4,8 @@ import { parseArgs } from "node:util";
 import { resolveDriver, defaultDriverCacheRoot } from "@ludens/baseware/drivers/loader.ts";
 import workspaceGuide from "../../templates/AGENTS.md" with { type: "text" };
 import perceptionTemplate from "../../templates/perception.py" with { type: "text" };
-import { ensureWorkspaceIdentity, readGlobalConfig, registerWorkspace, validateWorkspaceRegistration } from "@ludens/protocol/ludens";
+import { ensureWorkspaceIdentity, readGlobalConfig, readMachinesConfig, registerWorkspace, validateWorkspaceRegistration } from "@ludens/protocol/ludens";
+import type { BasewareMachineSpec } from "@ludens/protocol/machines";
 import { parseConfig, launchPlan, WorkspaceLauncher } from "../daemon/launcher.ts";
 
 export const WORKSPACE_HELP = `Workspace startup (macOS):
@@ -85,21 +86,35 @@ export async function workspaceCommand(command: string, args: string[], selected
   // Status and shutdown remain available even if the launch config was removed or edited badly.
   const raw = command === "up" ? await Bun.file(join(workspace, "ludens.json")).json() : { driver: "cua" };
   if (typeof raw.driverPackage === "string" && raw.driverPackage.startsWith("file:")) raw.driverPackage = `file:${resolve(workspace, raw.driverPackage.slice(5))}`;
-  const manifest = await resolveDriver(raw.driver, raw.driverPackage, defaultDriverCacheRoot());
+  let manifest = await resolveDriver(raw.driver, raw.driverPackage, defaultDriverCacheRoot());
   const config = parseConfig(raw, manifest);
   if (command === "up" && (values.pet || values["no-pet"])) config.pet = Boolean(values.pet);
-  const plan = await launchPlan(config, workspace, resolve(import.meta.dir, "../../.."), undefined, manifest);
+  let activeMachine: BasewareMachineSpec | undefined;
+  if (command === "up" && config.machines?.active && config.machines.active !== "workspace-default") {
+    const registry = await readMachinesConfig();
+    const found = registry.machines.find(item => item.id === config.machines!.active);
+    if (!found) throw new Error(`Unknown Baseware machine in machines.active: ${config.machines.active}`);
+    activeMachine = found;
+    const pkg = found.driverPackage?.startsWith("file:")
+      ? `file:${resolve(workspace, found.driverPackage.slice(5))}`
+      : found.driverPackage;
+    manifest = await resolveDriver(found.driver, pkg, defaultDriverCacheRoot());
+  }
+  const plan = await launchPlan(config, workspace, resolve(import.meta.dir, "../../.."), undefined, manifest, activeMachine);
   if (values["dry-run"]) { console.log(JSON.stringify(plan, null, 2)); return; }
   if (process.platform !== "darwin") throw new Error("Workspace service commands currently use macOS launchd");
   if (command === "up") {
     const repo = resolve(import.meta.dir, "../../..");
+    const managedGame = activeMachine
+      ? activeMachine.transport.kind === "bridge" && activeMachine.transport.managed ? activeMachine.transport.game : undefined
+      : config.game;
     const required = [
-      ...(config.game && manifest.launchCommand ? [resolve(workspace, config.game)] : []),
+      ...(managedGame && manifest.launchCommand ? [resolve(workspace, managedGame)] : []),
       ...(config.dashboard ? [join(repo, "app/node_modules/next/package.json")] : []),
       ...(config.pet ? [join(repo, "app/dist/electron/main.js"), join(repo, "app/node_modules/electron/package.json")] : []),
     ];
     for (const path of required) if (!await Bun.file(path).exists()) throw new Error(`Missing ${path}. Install/build the components as described in README.md.`);
-    const executable = config.game ? manifest.launchCommand?.[0] : undefined;
+    const executable = managedGame ? manifest.launchCommand?.[0] : undefined;
     if (executable && !Bun.which(executable, { cwd: workspace })) throw new Error(`Missing executable ${executable}. Install/build the components as described in README.md.`);
   }
   const launcher = new WorkspaceLauncher(plan);
