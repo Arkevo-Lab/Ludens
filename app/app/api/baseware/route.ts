@@ -33,6 +33,15 @@ export async function POST(request: Request) {
     if (body.action === "probeMachine") {
       return Response.json(await worker.call("probeBasewareMachine", [body.machine ?? { id: body.id }], request.signal));
     }
+    if (body.action === "controlWorkspaceMachine") {
+      return Response.json(
+        await worker.call(
+          "controlWorkspaceMachine",
+          [body.workspaceId ?? body.id, { operation: body.operation, machineId: body.machineId }],
+          request.signal,
+        ),
+      );
+    }
     throw new Error("未知的 Baseware 操作");
   } catch (error) {
     return errorResponse(error);

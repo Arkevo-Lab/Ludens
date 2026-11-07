@@ -432,6 +432,34 @@ async function listCachedDrivers(home: string): Promise<CachedDriverEntry[]> {
   return cached.flat().sort((a, b) => a.driverId.localeCompare(b.driverId) || a.cacheKey.localeCompare(b.cacheKey));
 }
 
+function resolveEffectiveBinding(
+  cfg: WorkspaceConfigSummary | null | undefined,
+  registryMachines: BasewareMachineSpec[],
+): WorkspaceMachinesBinding {
+  const validIds = new Set(registryMachines.map(machine => machine.id));
+  const matchedId = cfg?.driver === "cua"
+    ? BUILTIN_LOCAL_DESKTOP_MACHINE.id
+    : registryMachines.find(machine => machine.driver === cfg?.driver
+        && cfg?.port !== undefined
+        && machine.transport.kind === "bridge"
+        && machine.transport.port === cfg.port)?.id
+      ?? registryMachines.find(machine => machine.driver === cfg?.driver)?.id
+      ?? BUILTIN_LOCAL_DESKTOP_MACHINE.id;
+  const allowed = Array.from(new Set((cfg?.machines?.allowed ?? [])
+    .map(id => id === "workspace-default" ? matchedId : id)
+    .filter(id => validIds.has(id))));
+  if (allowed.length === 0) {
+    allowed.push(...Array.from(new Set([matchedId, BUILTIN_LOCAL_DESKTOP_MACHINE.id])));
+  }
+  const configuredActive = cfg?.machines?.active;
+  const active = configuredActive && configuredActive !== "workspace-default" && allowed.includes(configuredActive)
+    ? configuredActive
+    : configuredActive === "workspace-default" && allowed.includes(matchedId)
+      ? matchedId
+      : allowed[0] ?? BUILTIN_LOCAL_DESKTOP_MACHINE.id;
+  return { active, allowed };
+}
+
 export async function basewareOverview(workspaceId?: unknown, home = globalHome): Promise<WorkspaceBasewareSnapshot> {
   const [registry, workspaces, cachedDrivers] = await Promise.all([
     readMachinesConfig(home),
@@ -446,32 +474,18 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
   const candidate = selectedId ? workspaces.find(item => item.id === selectedId) : undefined;
   const entry = candidate?.available ? candidate : undefined;
   const cfg = entry ? configs.get(entry.id) : null;
-  const implicitMachine: BasewareMachineSpec | null = entry && cfg ? {
-    id: "workspace-default",
-    name: `${entry.name} (${cfg.driver})`,
-    driver: cfg.driver,
-    ...(cfg.driverPackage ? { driverPackage: cfg.driverPackage } : {}),
-    transport: cfg.driver === "cua"
-      ? { kind: "stdio", command: cfg.cuaCommand || "cua-driver" }
-      : { kind: "bridge", host: "127.0.0.1", port: cfg.port ?? 47663, ...(cfg.game ? { game: cfg.game } : {}), managed: Boolean(cfg.game) },
-    updatedAt: entry.updatedAt,
-  } : null;
-  const binding = cfg?.machines ?? (entry
-    ? { active: "workspace-default", allowed: ["workspace-default", "local-desktop"] }
-    : { active: BUILTIN_LOCAL_DESKTOP_MACHINE.id, allowed: [BUILTIN_LOCAL_DESKTOP_MACHINE.id] });
-  const availableMachines = [...(implicitMachine ? [implicitMachine] : []), ...registry.machines];
-  const activeMachine = binding.active ? availableMachines.find(machine => machine.id === binding.active) ?? null : null;
-  const usedBy = (machineId: string) => workspaces.filter(workspace => {
-    const workspaceConfig = configs.get(workspace.id);
-    const workspaceBinding = workspaceConfig?.machines ?? (workspace.available
-      ? { active: "workspace-default", allowed: ["workspace-default", "local-desktop"] }
-      : null);
-    return workspaceBinding?.allowed.includes(machineId) ?? false;
-  }).map(workspace => workspace.id);
-  const machines: BasewareMachineRuntimeStatus[] = [
-    ...(implicitMachine && entry ? [{ ...implicitMachine, usedByWorkspaceIds: usedBy(implicitMachine.id), implicitForWorkspaceId: entry.id }] : []),
-    ...registry.machines.map(machine => ({ ...machine, usedByWorkspaceIds: usedBy(machine.id) })),
-  ];
+  const implicitMachine: BasewareMachineSpec | null = null;
+  const binding = resolveEffectiveBinding(cfg, registry.machines);
+  const activeMachine = binding.active
+    ? registry.machines.find(machine => machine.id === binding.active) ?? null
+    : null;
+  const usedBy = (machineId: string) => workspaces.filter(workspace =>
+    resolveEffectiveBinding(configs.get(workspace.id), registry.machines).allowed.includes(machineId),
+  ).map(workspace => workspace.id);
+  const machines: BasewareMachineRuntimeStatus[] = registry.machines.map(machine => ({
+    ...machine,
+    usedByWorkspaceIds: usedBy(machine.id),
+  }));
 
   let daemon: WorkspaceBasewareSnapshot["daemon"] = {
     hostSocket: null,
@@ -587,6 +601,114 @@ export async function updateWorkspaceMachines(id: unknown, input: unknown, home 
     }
   }
   return basewareOverview(id, home);
+}
+
+export async function controlWorkspaceMachine(
+  id: unknown,
+  input: unknown,
+  home = globalHome,
+): Promise<WorkspaceBasewareSnapshot> {
+  if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("受控节点操作必须是对象");
+  const { operation, machineId } = input as Record<string, unknown>;
+  if (!["setPrimary", "toggleAllowed", "mount", "unmount", "reconnect"].includes(String(operation))) {
+    throw new Error("不支持的受控节点操作");
+  }
+  if (typeof machineId !== "string" || !machineId.trim()) throw new Error("请选择受控节点");
+  const registry = await readMachinesConfig(home);
+  if (!registry.machines.some(machine => machine.id === machineId)) throw new Error(`Unknown machine: ${machineId}`);
+  const entry = await registeredWorkspace(id, home);
+  const workspace = entry.workspace;
+  const current = resolveEffectiveBinding(await readWorkspaceConfigSummary(workspace), registry.machines);
+  let active = current.active;
+  const allowed = [...current.allowed];
+  const persist = async () => {
+    await withWorkspaceRegistrationLock(home, id, async () => {
+      const configPath = join(workspace, "ludens.json");
+      const raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("ludens.json 必须是 JSON 对象");
+      const next = { ...raw, machines: { active, allowed } };
+      const temporary = `${configPath}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+        await rename(temporary, configPath);
+      } finally {
+        await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
+      }
+    });
+  };
+
+  switch (operation) {
+    case "setPrimary": {
+      if (!allowed.includes(machineId)) allowed.push(machineId);
+      active = machineId;
+      await persist();
+      const socket = await probeBasewareSocket(workspace);
+      if (socket) {
+        const client = await BasewareClient.connect(socket);
+        try { await client.request({ kind: "machines", action: "use", id: machineId }); }
+        finally { client.close(); }
+      }
+      break;
+    }
+    case "toggleAllowed": {
+      const removing = allowed.includes(machineId);
+      const previousActive = active;
+      if (removing) {
+        if (allowed.length <= 1) throw new Error("工作区至少需要保留一个允许访问的受控节点");
+        allowed.splice(allowed.indexOf(machineId), 1);
+        if (active === machineId) active = allowed[0] ?? null;
+      } else {
+        allowed.push(machineId);
+        if (!active) active = machineId;
+      }
+      await persist();
+      if (removing) {
+        const socket = await probeBasewareSocket(workspace);
+        if (socket) {
+          const client = await BasewareClient.connect(socket);
+          try {
+            if (active !== previousActive && active) {
+              await client.request({ kind: "machines", action: "use", id: active });
+            }
+            try { await client.request({ kind: "machines", action: "disconnect", id: machineId }); }
+            catch { /* The machine may not be mounted. */ }
+          } finally { client.close(); }
+        }
+      }
+      break;
+    }
+    case "mount": {
+      if (!allowed.includes(machineId)) {
+        allowed.push(machineId);
+        await persist();
+      }
+      const socket = await probeBasewareSocket(workspace);
+      if (!socket) throw new Error("当前工作区 Baseware 尚未启动，请先启动工作区服务");
+      const client = await BasewareClient.connect(socket);
+      try { await client.request({ kind: "machines", action: "connect", ids: [machineId] }); }
+      finally { client.close(); }
+      break;
+    }
+    case "unmount": {
+      const socket = await probeBasewareSocket(workspace);
+      if (!socket) throw new Error("当前工作区 Baseware 尚未启动");
+      const client = await BasewareClient.connect(socket);
+      try { await client.request({ kind: "machines", action: "disconnect", id: machineId }); }
+      finally { client.close(); }
+      break;
+    }
+    case "reconnect": {
+      const socket = await probeBasewareSocket(workspace);
+      if (!socket) throw new Error("当前工作区 Baseware 尚未启动");
+      const client = await BasewareClient.connect(socket);
+      try { await client.request({ kind: "reconnect", id: machineId }); }
+      finally { client.close(); }
+      break;
+    }
+  }
+  clearCatalogCache();
+  return await basewareOverview(id, home);
 }
 
 function probeBridge(transport: Extract<MachineTransportConfig, { kind: "bridge" }>): Promise<string> {

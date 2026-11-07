@@ -29,6 +29,7 @@ import {
   upsertBasewareMachine,
   removeBasewareMachine,
   updateWorkspaceMachines,
+  controlWorkspaceMachine,
   probeBasewareMachine,
 } from "./workspaces";
 const port = parentPort!;
@@ -49,6 +50,7 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   upsertBasewareMachine: ([input]) => upsertBasewareMachine(input),
   removeBasewareMachine: ([id]) => removeBasewareMachine(id),
   updateWorkspaceMachines: ([id, input]) => updateWorkspaceMachines(id, input),
+  controlWorkspaceMachine: ([id, input]) => controlWorkspaceMachine(id, input),
   probeBasewareMachine: ([input]) => probeBasewareMachine(input),
   diagnosticEvents: ([project, run, query], signal) => diagnosticEvents(project, run, query, signal),
   diagnostics: () => ({ memory: process.memoryUsage(), index: indexCacheStats(), activeRequests: requests.size - 1 }),

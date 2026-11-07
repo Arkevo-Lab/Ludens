@@ -734,9 +734,9 @@ test("Baseware machine bindings validate and persist across registry and workspa
 
     const initial = await basewareOverview(entry.id, home);
     expect(initial.workspaceId).toBe(entry.id);
-    expect(initial.binding).toEqual({ active: "workspace-default", allowed: ["workspace-default", "local-desktop"] });
-    expect(initial.implicitMachine).toMatchObject({ id: "workspace-default", driver: "cua", transport: { kind: "stdio", command: "cua-driver" } });
-    expect(initial.activeMachine?.id).toBe("workspace-default");
+    expect(initial.binding).toEqual({ active: "local-desktop", allowed: ["local-desktop"] });
+    expect(initial.implicitMachine).toBeNull();
+    expect(initial.activeMachine?.id).toBe("local-desktop");
     expect(initial.machines.find(machine => machine.id === "local-desktop")?.usedByWorkspaceIds).toEqual([entry.id]);
 
     const updated = await updateWorkspaceMachines(entry.id, { active: "test-machine", allowed: ["test-machine"] }, home);

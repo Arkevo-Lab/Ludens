@@ -352,7 +352,9 @@ export function WorkspaceStudioView({
           ) : (
             <ServicesAndShioriPanel
               studio={studio}
+              isZh={isZh}
               onRefresh={refreshStudio}
+              onOpenBaseware={() => navigate({ view: "baseware" })}
               onShioriUpdated={shiori =>
                 setStudio(current => (current ? { ...current, shiori } : current))
               }
@@ -861,11 +863,15 @@ function ModelAndBudgetPanel({
 
 function ServicesAndShioriPanel({
   studio,
+  isZh,
   onRefresh,
+  onOpenBaseware,
   onShioriUpdated,
 }: {
   studio: WorkspaceStudioSnapshot;
+  isZh: boolean;
   onRefresh(): void;
+  onOpenBaseware(): void;
   onShioriUpdated(shiori: WorkspaceShioriSnapshot): void;
 }) {
   const t = useTranslations("workspaceStudio");
@@ -924,18 +930,24 @@ function ServicesAndShioriPanel({
     <div className="grid gap-5">
       <Card>
         <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0 flex-1 space-y-1">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Server className="size-4 text-[var(--gold)]" aria-hidden="true" />
                 {t("servicesSection.title")}
               </CardTitle>
               <CardDescription>{t("servicesSection.description")}</CardDescription>
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
-              <RefreshCw className="size-3.5" aria-hidden="true" />
-              {t("refresh")}
-            </Button>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={onOpenBaseware}>
+                <HardDrive className="size-3.5" aria-hidden="true" />
+                {isZh ? "管理受控节点 (Baseware)" : "Manage Machines (Baseware)"}
+              </Button>
+              <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
+                <RefreshCw className="size-3.5" aria-hidden="true" />
+                {t("refresh")}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
