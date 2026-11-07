@@ -28,6 +28,7 @@ import type {
   removeBasewareMachine,
   updateWorkspaceMachines,
   probeBasewareMachine,
+  WorkspaceBasewareSnapshot,
 } from "./workspaces";
 
 /** Only existing Dashboard operations cross the worker boundary, never arbitrary code or paths. */
@@ -48,6 +49,7 @@ export interface DashboardMethods {
   upsertBasewareMachine: { args: [input: unknown]; result: Awaited<ReturnType<typeof upsertBasewareMachine>> };
   removeBasewareMachine: { args: [id: unknown]; result: Awaited<ReturnType<typeof removeBasewareMachine>> };
   updateWorkspaceMachines: { args: [id: unknown, input: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceMachines>> };
+  controlWorkspaceMachine: { args: [id: unknown, input: unknown]; result: WorkspaceBasewareSnapshot };
   probeBasewareMachine: { args: [input: unknown]; result: Awaited<ReturnType<typeof probeBasewareMachine>> };
   archiveBuild: { args: [project: string, run: string, action?: "cancel" | "retry", buildId?: string]; result: Awaited<ReturnType<typeof archiveBuild>> };
   diagnosticEvents: { args: [project: string, run: string, query?: DiagnosticQuery]; result: Awaited<ReturnType<typeof diagnosticEvents>> };
