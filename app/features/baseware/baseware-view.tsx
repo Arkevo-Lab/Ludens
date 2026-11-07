@@ -769,11 +769,11 @@ export function BasewareView({
                         <label
                           key={machine.id}
                           className={
-                            "flex cursor-pointer items-start justify-between gap-2 rounded-md border p-2.5 text-xs transition-colors " +
+                            "flex min-w-0 cursor-pointer items-start justify-between gap-2 overflow-hidden rounded-md border p-2.5 text-xs transition-colors " +
                             (allowed ? "border-primary/40 bg-primary/5" : "border-border bg-card opacity-75")
                           }
                         >
-                          <div className="flex items-start gap-2">
+                          <div className="flex min-w-0 flex-1 items-start gap-2">
                             <input
                               type="checkbox"
                               className="mt-0.5"
@@ -845,6 +845,36 @@ export function BasewareView({
                     <dd className="font-mono text-[11px]">{daemon?.status?.epoch ?? "—"}</dd>
                   </div>
                 </dl>
+
+                {daemon?.status?.mountedMachines && daemon.status.mountedMachines.length > 0 && (
+                  <div className="space-y-1.5 border-t border-border/60 pt-2.5" data-baseware-mounted-machines>
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      实时挂载节点 ({daemon.status.mountedMachines.length})
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {daemon.status.mountedMachines.map(mounted => (
+                        <div
+                          key={mounted.id}
+                          className="flex items-center gap-1.5 rounded border bg-background/80 px-2 py-1 text-[11px]"
+                        >
+                          <span
+                            className={
+                              "inline-block size-2 rounded-full " +
+                              (mounted.connected ? "bg-emerald-500" : "bg-rose-500")
+                            }
+                          />
+                          <code className="font-semibold">{mounted.id}</code>
+                          <span className="text-muted-foreground">({mounted.driver})</span>
+                          {mounted.isPrimary && (
+                            <Badge variant="default" className="px-1 py-0 text-[9px]">
+                              Primary
+                            </Badge>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

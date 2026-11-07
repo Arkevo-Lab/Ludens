@@ -29,6 +29,8 @@ import {
   type WorkspaceRegistration,
 } from "@ludens/protocol/ludens";
 import { globalHome, clearCatalogCache } from "./data";
+import { BasewareClient } from "@ludens/baseware/client";
+import { defaultSocket } from "@ludens/baseware/address";
 
 export interface CreateWorkspaceInput {
   name: string;
@@ -103,6 +105,17 @@ export interface WorkspaceBasewareSnapshot {
       mode: string;
       connected: boolean;
       epoch: string | null;
+      activeMachineId?: string | null;
+      mountedMachines?: Array<{
+        id: string;
+        label: string;
+        driver: string;
+        transport: string;
+        connected: boolean;
+        reason: string;
+        isPrimary: boolean;
+        controllers: string[];
+      }>;
     } | null;
     emulatorJob: WorkspaceServiceJobSnapshot | null;
     basewareJob: WorkspaceServiceJobSnapshot | null;
@@ -484,7 +497,14 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
         try {
           const value = JSON.parse(result.stdout) as Record<string, unknown>;
           if (typeof value.serviceId === "string" && typeof value.mode === "string" && typeof value.connected === "boolean") {
-            status = { serviceId: value.serviceId, mode: value.mode, connected: value.connected, epoch: typeof value.epoch === "string" ? value.epoch : null };
+            status = {
+              serviceId: value.serviceId,
+              mode: value.mode,
+              connected: value.connected,
+              epoch: typeof value.epoch === "string" ? value.epoch : null,
+              ...(typeof value.activeMachineId === "string" ? { activeMachineId: value.activeMachineId } : {}),
+              ...(Array.isArray(value.machines) ? { mountedMachines: value.machines as Array<{ id: string; label: string; driver: string; transport: string; connected: boolean; reason: string; isPrimary: boolean; controllers: string[] }> } : {}),
+            };
           }
         } catch {
           // A stale or incompatible daemon does not prevent listing machine configuration.
@@ -524,11 +544,23 @@ export async function removeBasewareMachine(id: unknown, home = globalHome): Pro
   return { removed: res.removed, machines: res.registry.machines };
 }
 
+export async function probeBasewareSocket(workspace: string): Promise<string | null> {
+  const socketPath = await defaultSocket(workspace);
+  const { promise, resolve: resolveProbe } = Promise.withResolvers<string | null>();
+  const socket = createConnection(socketPath);
+  const timer = setTimeout(() => { socket.destroy(); resolveProbe(null); }, 500);
+  socket.once("connect", () => { clearTimeout(timer); socket.destroy(); resolveProbe(socketPath); });
+  socket.once("error", () => { clearTimeout(timer); resolveProbe(null); });
+  return promise;
+}
+
 export async function updateWorkspaceMachines(id: unknown, input: unknown, home = globalHome): Promise<WorkspaceBasewareSnapshot> {
   if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
   const binding = validateWorkspaceMachinesBinding(input, "machines");
+  let workspace: string | undefined;
   await withWorkspaceRegistrationLock(home, id, async () => {
     const entry = await registeredWorkspace(id, home);
+    workspace = entry.workspace;
     const configPath = join(entry.workspace, "ludens.json");
     const raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("ludens.json 必须是 JSON 对象");
@@ -542,6 +574,18 @@ export async function updateWorkspaceMachines(id: unknown, input: unknown, home 
     }
   });
   clearCatalogCache();
+  if (binding.active && workspace) {
+    try {
+      const socket = await probeBasewareSocket(workspace);
+      if (socket) {
+        const client = await BasewareClient.connect(socket);
+        try { await client.request({ kind: "machines", action: "use", id: binding.active }); }
+        finally { client.close(); }
+      }
+    } catch {
+      // Configuration persistence succeeds even when Baseware is not running.
+    }
+  }
   return basewareOverview(id, home);
 }
 

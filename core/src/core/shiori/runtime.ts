@@ -4,6 +4,8 @@ import type { DiagnosticsMode, EventTrace, RecordEvent } from "../storage/events
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
 import type { WorkspaceController } from "../subsystems/controller.ts";
 import { executeProgram, type Program } from "./program.ts";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export interface AgentRunner {
   run(context: { epoch: string; signal: AbortSignal; message?: string }): Promise<void>;
@@ -26,7 +28,9 @@ export interface DeviceSession {
   /** Must also accept an epoch whose acquisition has not completed yet. */
   release(epoch: string): Promise<void>;
   setInputGeneration?(epoch: string, generation: string | null): Promise<void>;
-  execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, trace: EventTrace, origin?: ObservationOrigin): Promise<ExecutionResult>;
+  onReconnect?(handler: () => void): void;
+  machines?(action: "list" | "use" | "connect" | "disconnect", payload?: { id?: string; ids?: string[] }): Promise<unknown>;
+  execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, trace: EventTrace, origin?: ObservationOrigin, machine?: string): Promise<ExecutionResult>;
 }
 
 /** An enclosing Shiori owns this deadline and signals its measurement boundary. */
@@ -72,6 +76,7 @@ export class Runtime {
   constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000) {
     if (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647) throw new Error("Invalid Shiori time budget");
     if (budget && !Number.isFinite(budget.deadlineMs)) throw new Error("Invalid shared Shiori deadline");
+    devices?.onReconnect?.(() => { void this.reconnected(); });
   }
 
   status() {
@@ -112,6 +117,28 @@ export class Runtime {
     if (epoch !== undefined) this.calls.add(call);
     try { return await call; }
     finally { this.calls.delete(call); }
+  }
+
+  async manageMachines(action: "list" | "use" | "connect" | "disconnect", payload: { id?: string; ids?: string[] } = {}, workspaceDir?: string) {
+    if (!this.devices?.machines) throw new Error("Current Baseware session does not support multi-machine management");
+    if ((action === "use" || action === "connect") && workspaceDir) {
+      let allowed: unknown;
+      try {
+        const config = JSON.parse(await readFile(join(workspaceDir, "ludens.json"), "utf8")) as { machines?: { allowed?: unknown } };
+        allowed = config.machines?.allowed;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (Array.isArray(allowed) && allowed.length) {
+        const requested = [...(payload.id ? [payload.id] : []), ...(payload.ids ?? [])];
+        for (const id of requested) {
+          if (!allowed.includes(id)) throw new Error(`Machine "${id}" is not in workspace machines.allowed`);
+        }
+      }
+    }
+    const result = await this.devices.machines(action, payload);
+    this.record("machines_changed", { action, ...payload, result }, this.epoch ? { epoch: this.epoch } : {});
+    return result;
   }
 
   async start(message?: string, program?: (context: { epoch: string; signal: AbortSignal }) => Promise<void>) {
@@ -288,8 +315,16 @@ export class Runtime {
 
   async disconnected(error: Error) {
     this.connected = false;
+    this.record("device_paused", { reason: error.message, previousMode: this.mode }, this.epoch ? { epoch: this.epoch } : {});
     await this.stop(error.message);
     this.record("disconnected", error.message);
+  }
+
+  async reconnected() {
+    this.connected = true;
+    this.reason = "reconnected";
+    this.record("control", this.status());
+    if (this._perception) await this._perception.reload().catch(error => this.record("error", String(error)));
   }
 
   async close() {

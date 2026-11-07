@@ -13,7 +13,8 @@ ludens perception status | state | reload | stop
 ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
 ludens perception inject [on|off]
 ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
-ludens controller list | <id> --help | <id> [--args '<JSON object>' | --file <arguments.json>]
+ludens controller list | <id> --help | <id> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
+ludens machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>
 
 Control management is unavailable inside agent cycles carrying BASEWARE_EPOCH.
 The current directory is the workspace; --workspace <path> or LUDENS_WORKSPACE overrides it.
@@ -80,7 +81,7 @@ async function observe(argv: string[], socket: string) {
 
 export const CONTROLLER_HELP = `ludens controller list
 ludens controller <id> --help
-ludens controller controller/<native name> [--args '<JSON object>' | --file <arguments.json>]
+ludens controller controller/<native name> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
 ludens controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
 
 Device controllers (including sensors) and decorated Python functions share this workspace catalog.
@@ -91,8 +92,17 @@ Python: from ludens_tools import Client; Client().list(), .help(id), .call(id, a
 All arguments are objects; --file reads the same complete argument object as --args.`;
 
 async function controller(argv: string[], socket: string) {
-  const [id, ...args] = argv;
+  let [id, ...args] = argv;
   if (!id || id === "--help") { console.log(CONTROLLER_HELP); return; }
+  let machine: string | undefined;
+  const toolArgs: string[] = [];
+  for (let index = 0; index < args.length; index++) {
+    if (args[index] !== "--machine") { toolArgs.push(args[index]!); continue; }
+    if (machine !== undefined || !args[index + 1]) throw new Error("Usage: --machine <machineId>");
+    machine = args[++index];
+  }
+  args = toolArgs;
+  if (machine && id.startsWith("controller/") && id.split("/").length === 2) id = `controller/${machine}/${id.slice("controller/".length)}`;
   const request: Request = { kind: "controller", argv: [], epoch: process.env.BASEWARE_EPOCH,
     trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined };
   if (id === "list" && args.length === 0) request.action = "list";
@@ -132,7 +142,7 @@ export async function cli(argv: string[], socket: string) {
     console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
     return;
   }
-  if (!["status", "auto", "steer", "consolidate", "perception"].includes(kind)) throw new Error("Unknown command; see ludens --help");
+  if (!["status", "auto", "steer", "consolidate", "perception", "machine"].includes(kind)) throw new Error("Unknown command; see ludens --help");
   const control = kind === "auto" || kind === "steer" || kind === "consolidate" ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null } : undefined;
   const value = await send(socket, {
     kind, argv: rest, epoch: process.env.BASEWARE_EPOCH,

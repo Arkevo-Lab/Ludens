@@ -62,7 +62,9 @@ export class WorkspaceController {
     signal.throwIfAborted();
     const device = this.device(id);
     if (device) {
-      return this.options.devices.execute(device.name, objectArguments(args === undefined ? {} : args), epoch, signal, trace, "cli");
+      const name = id.slice("controller/".length);
+      const machine = device.machineId ?? (name !== device.name && name.endsWith(`/${device.name}`) ? name.slice(0, -device.name.length - 1) : undefined);
+      return this.options.devices.execute(device.name, objectArguments(args === undefined ? {} : args), epoch, signal, trace, "cli", machine);
     }
     const capability = await this.pythonCapability(id, signal, trace);
     const result = await this.python.invoke(capability.id, args === undefined ? {} : args, {
@@ -73,7 +75,14 @@ export class WorkspaceController {
   }
 
   private device(id: string) {
-    return this.options.devices.catalog.controllers.find(item => id === `controller/${item.name}`);
+    const controllers = this.options.devices.catalog.controllers;
+    const exact = controllers.find(item => id === `controller/${item.name}`);
+    if (exact || !id.startsWith("controller/")) return exact;
+    const name = id.slice("controller/".length);
+    const separator = name.indexOf("/");
+    if (separator < 1) return undefined;
+    const tool = name.slice(separator + 1);
+    return controllers.find(item => item.name === tool);
   }
 
   async requiresControl(id: string, signal: AbortSignal, trace: EventTrace = {}) {

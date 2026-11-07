@@ -11,14 +11,30 @@ export type RecordEvent = (type: string, data: unknown, trace?: Trace, metadata?
 import type { ToolDefinition, ToolArguments } from "./contracts.ts";
 import type { DriverManifest } from "./drivers/registry.ts";
 
+export interface BasewareMountedMachineStatus {
+  id: string;
+  label: string;
+  driver: string;
+  transport: string;
+  connected: boolean;
+  reason: string;
+  isPrimary: boolean;
+  controllers: string[];
+}
+
 /** Serializable service discovery; driver implementation objects never cross this boundary. */
 export interface Catalog {
   drivers: (Pick<DriverManifest, "id" | "transport" | "defaultPort" | "needsGame" | "launchHint" | "launchCommand" | "launchEnv" | "source"> & { version: string })[];
-  controllers: (ToolDefinition & { requiresControl: boolean; mediaTypes?: readonly string[] })[];
+  controllers: (ToolDefinition & { requiresControl: boolean; mediaTypes?: readonly string[]; machineId?: string })[];
+  machines?: BasewareMountedMachineStatus[];
+  activeMachineId?: string;
 }
 export interface Request {
-  kind: "status" | "list" | "help" | "acquire" | "release" | "revoke" | "input_generation" | "controller" | "cancel" | "subscribe";
+  kind: "status" | "list" | "help" | "acquire" | "release" | "revoke" | "input_generation" | "controller" | "cancel" | "subscribe" | "reconnect" | "machines";
   id?: string;
+  machine?: string;
+  action?: "list" | "use" | "connect" | "disconnect";
+  ids?: string[];
   arguments?: ToolArguments;
   epoch?: string;
   seconds?: number;
