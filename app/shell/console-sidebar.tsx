@@ -6,11 +6,11 @@ import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 
-export const consoleViewIds = ["live", "replay", "perf", "caps", "perception", "workspaces", "docs", "settings", "dev"] as const;
+export const consoleViewIds = ["live", "replay", "perf", "caps", "perception", "baseware", "workspaces", "docs", "settings", "dev"] as const;
 export type ConsoleView = typeof consoleViewIds[number];
 const navSections: Array<{ label: string; ids: ConsoleView[] }> = [
   { label: "navSectionWorkspace", ids: ["live", "replay", "perf", "caps", "perception"] },
-  { label: "navSectionGlobal", ids: ["workspaces", "docs"] },
+  { label: "navSectionGlobal", ids: ["workspaces", "baseware", "docs"] },
 ];
 
 function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
@@ -46,6 +46,12 @@ function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
       ) : kind === "perception" ? (
         <>
           <path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6" />
+        </>
+      ) : kind === "baseware" ? (
+        <>
+          <rect x="4" y="4" width="16" height="6" rx="1.5" />
+          <rect x="4" y="14" width="16" height="6" rx="1.5" />
+          <path d="M8 7h.01M8 17h.01M12 10v4" />
         </>
       ) : kind === "perf" ? (
         <path d="M4 19V11M10 19V5M16 19V8M22 19V2" strokeWidth="3" />

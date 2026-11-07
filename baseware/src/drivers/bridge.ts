@@ -34,8 +34,8 @@ export class Bridge {
     socket.on("close", () => fail(new Error("Device bridge disconnected")));
   }
 
-  static async open(port: number): Promise<Bridge> {
-    const socket = connect({ host: "127.0.0.1", port });
+  static async open(port: number, host = "127.0.0.1"): Promise<Bridge> {
+    const socket = connect({ host, port });
     const bridge = new Bridge(socket);
     await new Promise<void>((resolve, reject) => {
       socket.once("connect", resolve);

@@ -13,6 +13,7 @@ import { RunPicker } from "@/features/workspaces/run-picker";
 import { DesktopBridge } from "@/features/pet/desktop-bridge";
 import { DocsView } from "@/features/docs/docs-view";
 import { CapabilitiesView } from "@/features/capabilities/capabilities-view";
+import { BasewareView } from "@/features/baseware/baseware-view";
 import { SettingsView } from "@/features/workspaces/settings-view";
 import { DevPanel } from "@/shell/dev-panel";
 import { TimelinePlayer } from "@/features/replay/timeline-player";
@@ -38,7 +39,7 @@ export default function ConsoleShell() {
       <Metric label={dt("metric.cache")} value={percent(s!.cacheHit)} detail={dt("metric.afterFirst") + percent(s!.warmCacheHit)} />
     </section>
   ) : null;
-  const workspaceScopedView = view === "live" || view === "replay" || view === "perf" || view === "caps" || view === "perception";
+  const workspaceScopedView = view === "live" || view === "replay" || view === "perf" || view === "caps" || view === "perception" || view === "baseware";
   return (
     <div className="console-shell">
       <DesktopBridge onNavigate={navigateUrl} />
@@ -106,7 +107,7 @@ export default function ConsoleShell() {
         <main ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
           tabIndex={runControls ? -1 : undefined} aria-label={runControls ? t(`views.${view}.title`) : undefined}
           className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : view === "replay" && entry === "ready" ? " replay-page" : "")}>
-          {view !== "workspaces" && view !== "docs" && view !== "perception" && view !== "caps" && view !== "live" && (view !== "replay" || entry !== "ready") && <div className={"page-heading" + (view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
+          {view !== "workspaces" && view !== "baseware" && view !== "docs" && view !== "perception" && view !== "caps" && view !== "live" && (view !== "replay" || entry !== "ready") && <div className={"page-heading" + (view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
             <div>
               <h1>{t(`views.${view}.title`)}</h1>
               <p>{t(`views.${view}.description`)}</p>
@@ -184,6 +185,10 @@ export default function ConsoleShell() {
             <CapabilitiesView project={selection.project} ready={catalogReady} catalogError={catalogError}
               workspace={project?.workspace ?? null} onNavigate={navigateUrl}
               catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog} />
+          ) : view === "baseware" ? (
+            <BasewareView project={selection.project} workspace={project?.workspace ?? null} projects={projects}
+              ready={catalogReady} catalogError={catalogError} catalogLoading={catalogLoading}
+              onRetryCatalog={refreshCatalog} onNavigate={navigateUrl} />
           ) : runControls && entry !== "ready" ? (
             <WorkspaceRunEmpty state={entry} project={project?.id} workspaceName={workspaceName(project)}
               workspacePath={project?.workspace ?? undefined}

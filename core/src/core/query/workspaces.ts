@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { createConnection } from "node:net";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repoRoot } from "./repo";
 import {
@@ -11,8 +12,17 @@ import {
   forgetWorkspace,
   registeredWorkspace,
   readWorkspaceIdentity,
+  readMachinesConfig,
+  upsertMachineConfig,
+  removeMachineConfig,
+  validateWorkspaceMachinesBinding,
+  validateMachineSpec,
+  BUILTIN_LOCAL_DESKTOP_MACHINE,
   validateConnectionConfig,
   withWorkspaceRegistrationLock,
+  type BasewareMachineSpec,
+  type WorkspaceMachinesBinding,
+  type MachineTransportConfig,
   type LudensConfig,
   type ModelConnectionConfig,
   type WorkspaceDefaults,
@@ -40,6 +50,7 @@ export interface WorkspaceConfigSummary {
   requests: number;
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
+  machines?: WorkspaceMachinesBinding;
   dashboard: boolean;
   pet: boolean;
   diagnostics: "normal" | "full";
@@ -61,6 +72,43 @@ export interface WorkspaceServicesSnapshot {
   hostSocket: string;
   hostSocketExists: boolean;
   jobs: WorkspaceServiceJobSnapshot[];
+}
+
+export interface CachedDriverEntry {
+  driverId: string;
+  cacheKey: string;
+  spec: string;
+  path: string;
+  updatedAt: string;
+}
+
+export interface BasewareMachineRuntimeStatus extends BasewareMachineSpec {
+  usedByWorkspaceIds: string[];
+  implicitForWorkspaceId?: string;
+}
+
+export interface WorkspaceBasewareSnapshot {
+  workspaceId: string | null;
+  workspaceName: string | null;
+  workspacePath: string | null;
+  binding: WorkspaceMachinesBinding;
+  implicitMachine: BasewareMachineSpec | null;
+  activeMachine: BasewareMachineSpec | null;
+  daemon: {
+    hostSocket: string | null;
+    basewareSocket: string | null;
+    basewareSocketExists: boolean;
+    status: {
+      serviceId: string;
+      mode: string;
+      connected: boolean;
+      epoch: string | null;
+    } | null;
+    emulatorJob: WorkspaceServiceJobSnapshot | null;
+    basewareJob: WorkspaceServiceJobSnapshot | null;
+  };
+  machines: BasewareMachineRuntimeStatus[];
+  cachedDrivers: CachedDriverEntry[];
 }
 
 export interface WorkspaceSessionEntry {
@@ -109,6 +157,14 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
         // Ignore malformed connection in summary read; studio editor surfaces raw defaults.
       }
     }
+    let machines: WorkspaceMachinesBinding | undefined;
+    if (raw.machines !== undefined) {
+      try {
+        machines = validateWorkspaceMachinesBinding(raw.machines, "machines");
+      } catch {
+        // Ignore malformed machine bindings in summary reads; the editor can repair them.
+      }
+    }
     return {
       driver: typeof raw.driver === "string" && raw.driver.trim() ? raw.driver.trim() : "cua",
       ...(typeof raw.driverPackage === "string" && raw.driverPackage.trim() ? { driverPackage: raw.driverPackage.trim() } : {}),
@@ -122,6 +178,7 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
         ? { compactionThreshold: raw.compactionThreshold }
         : {}),
       ...(connection ? { connection } : {}),
+      ...(machines ? { machines } : {}),
       dashboard: typeof raw.dashboard === "boolean" ? raw.dashboard : true,
       pet: typeof raw.pet === "boolean" ? raw.pet : false,
       diagnostics,
@@ -342,6 +399,225 @@ async function inspectWorkspaceServices(workspacePath: string, home: string): Pr
   return { hostSocket, hostSocketExists, jobs };
 }
 
+async function listCachedDrivers(home: string): Promise<CachedDriverEntry[]> {
+  const root = join(home, "cache", "drivers");
+  const drivers = await readdir(root, { withFileTypes: true }).catch(() => []);
+  const cached = await Promise.all(drivers.filter(entry => entry.isDirectory()).map(async driver => {
+    const caches = await readdir(join(root, driver.name), { withFileTypes: true }).catch(() => []);
+    const entries = await Promise.all(caches.filter(entry => entry.isDirectory()).map(async (cache): Promise<CachedDriverEntry | null> => {
+      const path = join(root, driver.name, cache.name);
+      const complete = join(path, ".complete");
+      try {
+        const [spec, info] = await Promise.all([readFile(complete, "utf8"), stat(complete)]);
+        return { driverId: driver.name, cacheKey: cache.name, spec: spec.trim(), path, updatedAt: info.mtime.toISOString() };
+      } catch {
+        return null;
+      }
+    }));
+    return entries.filter((entry): entry is CachedDriverEntry => entry !== null);
+  }));
+  return cached.flat().sort((a, b) => a.driverId.localeCompare(b.driverId) || a.cacheKey.localeCompare(b.cacheKey));
+}
+
+export async function basewareOverview(workspaceId?: unknown, home = globalHome): Promise<WorkspaceBasewareSnapshot> {
+  const [registry, workspaces, cachedDrivers] = await Promise.all([
+    readMachinesConfig(home),
+    listRegisteredWorkspaces(home),
+    listCachedDrivers(home),
+  ]);
+  const configs = new Map<string, WorkspaceConfigSummary | null>();
+  await Promise.all(workspaces.map(async entry => {
+    configs.set(entry.id, entry.available ? await readWorkspaceConfigSummary(entry.workspace) : null);
+  }));
+  const selectedId = typeof workspaceId === "string" ? workspaceId : null;
+  const candidate = selectedId ? workspaces.find(item => item.id === selectedId) : undefined;
+  const entry = candidate?.available ? candidate : undefined;
+  const cfg = entry ? configs.get(entry.id) : null;
+  const implicitMachine: BasewareMachineSpec | null = entry && cfg ? {
+    id: "workspace-default",
+    name: `${entry.name} (${cfg.driver})`,
+    driver: cfg.driver,
+    ...(cfg.driverPackage ? { driverPackage: cfg.driverPackage } : {}),
+    transport: cfg.driver === "cua"
+      ? { kind: "stdio", command: cfg.cuaCommand || "cua-driver" }
+      : { kind: "bridge", host: "127.0.0.1", port: cfg.port ?? 47663, ...(cfg.game ? { game: cfg.game } : {}), managed: Boolean(cfg.game) },
+    updatedAt: entry.updatedAt,
+  } : null;
+  const binding = cfg?.machines ?? (entry
+    ? { active: "workspace-default", allowed: ["workspace-default", "local-desktop"] }
+    : { active: BUILTIN_LOCAL_DESKTOP_MACHINE.id, allowed: [BUILTIN_LOCAL_DESKTOP_MACHINE.id] });
+  const availableMachines = [...(implicitMachine ? [implicitMachine] : []), ...registry.machines];
+  const activeMachine = binding.active ? availableMachines.find(machine => machine.id === binding.active) ?? null : null;
+  const usedBy = (machineId: string) => workspaces.filter(workspace => {
+    const workspaceConfig = configs.get(workspace.id);
+    const workspaceBinding = workspaceConfig?.machines ?? (workspace.available
+      ? { active: "workspace-default", allowed: ["workspace-default", "local-desktop"] }
+      : null);
+    return workspaceBinding?.allowed.includes(machineId) ?? false;
+  }).map(workspace => workspace.id);
+  const machines: BasewareMachineRuntimeStatus[] = [
+    ...(implicitMachine && entry ? [{ ...implicitMachine, usedByWorkspaceIds: usedBy(implicitMachine.id), implicitForWorkspaceId: entry.id }] : []),
+    ...registry.machines.map(machine => ({ ...machine, usedByWorkspaceIds: usedBy(machine.id) })),
+  ];
+
+  let daemon: WorkspaceBasewareSnapshot["daemon"] = {
+    hostSocket: null,
+    basewareSocket: null,
+    basewareSocketExists: false,
+    status: null,
+    emulatorJob: null,
+    basewareJob: null,
+  };
+  if (entry) {
+    const canonical = await realpath(entry.workspace).catch(() => resolve(entry.workspace));
+    const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
+    const uid = process.getuid ? process.getuid() : 0;
+    const basewareSocket = `/tmp/ludens-baseware-${uid}-${hash}.sock`;
+    const [services, basewareSocketExists] = await Promise.all([
+      inspectWorkspaceServices(entry.workspace, resolve(home)),
+      stat(basewareSocket).then(() => true).catch(() => false),
+    ]);
+    let status: WorkspaceBasewareSnapshot["daemon"]["status"] = null;
+    if (basewareSocketExists) {
+      const result = await runCommandShort(["env", `BASEWARE_SOCKET=${basewareSocket}`, join(repoRoot, "baseware/bin/baseware"), "status"], 1500);
+      if (result.code === 0) {
+        try {
+          const value = JSON.parse(result.stdout) as Record<string, unknown>;
+          if (typeof value.serviceId === "string" && typeof value.mode === "string" && typeof value.connected === "boolean") {
+            status = { serviceId: value.serviceId, mode: value.mode, connected: value.connected, epoch: typeof value.epoch === "string" ? value.epoch : null };
+          }
+        } catch {
+          // A stale or incompatible daemon does not prevent listing machine configuration.
+        }
+      }
+    }
+    daemon = {
+      hostSocket: services.hostSocket,
+      basewareSocket,
+      basewareSocketExists,
+      status,
+      emulatorJob: services.jobs.find(job => job.name === "emulator") ?? null,
+      basewareJob: services.jobs.find(job => job.name === "baseware") ?? null,
+    };
+  }
+  return {
+    workspaceId: entry?.id ?? null,
+    workspaceName: entry?.name ?? null,
+    workspacePath: entry?.workspace ?? null,
+    binding,
+    implicitMachine,
+    activeMachine,
+    daemon,
+    machines,
+    cachedDrivers,
+  };
+}
+
+export async function upsertBasewareMachine(input: unknown, home = globalHome): Promise<{ machine: BasewareMachineSpec; machines: BasewareMachineSpec[] }> {
+  const registry = await upsertMachineConfig(input, home);
+  const spec = validateMachineSpec(input);
+  return { machine: registry.machines.find(machine => machine.id === spec.id)!, machines: registry.machines };
+}
+
+export async function removeBasewareMachine(id: unknown, home = globalHome): Promise<{ removed: BasewareMachineSpec | null; machines: BasewareMachineSpec[] }> {
+  const res = await removeMachineConfig(id, home);
+  return { removed: res.removed, machines: res.registry.machines };
+}
+
+export async function updateWorkspaceMachines(id: unknown, input: unknown, home = globalHome): Promise<WorkspaceBasewareSnapshot> {
+  if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
+  const binding = validateWorkspaceMachinesBinding(input, "machines");
+  await withWorkspaceRegistrationLock(home, id, async () => {
+    const entry = await registeredWorkspace(id, home);
+    const configPath = join(entry.workspace, "ludens.json");
+    const raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("ludens.json 必须是 JSON 对象");
+    const next = { ...raw, machines: binding };
+    const temporary = `${configPath}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+      await rename(temporary, configPath);
+    } finally {
+      await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
+    }
+  });
+  clearCatalogCache();
+  return basewareOverview(id, home);
+}
+
+function probeBridge(transport: Extract<MachineTransportConfig, { kind: "bridge" }>): Promise<string> {
+  const { promise, resolve: resolveProbe, reject: rejectProbe } = Promise.withResolvers<string>();
+  const socket = createConnection({ host: transport.host ?? "127.0.0.1", port: transport.port });
+  const timer = setTimeout(() => socket.destroy(new Error("TCP connection timed out")), 2000);
+  socket.once("connect", () => {
+    clearTimeout(timer);
+    socket.end();
+    resolveProbe(`Connected to ${transport.host ?? "127.0.0.1"}:${transport.port}`);
+  });
+  socket.once("error", error => {
+    clearTimeout(timer);
+    rejectProbe(error);
+  });
+  return promise;
+}
+
+export async function probeBasewareMachine(input: unknown, home = globalHome): Promise<{ ok: boolean; latencyMs: number; detail: string }> {
+  const started = Date.now();
+  let machine: BasewareMachineSpec;
+  if (input && typeof input === "object" && !Array.isArray(input) && Object.keys(input).length === 1 && "id" in input) {
+    const id = input.id;
+    if (typeof id !== "string") throw new Error("Invalid machine ID");
+    const registry = await readMachinesConfig(home);
+    const found = registry.machines.find(item => item.id === id);
+    if (!found) throw new Error(`Unknown machine: ${id}`);
+    machine = found;
+  } else {
+    machine = validateMachineSpec(input);
+  }
+  try {
+    const transport: MachineTransportConfig = machine.transport;
+    let detail: string;
+    switch (transport.kind) {
+      case "bridge":
+        detail = await probeBridge(transport);
+        break;
+      case "ssh": {
+        const args = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=2"];
+        if (transport.port !== undefined) args.push("-p", String(transport.port));
+        if (transport.identityFile) args.push("-i", transport.identityFile);
+        args.push(`${transport.user ? `${transport.user}@` : ""}${transport.host}`, "echo ok");
+        const result = await runCommandShort(["ssh", ...args], 2500);
+        if (result.code !== 0) throw new Error(result.stderr.trim() || "SSH probe failed");
+        detail = result.stdout.trim() || "SSH connection succeeded";
+        break;
+      }
+      case "http":
+      case "sse": {
+        const response = await fetch(transport.url, { method: "HEAD", headers: transport.headers, signal: AbortSignal.timeout(2000) });
+        if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`.trim());
+        detail = `HTTP ${response.status}`;
+        break;
+      }
+      case "stdio": {
+        const command = transport.command || "cua-driver";
+        if (isAbsolute(command)) {
+          const info = await stat(command);
+          if (!info.isFile()) throw new Error(`${command} is not a file`);
+          detail = `Executable found at ${command}`;
+        } else {
+          const result = await runCommandShort(["which", command], 2000);
+          if (result.code !== 0) throw new Error(`Executable not found: ${command}`);
+          detail = `Executable found at ${result.stdout.trim()}`;
+        }
+        break;
+      }
+    }
+    return { ok: true, latencyMs: Date.now() - started, detail };
+  } catch (error) {
+    return { ok: false, latencyMs: Date.now() - started, detail: error instanceof Error ? error.message : String(error) };
+  }
+}
+
 async function inspectWorkspaceShiori(workspacePath: string, workspaceId: string): Promise<WorkspaceShioriSnapshot> {
   const canonical = await realpath(workspacePath).catch(() => resolve(workspacePath));
   const shioriDir = join(canonical, ".ludens", "shiori");
@@ -441,6 +717,7 @@ export async function updateWorkspaceStudioConfig(
     "game",
     "cuaCommand",
     "connection",
+    "machines",
   ];
   for (const key of Object.keys(patch)) {
     if (!allowed.includes(key)) throw new Error(`不支持的工作区配置字段：${key}`);
@@ -518,6 +795,10 @@ export async function updateWorkspaceStudioConfig(
         if (Object.keys(validated).length > 0) next.connection = validated;
         else delete next.connection;
       }
+    }
+    if ("machines" in patch) {
+      if (patch.machines === null || patch.machines === undefined) delete next.machines;
+      else next.machines = validateWorkspaceMachinesBinding(patch.machines, "machines");
     }
 
     const temporary = `${configPath}.${randomUUID()}.tmp`;

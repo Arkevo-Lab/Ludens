@@ -10,6 +10,7 @@
     "./event-sources": "./src/event-sources.ts",
     "./log-archive": "./src/log-archive.ts",
     "./ludens": "./src/ludens.ts",
+    "./machines": "./src/machines.ts",
     "./python": "./src/python.ts",
     "./timeline-media": "./src/timeline-media.ts",
     "./timeline-types": "./src/timeline-types.ts"

@@ -5,7 +5,7 @@ import type { Catalog, Request } from "./protocol.ts";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 
-export const HELP = `baseware serve --driver <id> [--driver-package <npm|github:org/repo#rev|https://github.com/org/repo#rev|file:path>] [--port <n>] [--cua-command <path>] [--socket <path>] [--data-dir <path>] [--diagnostics normal|full]
+export const HELP = `baseware serve --driver <id> [--driver-package <npm|github:org/repo#rev|https://github.com/org/repo#rev|file:path>] [--port <n>] [--host <host>] [--transport stdio|bridge|ssh|http|sse] [--ssh-host <host>] [--ssh-user <user>] [--ssh-port <n>] [--ssh-identity <path>] [--ssh-command <cmd>] [--url <url>] [--cua-command <path>] [--socket <path>] [--data-dir <path>] [--diagnostics normal|full]
 baseware status
 baseware list
 baseware export [--output <path>]
