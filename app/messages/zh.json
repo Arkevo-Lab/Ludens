@@ -553,7 +553,7 @@
     "sourcesTitle": "工作区来源",
     "sourcesDescription": "各来源独立读取；数量表示已记录或已声明的条目，不代表执行成功。",
     "groupTitles": {
-      "device": "设备目录快照",
+      "device": "控制器接口",
       "workspace": "工作区能力声明"
     },
     "sourceStates": {

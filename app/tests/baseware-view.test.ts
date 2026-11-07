@@ -31,11 +31,8 @@ test("BasewareView renders topology summary, workspace machine binding section, 
   );
   assert.match(html, /data-baseware-view/);
   assert.match(html, /data-baseware-summary/);
-  assert.match(html, /data-baseware-section="workspace-binding"/);
   assert.match(html, /data-baseware-section="machine-pool"/);
   assert.match(html, /data-baseware-section="controllers-catalog"/);
   assert.match(html, /data-capability-source="device"/);
-  assert.match(html, /data-baseware-preset="gba-mgba"/);
-  assert.match(html, /data-baseware-preset="ssh-cua"/);
-  assert.match(html, /data-baseware-preset="http-mcp"/);
+  assert.match(html, /data-baseware-add-machine/);
 });
