@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import { defaultSocket } from "@ludens/baseware/address";
 import { ludensHome, validateConnectionConfig, type ModelConnectionConfig } from "@ludens/protocol/ludens";
-import { validateWorkspaceMachinesBinding, type MachineTransportKind, type WorkspaceMachinesBinding } from "@ludens/protocol/machines";
+import {
+  validateWorkspaceMachinesBinding,
+  type BasewareMachineSpec,
+  type MachineTransportKind,
+  type WorkspaceMachinesBinding,
+} from "@ludens/protocol/machines";
 
 export interface DriverManifest {
   id: string;
@@ -85,6 +90,7 @@ export interface LaunchPlan {
   workspace: string;
   config: LaunchConfig;
   manifest?: DriverManifest;
+  activeMachine?: BasewareMachineSpec;
   dashboardUrl: string;
   dashboardCheck: string[];
   background: string;
@@ -96,27 +102,98 @@ export interface LaunchPlan {
   commands: Partial<Record<ServiceName, string[]>>;
 }
 
-export async function launchPlan(config: LaunchConfig, workspace: string, repo = resolve(import.meta.dir, "../../.."), socket?: string, manifest?: DriverManifest): Promise<LaunchPlan> {
+export async function launchPlan(
+  config: LaunchConfig,
+  workspace: string,
+  repo = resolve(import.meta.dir, "../../.."),
+  socket?: string,
+  manifest?: DriverManifest,
+  activeMachine?: BasewareMachineSpec,
+): Promise<LaunchPlan> {
   const ludens = join(repo, "core/bin/ludens");
   const baseware = join(repo, "baseware/bin/baseware");
   const basewareSocket = socket ?? await defaultSocket(workspace);
   const background = join(workspace, "logs/background");
   const sharedPet = { cwd: repo, background: join(ludensHome(), "pet/background") };
-  const bridge = manifest ? manifest.transport !== "stdio" : true;
+
+  const effectiveDriver = activeMachine ? activeMachine.driver : config.driver;
+  const effectivePackage = activeMachine ? activeMachine.driverPackage : config.driverPackage;
+  const resolvedPackage = effectivePackage
+    ? effectivePackage.startsWith("file:")
+      ? `file:${resolve(workspace, effectivePackage.slice(5))}`
+      : effectivePackage
+    : undefined;
+
+  let emulatorCmd: string[] | undefined;
+  let transportArgs: string[] = [];
+
+  if (activeMachine) {
+    const t = activeMachine.transport;
+    switch (t.kind) {
+      case "bridge": {
+        const host = t.host ?? "127.0.0.1";
+        transportArgs = ["--transport", "bridge", ...(host !== "127.0.0.1" ? ["--host", host] : []), "--port", String(t.port)];
+        if (t.managed && t.game && manifest?.launchCommand) {
+          emulatorCmd = [
+            "env",
+            ...Object.entries(manifest.launchEnv ?? {}).map(([key, value]) => `${key}=${value}`),
+            `LUDENS_BRIDGE_PORT=${t.port}`,
+            ...manifest.launchCommand,
+            resolve(workspace, t.game),
+          ];
+        }
+        break;
+      }
+      case "stdio":
+        transportArgs = [
+          "--transport",
+          "stdio",
+          ...(t.command ? ["--cua-command", t.command] : []),
+        ];
+        break;
+      case "ssh":
+        transportArgs = [
+          "--transport",
+          "ssh",
+          "--ssh-host",
+          t.host,
+          ...(t.user ? ["--ssh-user", t.user] : []),
+          ...(t.port !== undefined ? ["--ssh-port", String(t.port)] : []),
+          ...(t.identityFile ? ["--ssh-identity", t.identityFile] : []),
+          ...(t.command ? ["--ssh-command", t.command] : []),
+        ];
+        break;
+      case "http":
+      case "sse":
+        transportArgs = ["--transport", t.kind, "--url", t.url];
+        break;
+    }
+  } else {
+    const bridge = manifest ? manifest.transport !== "stdio" : true;
+    if (config.game && bridge && manifest?.launchCommand) {
+      emulatorCmd = [
+        "env",
+        ...Object.entries(manifest.launchEnv ?? {}).map(([key, value]) => `${key}=${value}`),
+        `LUDENS_BRIDGE_PORT=${config.port}`,
+        ...manifest.launchCommand,
+        resolve(workspace, config.game),
+      ];
+    }
+    transportArgs = [
+      ...(bridge && config.port !== undefined ? ["--port", String(config.port)] : []),
+      ...(config.cuaCommand ? ["--cua-command", config.cuaCommand] : []),
+    ];
+  }
+
   return {
-    workspace, config, manifest, dashboardUrl: "http://127.0.0.1:3015", background, sharedPet,
+    workspace, config, manifest, ...(activeMachine ? { activeMachine } : {}), dashboardUrl: "http://127.0.0.1:3015", background, sharedPet,
     dashboardCheck: ["npm", "--prefix", join(repo, "app"), "run", "build:check"],
     launcher: join(repo, "core/scripts/launch-background.py"), ludens, baseware, basewareSocket,
     commands: {
-      ...(config.game && bridge && manifest?.launchCommand ? { emulator: ["env",
-        ...Object.entries(manifest.launchEnv ?? {}).map(([key, value]) => `${key}=${value}`),
-        `LUDENS_BRIDGE_PORT=${config.port}`,
-        ...manifest.launchCommand, resolve(workspace, config.game)] } : {}),
-      baseware: [baseware, "serve", "--driver", config.driver,
-        ...(config.driverPackage ? ["--driver-package", config.driverPackage.startsWith("file:")
-          ? `file:${resolve(workspace, config.driverPackage.slice(5))}` : config.driverPackage] : []),
-        ...(bridge && config.port !== undefined ? ["--port", String(config.port)] : []),
-        ...(config.cuaCommand ? ["--cua-command", config.cuaCommand] : []), "--socket", basewareSocket,
+      ...(emulatorCmd ? { emulator: emulatorCmd } : {}),
+      baseware: [baseware, "serve", "--driver", effectiveDriver,
+        ...(resolvedPackage ? ["--driver-package", resolvedPackage] : []),
+        ...transportArgs, "--socket", basewareSocket,
         "--data-dir", join(workspace, "logs/baseware"), "--diagnostics", config.logging.diagnostics],
       host: [ludens, "run", "--baseware-socket", basewareSocket, "--model", config.model,
         "--seconds", String(config.seconds), "--requests", String(config.requests),
@@ -258,9 +335,18 @@ export class WorkspaceLauncher {
       const existing = await this.job("baseware");
       if (!existing.pid) {
         const manifest = this.plan.manifest;
-        const bridge = manifest ? manifest.transport !== "stdio" : true;
-        if (bridge) {
-          const port = this.plan.config.port!;
+        const activeMachine = this.plan.activeMachine;
+        const isLocalBridge = activeMachine
+          ? activeMachine.transport.kind === "bridge" &&
+            ["127.0.0.1", "localhost", "::1"].includes(activeMachine.transport.host ?? "127.0.0.1")
+          : manifest
+            ? manifest.transport !== "stdio"
+            : true;
+        if (isLocalBridge) {
+          const port = activeMachine && activeMachine.transport.kind === "bridge"
+            ? activeMachine.transport.port
+            : this.plan.config.port!;
+          const effectiveDriver = activeMachine ? activeMachine.driver : this.plan.config.driver;
           if (this.plan.commands.emulator) {
             const emulator = await this.job("emulator");
             if (!emulator.pid) {
@@ -273,7 +359,7 @@ export class WorkspaceLauncher {
               if (executable) {
                 const literalExecutable = executable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
                 const running = await this.run(["pgrep", "-f", `^${literalExecutable}([[:space:]]|$)`]);
-                if (running.code === 0) throw new Error(`${this.plan.config.driver} is already running outside this workspace's emulator job. Use its workspace, or omit game to explicitly connect to the prepared device.`);
+                if (running.code === 0) throw new Error(`${effectiveDriver} is already running outside this workspace's emulator job. Use its workspace, or omit game to explicitly connect to the prepared device.`);
               }
             }
             await this.ensure("emulator");
@@ -282,7 +368,7 @@ export class WorkspaceLauncher {
               return !!pid && (await this.listeningPids(port)).includes(pid);
             });
           } else if (!(await this.listeningPids(port)).length) {
-            throw new Error(`No prepared bridge on port ${port}. ${manifest?.launchHint ?? `Prepare the ${this.plan.config.driver} backend, then retry.`}`);
+            throw new Error(`No prepared bridge on port ${port}. ${manifest?.launchHint ?? `Prepare the ${effectiveDriver} backend, then retry.`}`);
           }
           // Only probe bridge ownership when there is no reusable Baseware service.
           const clients = await this.bridgeClients(port);

@@ -112,7 +112,7 @@ const GBA_PRESET_DRAFT: MachineFormDraft = {
   transportKind: "bridge",
   bridgeHost: "127.0.0.1",
   bridgePort: "47653",
-  bridgeGame: "/Users/ame/2610dev/playness/roms/gba/games/pokemon-green/rom.gba",
+  bridgeGame: "/Users/ame/2610dev/playness/roms/gba/games/pokemon-green/pokemon-green.gba",
   bridgeManaged: false,
 };
 
