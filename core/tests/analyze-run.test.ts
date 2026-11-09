@@ -812,3 +812,64 @@ test("canonical perception reports query outcomes and every selected record with
   expect(JSON.stringify(report)).not.toContain("not copied into analysis");
   expect(report.summary.perception).not.toHaveProperty("reusedResults");
 });
+
+test("analysis rolls up decode throughput, sampler windows, record age, rpc and timing passthrough", async () => {
+  const event = fixture();
+  const call = { traceId: "model", spanId: "turn", modelCallId: "m-1" };
+  const local = (type: string, spanId: string, data: Record<string, unknown>) =>
+    event(type, "one", data, { traceId: "python", spanId });
+  const report = await analyze([
+    event("control", "one", { mode: "auto", epoch: "one" }),
+    event("model_start", "one", { model: "probe" }, call),
+    event("model_end", "one", { stopReason: "stop", durationMs: 1000, afterFirstStreamMs: 200,
+      toolCallCount: 3, usage: { input: 90, cacheRead: 10, output: 5 } }, call),
+    event("perception_stats", "one", { sample: { attempted: 11, completed: 10, failed: 1, recorded: 9,
+      sleepStarved: 2, durationMs: { total: 500, min: 10, max: 90 } }, realizedHz: 9.5, utilization: 0.4,
+      history: { hotRecords: 4, hotBytes: 4096, hotLimitBytes: 65536 } }, { traceId: "sampler" }),
+    event("perception_observe_start", "one", { query: {} }, { traceId: "reads", spanId: "fresh" }),
+    event("perception_observe_end", "one", { queryId: "fresh", ok: true, query: {},
+      records: [{ id: "record-1", sequence: 1, recordedAt: "1970-01-01T00:00:02.000Z", media: [] }],
+      hasMore: false, outcome: "success", durationMs: 10 }, { traceId: "reads", spanId: "fresh" }),
+    local("python_call_start", "helper", { id: "python/helper.py:helper" }),
+    local("python_call_end", "helper", { outcome: "success", durationMs: 12,
+      rpc: { calls: 3, errors: 0, durationMs: 7, controllerCalls: 1, observeCalls: 1 } }),
+    local("python_capability", "runner", { capabilityId: "python/actions.py:act", name: "act" }),
+    local("python_capability_result", "runner", { outcome: "success", durationMs: 40,
+      timing: { importDurationMs: 12, executionDurationMs: 34 } }),
+    event("control", "one", { mode: "manual", reason: "human" }),
+  ], "one");
+  const callEntry = report.calls[0];
+  expect(callEntry).toMatchObject({ afterFirstStreamMs: 200, outputTokensPerSecond: 25, toolCallCount: 3,
+    totalMs: 1000, state: "completed" });
+  expect(report.summary.metrics.outputTokensPerSecond).toMatchObject({ count: 1, median: 25 });
+  expect(report.summary.metrics.afterFirstStreamMs).toMatchObject({ count: 1, median: 200 });
+  expect(report.perception.reads[0].records[0]).toMatchObject({ recordedAt: "1970-01-01T00:00:02.000Z", recordAgeMs: 4000 });
+  expect(report.summary.perceptionSampler).toMatchObject({ windows: 1, attemptedSamples: 11, completedSamples: 10,
+    failedSamples: 1, recordedSamples: 9, sleepStarvedTicks: 2, peakHotBytes: 4096,
+    recordAgeMs: { count: 1, median: 4000 }, unknownRecordAge: 0 });
+  expect(report.perception.sampler).toEqual(report.summary.perceptionSampler);
+  expect(report.summary.efficiency).toMatchObject({ runDurationMs: 10000, modelTimeRatio: 0.1,
+    localPythonRpcCalls: 3, autonomyActionRatio: 1.0 });
+  expect(report.localPythonCalls[0].rpc).toMatchObject({ calls: 3, controllerCalls: 1, observeCalls: 1 });
+  expect(report.pythonCapabilities[0].timing).toMatchObject({ importDurationMs: 12, executionDurationMs: 34 });
+
+  const backgroundReport = await analyze([
+    { seq: 1, type: "perception_stats", atMs: 1000, at: "1970-01-01T00:00:01.000Z", trace: { traceId: "bg" },
+      data: { window: { durationMs: 5000 }, sample: { attempted: 150, completed: 150, failed: 0, recorded: 150, durationMs: { total: 2500 } } } },
+    { seq: 2, type: "control", atMs: 2000, at: "1970-01-01T00:00:02.000Z", trace: { epoch: "two" }, data: { mode: "auto", epoch: "two" } },
+    { seq: 3, type: "perception_stats", atMs: 7000, at: "1970-01-01T00:00:07.000Z", trace: { traceId: "bg" },
+      data: { window: { durationMs: 5000 }, sample: { attempted: 150, completed: 140, failed: 10, recorded: 140, durationMs: { total: 4000 } } } },
+    { seq: 4, type: "control", atMs: 8000, at: "1970-01-01T00:00:08.000Z", trace: { epoch: "two" }, data: { mode: "manual", reason: "done" } },
+    { seq: 5, type: "perception_stats", atMs: 13000, at: "1970-01-01T00:00:13.000Z", trace: { traceId: "bg" },
+      data: { window: { durationMs: 5000 }, sample: { attempted: 150, completed: 150, failed: 0, recorded: 150, durationMs: { total: 2000 } } } },
+  ], "two");
+  expect(backgroundReport.summary.perceptionSampler).toMatchObject({
+    windows: 1,
+    attemptedSamples: 150,
+    completedSamples: 140,
+    failedSamples: 10,
+    recordedSamples: 140,
+    realizedHz: { count: 1, median: 28 },
+    utilization: { count: 1, median: 0.8 },
+  });
+}, 30_000);

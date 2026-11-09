@@ -235,6 +235,18 @@ export interface SpanStats {
   outcomes: Record<SpanOutcome, number>;
   durationMs: { median: number | null; p95: number | null };
 }
+export interface PerceptionSamplerSummary {
+  windows: number;
+  attemptedSamples: number;
+  completedSamples: number;
+  failedSamples: number;
+  recordedSamples: number;
+  sleepStarvedTicks: number;
+  latestRealizedHz: number | null;
+  latestUtilization: number | null;
+  peakHotBytes: number | null;
+  startupDurationMs: number | null;
+}
 export interface NativeLoop {
   traceId: string;
   spanId: string;
@@ -249,7 +261,7 @@ export interface RunTelemetry {
   shiori: { stats: SpanStats; nativeLoops: NativeLoop[] };
   capabilities: { stats: SpanStats; python: SpanStats; localPython: SpanStats; discovery: SpanStats };
   devices: SpanStats;
-  perception: SpanStats;
+  perception: SpanStats & { sampler?: PerceptionSamplerSummary };
 }
 export interface RunData {
   project: string;

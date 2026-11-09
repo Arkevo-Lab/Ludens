@@ -317,6 +317,12 @@ class ObservationHistory:
                 "videoSegmentSeconds": self.video_segment_seconds, "videoIdleSeconds": self.video_idle_seconds,
                 "budgetEvictions": self.budget_evictions}
 
+    def metrics(self):
+        """Current hot-store watermarks for periodic sampler reporting."""
+        with self.lock:
+            return {"hotRecords": len(self._hot), "hotBytes": self.hot_bytes,
+                    "hotLimitBytes": self.hot_limit, "budgetEvictions": self.budget_evictions}
+
     def _save_meta(self, segment):
         path = Path(segment["path"] + ".meta.json")
         temporary = path.with_suffix(".tmp")

@@ -39,7 +39,7 @@ def read_events(run, epoch):
     multiple_sources = bool(manifest.get("eventSources"))
     source = {"path": "canonical" if multiple_sources else "events.jsonl", "eventCount": 0,
               "lastSeq": None, "lastEventAt": None, "ignoredPartialLastLine": False}
-    controls, events = [], []
+    controls, events, background_stats = [], [], []
     selected = epoch
 
     def consume(lines):
@@ -58,6 +58,8 @@ def read_events(run, epoch):
                           lastSeq=event.get("seq"), lastEventAt=event.get("at"))
             if multiple_sources:
                 source["lastEventId"] = event_identity(event)
+            if event["type"] == "perception_stats" and event.get("trace", {}).get("epoch") is None:
+                background_stats.append(event)
             if event["type"] == "control" and event["data"].get("mode") in ("auto", "manual"):
                 controls.append(event)
                 if selected is None and event["data"].get("mode") == "auto":
@@ -83,7 +85,7 @@ def read_events(run, epoch):
         with (run / "events.jsonl").open() as incoming:
             consume(incoming)
     source["retainedEpochEvents"] = len(events)
-    return events, controls, source
+    return events, controls, source, background_stats
 
 
 def skill_paths(args):
@@ -160,7 +162,10 @@ def operation_spans(inside, events, start_type, end_type):
             spans[-1].update({"functionOrigin": start["data"].get("origin"),
                               "pid": start["data"].get("pid"),
                               "origin": start.get("origin"),
-                              "endOrigin": finish.get("origin") if finish else None})
+                              "endOrigin": finish.get("origin") if finish else None,
+                              **({"rpc": result["rpc"]} if isinstance(result.get("rpc"), dict) else {})})
+        if start_type == "python_capability" and isinstance(result.get("timing"), dict):
+            spans[-1]["timing"] = result["timing"]
     return spans
 
 
@@ -334,6 +339,8 @@ def perception_report(inside, events):
         read["records"] = [{"id": record.get("id"), "sequence": record.get("sequence"),
                             "timeline": record.get("timeline"), "sampledAt": record.get("sampledAt"),
                             "sampleAgeMs": sample_age_ms(record.get("sampledAt"), end["at"]) if end else None,
+                            "recordedAt": record.get("recordedAt") if isinstance(record.get("recordedAt"), str) else None,
+                            "recordAgeMs": sample_age_ms(record.get("recordedAt"), end["at"]) if end else None,
                             "observationIds": [item["id"] for item in record.get("media", [])]}
                            for record in records]
         read["observationIds"] = list(dict.fromkeys(item for record in read["records"] for item in record["observationIds"]))
@@ -515,7 +522,7 @@ def compaction_maintenance_spans(compactions):
 
 
 def analyze(run, epoch=None):
-    events, controls, source = read_events(run, epoch)
+    events, controls, source, background_stats = read_events(run, epoch)
     takeovers = [event for event in controls if event["data"]["mode"] == "auto"]
     if epoch is None and len(takeovers) > 1:
         choices = ", ".join(event["data"]["epoch"] for event in takeovers)
@@ -553,7 +560,19 @@ def analyze(run, epoch=None):
         dispatched = [attempt for attempt in attempts
                       if attempt["transport"] == "http" or attempt["dispatchSeq"] is not None]
         first_inbound = next((event for event in related if event["type"] == "model_stream_start"), None)
+        first_inbound_ms = first_inbound["data"].get("modelElapsedMs") if first_inbound else None
         usage = final.get("usage")
+        total_ms = final.get("durationMs")
+        after_first_stream_ms = final.get("afterFirstStreamMs") if isinstance(final.get("afterFirstStreamMs"), (int, float)) else None
+        if after_first_stream_ms is None and isinstance(total_ms, (int, float)) and isinstance(first_inbound_ms, (int, float)):
+            after_first_stream_ms = max(0, total_ms - first_inbound_ms)
+        output_tokens = usage.get("output") if usage else None
+        output_tps = final.get("outputTokensPerSecond") if isinstance(final.get("outputTokensPerSecond"), (int, float)) else None
+        if output_tps is None and isinstance(output_tokens, (int, float)) and output_tokens > 0:
+            decode_base = after_first_stream_ms if isinstance(after_first_stream_ms, (int, float)) and after_first_stream_ms > 0 else total_ms
+            if isinstance(decode_base, (int, float)) and decode_base > 0:
+                output_tps = round(output_tokens * 1000.0 / decode_base, 2)
+        tool_call_count = final.get("toolCallCount") if isinstance(final.get("toolCallCount"), int) else None
         input_tokens = sum(usage.get(key, 0) for key in ("input", "cacheRead", "cacheWrite")) if usage else None
         cached = usage.get("cacheRead", 0) if usage else None
         state = ("pending" if not end else "aborted" if final.get("stopReason") == "aborted"
@@ -563,13 +582,16 @@ def analyze(run, epoch=None):
         tools = [event["data"]["toolName"] for event in related if event["type"] == "tool_start"]
         calls.append({"index": index, "modelCallId": call_id, "startSeq": start["seq"],
             "endSeq": end["seq"] if end else None, "at": start["at"], "state": state,
-            "stopReason": final.get("stopReason"), "totalMs": final.get("durationMs"),
+            "stopReason": final.get("stopReason"), "totalMs": total_ms,
+            "afterFirstStreamMs": after_first_stream_ms,
+            "outputTokensPerSecond": output_tps,
+            "toolCallCount": tool_call_count,
             "localPreparationMs": dispatch_ms - start["atMs"] if dispatch_ms is not None else None,
             "fetchWaitMs": sum(attempt["fetchWaitMs"] for attempt in attempts if attempt["fetchWaitMs"] is not None) if any(attempt["fetchWaitMs"] is not None for attempt in attempts) else None,
             "afterHeadersMs": end["atMs"] - headers_ms if end and headers_ms is not None else None,
             "wireBytes": dispatched[0]["wireBytes"] if dispatched else None,
             "attemptedWireBytes": sum(attempt["wireBytes"] or 0 for attempt in attempts),
-            "firstInboundMs": first_inbound["data"].get("modelElapsedMs") if first_inbound else None,
+            "firstInboundMs": first_inbound_ms,
             "dispatchToFirstInboundMs": first_inbound["data"].get("afterDispatchMs") if first_inbound else None,
             "transports": list(dict.fromkeys(attempt["transport"] for attempt in attempts)),
             "inputTokens": input_tokens, "cachedTokens": cached,
@@ -742,12 +764,81 @@ def analyze(run, epoch=None):
     discovery = operation_spans(inside, events, "python_capabilities_start", "python_capabilities")
     shiori_spans = operation_spans(inside, events, "shiori_span_start", "shiori_span_end")
     perception_summary, perception = perception_report(inside, events)
+    sampler_events = [event for event in inside if event["type"] == "perception_stats"]
+    if not sampler_events and background_stats:
+        sampler_events = [
+            event for event in background_stats
+            if not enabled or (
+                source_key(event) == source_key(enabled)
+                and event["seq"] >= enabled["seq"]
+                and (stopped is None or event["seq"] <= stopped["seq"])
+            )
+        ]
+
+    def sampler_realized_hz(event):
+        val = event["data"].get("realizedHz")
+        if isinstance(val, (int, float)):
+            return val
+        window_ms = event["data"].get("window", {}).get("durationMs")
+        completed = event["data"].get("sample", {}).get("completed")
+        if isinstance(window_ms, (int, float)) and window_ms > 0 and isinstance(completed, (int, float)):
+            return round(completed / (window_ms / 1000.0), 2)
+        return None
+
+    def sampler_utilization(event):
+        val = event["data"].get("utilization")
+        if isinstance(val, (int, float)):
+            return val
+        window_ms = event["data"].get("window", {}).get("durationMs")
+        total_ms = event["data"].get("sample", {}).get("durationMs", {}).get("total")
+        if isinstance(window_ms, (int, float)) and window_ms > 0 and isinstance(total_ms, (int, float)):
+            return round(min(1.0, total_ms / window_ms), 4)
+        return None
+
+    record_ages = [record.get("recordAgeMs") for read in perception["reads"] for record in read["records"]]
+    hot_bytes_values = [event["data"].get("history", {}).get("hotBytes") for event in sampler_events
+                        if isinstance(event["data"].get("history", {}).get("hotBytes"), (int, float))]
+    perception_sampler = {
+        "windows": len(sampler_events),
+        "attemptedSamples": sum(event["data"].get("sample", {}).get("attempted", 0) for event in sampler_events),
+        "completedSamples": sum(event["data"].get("sample", {}).get("completed", 0) for event in sampler_events),
+        "failedSamples": sum(event["data"].get("sample", {}).get("failed", 0) for event in sampler_events),
+        "recordedSamples": sum(event["data"].get("sample", {}).get("recorded", 0) for event in sampler_events),
+        "sleepStarvedTicks": sum(event["data"].get("sample", {}).get("sleepStarved", 0) for event in sampler_events),
+        "realizedHz": stats(sampler_realized_hz(event) for event in sampler_events),
+        "utilization": stats(sampler_utilization(event) for event in sampler_events),
+        "peakHotBytes": max(hot_bytes_values) if hot_bytes_values else None,
+        "recordAgeMs": stats(record_ages),
+        "unknownRecordAge": sum(age is None for age in record_ages),
+    }
+    perception["sampler"] = perception_sampler
     # A native loop can end after control was handed back; attach its summary to the loop we actually started.
     loop_keys = {trace_key(event, "traceId", "spanId") for event in inside
                  if event["type"] == "shiori_span_start" and event["data"].get("operation") == "invoke_agent"}
     native_runs = [{"trace": event["trace"], "source": event.get("source"), **event["data"]}
                    for event in events if event["type"] == "shiori_run_end"
                    and trace_key(event, "traceId", "spanId") in loop_keys]
+    run_timestamps = [event["atMs"] for event in inside]
+    run_duration_ms = max(run_timestamps) - min(run_timestamps) if run_timestamps else None
+    total_model_ms = sum(call["totalMs"] for call in calls if isinstance(call.get("totalMs"), (int, float)))
+    total_device_action_ms = sum(execution["durationMs"] for execution in executions
+                                 if isinstance(execution.get("durationMs"), (int, float)))
+    total_local_python_ms = sum(call["durationMs"] for call in local_python_calls
+                                if isinstance(call.get("durationMs"), (int, float)))
+    local_python_rpc_calls = sum(call["rpc"].get("calls", 0) for call in local_python_calls
+                                 if isinstance(call.get("rpc"), dict))
+    direct_controller_tool_calls = sum(count for name, count in tool_counts.items()
+                                       if name.startswith("controller/"))
+    capability_invocations = len(python_calls) + len(local_python_calls)
+    total_action_entrypoints = direct_controller_tool_calls + capability_invocations
+    efficiency = {
+        "runDurationMs": run_duration_ms,
+        "modelTimeRatio": round(total_model_ms / run_duration_ms, 4) if run_duration_ms and run_duration_ms > 0 else None,
+        "deviceActionDutyCycle": round(total_device_action_ms / run_duration_ms, 4) if run_duration_ms and run_duration_ms > 0 else None,
+        "localPythonTimeRatio": round(total_local_python_ms / run_duration_ms, 4) if run_duration_ms and run_duration_ms > 0 else None,
+        "localPythonRpcCalls": local_python_rpc_calls,
+        "autonomyActionRatio": round(capability_invocations / total_action_entrypoints, 4) if total_action_entrypoints > 0 else None,
+    }
     summary = {"startedRequests": len(calls), "completedRequests": len(completed),
         "pendingRequests": sum(call["state"] == "pending" for call in calls),
         "abortedRequests": sum(call["state"] == "aborted" for call in calls),
@@ -770,7 +861,7 @@ def analyze(run, epoch=None):
         "warmWeightedCacheHit": weighted_cache([call for call in completed if call["index"] > 1]),
         "metrics": {key: stats(call[key] for call in completed) for key in
                     ("totalMs", "localPreparationMs", "fetchWaitMs", "afterHeadersMs", "wireBytes", "inputTokens",
-                     "firstInboundMs", "dispatchToFirstInboundMs")},
+                     "firstInboundMs", "dispatchToFirstInboundMs", "afterFirstStreamMs", "outputTokensPerSecond")},
         "toolCounts": dict(tool_counts),
         "toolErrors": sum(tool["isError"] is True for tool in tool_details),
         "toolErrorsByName": dict(Counter(tool["toolName"] for tool in tool_details if tool["isError"] is True)),
@@ -832,7 +923,7 @@ def analyze(run, epoch=None):
         "localPythonCalls": span_summary(local_python_calls),
         "localPythonExceptions": python_exceptions,
         "capabilityDiscovery": span_summary(discovery),
-        "perception": perception_summary,
+        "perception": perception_summary, "perceptionSampler": perception_sampler, "efficiency": efficiency,
         "shiori": {"spans": span_summary(shiori_spans), "nativeLoops": len(native_runs)}}
     return {"analysisVersion": 7, "runDir": str(run), "generatedAt": datetime.now(timezone.utc).isoformat(),
         "source": source,

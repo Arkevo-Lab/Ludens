@@ -35,6 +35,9 @@ def main():
             raise ValueError("Workspace timeline has not started")
         record = history.append(sample, generation, sampling, identity=identity, run_id=runId, trace=trace,
                                 deliver_media=not continuous(current()))
+        window = current().get("recording_window")
+        if window is not None:
+            window.set_history_metrics(history.metrics())
         send({"event": "sample", "snapshot": {
             key: value for key, value in record.items() if key not in ("text", "media", "data", "space", "sources")
         }, "mediaCount": len(record["media"]), "trace": trace or {},

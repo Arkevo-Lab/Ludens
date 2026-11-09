@@ -18,6 +18,7 @@ export interface PerceptionStatus {
   sampleHz?: number;
   history?: { persistent: boolean; hotSeconds: number; segmentSeconds: number; hotBytes: number; segmentBytes: number;
     videoSegmentSeconds: number; videoIdleSeconds: number; budgetEvictions: number };
+  startupDurationMs?: number;
 }
 export interface PerceptionSnapshot {
   id: string;
@@ -94,6 +95,7 @@ export class PerceptionRuntime {
   private leaseRevision = 0;
   private leaseSignal?: AbortSignal;
   private admittedGeneration: string | null = null;
+  private generationLoadingStartedAtMs: number | null = null;
   private deviceLeaseEpoch: string | null = null;
 
   constructor(private readonly options: {
@@ -377,6 +379,7 @@ export class PerceptionRuntime {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") sourceError = String(error);
     }
     const generation = crypto.randomUUID(), codeSHA = source ? createHash("sha256").update(source).digest("hex") : undefined;
+    if (this.current.state !== "loading") this.generationLoadingStartedAtMs = Date.now();
     this.setStatus({ state: "loading", generation, codeSHA }, trace);
     const directory = join(this.options.runDir, "perception", generation);
     await mkdir(directory, { recursive: true });
@@ -572,9 +575,15 @@ export class PerceptionRuntime {
   }
 
   private setStatus(status: PerceptionStatus, trace?: EventTrace, persist = true) {
-    if (JSON.stringify(status) === JSON.stringify(this.current)) return;
-    this.current = status;
-    if (persist) this.record("perception_status", status, trace);
+    let next = status;
+    if (next.state !== "loading" && this.generationLoadingStartedAtMs !== null) {
+      const startupDurationMs = Math.max(0, Date.now() - this.generationLoadingStartedAtMs);
+      this.generationLoadingStartedAtMs = null;
+      next = { ...next, startupDurationMs };
+    }
+    if (JSON.stringify(next) === JSON.stringify(this.current)) return;
+    this.current = next;
+    if (persist) this.record("perception_status", next, trace);
   }
 
   private record(type: string, data: unknown, trace?: EventTrace, channel?: "diagnostic", origin?: EventMetadata["origin"]) {

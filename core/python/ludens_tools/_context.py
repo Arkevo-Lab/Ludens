@@ -35,6 +35,23 @@ def request(socket_path, message, timeout=None):
 
 
 _active = ContextVar("ludens_call_context", default=None)
+_CURRENT_RPC_STATS = ContextVar("ludens_current_rpc_stats", default=None)
+
+
+def record_client_rpc(method, duration_ms, ok):
+    """Accumulate client RPC evidence inside the active invocation scope."""
+    stats = _CURRENT_RPC_STATS.get()
+    if not isinstance(stats, dict):
+        return
+    stats["calls"] += 1
+    stats["durationMs"] += max(0, int(duration_ms))
+    if not ok:
+        stats["errors"] += 1
+    if method == "controller.call":
+        stats["controllerCalls"] += 1
+    if method.startswith("perception.") or method in ("devices.observations",):
+        stats["observeCalls"] += 1
+
 _clock_id = "python-" + uuid.uuid4().hex
 _sequence = 0
 _warned = False
@@ -174,6 +191,9 @@ def invocation(identity):
     context = {**parent, "trace": trace}
     data = {**identity, "pid": os.getpid()}
     with scope(context):
+        rpc_stats = {"calls": 0, "errors": 0, "durationMs": 0,
+                     "controllerCalls": 0, "observeCalls": 0}
+        token = _CURRENT_RPC_STATS.set(rpc_stats)
         emit(context, "python_call_start", data)
         started = time.monotonic()
         try:
@@ -182,8 +202,15 @@ def invocation(identity):
             emit(context, "python_call_end", {**data, "outcome": "error",
                  "durationMs": (time.monotonic() - started) * 1000,
                  "errorType": type(error).__name__, "error": f"{type(error).__name__}: {error}",
-                 **({"traceback": traceback.format_exc()} if context.get("diagnostics") == "full" else {})})
+                 **({"traceback": traceback.format_exc()} if context.get("diagnostics") == "full" else {}),
+                 "rpc": dict(rpc_stats)})
             raise
         else:
             emit(context, "python_call_end", {**data, "outcome": "success",
-                 "durationMs": (time.monotonic() - started) * 1000})
+                 "durationMs": (time.monotonic() - started) * 1000, "rpc": dict(rpc_stats)})
+        finally:
+            _CURRENT_RPC_STATS.reset(token)
+            parent_stats = _CURRENT_RPC_STATS.get()
+            if isinstance(parent_stats, dict):
+                for key, value in rpc_stats.items():
+                    parent_stats[key] = parent_stats.get(key, 0) + value
