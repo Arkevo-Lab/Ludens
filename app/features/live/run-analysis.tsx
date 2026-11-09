@@ -169,7 +169,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
         {!pending && detailData && !missing && <RequestDetails data={detailData} call={call} panel={panel} onPanel={onPanel} onSelect={onSelect} onInspect={onInspect} />}
       </div>
     </div>
-    <details className="surface run-analysis-overview">
+    <details className="surface run-analysis-overview" open>
       <summary><span><BarChart3 aria-hidden="true" />{t("performanceOverview")}</span><span>{t("overviewCount").replace("{count}", String(data.paging.totalCalls))}</span></summary>
       <div className="run-analysis-overview-body"><p className="help-text">{t("overviewHint")}</p>{metrics}
         <section className="charts" aria-label={t("requestCharts")}>

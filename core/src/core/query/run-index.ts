@@ -5,13 +5,14 @@ import { projectTelemetry } from "./telemetry";
 import { advanceTelemetry, telemetryFromState, telemetryFactKeys, type TelemetryState, type TelemetryRecipe } from "./telemetry-reducer";
 import { eventObservations, modelInputEvents, type ArchivedObservation } from "./observation-events";
 import { advanceLivePhase, emptyLivePhase, livePhaseValue, type LivePhaseState } from "./live-phase";
-import type { Call, Event, Manifest, NativeLoop, Observation, RunData, SpanStats, TraceSpan } from "./types";
+import type { Call, Event, Manifest, NativeLoop, Observation, PerceptionSamplerSummary, RunData, RunEfficiencySummary, SpanStats, TraceSpan } from "./types";
 
-const VERSION = "reducers-5";
+const VERSION = "reducers-7";
 const PAGE_SIZE = 100;
 type Meta = RecordPointer;
 type CycleState = { phase: LivePhaseState; lastControl: Record<string, any> | null; autoStarted?: number;
-  elapsedMs: number; callCount: number; counts: Record<string, number>; compaction: { startedAt: string; reason: string } | null };
+  elapsedMs: number; callCount: number; counts: Record<string, number>; compaction: { startedAt: string; reason: string } | null;
+  sampler?: PerceptionSamplerSummary; rpcCalls?: number; controllerToolCalls?: number };
 const blankState = (): CycleState => ({ phase: emptyLivePhase(), lastControl: null, elapsedMs: 0, callCount: 0, counts: {}, compaction: null });
 const epochOf = (event: Event) => event.trace?.epoch ?? "";
 const identity = (...parts: unknown[]) => JSON.stringify(parts);
@@ -101,7 +102,8 @@ async function hydrateCall(index: LogIndex, id: string, signal?: AbortSignal) {
   return { call, skills: projected.skills };
 }
 type CallState = { duration: number | null; status: string; transport: "sse" | "websocket" | null;
-  headers: number | null; wsWait: number | null; input: number; cached: number; observes: number };
+  headers: number | null; wsWait: number | null; input: number; cached: number; observes: number;
+  firstStreamMs?: number | null; decodeMs?: number | null; outputTokens?: number; outputTps?: number | null };
 const CALL_EVENTS = new Set(["model_start", "model_request", "model_ws_dispatch", "model_stream_start", "model_http_start", "model_http_end", "model_http_error", "model_end", "tool_start"]);
 function projectCallEvent(index: LogIndex, event: Event) {
   const id = event.trace.modelCallId;
@@ -114,6 +116,7 @@ function projectCallEvent(index: LogIndex, event: Event) {
   if (event.type === "model_ws_dispatch") state.transport = "websocket";
   if (event.type === "model_http_start") state.transport = "sse";
   if (event.type === "model_stream_start") state.wsWait = finite(d.afterDispatchMs) ? d.afterDispatchMs : null;
+  if (event.type === "model_stream_start") state.firstStreamMs = finite(d.modelElapsedMs) ? d.modelElapsedMs : null;
   if (event.type === "model_http_end" || event.type === "model_http_error") {
     const value = event.type === "model_http_end" ? d.fetchToHeadersMs : d.fetchDurationMs;
     const duration = finite(value) ? value : finite(d.durationMs) ? d.durationMs : null;
@@ -124,6 +127,20 @@ function projectCallEvent(index: LogIndex, event: Event) {
     state.status = d.stopReason ?? "done";
     state.input = (d.usage?.input ?? 0) + (d.usage?.cacheRead ?? 0) + (d.usage?.cacheWrite ?? 0);
     state.cached = d.usage?.cacheRead ?? 0;
+    const afterFirst: number | null = finite(d.afterFirstStreamMs)
+      ? d.afterFirstStreamMs
+      : state.duration != null && state.firstStreamMs != null
+        ? Math.max(0, state.duration - state.firstStreamMs)
+        : null;
+    state.decodeMs = afterFirst;
+    const outputTokens = typeof d.usage?.output === "number" ? d.usage.output : 0;
+    state.outputTokens = outputTokens;
+    const decodeBase = afterFirst != null && afterFirst > 0 ? afterFirst : state.duration;
+    state.outputTps = finite(d.outputTokensPerSecond)
+      ? d.outputTokensPerSecond
+      : outputTokens > 0 && decodeBase != null && decodeBase > 0
+        ? Number(((outputTokens * 1000) / decodeBase).toFixed(2))
+        : null;
   }
   if (event.type === "tool_start" && d.toolName === "observe") state.observes++;
   store.index(id, { state });
@@ -132,7 +149,8 @@ function projectCallEvent(index: LogIndex, event: Event) {
     duration: state.duration, headers: state.transport === "sse" ? state.headers : null,
     wsWait: state.transport === "websocket" ? state.wsWait : null,
     completed: state.duration !== null && !["error", "aborted"].includes(state.status),
-    input: state.input, cached: state.cached, observes: state.observes });
+    input: state.input, cached: state.cached, observes: state.observes,
+    decodeMs: state.decodeMs, outputTokens: state.outputTokens, outputTps: state.outputTps });
 }
 
 async function projectSpanEvent(index: LogIndex, event: Event, position: number, pending: Map<string, TelemetryState>) {
@@ -242,6 +260,42 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
   let position = Number(index.meta("run_position") ?? 0);
   const states = new Map<string, CycleState>();
   const pendingSpans = new Map<string, TelemetryState>();
+  const lastCycleId = [...rows(index, "run-cycles")].sort((a, b) => a.position - b.position).at(-1)?.id ?? "";
+  const lastCycleState = lastCycleId ? await index.store("run-states").get<CycleState>(lastCycleId) : undefined;
+  let activeEpoch = lastCycleState?.autoStarted !== undefined ? lastCycleId : "";
+  const updateSampler = (target: CycleState, event: Event) => {
+    const d = event.data;
+    target.sampler ??= { windows: 0, attemptedSamples: 0, completedSamples: 0, failedSamples: 0, recordedSamples: 0,
+      sleepStarvedTicks: 0, latestRealizedHz: null, latestUtilization: null, peakHotBytes: null, startupDurationMs: null };
+    const sampler = target.sampler;
+    if (event.type === "perception_stats") {
+      sampler.windows++;
+      const sample = (d.sample ?? {}) as Record<string, unknown>;
+      sampler.attemptedSamples += finite(sample.attempted) ? sample.attempted : 0;
+      sampler.completedSamples += finite(sample.completed) ? sample.completed : 0;
+      sampler.failedSamples += finite(sample.failed) ? sample.failed : 0;
+      sampler.recordedSamples += finite(sample.recorded) ? sample.recorded : 0;
+      sampler.sleepStarvedTicks += finite(sample.sleepStarved) ? sample.sleepStarved : 0;
+      const windowMs = finite((d.window as Record<string, unknown> | undefined)?.durationMs)
+        ? (d.window as Record<string, unknown>).durationMs as number : null;
+      const hz = finite(d.realizedHz)
+        ? d.realizedHz
+        : windowMs && windowMs > 0 && finite(sample.completed)
+          ? Number((sample.completed / (windowMs / 1000)).toFixed(2))
+          : null;
+      if (hz !== null) sampler.latestRealizedHz = hz;
+      const util = finite(d.utilization)
+        ? d.utilization
+        : windowMs && windowMs > 0
+          ? Number(Math.min(1, (finite((sample.durationMs as Record<string, unknown> | undefined)?.total) ? (sample.durationMs as Record<string, unknown>).total as number : 0) / windowMs).toFixed(4))
+          : null;
+      if (util !== null) sampler.latestUtilization = util;
+      if (finite((d.history as Record<string, unknown> | undefined)?.hotBytes))
+        sampler.peakHotBytes = Math.max(sampler.peakHotBytes ?? 0, d.history.hotBytes as number);
+    }
+    if (event.type === "perception_status" && finite(d.startupDurationMs))
+      sampler.startupDurationMs = d.startupDurationMs;
+  };
   return {
     async feed(row: ProjectionRow) {
       options.signal?.throwIfAborted();
@@ -264,12 +318,29 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
       if (event.type === "control") {
         state.lastControl = { ...d, at: event.at };
         if (d.mode === "auto") {
+          const nextAutoEpoch = typeof d.epoch === "string" && d.epoch ? d.epoch : epoch;
+          if (nextAutoEpoch) activeEpoch = nextAutoEpoch;
           state.autoStarted = Date.parse(event.at);
           if (event.trace.epoch) await index.store("run-cycles").put(epoch, { epoch, startedAt: event.at }, { position, epoch });
         } else if (state.autoStarted !== undefined) {
           state.elapsedMs += Date.parse(event.at) - state.autoStarted;
           delete state.autoStarted;
         }
+        if (d.mode === "manual") activeEpoch = "";
+      }
+      if (event.type === "perception_stats" || event.type === "perception_status") {
+        updateSampler(state, event);
+        if (epoch === "" && activeEpoch) {
+          let activeState = states.get(activeEpoch);
+          if (!activeState) { activeState = await index.store("run-states").get<CycleState>(activeEpoch) ?? blankState(); states.set(activeEpoch, activeState); }
+          updateSampler(activeState, event);
+        }
+      }
+      if (event.type === "python_call_end" && typeof d.rpc?.calls === "number") {
+        state.rpcCalls = (state.rpcCalls ?? 0) + d.rpc.calls;
+      }
+      if (event.type === "tool_start" && typeof d.toolName === "string" && d.toolName.startsWith("controller/")) {
+        state.controllerToolCalls = (state.controllerToolCalls ?? 0) + 1;
       }
       if (event.type === "context_policy") {
         state.lastControl = {
@@ -372,7 +443,8 @@ export async function readRunProjection(index: LogIndex, epoch: string | null, p
   let totalCalls = 0, completed = 0, input = 0, cached = 0, explicitObserves = 0;
   let firstCompleted: Meta | undefined;
   let firstCallPosition = Infinity;
-  const times: Record<"duration" | "headers" | "wsWait", number[]> = { duration: [], headers: [], wsWait: [] };
+  const times: Record<"duration" | "headers" | "wsWait" | "decode" | "outputTps", number[]> = { duration: [], headers: [], wsWait: [], decode: [], outputTps: [] };
+  let totalOutputTokens = 0;
   function* callPage() {
     for (const entry of callStore.entries(scope)) {
       if (!scoped(entry)) continue;
@@ -385,6 +457,9 @@ export async function readRunProjection(index: LogIndex, epoch: string | null, p
         if (!firstCompleted || entry.position < firstCompleted.position) firstCompleted = entry;
         for (const field of ["duration", "headers", "wsWait"] as const)
           if (finite(entry[field])) times[field].push(entry[field]);
+        if (finite(entry.decodeMs)) times.decode.push(entry.decodeMs);
+        if (finite(entry.outputTps)) times.outputTps.push(entry.outputTps);
+        totalOutputTokens += entry.outputTokens ?? 0;
       }
       if (page.beforeCall === undefined || entry.number < page.beforeCall) yield entry;
     }
@@ -487,6 +562,39 @@ export async function readRunProjection(index: LogIndex, epoch: string | null, p
   let errors = 0;
   for (const entry of rows(index, "run-notices")) if (scoped(entry) && entry.failed) errors++;
   const duration = distribution(times.duration), headers = distribution(times.headers), wsWait = distribution(times.wsWait);
+  const decode = distribution(times.decode), outputTps = distribution(times.outputTps);
+  const samplerList = states.map(value => value.sampler).filter((value): value is PerceptionSamplerSummary =>
+    !!value && (value.windows > 0 || value.startupDurationMs !== null));
+  const sampler = samplerList.length ? samplerList.reduce((acc, value) => ({
+    windows: acc.windows + value.windows,
+    attemptedSamples: acc.attemptedSamples + value.attemptedSamples,
+    completedSamples: acc.completedSamples + value.completedSamples,
+    failedSamples: acc.failedSamples + value.failedSamples,
+    recordedSamples: acc.recordedSamples + value.recordedSamples,
+    sleepStarvedTicks: acc.sleepStarvedTicks + value.sleepStarvedTicks,
+    latestRealizedHz: value.latestRealizedHz ?? acc.latestRealizedHz,
+    latestUtilization: value.latestUtilization ?? acc.latestUtilization,
+    peakHotBytes: acc.peakHotBytes !== null || value.peakHotBytes !== null ? Math.max(acc.peakHotBytes ?? 0, value.peakHotBytes ?? 0) : null,
+    startupDurationMs: value.startupDurationMs ?? acc.startupDurationMs,
+  })) : undefined;
+  const elapsedMs = states.reduce((total, value) => total + value.elapsedMs + (value.autoStarted !== undefined ? Math.max(0, now - value.autoStarted) : 0), 0);
+  const totalModelMs = times.duration.reduce((total, value) => total + value, 0);
+  const totalDeviceMs = (statistics.get("device")?.durations ?? []).reduce((total, value) => total + value, 0);
+  const totalLocalPythonMs = (statistics.get("python-local")?.durations ?? []).reduce((total, value) => total + value, 0);
+  const pythonCalls = statistics.get("python-local")?.started || statistics.get("python")?.started || 0;
+  const totalCapabilityCalls = statistics.get("capability")?.started ?? 0;
+  const controllerTools = states.reduce((acc, s) => acc + (s.controllerToolCalls ?? 0), 0);
+  const totalActionCalls = totalCapabilityCalls > 0 ? totalCapabilityCalls : pythonCalls + controllerTools;
+  const efficiency: RunEfficiencySummary = {
+    modelTimeRatio: elapsedMs > 0 ? Number((totalModelMs / elapsedMs).toFixed(4)) : null,
+    deviceActionDutyCycle: elapsedMs > 0 ? Number((totalDeviceMs / elapsedMs).toFixed(4)) : null,
+    localPythonTimeRatio: elapsedMs > 0 ? Number((totalLocalPythonMs / elapsedMs).toFixed(4)) : null,
+    medianDecodeMs: decode.median,
+    medianOutputTokensPerSecond: outputTps.median,
+    totalOutputTokens,
+    localPythonRpcCalls: states.reduce((acc, s) => acc + (s.rpcCalls ?? 0), 0),
+    autonomyActionRatio: totalActionCalls > 0 ? Number((pythonCalls / totalActionCalls).toFixed(4)) : null,
+  };
   return {
     calls, selectedCall: selected,
     paging: { totalCalls, beforeCall: hasMore ? firstVisible.number as number : null,
@@ -502,14 +610,15 @@ export async function readRunProjection(index: LogIndex, epoch: string | null, p
       spans, shiori: { stats: stats("shiori"), nativeLoops: await recent<NativeLoop>("run-loops") },
       capabilities: { stats: stats("capability"), python: stats("python"),
         localPython: stats("python-local"), discovery: stats("discovery") },
-      devices: stats("device"), perception: stats("perception"),
+      devices: stats("device"), perception: { ...stats("perception"), ...(sampler ? { sampler } : {}) },
+      efficiency,
     },
     summary: { completed, actions: counts.actions ?? 0, explicitObserves, errors,
       compactions: counts.compactions ?? 0, medianMs: duration.median, p95Ms: duration.p95,
       medianHeadersMs: headers.median, medianHttpHeadersMs: headers.median,
       medianWsWaitMs: wsWait.median, cacheHit: input ? cached / input : null,
       warmCacheHit: input - (firstCompleted?.input ?? 0) ? (cached - (firstCompleted?.cached ?? 0)) / (input - (firstCompleted?.input ?? 0)) : null,
-      elapsedSeconds: states.reduce((total, value) => total + value.elapsedMs + (value.autoStarted !== undefined ? Math.max(0, now - value.autoStarted) : 0), 0) / 1000,
+      elapsedSeconds: elapsedMs / 1000,
     },
   };
 }

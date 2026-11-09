@@ -16,7 +16,7 @@ export function telemetryFactKeys(event: Event) {
   }
   return { starts, ends, native: event.type === "shiori_run_end" };
 }
-const fields = ["stage", "actionId", "operation", "outcome", "durationMs", "aborted", "errorMessage", "error", "status", "timing"] as const;
+const fields = ["stage", "actionId", "operation", "outcome", "durationMs", "aborted", "errorMessage", "error", "status", "timing", "rpc"] as const;
 function compact(event: Event): Event {
   const data: Record<string, any> = {};
   for (const key of fields) if (event.data[key] !== undefined) {
@@ -24,7 +24,13 @@ function compact(event: Event): Event {
     // Only truthiness of errors affects lifecycle statistics. Full errors are hydrated on demand.
     data[key] = key === "error" || key === "errorMessage" ? !!value
       : key === "status" && value && typeof value === "object" ? { state: value.state }
-      : key === "timing" && value ? { clock: value.clock, submittedAtMs: value.submittedAtMs, receivedAtMs: value.receivedAtMs }
+      : key === "timing" && value && typeof value === "object" ? {
+        ...(value.clock !== undefined ? { clock: value.clock } : {}),
+        ...(value.submittedAtMs !== undefined ? { submittedAtMs: value.submittedAtMs } : {}),
+        ...(value.receivedAtMs !== undefined ? { receivedAtMs: value.receivedAtMs } : {}),
+        ...(value.importDurationMs !== undefined ? { importDurationMs: value.importDurationMs } : {}),
+        ...(value.executionDurationMs !== undefined ? { executionDurationMs: value.executionDurationMs } : {}),
+      }
       : value;
   }
   return { seq: event.seq, at: event.at, atMs: event.atMs, type: event.type, trace: event.trace,

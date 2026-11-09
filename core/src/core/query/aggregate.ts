@@ -214,6 +214,18 @@ export function aggregate(events: Event[], now = Date.now()) {
         call.phases[key] = finite(d[key]);
       if (call.phases.headersAtMs != null)
         call.phases.afterHeadersMs = event.atMs - call.phases.headersAtMs;
+      if (typeof d.usage?.output === "number") {
+        call.outputTokens = d.usage.output;
+        const afterFirst = call.phases.afterFirstStreamMs ?? (call.durationMs != null && call.firstStreamMs != null ? Math.max(0, call.durationMs - call.firstStreamMs) : null);
+        const decodeBase = afterFirst != null && afterFirst > 0 ? afterFirst : call.durationMs;
+        const tps = finite(d.outputTokensPerSecond) ?? (d.usage.output > 0 && decodeBase != null && decodeBase > 0 ? Number(((d.usage.output * 1000) / decodeBase).toFixed(2)) : null);
+        if (tps !== null) call.outputTokensPerSecond = tps;
+      } else if (typeof d.outputTokensPerSecond === "number") {
+        call.outputTokensPerSecond = finite(d.outputTokensPerSecond);
+      }
+      if (typeof d.toolCallCount === "number") {
+        call.toolCallCount = d.toolCallCount;
+      }
     }
     if (event.type === "tool_start" && call) {
       const tool = {

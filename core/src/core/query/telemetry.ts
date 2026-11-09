@@ -253,6 +253,8 @@ export function projectTelemetry(
         outcome,
         durationMs,
         codeSHA: start.data.codeSHA ?? result?.status?.codeSHA,
+        ...(result?.rpc && typeof result.rpc === "object" ? { rpc: result.rpc } : {}),
+        ...(result?.timing && (typeof result.timing.importDurationMs === "number" || typeof result.timing.executionDurationMs === "number") ? { timing: { importDurationMs: result.timing.importDurationMs, executionDurationMs: result.timing.executionDurationMs } } : {}),
         error: errorText(result?.errorMessage ?? result?.error),
       });
     }
@@ -284,6 +286,20 @@ export function projectTelemetry(
   const of = (kind: SpanKind) => spans.filter((span) => span.kind === kind);
   const number = (value: unknown): number | null =>
     typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+  const eventRealizedHz = (event: Event): number | null => {
+    const direct = number(event.data.realizedHz);
+    if (direct !== null) return direct;
+    const windowMs = number((event.data.window as Record<string, unknown> | undefined)?.durationMs);
+    const completed = number((event.data.sample as Record<string, unknown> | undefined)?.completed);
+    return windowMs && windowMs > 0 && completed !== null ? Number((completed / (windowMs / 1000)).toFixed(2)) : null;
+  };
+  const eventUtilization = (event: Event): number | null => {
+    const direct = number(event.data.utilization);
+    if (direct !== null) return direct;
+    const windowMs = number((event.data.window as Record<string, unknown> | undefined)?.durationMs);
+    const totalMs = number(((event.data.sample as Record<string, unknown> | undefined)?.durationMs as Record<string, unknown> | undefined)?.total);
+    return windowMs && windowMs > 0 && totalMs !== null ? Number(Math.min(1, totalMs / windowMs).toFixed(4)) : null;
+  };
   const samplerEvents = selected.filter((event) => event.type === "perception_stats");
   const sampleField = (event: Event, field: string) =>
     number((event.data.sample as Record<string, unknown> | undefined)?.[field]) ?? 0;
@@ -294,8 +310,8 @@ export function projectTelemetry(
     failedSamples: samplerEvents.reduce((total, event) => total + sampleField(event, "failed"), 0),
     recordedSamples: samplerEvents.reduce((total, event) => total + sampleField(event, "recorded"), 0),
     sleepStarvedTicks: samplerEvents.reduce((total, event) => total + sampleField(event, "sleepStarved"), 0),
-    latestRealizedHz: samplerEvents.filter((event) => number(event.data.realizedHz) !== null).at(-1)?.data.realizedHz ?? null,
-    latestUtilization: samplerEvents.filter((event) => number(event.data.utilization) !== null).at(-1)?.data.utilization ?? null,
+    latestRealizedHz: samplerEvents.map(eventRealizedHz).filter((value): value is number => value !== null).at(-1) ?? null,
+    latestUtilization: samplerEvents.map(eventUtilization).filter((value): value is number => value !== null).at(-1) ?? null,
     peakHotBytes: (() => {
       const hotBytes = samplerEvents
         .map((event) => number((event.data.history as Record<string, unknown> | undefined)?.hotBytes))
