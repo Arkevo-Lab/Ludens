@@ -30,13 +30,39 @@ export default function ConsoleShell() {
     s?.medianHttpHeadersMs != null ? dt("waitHttp") + " " + seconds(s.medianHttpHeadersMs) : "",
     s?.medianWsWaitMs != null ? dt("waitWs") + " " + seconds(s.medianWsWaitMs) : "",
   ].filter(Boolean).join(" · ");
+  const eff = data?.telemetry.efficiency;
+  const sampler = data?.telemetry.perception.sampler;
   const metrics = data ? (
-    <section className={view === "live" ? "metrics live-metrics" : "metrics"} aria-label={dt("roundSummary")}>
+    <section className={view === "live" ? "metrics live-metrics" : "metrics perf-metrics"} aria-label={dt("roundSummary")}>
       <Metric label={dt("metric.completed")} value={String(s!.completed)} detail={dt("metric.totalPrefix") + data.paging.totalCalls + dt("requestsUnit")} />
       {view === "live" ? <Metric label={dt("metric.actions")} value={String(s!.actions)} detail={s!.explicitObserves + dt("metric.observes")} />
         : <Metric label={dt("metric.p95")} value={seconds(s!.p95Ms)} detail={dt("metric.nearestRank")} />}
       <Metric label={dt("metric.median")} value={seconds(s!.medianMs)} detail={waitSummary || dt("metric.noWait")} />
       <Metric label={dt("metric.cache")} value={percent(s!.cacheHit)} detail={dt("metric.afterFirst") + percent(s!.warmCacheHit)} />
+      {view === "perf" && (
+        <>
+          <Metric
+            label={dt("metric.decodeSpeed")}
+            value={eff?.medianOutputTokensPerSecond != null ? `${eff.medianOutputTokensPerSecond.toFixed(1)} tok/s` : "—"}
+            detail={dt("metric.decodeMedian") + " " + seconds(eff?.medianDecodeMs)}
+          />
+          <Metric
+            label={dt("metric.dutyCycle")}
+            value={percent(eff?.modelTimeRatio)}
+            detail={dt("metric.deviceDuty") + " " + percent(eff?.deviceActionDutyCycle)}
+          />
+          <Metric
+            label={dt("metric.samplerHz")}
+            value={sampler?.latestRealizedHz != null ? `${sampler.latestRealizedHz.toFixed(1)} Hz` : "—"}
+            detail={dt("metric.samplerUtil") + " " + percent(sampler?.latestUtilization) + (sampler?.windows ? ` · ${sampler.windows}w` : "")}
+          />
+          <Metric
+            label={dt("metric.autonomy")}
+            value={percent(eff?.autonomyActionRatio)}
+            detail={dt("metric.pythonDuty") + " " + percent(eff?.localPythonTimeRatio) + ` · ${data.telemetry.capabilities.localPython.started} calls`}
+          />
+        </>
+      )}
     </section>
   ) : null;
   const workspaceScopedView = view === "live" || view === "replay" || view === "perf" || view === "caps" || view === "perception" || view === "baseware";
@@ -322,18 +348,147 @@ export default function ConsoleShell() {
                     onLoadMore={() => navigate({ ...pinned, beforeCall: String(data.paging.beforeCall), call: null, image: null, block: null })}
                   />
                   <section className="surface telemetry-summary">
-                    <div>
-                      <h2>{dt("telemetry.title")}</h2>
-                      <p>{dt("telemetry.hint")}</p>
+                    <div className="telemetry-header">
+                      <div>
+                        <h2>{dt("telemetry.title")}</h2>
+                        <p>{dt("telemetry.hint")}</p>
+                      </div>
+                      <div className="source-chips">
+                        {data.telemetry.sources.map((source) => (
+                          <span key={source.component}>
+                            <i className={"source-dot " + source.component} />
+                            {source.component}
+                            <b>{source.count.toLocaleString()}</b>
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                    <div className="source-chips">
-                      {data.telemetry.sources.map((source) => (
-                        <span key={source.component}>
-                          <i className={"source-dot " + source.component} />
-                          {source.component}
-                          <b>{source.count.toLocaleString()}</b>
-                        </span>
-                      ))}
+                    <div className="telemetry-grid">
+                      <article className="telemetry-card">
+                        <h3>{dt("telemetry.efficiencyTitle")}</h3>
+                        <dl className="telemetry-kv">
+                          <div>
+                            <dt>{dt("telemetry.modelShare")}</dt>
+                            <dd>
+                              <strong>{percent(eff?.modelTimeRatio)}</strong>
+                              <span className="telemetry-bar"><i style={{ width: `${Math.min(100, Math.max(0, (eff?.modelTimeRatio ?? 0) * 100))}%`, background: "var(--gold)" }} /></span>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.deviceDuty")}</dt>
+                            <dd>
+                              <strong>{percent(eff?.deviceActionDutyCycle)}</strong>
+                              <span className="telemetry-bar"><i style={{ width: `${Math.min(100, Math.max(0, (eff?.deviceActionDutyCycle ?? 0) * 100))}%`, background: "var(--sage)" }} /></span>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.pythonShare")}</dt>
+                            <dd>
+                              <strong>{percent(eff?.localPythonTimeRatio)}</strong>
+                              <span className="telemetry-bar"><i style={{ width: `${Math.min(100, Math.max(0, (eff?.localPythonTimeRatio ?? 0) * 100))}%`, background: "var(--blue)" }} /></span>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.autonomyRatio")}</dt>
+                            <dd><strong>{percent(eff?.autonomyActionRatio)}</strong></dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.pythonRpcs")}</dt>
+                            <dd><strong>{(eff?.localPythonRpcCalls ?? 0).toLocaleString()}</strong></dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.outputTokens")}</dt>
+                            <dd><strong>{(eff?.totalOutputTokens ?? 0).toLocaleString()}</strong></dd>
+                          </div>
+                        </dl>
+                      </article>
+                      <article className="telemetry-card">
+                        <h3>{dt("telemetry.samplerTitle")}</h3>
+                        <dl className="telemetry-kv">
+                          <div>
+                            <dt>{dt("telemetry.samplerRate")}</dt>
+                            <dd>
+                              <strong>{sampler?.latestRealizedHz != null ? `${sampler.latestRealizedHz.toFixed(2)} Hz` : "—"}</strong>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.samplerUtil")}</dt>
+                            <dd>
+                              <strong>{percent(sampler?.latestUtilization)}</strong>
+                              <span className="telemetry-bar"><i style={{ width: `${Math.min(100, Math.max(0, (sampler?.latestUtilization ?? 0) * 100))}%`, background: "var(--sage)" }} /></span>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.samplerWindows")}</dt>
+                            <dd><strong>{(sampler?.windows ?? 0).toLocaleString()}</strong></dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.samplerSamples")}</dt>
+                            <dd>
+                              <strong>
+                                {(sampler?.completedSamples ?? 0).toLocaleString()} / {(sampler?.attemptedSamples ?? 0).toLocaleString()}
+                              </strong>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.samplerStarved")}</dt>
+                            <dd><strong>{(sampler?.sleepStarvedTicks ?? 0).toLocaleString()}</strong></dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.samplerHotBytes")}</dt>
+                            <dd><strong>{bytes(sampler?.peakHotBytes)}</strong></dd>
+                          </div>
+                        </dl>
+                      </article>
+                      <article className="telemetry-card">
+                        <h3>{dt("telemetry.subsystemsTitle")}</h3>
+                        <dl className="telemetry-kv">
+                          <div>
+                            <dt>{dt("telemetry.shioriLoops")} <small>({data.telemetry.shiori.stats.started})</small></dt>
+                            <dd>
+                              <strong>
+                                {seconds(data.telemetry.shiori.stats.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.shiori.stats.durationMs.p95).replace(" ", "")}
+                              </strong>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.capabilities")} <small>({data.telemetry.capabilities.stats.started})</small></dt>
+                            <dd>
+                              <strong>
+                                {seconds(data.telemetry.capabilities.stats.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.capabilities.stats.durationMs.p95).replace(" ", "")}
+                              </strong>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.localPython")} <small>({data.telemetry.capabilities.localPython.started})</small></dt>
+                            <dd>
+                              <strong>
+                                {seconds(data.telemetry.capabilities.localPython.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.capabilities.localPython.durationMs.p95).replace(" ", "")}
+                              </strong>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.deviceExecs")} <small>({data.telemetry.devices.started})</small></dt>
+                            <dd>
+                              <strong>
+                                {seconds(data.telemetry.devices.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.devices.durationMs.p95).replace(" ", "")}
+                              </strong>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.perceptionReads")} <small>({data.telemetry.perception.started})</small></dt>
+                            <dd>
+                              <strong>
+                                {seconds(data.telemetry.perception.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.perception.durationMs.p95).replace(" ", "")}
+                              </strong>
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>{dt("telemetry.perceptionStartup")}</dt>
+                            <dd><strong>{seconds(sampler?.startupDurationMs).replace(" ", "")}</strong></dd>
+                          </div>
+                        </dl>
+                      </article>
                     </div>
                     <div className="telemetry-counts">
                       <span>

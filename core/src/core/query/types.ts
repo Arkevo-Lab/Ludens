@@ -150,6 +150,9 @@ export interface Call {
   perception?: PerceptionRead;
   actions: number;
   phases: Record<string, number | null>;
+  outputTokens?: number;
+  outputTokensPerSecond?: number | null;
+  toolCallCount?: number;
 }
 export interface Notice {
   seq: number;
@@ -227,6 +230,8 @@ export interface TraceSpan {
   endSeq: number | null;
   outcome: SpanOutcome;
   durationMs: number | null;
+  rpc?: { calls: number; errors: number; durationMs: number; controllerCalls: number; observeCalls: number };
+  timing?: { importDurationMs?: number; executionDurationMs?: number };
   codeSHA?: string;
   error?: string;
 }
@@ -247,6 +252,16 @@ export interface PerceptionSamplerSummary {
   peakHotBytes: number | null;
   startupDurationMs: number | null;
 }
+export interface RunEfficiencySummary {
+  modelTimeRatio: number | null;
+  deviceActionDutyCycle: number | null;
+  localPythonTimeRatio: number | null;
+  medianDecodeMs: number | null;
+  medianOutputTokensPerSecond: number | null;
+  totalOutputTokens: number;
+  localPythonRpcCalls: number;
+  autonomyActionRatio: number | null;
+}
 export interface NativeLoop {
   traceId: string;
   spanId: string;
@@ -262,6 +277,7 @@ export interface RunTelemetry {
   capabilities: { stats: SpanStats; python: SpanStats; localPython: SpanStats; discovery: SpanStats };
   devices: SpanStats;
   perception: SpanStats & { sampler?: PerceptionSamplerSummary };
+  efficiency?: RunEfficiencySummary;
 }
 export interface RunData {
   project: string;

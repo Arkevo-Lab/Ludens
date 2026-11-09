@@ -653,6 +653,22 @@ function TraceList({ data, call }: { data: RunData; call?: Call }) {
                     {s.endSeq == null ? t("trace.waitingFinal") : "#" + s.endSeq}
                   </dd>
                 </div>
+                {s.rpc && (
+                  <div>
+                    <dt>Client RPC</dt>
+                    <dd>
+                      {s.rpc.calls} calls · {s.rpc.controllerCalls} ctrl · {s.rpc.observeCalls} obs · {seconds(s.rpc.durationMs)}
+                    </dd>
+                  </div>
+                )}
+                {s.timing && (
+                  <div>
+                    <dt>Timing</dt>
+                    <dd>
+                      import {s.timing.importDurationMs ?? 0} ms · exec {s.timing.executionDurationMs ?? 0} ms
+                    </dd>
+                  </div>
+                )}
               </dl>
               {s.kind === "python-local" && s.outcome === "error" && <p className="help-text">{t("trace.pythonLocalNote")}</p>}
               {s.error && <pre className={s.kind === "python-local" ? "help-text" : "error-text"}>{s.error}</pre>}
@@ -742,9 +758,14 @@ export function RequestDetails({
               <span>{t("request.cacheHit")}</span>
               <strong>{percent(call.cacheHit)}</strong>
             </div>
+            <div>
+              <span>{t("request.decodeSpeed")}</span>
+              <strong>{call.outputTokensPerSecond != null ? `${call.outputTokensPerSecond.toFixed(1)} tok/s` : "—"}</strong>
+            </div>
           </div>
           <p className="request-caption">
             {transport(call, t)} · {t("request.input")} {call.inputTokens.toLocaleString()} tokens
+            {call.outputTokens != null ? ` · ${t("request.output")} ${call.outputTokens.toLocaleString()} tokens` : ""}
             ·{" "}
             {call.transport === "websocket"
               ? call.wsFrames + " " + t("request.frames")
