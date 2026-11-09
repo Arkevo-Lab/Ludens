@@ -69,7 +69,7 @@ async function fixture(keepRecentTokens = 1) {
     emitNotice: () => {}, scheduleAgentContinue: () => {}, scheduleCompactionContinuation: () => false,
     persistTurnMessagesForMidRunCompaction: async () => false, findLastAssistantMessage: () => undefined,
     disconnectFromAgent: () => {}, reconnectToAgent: () => {}, drainStrandedQueuedMessages: () => {},
-    buildDisplaySessionContext: () => manager.buildSessionContext(), convertToLlmForSideRequest: convertToLlm,
+    buildDisplaySessionContext: () => manager.buildSessionContext(), replaceMessagesFromSessionContext: messages => agent.replaceMessages(messages), convertToLlmForSideRequest: convertToLlm,
     buildLiveProviderContext: async (summarized, retained) => ({messages: convertToLlm([...summarized, ...retained])}),
     obfuscateTextForProvider: text => text, obfuscatePreparationForProvider: preparation => preparation,
     closeCodexProviderSessionsForHistoryRewrite: () => {}, resetCodexProviderAfterCompaction: () => {},

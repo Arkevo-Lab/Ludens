@@ -1,8 +1,8 @@
 diff --git a/dist/types/providers/openai-codex-responses.d.ts b/dist/types/providers/openai-codex-responses.d.ts
-index 3f11cef..85a3c7d 100644
+index 5ff1d3a..3130e4c 100644
 --- a/dist/types/providers/openai-codex-responses.d.ts
 +++ b/dist/types/providers/openai-codex-responses.d.ts
-@@ -277,7 +277,8 @@ type CodexToolPayload = {
+@@ -274,7 +274,8 @@ type CodexToolPayload = {
  /** @internal Exported for tests. */
  export declare function convertOpenAICodexResponsesTools(tools: Tool[], model: Model<"openai-codex-responses">): CodexToolPayload[];
  export declare class CodexWebSocketTransportError extends Error {
@@ -29,11 +29,36 @@ index a19fd27..500fc7d 100644
      websocketPreferred: boolean;
      lastTransport?: CodexTransport;
      websocketDisabled: boolean;
+diff --git a/dist/types/providers/responses-websocket-connection.d.ts b/dist/types/providers/responses-websocket-connection.d.ts
+index c9ff6a3..a3803b4 100644
+--- a/dist/types/providers/responses-websocket-connection.d.ts
++++ b/dist/types/providers/responses-websocket-connection.d.ts
+@@ -7,9 +7,11 @@ export declare class ResponsesWebSocketTransportError extends Error {
+     readonly phase: ResponsesWebSocketTransportErrorPhase;
+     readonly status?: number;
+     readonly headers?: Headers;
++    readonly closeCode?: number;
+     constructor(reason: ResponsesWebSocketTransportErrorReason, phase: ResponsesWebSocketTransportErrorPhase, detail: string, options?: ErrorOptions & {
+         status?: number;
+         headers?: Headers;
++        closeCode?: number;
+     });
+ }
+ export interface ResponsesWebSocketTimeouts {
+@@ -32,6 +34,8 @@ export interface ResponsesWebSocketConnectionOptions {
+     connectTimeoutMs: number;
+     maxIdleReuseMs: number;
+     messageQueueCapacity: number;
++    /** Conservative local frame budget, not a claim about the gateway's exact limit. */
++    maxRequestBytes?: number;
+     heartbeat?: {
+         intervalMs: number;
+         pongTimeoutMs: number;
 diff --git a/src/providers/openai-codex-responses.ts b/src/providers/openai-codex-responses.ts
-index e6c0545..a7bb734 100644
+index d77841d..2c2b2bb 100644
 --- a/src/providers/openai-codex-responses.ts
 +++ b/src/providers/openai-codex-responses.ts
-@@ -282,6 +282,8 @@ const CODEX_WEBSOCKET_IDLE_TIMEOUT_MS = Number($env.PI_CODEX_WEBSOCKET_IDLE_TIME
+@@ -289,6 +289,8 @@ const CODEX_WEBSOCKET_IDLE_TIMEOUT_MS = Number($env.PI_CODEX_WEBSOCKET_IDLE_TIME
   */
  const CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS = Number($env.PI_CODEX_WEBSOCKET_FIRST_EVENT_TIMEOUT_MS || 300_000);
  const CODEX_WEBSOCKET_RETRY_BUDGET = Number($env.PI_CODEX_WEBSOCKET_RETRY_BUDGET || CODEX_MAX_RETRIES);
@@ -42,7 +67,7 @@ index e6c0545..a7bb734 100644
  const CODEX_WEBSOCKET_RETRY_DELAY_MS = Number($env.PI_CODEX_WEBSOCKET_RETRY_DELAY_MS || CODEX_RETRY_DELAY_MS);
  const CODEX_WEBSOCKET_TRANSPORT_ERROR_PREFIX = "Codex websocket transport error";
  // The native-lane steering rejection is replayable: the session stops steering
-@@ -302,7 +304,9 @@ const CODEX_WS_RESPONSES_LITE_CLIENT_METADATA_KEY = "ws_request_header_x_openai_
+@@ -315,7 +317,9 @@ const CODEX_WS_RESPONSES_LITE_CLIENT_METADATA_KEY = "ws_request_header_x_openai_
  /** `response.metadata` payload key carrying ChatGPT moderation metadata. */
  const CODEX_MODERATION_METADATA_KEY = "openai_chatgpt_moderation_metadata";
  /** Connection-level websocket failures that should immediately fall back to SSE without retrying. */
@@ -52,8 +77,8 @@ index e6c0545..a7bb734 100644
 +const CODEX_WEBSOCKET_REJECTED_CLOSE_CODES = new Set([1002, 1003, 1007, 1008, 1010, 3000, 3003]);
  /** Max total time to spend retrying 429s with server-provided delays (5 minutes). */
  const CODEX_RATE_LIMIT_BUDGET_MS = 5 * 60 * 1000;
- const CODEX_ADDITIONAL_PROGRESS_EVENT_TYPES = new Set(["response.done", "response.incomplete"]);
-@@ -442,6 +446,10 @@ export interface OpenAICodexWebSocketDebugStats {
+ // Provider/model failure mode: Codex can keep a response alive by streaming
+@@ -418,6 +422,10 @@ export interface OpenAICodexWebSocketDebugStats {
  export type CodexWebSocketSessionState = {
  	sessionId: string;
  	disableWebsocket: boolean;
@@ -64,7 +89,7 @@ index e6c0545..a7bb734 100644
  	lastRequest?: RequestBody;
  	/** Last completed response; an in-progress response cannot replace the retry baseline. */
  	lastResponseId?: string;
-@@ -460,6 +468,7 @@ export type CodexWebSocketSessionState = {
+@@ -436,6 +444,7 @@ export type CodexWebSocketSessionState = {
  	lastTransport?: CodexTransport;
  	fallbackCount: number;
  	lastFallbackAt?: number;
@@ -72,7 +97,7 @@ index e6c0545..a7bb734 100644
  	prewarmed: boolean;
  	stats: OpenAICodexWebSocketDebugStats;
  };
-@@ -1029,22 +1038,7 @@ interface CodexStreamCompletion {
+@@ -1005,22 +1014,7 @@ interface CodexStreamCompletion {
  }
  
  function isCodexWebSocketRetryableStreamError(error: unknown): boolean {
@@ -94,9 +119,9 @@ index e6c0545..a7bb734 100644
 -	);
 +	return error instanceof CodexWebSocketTransportError;
  }
- function toCodexHeaderRecord(value: unknown): Record<string, string> | null {
- 	if (!value || typeof value !== "object") return null;
-@@ -1415,6 +1409,8 @@ function createCodexRequestContext(
+ 
+ function updateCodexSessionMetadataFromHeaders(
+@@ -1299,6 +1293,8 @@ function createCodexRequestContext(
  			: sharedWebsocketState;
  	if (isolatedTransportState && websocketState && sharedWebsocketState) {
  		websocketState.disableWebsocket = sharedWebsocketState.disableWebsocket;
@@ -105,7 +130,7 @@ index e6c0545..a7bb734 100644
  		websocketState.modelsEtag = sharedWebsocketState.modelsEtag;
  	}
  	const metadataSessionId = transportSessionId ?? crypto.randomUUID();
-@@ -1602,16 +1598,16 @@ async function openInitialCodexEventStream(
+@@ -1489,16 +1485,16 @@ async function openInitialCodexEventStream(
  					options ? event => options.onSseEvent?.(event, model) : undefined,
  				);
  			} catch (error) {
@@ -125,7 +150,7 @@ index e6c0545..a7bb734 100644
  				CODEX_DEBUG &&
  					logger.debug("[codex] codex websocket fallback", {
  						error: error.message,
-@@ -1711,7 +1707,7 @@ async function* streamCodexCompactionEvents(
+@@ -1598,7 +1594,7 @@ async function* streamCodexCompactionEvents(
  					throw error;
  				}
  				const state = requestContext.websocketState;
@@ -134,35 +159,15 @@ index e6c0545..a7bb734 100644
  				const fallback = await openCodexSseTransport(model, requestContext, requestSetup, options, state);
  				if (state) state.lastTransport = fallback.transport;
  				yield* drainCodexCompactionEvents(fallback.eventStream, requestContext);
-@@ -1791,8 +1787,6 @@ async function openCodexWebSocketTransport(
- 	requestBodyForState: RequestBody;
- 	transport: CodexTransport;
- }> {
--	const canAppendBeforeRequest = websocketState.canAppend === true;
--	let chainedBody = buildCodexChainedRequestBody(requestContext.transformedBody, websocketState);
- 	const websocketHeaders = createCodexHeaders(
- 		requestContext.requestHeaders,
- 		requestContext.accountId,
-@@ -1827,6 +1821,10 @@ async function openCodexWebSocketTransport(
- 		model.provider,
- 		requestSetup.requestSignal,
- 	);
-+	// A replacement connection clears append state. Build the request afterward
-+	// so its first frame cannot retain a previous_response_id from the old socket.
-+	const canAppendBeforeRequest = websocketState.canAppend === true;
-+	let chainedBody = buildCodexChainedRequestBody(requestContext.transformedBody, websocketState);
- 	const timeouts: CodexWebSocketRequestTimeouts = {
- 		idleTimeoutMs: requestSetup.websocketIdleTimeoutMs,
- 		firstEventTimeoutMs: requestSetup.websocketFirstEventTimeoutMs,
-@@ -2768,6 +2766,7 @@ class CodexStreamProcessor {
+@@ -2682,6 +2678,7 @@ class CodexStreamProcessor {
  	}
  
  	async #recoverStreamError(error: unknown): Promise<boolean> {
 +		if (this.requestSetup.requestSignal.aborted) return false;
- 		this.#stopSteeringOnNativeLaneRejection(error);
  		if (
  			error instanceof CodexSteerCommitError &&
-@@ -2801,6 +2800,12 @@ class CodexStreamProcessor {
+ 			this.runtime.websocketState &&
+@@ -2714,6 +2711,12 @@ class CodexStreamProcessor {
  		if (await this.#tryRetryProviderError(error)) {
  			return true;
  		}
@@ -175,7 +180,7 @@ index e6c0545..a7bb734 100644
  		return false;
  	}
  
-@@ -2913,12 +2918,12 @@ class CodexStreamProcessor {
+@@ -2826,12 +2829,12 @@ class CodexStreamProcessor {
  			});
  
  		if (this.output.content.length > 0) {
@@ -191,7 +196,7 @@ index e6c0545..a7bb734 100644
  			await this.#reopenSseStream(websocketState);
  			return true;
  		}
-@@ -2931,7 +2936,7 @@ class CodexStreamProcessor {
+@@ -2844,7 +2847,7 @@ class CodexStreamProcessor {
  		this.runtime.resetAccumulators();
  		this.firstTokenTime = undefined;
  		if (this.runtime.websocketStreamRetries >= CODEX_WEBSOCKET_RETRY_BUDGET) {
@@ -200,8 +205,8 @@ index e6c0545..a7bb734 100644
  			await this.#reopenSseStream(websocketState);
  			return true;
  		}
-@@ -3071,14 +3076,15 @@ class CodexStreamProcessor {
- 		const streamError = error instanceof Error ? error : new Error(String(error));
+@@ -2984,14 +2987,15 @@ class CodexStreamProcessor {
+ 		const streamError = toError(error);
  		const replayingBufferedOutputOverSse = this.output.content.length > 0;
  		const fatalWebSocketMessage = streamError.message.toLowerCase();
 -		const isFatal = CODEX_WEBSOCKET_FATAL_PATTERNS.some(pattern =>
@@ -218,7 +223,7 @@ index e6c0545..a7bb734 100644
  		CODEX_DEBUG &&
  			logger.debug("[codex] codex websocket stream fallback", {
  				error: streamError.message,
-@@ -3103,6 +3109,7 @@ class CodexStreamProcessor {
+@@ -3016,6 +3020,7 @@ class CodexStreamProcessor {
  			return true;
  		}
  
@@ -226,7 +231,7 @@ index e6c0545..a7bb734 100644
  		this.runtime.resetAccumulators();
  		resetOutputState(this.output);
  		this.firstTokenTime = undefined;
-@@ -3221,12 +3228,12 @@ class CodexStreamProcessor {
+@@ -3134,12 +3139,12 @@ class CodexStreamProcessor {
  			this.runtime.transport = next.transport;
  			state.lastTransport = next.transport;
  		} catch (error) {
@@ -241,7 +246,7 @@ index e6c0545..a7bb734 100644
  			CODEX_DEBUG &&
  				logger.debug("[codex] codex websocket reopen failed, falling back to SSE", {
  					error: error.message,
-@@ -3482,7 +3489,24 @@ function getCodexWebSocketSessionState(
+@@ -3422,7 +3427,24 @@ function getCodexWebSocketSessionState(
  	return created;
  }
  
@@ -267,7 +272,7 @@ index e6c0545..a7bb734 100644
  	resetCodexWebSocketAppendState(state);
  	// Never tear down a CONNECTING socket: it belongs to a concurrent caller's
  	// in-flight handshake (prewarm/request race); closing it would reject that
-@@ -3493,10 +3517,20 @@ function recordCodexWebSocketFailure(state: CodexWebSocketSessionState, activate
+@@ -3433,10 +3455,20 @@ function recordCodexWebSocketFailure(state: CodexWebSocketSessionState, activate
  		state.connection = undefined;
  	}
  	state.lastFallbackAt = Date.now();
@@ -291,7 +296,7 @@ index e6c0545..a7bb734 100644
  }
  
  /**
-@@ -3520,7 +3554,11 @@ function shouldUseCodexWebSocket(
+@@ -3460,7 +3492,11 @@ function shouldUseCodexWebSocket(
  	// Explicitly disabled by the model or session state.
  	if (model.preferWebsockets === false) return false;
  	// Explicitly disabled by the session state.
@@ -304,37 +309,31 @@ index e6c0545..a7bb734 100644
  	// Env val > Preference
  	const envVal = getOpenAICodexWebSocketEnvValue();
  	if (envVal !== undefined) return envVal;
-@@ -4016,10 +4054,14 @@ class CodexWebSocketConnection {
- 			if (!settled) {
- 				settled = true;
- 				clearPending();
--				reject(new CodexWebSocketTransportError(`websocket closed before open (${event.code})`));
-+				reject(new CodexWebSocketTransportError(`websocket closed before open (${event.code})`, { closeCode: event.code }));
- 				return;
- 			}
--			this.#push(new CodexWebSocketTransportError(`websocket closed (${event.code})`));
-+			this.#push(
-+				event.code === 1009
-+					? new CodexWebSocketMessageTooLargeError(`websocket closed (1009)`)
-+					: new CodexWebSocketTransportError(`websocket closed (${event.code})`, { closeCode: event.code }),
-+			);
- 			this.#push(null);
- 		};
- 		socket.onmessage = event => {
-@@ -4128,6 +4170,12 @@ class CodexWebSocketConnection {
- 					: undefined;
+@@ -3772,6 +3808,7 @@ class CodexWebSocketConnection {
+ 			headers,
+ 			proxy: options.proxy,
+ 			connectTimeoutMs: CODEX_WEBSOCKET_CONNECT_TIMEOUT_MS,
++			maxRequestBytes: CODEX_WEBSOCKET_MAX_REQUEST_BYTES,
+ 			maxIdleReuseMs: CODEX_WEBSOCKET_MAX_IDLE_REUSE_MS,
+ 			messageQueueCapacity: CODEX_WEBSOCKET_MESSAGE_QUEUE_CAPACITY,
+ 			heartbeat: {
+@@ -3985,7 +4022,14 @@ class CodexWebSocketConnection {
+ function translateCodexWebSocketError(error: unknown): unknown {
+ 	if (!(error instanceof ResponsesWebSocketTransportError)) return error;
+ 	if (error.reason === "busy") return new CodexWebSocketBusyError(error.message, { cause: error });
+-	return new CodexWebSocketTransportError(error.message, { cause: error.cause ?? error });
++	// A 1009 close rejects the frame size; retry only after history compaction.
++	if (error.closeCode === 1009) {
++		return new CodexWebSocketMessageTooLargeError(error.message, { cause: error.cause ?? error, closeCode: 1009 });
++	}
++	if (error.message.startsWith("websocket message too large")) {
++		return new CodexWebSocketMessageTooLargeError(error.message, { cause: error.cause ?? error });
++	}
++	return new CodexWebSocketTransportError(error.message, { cause: error.cause ?? error, closeCode: error.closeCode });
+ }
  
- 				const requestPayload = JSON.stringify(request);
-+				const requestBytes = Buffer.byteLength(requestPayload, "utf8");
-+				if (requestBytes > CODEX_WEBSOCKET_MAX_REQUEST_BYTES) {
-+					throw new CodexWebSocketMessageTooLargeError(
-+						`websocket message too large (${requestBytes} > ${CODEX_WEBSOCKET_MAX_REQUEST_BYTES} bytes)`,
-+					);
-+				}
- 				notifyCodexWebSocketOutbound(onSseEvent, request, requestPayload);
- 				// Re-check liveness: the debug-session await above can outlive the socket.
- 				// Preserve the abort cause: onAbort already queued a caused error, but this
-@@ -5095,11 +5143,15 @@ export function convertOpenAICodexResponsesTools(
+ async function getOrCreateCodexWebSocketConnection(
+@@ -4554,11 +4598,15 @@ export function convertOpenAICodexResponsesTools(
  }
  
  export class CodexWebSocketTransportError extends Error {
@@ -385,3 +384,61 @@ index 5086c32..82bbb3f 100644
 +		lastFallbackError: state?.lastFallbackError,
  	};
  }
+diff --git a/src/providers/responses-websocket-connection.ts b/src/providers/responses-websocket-connection.ts
+index fbb9190..26d9592 100644
+--- a/src/providers/responses-websocket-connection.ts
++++ b/src/providers/responses-websocket-connection.ts
+@@ -27,17 +27,19 @@ export type ResponsesWebSocketTransportErrorPhase = "connect" | "stream" | "befo
+ export class ResponsesWebSocketTransportError extends Error {
+ 	readonly status?: number;
+ 	readonly headers?: Headers;
++	readonly closeCode?: number;
+ 
+ 	constructor(
+ 		readonly reason: ResponsesWebSocketTransportErrorReason,
+ 		readonly phase: ResponsesWebSocketTransportErrorPhase,
+ 		detail: string,
+-		options?: ErrorOptions & { status?: number; headers?: Headers },
++		options?: ErrorOptions & { status?: number; headers?: Headers; closeCode?: number },
+ 	) {
+ 		super(detail, options);
+ 		this.name = "ResponsesWebSocketTransportError";
+ 		this.status = options?.status;
+ 		this.headers = options?.headers;
++		this.closeCode = options?.closeCode;
+ 	}
+ }
+ 
+@@ -61,6 +63,8 @@ export interface ResponsesWebSocketConnectionOptions {
+ 	maxIdleReuseMs: number;
+ 	messageQueueCapacity: number;
+ 	heartbeat?: { intervalMs: number; pongTimeoutMs: number };
++	/** Conservative local frame budget, not a claim about the gateway's exact limit. */
++	maxRequestBytes?: number;
+ 	inspectUpgradeResponse?: boolean;
+ 	onHandshakeHeaders?: (headers: Headers) => void;
+ 	controlFrames?: ResponsesWebSocketControlFrames;
+@@ -312,7 +316,7 @@ export class ResponsesWebSocketConnection {
+ 						"closed",
+ 						connecting ? "connect" : "stream",
+ 						connecting ? `websocket closed before open (${event.code})` : `websocket closed (${event.code})`,
+-						{ cause: event },
++						{ cause: event, closeCode: event.code },
+ 					),
+ 					"closed",
+ 				);
+@@ -511,6 +515,14 @@ export class ResponsesWebSocketConnection {
+ 
+ 	sendControl(frame: Record<string, unknown>): void {
+ 		const payload = JSON.stringify(frame);
++		const requestBytes = Buffer.byteLength(payload, "utf8");
++		if (requestBytes > this.#options.maxRequestBytes) {
++			throw new ResponsesWebSocketTransportError(
++				"send",
++				"stream",
++				`websocket message too large (${requestBytes} > ${this.#options.maxRequestBytes} bytes)`,
++			);
++		}
+ 		notifyFrame(this.#streamObserver, frame, payload, "→");
+ 		const socket = this.#socket;
+ 		if (!socket || socket.readyState !== WebSocket.OPEN || this.#closedError) {

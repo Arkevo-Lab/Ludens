@@ -5,7 +5,7 @@ import type { EventLog, EventTrace } from "../storage/events.ts";
 
 /** Shiori names the agent-loop role; OMP is this host's current implementation. */
 export const SHIORI_SOURCE = {
-  component: "shiori", implementation: "omp", implementationVersion: "18.14.0",
+  component: "shiori", implementation: "omp", implementationVersion: "18.18.3",
 } as const;
 
 function outcome(span: ReadableSpan) {
