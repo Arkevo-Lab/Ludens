@@ -49,6 +49,9 @@ export async function PUT(request: Request) {
     if (body?.action === "workspaceShiori") {
       return Response.json(await worker.call("updateWorkspaceShiori", [body.id, body.shiori], request.signal));
     }
+    if (body?.action === "workspaceServiceControl") {
+      return Response.json(await worker.call("controlWorkspaceService", [body.id, body.service], request.signal));
+    }
     return Response.json(await worker.call("updateWorkspaceRoot", [body?.workspaceRoot], request.signal));
   } catch (error) { return errorResponse(error); }
 }

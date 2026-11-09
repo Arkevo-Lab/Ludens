@@ -4,7 +4,7 @@ import { diagnosticEvents } from "./diagnostic-events";
 import { getActivity } from "./activity";
 import { getReplay } from "./replay";
 import { controlWorkspaceRuntime } from "./runtime-control";
-import { capabilities, capabilityRuntime } from "./capabilities";
+import { capabilities, capabilityRuntime, runWorkspaceCapabilityEval } from "./capabilities";
 import { discoverDriver } from "./drivers";
 import { docGroups, readDoc } from "./docs";
 import { petState, setPetTarget, recordPetConsumer } from "./pet-state";
@@ -30,6 +30,7 @@ import {
   removeBasewareMachine,
   updateWorkspaceMachines,
   controlWorkspaceMachine,
+  controlWorkspaceService,
   probeBasewareMachine,
 } from "./workspaces";
 const port = parentPort!;
@@ -51,6 +52,7 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   removeBasewareMachine: ([id]) => removeBasewareMachine(id),
   updateWorkspaceMachines: ([id, input]) => updateWorkspaceMachines(id, input),
   controlWorkspaceMachine: ([id, input]) => controlWorkspaceMachine(id, input),
+  controlWorkspaceService: ([id, input]) => controlWorkspaceService(id, input),
   probeBasewareMachine: ([input]) => probeBasewareMachine(input),
   diagnosticEvents: ([project, run, query], signal) => diagnosticEvents(project, run, query, signal),
   diagnostics: () => ({ memory: process.memoryUsage(), index: indexCacheStats(), activeRequests: requests.size - 1 }),
@@ -62,6 +64,7 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   media: ([project, run, id], signal) => mediaFile(project, run, id, undefined, signal),
   timelineRecord: ([project, run, record, sequence, source], signal) => timelineRecord(project, run, record, sequence, source, undefined, signal),
   capabilities: ([project, workspace], signal) => capabilities(project, workspace, undefined, signal),
+  runWorkspaceCapabilityEval: ([project, workspace, options], signal) => runWorkspaceCapabilityEval(project, workspace, options, undefined, signal),
   capabilityRuntime: ([project, workspace]) => capabilityRuntime(project, workspace),
   runtimeControl: ([project, workspace, command]) => controlWorkspaceRuntime(project, workspace, command),
   discoverDriver: ([spec], signal) => discoverDriver(spec, signal),

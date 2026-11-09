@@ -15,6 +15,8 @@ import {
   FlaskConical,
   History,
   Monitor,
+  Play,
+  RefreshCw,
   Sparkles,
   Timer,
   TrendingUp,
@@ -746,14 +748,20 @@ function WorkspaceTriadDeclarations({
   items,
   title,
   project,
+  runningEvalTarget,
+  onRunEval,
   onNavigate,
 }: {
   items: CapabilityEntry[];
   title: string;
   project: string;
+  runningEvalTarget?: string | null;
+  onRunEval?(capabilityId: string): void;
   onNavigate(href: string): void;
 }) {
   const t = useTranslations("capabilitiesView");
+  const { locale } = useLocale();
+  const isZh = locale === "zh";
   return (
     <ul className="triad-capability-list" role="list" aria-label={title}>
       {items.map(item => {
@@ -763,6 +771,7 @@ function WorkspaceTriadDeclarations({
         const staleSet = new Set(item.staleReasons ?? []);
         const duration = formatDuration(item.latestRecord?.durationMs);
         const adaptation = item.latestRecord?.adaptation;
+        const isRunningThis = runningEvalTarget === item.id || runningEvalTarget === "__all__";
         return (
           <li key={item.id} className="capability-declaration triad-card" data-capability-declaration={item.id}>
             <div className="triad-card-header">
@@ -785,9 +794,30 @@ function WorkspaceTriadDeclarations({
                     </Badge>
                   )}
                 </h4>
-                <div className="triad-origin-meta">
-                  {item.origin && <code>{item.origin.path}:{item.origin.line}</code>}
-                  {capSha && <code>#{capSha}</code>}
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="triad-origin-meta">
+                    {item.origin && <code>{item.origin.path}:{item.origin.line}</code>}
+                    {capSha && <code>#{capSha}</code>}
+                  </div>
+                  {item.evalId && onRunEval && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={Boolean(runningEvalTarget)}
+                      onClick={() => onRunEval(item.id)}
+                      data-capability-run-eval={item.id}
+                    >
+                      {isRunningThis ? (
+                        <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Play className="size-3" aria-hidden="true" />
+                      )}
+                      {isRunningThis
+                        ? isZh ? "评测中…" : "Evaluating…"
+                        : isZh ? "运行评测" : "Run Eval"}
+                    </Button>
+                  )}
                 </div>
               </div>
               <div className="capability-declaration-description">
@@ -1006,18 +1036,62 @@ function ConnectionCheck({ project, workspace }: { project: string; workspace: s
 
 function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalogLoading, onRetryCatalog, onNavigate }: WorkspaceCatalogProps) {
   const t = useTranslations("capabilitiesView"), guide = useGuideHref(project);
+  const { locale } = useLocale();
+  const isZh = locale === "zh";
   const capsLoad = useReadResource<CapabilitiesResult>(project && workspace ? "/api/capabilities?" + new URLSearchParams({ project, workspace }) : null, t("readFailed"));
   const caps = capsLoad.value;
   const [statusFilter, setStatusFilter] = useState<CapabilityEvalStatus | "all">("all");
+  const [runningEvalTarget, setRunningEvalTarget] = useState<string | null>(null);
+  const [evalRunNotice, setEvalRunNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const catalogFocus = useRetryFocus(!!catalogLoading, catalogError);
   const links = { device: { doc: "tutorials/devices", label: "deviceGuide" }, workspace: { doc: "tutorials/workspace", label: "capabilityGuide" } };
   const workspaceItems = caps?.groups.find(group => group.id === "workspace")?.items ?? [];
+  const runnableEvalCount = workspaceItems.filter(item => Boolean(item.evalId)).length;
   const filteredWorkspaceItems = statusFilter === "all"
     ? workspaceItems
     : workspaceItems.filter(item => item.evalStatus === statusFilter);
   const deviceItems = caps?.groups.find(group => group.id === "device")?.items ?? [];
   const envs = caps?.envs ?? [];
   const evalSummary = caps?.evalSummary ?? { missing: 0, unverified: 0, stale: 0, adapting: 0, failed: 0, verified: 0 };
+
+  const handleRunEval = async (capabilityId?: string) => {
+    if (!project || !workspace || runningEvalTarget) return;
+    setRunningEvalTarget(capabilityId ?? "__all__");
+    setEvalRunNotice(null);
+    try {
+      const response = await fetch("/api/capabilities", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project,
+          workspace,
+          ...(capabilityId ? { capabilityId } : { all: true }),
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result?.error ?? (isZh ? "运行评测失败" : "Failed to run eval"));
+      const runOutcome = result?.run?.outcome === "passed";
+      const count = Array.isArray(result?.run?.results) ? result.run.results.length : 1;
+      setEvalRunNotice({
+        ok: runOutcome,
+        message: capabilityId
+          ? isZh
+            ? `${capabilityId} 评测完成：${runOutcome ? "通过 (Passed)" : "未通过 (Failed)"}`
+            : `Eval ${capabilityId}: ${runOutcome ? "Passed" : "Failed"}`
+          : isZh
+            ? `已执行 ${count} 项能力评测：${runOutcome ? "全部通过" : "存在失败项"}`
+            : `Executed ${count} capability eval(s): ${runOutcome ? "All passed" : "Some failed"}`,
+      });
+      capsLoad.retry();
+    } catch (error) {
+      setEvalRunNotice({
+        ok: false,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setRunningEvalTarget(null);
+    }
+  };
 
   return <div ref={catalogFocus.target} className="grid min-w-0 grid-cols-1 gap-5" tabIndex={-1} role="region" aria-label={t("overviewLabel")} aria-busy={capsLoad.loading}>
     {catalogError && <Alert variant="destructive"><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0 flex-1"><p>{t("catalogFailed")}</p><details className="mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{catalogError}</pre></details></div>
@@ -1060,10 +1134,39 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
                 </span>
               </div>
             </div>
-            <NavigationLink href={guide(links.workspace.doc)} onNavigate={onNavigate}>
-              <BookOpen />{t(links.workspace.label)}
-            </NavigationLink>
+            <div className="flex flex-wrap items-center gap-2">
+              {runnableEvalCount > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  disabled={Boolean(runningEvalTarget)}
+                  onClick={() => void handleRunEval()}
+                  data-capability-run-all-evals
+                >
+                  {runningEvalTarget === "__all__" ? (
+                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <FlaskConical className="size-3.5" aria-hidden="true" />
+                  )}
+                  {runningEvalTarget === "__all__"
+                    ? isZh ? "正在运行评测…" : "Running Evals…"
+                    : isZh ? `运行全部评测 (${runnableEvalCount})` : `Run All Evals (${runnableEvalCount})`}
+                </Button>
+              )}
+              <NavigationLink href={guide(links.workspace.doc)} onNavigate={onNavigate}>
+                <BookOpen />{t(links.workspace.label)}
+              </NavigationLink>
+            </div>
           </div>
+          {evalRunNotice && (
+            <Alert className={evalRunNotice.ok ? "border-success/35 bg-success/5" : "border-destructive/40 bg-destructive/10"}>
+              <AlertDescription className="flex items-center justify-between gap-2 text-xs">
+                <span>{evalRunNotice.message}</span>
+                <button type="button" onClick={() => setEvalRunNotice(null)} className="text-muted-foreground hover:text-foreground">×</button>
+              </AlertDescription>
+            </Alert>
+          )}
           <p className="text-xs leading-relaxed text-muted-foreground">{t("sourceDescriptions.workspace")}</p>
           {caps.sources.workspace.status === "error" ? (
             <p className="text-sm text-destructive">{t("sourceFailure")}</p>
@@ -1081,6 +1184,8 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
               items={filteredWorkspaceItems}
               title={t("groupTitles.workspace")}
               project={project}
+              runningEvalTarget={runningEvalTarget}
+              onRunEval={capId => void handleRunEval(capId)}
               onNavigate={onNavigate}
             />
           )}

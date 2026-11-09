@@ -34,3 +34,31 @@ ludens init --name my-task --driver <id> --driver-package 'github:org/repo#rev'
 - **Trust boundary**: discovery does not call the driver's `load()`, but it downloads and installs dependencies and imports the package entry code; only run discovery and init against trusted sources. For the driver package spec see [Driver packages & launch descriptions](../reference/baseware.md#driver-packages-and-launch-description) and [Driver Bridge protocol](../reference/driver-bridge-protocol.md).
 
 **Migrating an existing external-driver workspace**: run `ludens auto off`, then `ludens down --keep-emulator`; add or update the matching `driverPackage` in `ludens.json` (pinning the target revision or commit SHA), then run `ludens up --dry-run` / `ludens up`. Do not re-run `ludens init`; the original workspace files and saves are kept. Already-running services do not switch packages just because sources were updated. To attach to an already manually prepared emulator without auto-launching a game file, omit `game`.
+
+## Machine pool & multi-device mounting
+
+Rather than binding to a single static host, Ludens manages a persistent **controlled node pool** in `~/.ludens/machines.json` and allows a workspace to mount multiple devices simultaneously:
+
+1. **Inspect & manage nodes from the CLI** (when running inside a launched workspace shell):
+   ```bash
+   ludens machine list
+   ludens machine use gba-mgba
+   ludens machine connect gba-mgba-2
+   ludens machine disconnect gba-mgba-2
+   ```
+2. **Manage nodes in the Console (`?view=baseware`)**:
+   - Open the **Baseware** view to inspect all registered machines in the left-hand node list (`data-baseware-section="machine-pool"`).
+   - Click **+ Add Node** (`data-baseware-add-machine`) to add an mGBA preset or custom `ws` / `tcp` / `unix` endpoint.
+   - Select any machine to view its 3-tab detail pane (**Node Control & Controller Interfaces**, **Connection Config**, **Local Baseware Daemon**), and use **Set as Primary (`use`)**, **Also Mount (`connect`)**, or **Disconnect (`disconnect`)** with 1 click.
+3. **Target specific devices from Python (`ludens_tools`)**:
+   ```python
+   import ludens_tools
+
+   # Inspect mounted machines
+   print(ludens_tools.machines())
+
+   # Call the primary machine (or pass machine="<machineId>" for any mounted node)
+   ludens_tools.call("controller/capture_frame", {}, machine="gba-mgba")
+   ludens_tools.call("controller/tap_button", {"button": "A"}, machine="gba-mgba-2")
+   ```
+

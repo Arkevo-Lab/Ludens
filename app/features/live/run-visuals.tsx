@@ -217,6 +217,30 @@ function TimelineRecordDetails({ snapshot, url }: { snapshot: PerceptionSnapshot
   </details>;
 }
 
+function observationMachineId(o?: Observation): string | null {
+  if (!o) return null;
+  const ctrl = o.controller?.startsWith("controller/") ? o.controller.slice("controller/".length) : o.controller;
+  if (ctrl && ctrl.includes("/")) {
+    return ctrl.split("/")[0] || null;
+  }
+  const sources = o.perception?.snapshot?.sources;
+  if (Array.isArray(sources)) {
+    for (const src of sources) {
+      if (src && typeof src === "object") {
+        const rec = src as Record<string, unknown>;
+        if (typeof rec.machineId === "string" && rec.machineId) return rec.machineId;
+        if (typeof rec.controllerId === "string" && rec.controllerId.includes("/")) {
+          const stripped = rec.controllerId.startsWith("controller/")
+            ? rec.controllerId.slice("controller/".length)
+            : rec.controllerId;
+          if (stripped.includes("/")) return stripped.split("/")[0] || null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
 export function ObservationPanel({
   data,
   call,
@@ -239,6 +263,15 @@ export function ObservationPanel({
   const { inputs, others, observation, showingInput } = selectObservations(
     data.observations, call, selectedImage,
   );
+  const machineStreams = (() => {
+    const byMachine = new Map<string, Observation>();
+    for (const item of [...inputs, ...others, ...data.observations]) {
+      const mId = observationMachineId(item);
+      if (mId) byMachine.set(mId, item);
+    }
+    return [...byMachine.entries()].map(([machineId, latestObs]) => ({ machineId, latestObs }));
+  })();
+  const activeMachineId = observationMachineId(observation);
   const text = showingInput ? call?.inputText : observation?.text;
   const perception = observation?.perception ?? (showingInput ? call?.perception : undefined);
   const snapshot = perception?.snapshot;
@@ -267,7 +300,10 @@ export function ObservationPanel({
           title={[o.controller, timestamp(o)].filter(Boolean).join(" · ")}
         >
           <ObservationMedia key={media(o)} observation={o} url={media(o)} thumbnail />
-          <small>{o.mediaStorage === "unrecorded" ? t("panel.unrecorded") : label}</small>
+          <small>
+            {observationMachineId(o) ? `[${observationMachineId(o)}] ` : ""}
+            {o.mediaStorage === "unrecorded" ? t("panel.unrecorded") : label}
+          </small>
           <small>{observationTime(timestamp(o), t)}</small>
         </button>
       ))}
@@ -338,6 +374,34 @@ export function ObservationPanel({
         </p>
       )}
       {!priority && readDetails}
+      {machineStreams.length > 1 && (
+        <div
+          className="flex flex-wrap items-center gap-1.5 px-3 pb-2 text-xs"
+          role="group"
+          aria-label="Multi-Machine Observation Streams"
+          data-observation-machine-streams
+        >
+          {machineStreams.map(({ machineId, latestObs }) => {
+            const isSelectedMachine = activeMachineId === machineId;
+            return (
+              <button
+                key={machineId}
+                type="button"
+                onClick={() => onImage(latestObs.id)}
+                className={
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-mono text-[11px] transition-colors " +
+                  (isSelectedMachine
+                    ? "border-primary bg-primary/15 font-semibold text-primary"
+                    : "border-border/70 bg-muted/40 text-muted-foreground hover:border-border hover:text-foreground")
+                }
+              >
+                <span className={"size-1.5 rounded-full " + (isSelectedMachine ? "bg-primary" : "bg-muted-foreground")} />
+                <span>{machineId}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
       <div className={"screen" + (priority && (!observation || !observation.mediaType.startsWith("image/") || observation.mediaStorage === "unrecorded") ? " screen-content" : "")}>
         {observation ? (
           <ObservationMedia key={data.project + ":" + data.run} observation={observation} url={media(observation)}
@@ -357,6 +421,11 @@ export function ObservationPanel({
         )}
       </div>
       <div className="screen-meta">
+        {activeMachineId && (
+          <span className="rounded border border-primary/35 bg-primary/10 px-1.5 py-0.5 font-mono text-[11px] text-primary" data-observation-machine={activeMachineId}>
+            {activeMachineId}
+          </span>
+        )}
         <span>
           {observation
             ? (observationOrigin(observation.origin, t) +

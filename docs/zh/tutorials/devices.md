@@ -34,3 +34,31 @@ ludens init --name my-task --driver <id> --driver-package 'github:org/repo#rev'
 - **信任边界**：发现阶段虽不调用驱动的 `load()`，但会下载安装依赖并导入包入口代码；仅对可信来源执行发现与初始化。驱动包规范详见 [Driver 包与启动描述](../reference/baseware.md#driver-包与启动描述) 与 [Driver Bridge 协议](../reference/driver-bridge-protocol.md)。
 
 **已有外部驱动工作区迁移**：先执行 `ludens auto off`，再执行 `ludens down --keep-emulator`；在原 `ludens.json` 增加或更新匹配驱动的 `driverPackage`（固定目标版本或 commit SHA），然后 `ludens up --dry-run` / `ludens up`。不重新执行 `ludens init`，原工作区文件与存档继续保留。已经运行的服务不会因源码更新自动换包。仅连接已手动准备的模拟器而不自动启动游戏文件时，省略 `game`。
+
+## 受控节点池与多设备挂载
+
+Ludens 不再局限于绑定单一静态地址，而是在 `~/.ludens/machines.json` 中维护持久化的**受控节点池（Machine Pool）**，并支持单个工作区并发挂载多台设备：
+
+1. **在 CLI 中查看与切换节点**（在已启动的工作区环境中执行）：
+   ```bash
+   ludens machine list
+   ludens machine use gba-mgba
+   ludens machine connect gba-mgba-2
+   ludens machine disconnect gba-mgba-2
+   ```
+2. **在管理台（`?view=baseware`）中管理节点**：
+   - 打开 **Baseware** 视图，在左侧受控节点池列表（`data-baseware-section="machine-pool"`）中查看全部已注册节点及其在线探活状态。
+   - 点击 **+ 新增节点**（`data-baseware-add-machine`）即可一键填入 mGBA 预设或自定义 `ws` / `tcp` / `unix` 端点。
+   - 选中任意节点后，右侧详情面板提供三个标签页（**节点操控与控制器接口**、**连接参数配置**、**本机 Baseware 守护进程**），支持一键执行 **设为主控 (`use`)**、**并发挂载 (`connect`)** 或 **断开连接 (`disconnect`)**。
+3. **在 Python (`ludens_tools`) 中定向操控指定设备**：
+   ```python
+   import ludens_tools
+
+   # 查看当前工作区挂载的设备列表
+   print(ludens_tools.machines())
+
+   # 默认调用主控设备，或通过 machine="<machineId>" 定向调用任意已挂载节点
+   ludens_tools.call("controller/capture_frame", {}, machine="gba-mgba")
+   ludens_tools.call("controller/tap_button", {"button": "A"}, machine="gba-mgba-2")
+   ```
+

@@ -711,6 +711,60 @@ export async function controlWorkspaceMachine(
   return await basewareOverview(id, home);
 }
 
+export interface WorkspaceServiceControlResult {
+  ok: boolean;
+  operation: "up" | "down" | "reload";
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  studio: WorkspaceStudioSnapshot;
+}
+
+/** Start, stop, or reload a workspace's background services through the ludens CLI. */
+export async function controlWorkspaceService(
+  id: unknown,
+  input: unknown,
+  home = globalHome,
+): Promise<WorkspaceServiceControlResult> {
+  if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
+  if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("后台服务操作必须是对象");
+  const { operation } = input as Record<string, unknown>;
+  if (operation !== "up" && operation !== "down" && operation !== "reload") throw new Error("不支持的后台服务操作");
+  const entry = await registeredWorkspace(id, home);
+  const ludensBin = join(repoRoot, "core/bin/ludens");
+  const envHome = ["env", `LUDENS_HOME=${resolve(home)}`];
+  let code: number;
+  let stdout = "";
+  let stderr = "";
+  if (operation === "up") {
+    const result = await runCommandShort([...envHome, ludensBin, "--workspace", entry.workspace, "up"], 25_000);
+    code = result.code;
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } else if (operation === "down") {
+    const result = await runCommandShort([...envHome, ludensBin, "--workspace", entry.workspace, "down"], 25_000);
+    code = result.code;
+    stdout = result.stdout;
+    stderr = result.stderr;
+  } else {
+    const down = await runCommandShort(
+      [...envHome, ludensBin, "--workspace", entry.workspace, "down", "--keep-emulator"], 25_000);
+    const up = await runCommandShort([...envHome, ludensBin, "--workspace", entry.workspace, "up"], 25_000);
+    code = down.code === 0 ? up.code : down.code;
+    stdout = `${down.stdout}\n${up.stdout}`;
+    stderr = `${down.stderr}\n${up.stderr}`;
+  }
+  clearCatalogCache();
+  return {
+    ok: code === 0,
+    operation,
+    exitCode: code,
+    stdout: stdout.trim(),
+    stderr: stderr.trim(),
+    studio: await workspaceStudio(id, home),
+  };
+}
+
 function probeBridge(transport: Extract<MachineTransportConfig, { kind: "bridge" }>): Promise<string> {
   const { promise, resolve: resolveProbe, reject: rejectProbe } = Promise.withResolvers<string>();
   const socket = createConnection({ host: transport.host ?? "127.0.0.1", port: transport.port });

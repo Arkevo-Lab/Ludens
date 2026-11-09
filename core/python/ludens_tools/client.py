@@ -263,8 +263,15 @@ class Client:
             query["after"] = page.get("nextAfter", batch[-1]["sequence"])
         return records
 
-    def call(self, capability_id: str, arguments: dict[str, Any] | None = None) -> Any:
+    def call(self, capability_id: str, arguments: dict[str, Any] | None = None, *, machine: str | None = None) -> Any:
         """Call a driver or local Python function with named arguments."""
+        if machine is not None:
+            if not isinstance(machine, str) or not machine.strip():
+                raise ValueError("machine must be a non-empty string")
+            if capability_id.startswith("controller/"):
+                rest = capability_id[len("controller/"):]
+                if not rest.startswith(f"{machine}/"):
+                    capability_id = f"controller/{machine}/{rest}"
         if capability_id.startswith("python/"):
             from ._capabilities import call_local
             context = self._context()
@@ -292,8 +299,14 @@ class Client:
                 # Base64 payload; wrap the content block in a lazy reference.
                 for obs in observations:
                     if isinstance(obs, dict) and isinstance(obs.get("path"), str) and obs["path"]:
-                        source_meta = {key: obs[key] for key in ("id", "controllerId", "timing", "sourceSequence")
+                        source_meta = {key: obs[key] for key in ("id", "controllerId", "machineId", "timing", "sourceSequence")
                                        if key in obs}
+                        if "machineId" not in source_meta:
+                            ctrl_id = obs.get("controllerId")
+                            if isinstance(ctrl_id, str) and "/" in ctrl_id:
+                                source_meta["machineId"] = ctrl_id.split("/", 1)[0]
+                            elif machine:
+                                source_meta["machineId"] = machine
                         index = obs.get("contentIndex")
                         if (isinstance(content, list) and isinstance(index, int)
                                 and 0 <= index < len(content) and isinstance(content[index], dict)):
@@ -304,6 +317,45 @@ class Client:
                                 path=obs["path"], sha256=obs.get("sha256"), media_bytes=obs.get("bytes"),
                                 media_type=obs.get("mediaType") or block.get("mimeType"), source=source_meta)
         return result
+
+    def machines(self) -> Any:
+        """List mounted and registered machines in the current workspace."""
+        context = self._context()
+        return request(context["socket_path"], {
+            "kind": "machine", "argv": ["list"],
+            **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
+        }, context["timeout"])
+
+    def use_machine(self, machine_id: str) -> Any:
+        """Switch the active primary machine in the current workspace."""
+        if not isinstance(machine_id, str) or not machine_id.strip():
+            raise ValueError("machine_id must be a non-empty string")
+        context = self._context()
+        return request(context["socket_path"], {
+            "kind": "machine", "argv": ["use", machine_id.strip()],
+            **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
+        }, context["timeout"])
+
+    def connect_machines(self, *machine_ids: str) -> Any:
+        """Mount one or more machines concurrently in Baseware."""
+        cleaned = [m.strip() for m in machine_ids if isinstance(m, str) and m.strip()]
+        if not cleaned:
+            raise ValueError("connect_machines requires at least one machine_id")
+        context = self._context()
+        return request(context["socket_path"], {
+            "kind": "machine", "argv": ["connect", *cleaned],
+            **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
+        }, context["timeout"])
+
+    def disconnect_machines(self, machine_id: str) -> Any:
+        """Unmount a secondary machine from Baseware."""
+        if not isinstance(machine_id, str) or not machine_id.strip():
+            raise ValueError("machine_id must be a non-empty string")
+        context = self._context()
+        return request(context["socket_path"], {
+            "kind": "machine", "argv": ["disconnect", machine_id.strip()],
+            **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
+        }, context["timeout"])
 
 
 def replay(window: Any = None, *, start: str | float | int | None = None,
