@@ -138,9 +138,9 @@ async function main() {
     devices.onHandback(reason => { void runtime!.stop(reason); });
     devices.onDisconnect(error => { void runtime!.disconnected(error); });
     await writeFile(join(runDir, "manifest.json"), JSON.stringify({ runId, workspace, workspaceId: state.id, stateDir: state.dir, socket,
-      drivers: devices.catalog.drivers, basewareSocket, omp: "18.14.0", eventSchemaVersion: EVENT_SCHEMA_VERSION,
+      drivers: devices.catalog.drivers, basewareSocket, omp: "18.18.3", eventSchemaVersion: EVENT_SCHEMA_VERSION,
       logging: { diagnostics, basewareDiagnostics: devices.diagnostics }, eventSources: devices.eventSources,
-      shiori: values["device-only"] ? null : { implementation: "omp", implementationVersion: "18.14.0" },
+      shiori: values["device-only"] ? null : { implementation: "omp", implementationVersion: "18.18.3" },
       provenance: await runProvenance(workspace), model: values["device-only"] ? null : model,
       seconds, maxRequests, resume, perception: { entry: "perception.py:Perception" }, compactionThreshold: compactionThreshold ?? null }, null, 2));
     ready = true;

@@ -1,5 +1,5 @@
 diff --git a/dist/types/compaction/compaction-v2-streaming.d.ts b/dist/types/compaction/compaction-v2-streaming.d.ts
-index 80cffb9..f95dc39 100644
+index 13b57ef..eb833bb 100644
 --- a/dist/types/compaction/compaction-v2-streaming.d.ts
 +++ b/dist/types/compaction/compaction-v2-streaming.d.ts
 @@ -31,6 +31,7 @@ export interface CompactionV2Request {
@@ -27,10 +27,10 @@ index 80cffb9..f95dc39 100644
      retainedMessageBudget?: number;
      retainedUserItems?: unknown[];
 diff --git a/dist/types/compaction/compaction.d.ts b/dist/types/compaction/compaction.d.ts
-index 2272e27..64ee5ba 100644
+index f81b4d6..088476d 100644
 --- a/dist/types/compaction/compaction.d.ts
 +++ b/dist/types/compaction/compaction.d.ts
-@@ -243,6 +243,8 @@ export interface SummaryOptions {
+@@ -245,6 +245,8 @@ export interface SummaryOptions {
      thinkingLevel?: ThinkingLevel;
      /** Session routing key for remote compaction transports with sticky provider sessions. */
      sessionId?: string;
@@ -40,7 +40,7 @@ index 2272e27..64ee5ba 100644
      promptCacheKey?: string;
      /**
 diff --git a/src/compaction/compaction-v2-streaming.ts b/src/compaction/compaction-v2-streaming.ts
-index fb1c6db..5ca1fc8 100644
+index 1fe1085..df20487 100644
 --- a/src/compaction/compaction-v2-streaming.ts
 +++ b/src/compaction/compaction-v2-streaming.ts
 @@ -80,6 +80,7 @@ export interface CompactionV2Request {
@@ -75,19 +75,19 @@ index fb1c6db..5ca1fc8 100644
  		promptCacheKey: options?.promptCacheKey,
  	};
  }
-@@ -375,6 +379,7 @@ async function attemptCompactionV2Streaming(
+@@ -378,6 +382,7 @@ async function attemptCompactionV2Streaming(
  			signal,
  			fetch: fetchImpl,
  			sessionId: request.sessionId,
 +			parentSessionId: request.parentSessionId,
  			providerSessionState: options.providerSessionState,
  			preferWebsockets: options.preferWebsockets,
- 			responsesLite: model.useResponsesLite,
+ 			codexAccessPrograms: options.codexAccessPrograms,
 diff --git a/src/compaction/compaction.ts b/src/compaction/compaction.ts
-index 542131c..04909df 100644
+index 49c6545..a59d9f6 100644
 --- a/src/compaction/compaction.ts
 +++ b/src/compaction/compaction.ts
-@@ -737,6 +737,8 @@ export interface SummaryOptions {
+@@ -736,6 +736,8 @@ export interface SummaryOptions {
  	thinkingLevel?: ThinkingLevel;
  	/** Session routing key for remote compaction transports with sticky provider sessions. */
  	sessionId?: string;
@@ -96,7 +96,7 @@ index 542131c..04909df 100644
  	/** Prompt-cache key for conventional summary requests, gated against the summarizing model. */
  	promptCacheKey?: string;
  	/**
-@@ -1758,6 +1760,7 @@ export async function compact(
+@@ -1787,6 +1789,7 @@ export async function compact(
  		// at the call sites, leaked back in here. See resolveCompactionEffort.
  		thinkingLevel: options?.thinkingLevel,
  		sessionId: options?.sessionId,
@@ -104,7 +104,7 @@ index 542131c..04909df 100644
  		promptCacheKey: options?.promptCacheKey,
  		remotePromptCacheKey:
  			options && Object.hasOwn(options, "remotePromptCacheKey")
-@@ -1982,6 +1985,7 @@ export async function compact(
+@@ -2021,6 +2024,7 @@ export async function compact(
  			assertRemoteCompactionInputFits(trimmed, model);
  			const requestOptions = {
  				sessionId: summaryOptions.sessionId,
