@@ -1,10 +1,27 @@
-# Ludens Dashboard
+# @ludens/app
 
-Browser-first console for live runs, timeline replay, run analysis, and Ludens Pet settings. Reads run logs and provides unified projections and workspace management without requiring Electron; the optional Ludens Pet desktop app loads the same console.
+Browser-first Next.js 16 observability and control console for Ludens workspaces, plus the optional Electron **Ludens Pet** desktop companion. Both the web console (`http://127.0.0.1:3015`) and the desktop app share the same React 19, Tailwind CSS 4, and shadcn/ui component primitives; Electron is not required for UI development or daily console use.
 
+## Console Views
+
+- **Live (`?view=live`)**: Real-time **Shiori Loop Cockpit** (`auto on`, `steer`, `follow_up`, `auto off`, `consolidate`), multi-machine observation stream switcher (`[machineId]`), and live activity trace.
+- **Replay (`?view=replay`)**: Bounded 30-second fMP4 frame window scrubber, millisecond timestamp jump, full-archive event search, and recorded model-input evidence inspector.
+- **Performance (`?view=perf`)**: Per-request latency breakdown, token/cache telemetry, and compaction timeline analysis.
+- **Capabilities (`?view=caps`)**: Visual **Capability – Eval – Env** triad topology, 3-way stale drift attribution, reward evolution charts, and 1-click **Run All Evals** / **Run Eval**.
+- **Config & Studio (`?view=perception`)**: Unified 5-tab workspace workbench (**Model & Budget**, **Connection & Multimodal Transport**, **Services & Session** with 1-click `up` / `reload` / `down` and inline `MEMORY.md` editor, **Perception Recording**, and **Loop Simulator**).
+- **Baseware (`?view=baseware`)**: Master-Detail **Controlled Node Hub** for managing `~/.ludens/machines.json`, 1-click workspace node mounting (`use` / `connect` / `disconnect`), connectivity probes, and Controller Interfaces catalog.
+- **Workspaces (`?view=workspaces`)**, **Docs (`?view=docs`)**, and **Settings (`?view=settings`)**.
+
+## Scripts
+
+```sh
+cd app && npm run dev        # Start local web console on http://127.0.0.1:3015
+cd app && npm run typecheck  # Next.js route typegen + web & desktop tsc
+cd app && bun test           # Run console test suite
+```
+
+## Documentation
+
+- [Dashboard UI and Interaction Contract](../docs/en/reference/dashboard-ui.md)
+- [Console Debugging and Verification](../docs/en/tutorials/debugging-and-verification.md)
 - [Install and Workspace Lifecycle](../docs/en/tutorials/quickstart.md)
-- [Console Debugging and Verification](../docs/en/tutorials/debugging-and-verification.md#standalone-components-and-consoles): in-console docs (`?view=docs`), capability catalog (`?view=caps`), and global settings (`?view=settings`, including Ludens Pet preferences)
-- [Loop Injection Workbench](../docs/en/reference/architecture.md#1-omp-superset-assembly-and-outer-turn-continuation): developer panel (`?view=dev&panel=loop`) simulating takeover context composition across the native OMP layer, the Ludens injection layer, and the removed end-of-batch channel
-- [Logging and Call Chains](../docs/en/reference/logging.md)
-- [Dashboard UI and Theme Conventions](../docs/en/reference/dashboard-ui.md): shadcn/ui, Tailwind CSS 4, and shared primitives
-- [Architecture and Boundaries](../docs/en/reference/architecture.md)

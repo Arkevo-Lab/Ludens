@@ -1,13 +1,28 @@
-# RSA
+# @ludens/core
 
-Recursive Self-Adaptation Harness: connects Shiori (currently OMP), Baseware, and an ordinary coding workspace with control cycles, resident perception/action loops, capability discovery, logging, and the workspace-native Capability–Eval–Env evaluation triad (`ludens eval`).
+The Ludens recursive self-adaptation harness: connects **Shiori** (powered by **OMP `18.18.3`**), **Baseware** controlled node pools, and an agent-evolved coding workspace with autonomous control cycles, a resident Python perception/action worker (`perception.py`), multi-machine controller routing (`controller/<machineId>/<tool>`), and the workspace-native **Capability – Eval – Env** evaluation triad (`ludens eval`).
+
+## Key Subsystems
+
+- **Host Daemon & Transport (`src/daemon/`)**: Manages the workspace unix socket (`ludens.sock`), Shiori autonomous loop (`auto on` / `steer` / `follow_up` / `auto off`), and dynamic multi-machine mounts (`ludens machine list | use | connect | disconnect`).
+- **Shiori Agent Runtime (`src/core/agent-omp/`)**: Integrates `@oh-my-pi/pi-coding-agent@18.18.3` with single-channel per-turn perception injection, background speculative compaction (`:spec:` session isolation + `parentSessionId` cache affinity), and stateful WebSocket delta recovery.
+- **Resident Python SDK (`python/ludens_tools/`)**: Provides `ludens_tools.Client`, multi-machine `call(..., machine=...)`, `@capability` / `@eval_capability` / `@eval_env` decorators, and high-frequency fMP4/H.264 timeline media recording.
+- **Dashboard Query Worker (`src/core/query/`)**: Serves workspace catalogs, live/replay projections, capability telemetry, 1-click service lifecycle RPCs (`controlWorkspaceService`), and capability eval runs (`runWorkspaceCapabilityEval`).
+
+## Scripts
+
+```sh
+cd core && bun run typecheck
+cd core && bun test
+```
+
+## Documentation
 
 - [Architecture and Boundaries](../docs/en/reference/architecture.md)
 - [Install and Workspace Lifecycle](../docs/en/tutorials/quickstart.md)
+- [Devices, Drivers & Multi-Machine Pool](../docs/en/tutorials/devices.md)
 - [Workspaces and Capability Programming](../docs/en/tutorials/workspace.md)
 - [Resident Perception-and-Action State Machine](../docs/en/tutorials/perception-and-action.md)
-- [Console Debugging and Verification](../docs/en/tutorials/debugging-and-verification.md)
-- [Logging and Call Chains](../docs/en/reference/logging.md)
 - [OMP Background Compaction Rework](../docs/en/insights/omp-compaction.md)
 - [WS Recovery Test Rationale](../docs/en/insights/ws-recovery.md)
-- [Injection Converges to a Single Per-Turn Channel](../docs/en/insights/omp-injection.md)
+- [Single-Channel Turn Injection](../docs/en/insights/omp-injection.md)
