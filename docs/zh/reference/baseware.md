@@ -138,3 +138,20 @@ baseware driver discover --package 'github:org/repo#rev'
 ## 上游契约与升级
 
 [baseware/contracts/cua-driver/](../../../baseware/contracts/cua-driver/) 目录固定保存了上游 CUA Driver 的版本、来源哈希、许可证与工具快照。该快照用于离线审计原子能力与运行 `python3 baseware/scripts/sync-cua-contract.py --check` 回归测试，运行期不会用快照裁剪上游新增的平台工具。由于 MCP SDK 默认 schema 解析会裁剪未知嵌套字段，Baseware 在协议边界校验结构后原样保留原始字段，并通过 MCP 往返测试保障保真度。
+
+## 受控节点池、多传输协议与多设备并发挂载
+
+Baseware 将工作区控制面（`<workspace>/ludens.json`）与被控制节点池（`~/.ludens/machines.json`，契约见 [machines.ts](../../../protocol/src/machines.ts)）解耦：
+
+1. **五类传输协议（Transport）**：
+   - `stdio`：本机子进程标准流管道（如内置 `local-desktop` CUA）；
+   - `bridge`：本机或局域网 TCP JSON-line 桥接（`host:port`）；
+   - `ssh`：远程 SSH 标准流隧道（`ssh -o BatchMode=yes ... [user@]host <command>`）；
+   - `http` / `sse`：Streamable HTTP 或 Server-Sent Events MCP 端点。
+2. **多设备并发挂载与精确路由**：
+   - 工作区通过 `machines.allowed` 声明允许访问的受控节点池，通过 `machines.active` 指定默认主控节点。
+   - 运行期可通过 `ludens machine list | use <id> | connect <id...> | disconnect <id>`（或控制台 `?view=baseware` 主从式节点中枢）在不重启 Host 与 Baseware 的前提下动态切换主控节点或并发挂载多台设备。
+   - 并发挂载多台设备时，未带前缀的调用（如 `controller/screen.capture`）自动路由至当前主控节点；带节点前缀的调用（如 `controller/<machineId>/screen.capture` 或 `ludens_tools.call("controller/screen.capture", machine="<machineId>")`）精确路由至目标节点。
+3. **断联自愈同步与 3 次重连失败自动暂停**：
+   - 当受控设备断联后重新启动时，Baseware 后台自愈循环会自动重连并广播 `baseware_reconnected` 事件。
+   - 当自主运行（`mode: "auto"`）期间主控设备发生断联，Ludens Host 会依次记录 `device_disconnected` 并执行最多 3 次自动重连尝试（`device_reconnect_attempt`）；若仍失败，则记录 `device_reconnect_failed` 与 `device_paused`，并自动暂停回 `manual` 模式。

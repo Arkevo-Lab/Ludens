@@ -1,8 +1,8 @@
 import type { getActivity, ActivityQuery } from "./activity";
 import type { HostControlStatus, RuntimeControlCommand } from "./runtime-control";
 import type { petState, recordPetConsumer, setPetTarget } from "./pet-state";
-import type { capabilities, capabilityRuntime } from "./capabilities";
 import type { discoverDriver } from "./drivers";
+import type { capabilities, capabilityRuntime, runWorkspaceCapabilityEval } from "./capabilities";
 import type { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } from "./data";
 import type { docGroups, readDoc } from "./docs";
 import type { getReplay, ReplayQuery } from "./replay";
@@ -27,6 +27,7 @@ import type {
   upsertBasewareMachine,
   removeBasewareMachine,
   updateWorkspaceMachines,
+  controlWorkspaceService,
   probeBasewareMachine,
   WorkspaceBasewareSnapshot,
 } from "./workspaces";
@@ -51,6 +52,7 @@ export interface DashboardMethods {
   updateWorkspaceMachines: { args: [id: unknown, input: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceMachines>> };
   controlWorkspaceMachine: { args: [id: unknown, input: unknown]; result: WorkspaceBasewareSnapshot };
   probeBasewareMachine: { args: [input: unknown]; result: Awaited<ReturnType<typeof probeBasewareMachine>> };
+  controlWorkspaceService: { args: [id: unknown, input: unknown]; result: Awaited<ReturnType<typeof controlWorkspaceService>> };
   archiveBuild: { args: [project: string, run: string, action?: "cancel" | "retry", buildId?: string]; result: Awaited<ReturnType<typeof archiveBuild>> };
   diagnosticEvents: { args: [project: string, run: string, query?: DiagnosticQuery]; result: Awaited<ReturnType<typeof diagnosticEvents>> };
   diagnostics: { args: []; result: { memory: NodeJS.MemoryUsage; index: ReturnType<typeof indexCacheStats>; activeRequests: number } };
@@ -63,6 +65,7 @@ export interface DashboardMethods {
   capabilities: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilities>> };
   capabilityRuntime: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilityRuntime>> };
   runtimeControl: { args: [project: string, workspace: string, command: RuntimeControlCommand]; result: HostControlStatus };
+  runWorkspaceCapabilityEval: { args: [project: string, workspace: string, options?: { capabilityId?: string; all?: boolean }]; result: Awaited<ReturnType<typeof runWorkspaceCapabilityEval>> };
   discoverDriver: { args: [spec: string]; result: Awaited<ReturnType<typeof discoverDriver>> };
   docGroups: { args: [root?: string, lang?: "en" | "zh"]; result: Awaited<ReturnType<typeof docGroups>> };
   readDoc: { args: [id: string, root?: string, lang?: "en" | "zh"]; result: Awaited<ReturnType<typeof readDoc>> };

@@ -9,10 +9,12 @@ import {
   historyCapabilityEvals,
   readLatestEvals,
   resolveCapabilityEval,
+  runCapabilityEvals,
   type CapabilityEnvBinding,
   type CapabilityEvalAdaptation,
   type CapabilityEvalBinding,
   type CapabilityEvalRecord,
+  type CapabilityEvalRun,
   type CapabilityEvalStatus,
 } from "../subsystems/capability-evals.ts";
 
@@ -21,6 +23,7 @@ export type {
   CapabilityEvalAdaptation,
   CapabilityEvalBinding,
   CapabilityEvalRecord,
+  CapabilityEvalRun,
   CapabilityEvalStatus,
 };
 
@@ -295,4 +298,26 @@ export async function capabilityRuntime(project: string, expectedWorkspace: stri
   await capabilityWorkspace(project, expectedWorkspace, root);
   return { checkedAt: new Date().toISOString(), host: "reachable", runId: value.runId,
     controlConnected: typeof value.connected === "boolean" ? value.connected : null };
+}
+
+export interface WorkspaceCapabilityEvalResult {
+  run: CapabilityEvalRun;
+  catalog: CapabilitiesResult;
+}
+
+/** Execute a workspace's bound @eval_capability functions and return the refreshed catalog. */
+export async function runWorkspaceCapabilityEval(
+  project: string,
+  expectedWorkspace: string,
+  options?: { capabilityId?: string; all?: boolean },
+  root = globalHome,
+  signal?: AbortSignal,
+): Promise<WorkspaceCapabilityEvalResult> {
+  signal?.throwIfAborted();
+  const workspace = await capabilityWorkspace(project, expectedWorkspace, root);
+  const capabilityId = typeof options?.capabilityId === "string" && options.capabilityId.trim() ? options.capabilityId.trim() : undefined;
+  const all = capabilityId ? false : Boolean(options?.all ?? true);
+  const run = await runCapabilityEvals(workspace, { capabilityId, all, signal });
+  const catalog = await capabilities(project, expectedWorkspace, root, signal);
+  return { run, catalog };
 }
