@@ -294,18 +294,29 @@ export class ModelTrace {
       let firstStreamAtMs: number | undefined, dispatchAtMs: number | undefined, headersAtMs: number | undefined;
       const transportDetails = () => model.api === "openai-codex-responses"
         ? getOpenAICodexTransportDetails(model as Model<"openai-codex-responses">, options) : undefined;
+      const contextMessages = context && typeof context === "object" && "messages" in context
+        && Array.isArray(context.messages) ? context.messages.length : undefined;
       this.record("model_start", { provider: model.provider, api: model.api, model: model.id,
         observations: source.observations, deliveryIds: source.deliveryIds, skillVersion: source.skillVersion, memoryVersion: source.memoryVersion, streamPath,
+        contextMessages,
         transportDetails: transportDetails() }, trace);
       const finish = (message: AssistantMessage) => {
         for (const block of message.content) if (block.type === "toolCall" && !this.tools.has(block.id)) {
           this.tools.set(block.id, { ...trace, toolCallId: block.id });
         }
-        this.record("model_end", { stopReason: message.stopReason, usage: message.usage,
-          durationMs: this.log.clock.now() - started, providerDurationMs: message.duration,
+        const durationMs = this.log.clock.now() - started;
+        const afterFirstStreamMs = firstStreamAtMs === undefined ? undefined : this.log.clock.now() - firstStreamAtMs;
+        const effectiveDecodeMs = afterFirstStreamMs !== undefined && afterFirstStreamMs > 0 ? afterFirstStreamMs : durationMs;
+        const usage = message.usage;
+        const outputTokensPerSecond = effectiveDecodeMs > 0 && typeof usage?.output === "number" && usage.output > 0
+          ? Number(((usage.output * 1000) / effectiveDecodeMs).toFixed(2)) : undefined;
+        this.record("model_end", { stopReason: message.stopReason, usage,
+          durationMs, providerDurationMs: message.duration,
           ttftMs: message.ttft, responseId: message.responseId, error: message.errorMessage,
           firstStreamEventMs: firstStreamAtMs === undefined ? undefined : firstStreamAtMs - started,
-          afterFirstStreamMs: firstStreamAtMs === undefined ? undefined : this.log.clock.now() - firstStreamAtMs,
+          afterFirstStreamMs,
+          toolCallCount: message.content.filter(part => part?.type === "toolCall").length,
+          ...(outputTokensPerSecond !== undefined ? { outputTokensPerSecond } : {}),
           payloadCaptureMs, httpInspectionMs, streamLogMs,
           requests, httpAttempts, frames, response: this.log.artifact(message), transportDetails: transportDetails() }, trace);
       };

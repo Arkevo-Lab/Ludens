@@ -1,6 +1,7 @@
 import type {
   Event,
   NativeLoop,
+  PerceptionSamplerSummary,
   RunTelemetry,
   SpanOutcome,
   SpanStats,
@@ -281,6 +282,29 @@ export function projectTelemetry(
       coverage: event.data.coverage ?? {},
     }));
   const of = (kind: SpanKind) => spans.filter((span) => span.kind === kind);
+  const number = (value: unknown): number | null =>
+    typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+  const samplerEvents = selected.filter((event) => event.type === "perception_stats");
+  const sampleField = (event: Event, field: string) =>
+    number((event.data.sample as Record<string, unknown> | undefined)?.[field]) ?? 0;
+  const sampler: PerceptionSamplerSummary | undefined = samplerEvents.length ? {
+    windows: samplerEvents.length,
+    attemptedSamples: samplerEvents.reduce((total, event) => total + sampleField(event, "attempted"), 0),
+    completedSamples: samplerEvents.reduce((total, event) => total + sampleField(event, "completed"), 0),
+    failedSamples: samplerEvents.reduce((total, event) => total + sampleField(event, "failed"), 0),
+    recordedSamples: samplerEvents.reduce((total, event) => total + sampleField(event, "recorded"), 0),
+    sleepStarvedTicks: samplerEvents.reduce((total, event) => total + sampleField(event, "sleepStarved"), 0),
+    latestRealizedHz: samplerEvents.filter((event) => number(event.data.realizedHz) !== null).at(-1)?.data.realizedHz ?? null,
+    latestUtilization: samplerEvents.filter((event) => number(event.data.utilization) !== null).at(-1)?.data.utilization ?? null,
+    peakHotBytes: (() => {
+      const hotBytes = samplerEvents
+        .map((event) => number((event.data.history as Record<string, unknown> | undefined)?.hotBytes))
+        .filter((value): value is number => value !== null);
+      return hotBytes.length ? Math.max(...hotBytes) : null;
+    })(),
+    startupDurationMs: selected.filter((event) => event.type === "perception_status")
+      .map((event) => number(event.data.startupDurationMs)).filter((value): value is number => value !== null).at(-1) ?? null,
+  } : undefined;
   return {
     sources: [...sources]
       .map(([component, count]) => ({ component, count }))
@@ -298,6 +322,6 @@ export function projectTelemetry(
       discovery: stats(of("discovery")),
     },
     devices: stats(of("device")),
-    perception: stats(of("perception")),
+    perception: { ...stats(of("perception")), ...(sampler ? { sampler } : {}) },
   };
 }

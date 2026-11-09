@@ -167,6 +167,34 @@ class Perception:
                         self.assertTrue(all(cap["durationMs"]["min"] is not None for cap in capabilities))
                     self.assertTrue(all(record["trace"]["recordingPurpose"] == "continuous-perception" for record in records))
 
+    def test_window_flush_reports_starvation_watermarks_and_lifetime(self):
+        with tempfile.TemporaryDirectory() as directory:
+            clock, events = [0.0], []
+            base = context(directory, recording_purpose="continuous-perception")
+            recorder = RecordingWindow(events.append, base["trace"], "generation", 10, clock=lambda: clock[0], interval=1)
+            recorder.set_history_metrics({"hotRecords": 3, "hotBytes": 100, "hotLimitBytes": 1000})
+            for index in range(10):
+                succeeded = index % 3 != 0
+                recorder.sampled(20, succeeded, starved=index % 4 == 0)
+                if succeeded:
+                    recorder.recorded()
+                clock[0] = (index + 1) / 10
+                recorder.flush()
+            recorder.sampled(20, True, starved=True)
+            clock[0] = 1.1
+            recorder.flush(reason="stopped")
+        self.assertEqual([item["type"] for item in events], ["perception_stats", "perception_stats"])
+        first, final = (item["data"] for item in events)
+        self.assertEqual(first["sample"], {"attempted": 10, "completed": 6, "failed": 4, "recorded": 6,
+                                           "durationMs": {"total": 200.0, "min": 20, "max": 20}, "sleepStarved": 3})
+        self.assertEqual(first["realizedHz"], 6.0)
+        self.assertEqual(first["utilization"], 0.2)
+        self.assertEqual(first["history"], {"hotRecords": 3, "hotBytes": 100, "hotLimitBytes": 1000})
+        self.assertEqual(final["sample"]["sleepStarved"], 1)
+        self.assertEqual(final["lifetime"], {"startedAt": final["lifetime"]["startedAt"], "uptimeMs": 1100,
+                                             "windows": 2, "attempted": 11, "completed": 7, "failed": 4,
+                                             "recorded": 6, "sleepStarved": 4, "realizedHz": 6.36})
+
     def test_full_adds_diagnostics_without_changing_results_or_rpc(self):
         with tempfile.TemporaryDirectory() as directory:
             events, records = [], []

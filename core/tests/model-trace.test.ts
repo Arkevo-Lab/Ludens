@@ -408,7 +408,9 @@ test("real OMP preserves image prefixes and native tool traces while shell IPC r
       expect(JSON.parse(received[i]).diagnostic_marker).toBe("after-extension");
       expect(http[i].trace.requestId).toBe(requests[i].trace.requestId);
       expect(ends[i].trace.modelCallId).toBe(requests[i].trace.modelCallId);
-      expect(ends[i].data.usage).toMatchObject({input: 210, cacheRead: 1024, output: 2});
+      expect(ends[i].data.toolCallCount).toBe(i === 0 ? 2 : i === 6 ? 0 : 1);
+      expect(ends[i].data.outputTokensPerSecond).toBeGreaterThan(0);
+      expect(ends[i].data.afterFirstStreamMs).toBeGreaterThanOrEqual(0);
       expect(dispatches[i].trace.httpId).toBe(http[i].trace.httpId);
       expect(dispatches[i].atMs).toBeLessThanOrEqual(headers[i].atMs);
       expect(headers[i].atMs).toBeLessThanOrEqual(streamStarts[i].atMs);

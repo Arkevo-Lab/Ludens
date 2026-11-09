@@ -60,6 +60,7 @@ export interface PythonInvocationDetails {
   codeSHA: string;
   result?: unknown;
   error?: { type: string; message: string; traceback?: string };
+  timing?: { importDurationMs?: number; executionDurationMs?: number };
   exitCode: number;
   stderr: string;
 }
@@ -72,6 +73,7 @@ export interface PythonEvalDetails {
   rewards?: Record<string, number>;
   details?: Record<string, unknown>;
   error?: { type: string; message: string; traceback?: string };
+  timing?: { importDurationMs?: number; executionDurationMs?: number };
   exitCode: number;
   stderr: string;
 }
@@ -121,7 +123,7 @@ export class PythonCapabilities {
       const processResult = await this.run({ action: "invoke", workspace: this.workspace, capability, arguments: args }, {
         ...options, env: { ...options.env, BASEWARE_TRACE: JSON.stringify(trace) } as NodeJS.ProcessEnv,
       });
-      let reply: { ok: boolean; result?: unknown; error?: PythonInvocationDetails["error"] };
+      let reply: { ok: boolean; result?: unknown; error?: PythonInvocationDetails["error"]; timing?: PythonInvocationDetails["timing"] };
       try { reply = JSON.parse(processResult.stdout); }
       catch {
         reply = { ok: false, error: { type: "PythonProcessError", message: `Python exited ${processResult.exitCode} without a valid result` } };
@@ -129,12 +131,14 @@ export class PythonCapabilities {
       const failed = !reply.ok || processResult.exitCode !== 0;
       const details: PythonInvocationDetails = { capabilityId: id, origin: capability.origin, codeSHA: capability.codeSHA,
         ...(failed ? { error: reply.error ?? { type: "PythonProcessError", message: `Python exited ${processResult.exitCode}` } } : { result: reply.result }),
+        ...(reply.timing ? { timing: reply.timing } : {}),
         exitCode: processResult.exitCode, stderr: processResult.stderr };
       const result = details.result as { timeline?: unknown; media?: unknown[] } | undefined;
       this.emit("python_capability_result", { ...details,
         // Explicit recording owns the retained payload; invocation logs only reference it.
         ...(capability.recorded || result?.timeline || Array.isArray(result?.media) ? { result: result?.timeline
           ? { timeline: result.timeline } : { recorded: false } } : {}),
+        ...(details.timing ? { timing: details.timing } : {}),
         outcome: failed ? "error" : "success", durationMs: performance.now() - started }, trace);
       return { content: [{ type: "text" as const, text: JSON.stringify(failed ? { error: details.error } : reply.result) }], details, isError: failed };
     } catch (error) {
@@ -155,7 +159,7 @@ export class PythonCapabilities {
       if (!capability) throw new Error(`Unknown Python capability: ${id}; discover the workspace before invoking it`);
       if (!capability.eval) throw new Error(`Capability ${id} has no @eval_capability bound`);
       const processResult = await this.run({ action: "eval", workspace: this.workspace, capability }, options, false, true);
-      let reply: { ok: boolean; passed?: boolean; rewards?: Record<string, number>; details?: Record<string, unknown>; error?: PythonEvalDetails["error"] };
+      let reply: { ok: boolean; passed?: boolean; rewards?: Record<string, number>; details?: Record<string, unknown>; error?: PythonEvalDetails["error"]; timing?: PythonEvalDetails["timing"] };
       try { reply = JSON.parse(processResult.stdout); }
       catch {
         reply = { ok: false, error: { type: "PythonProcessError", message: `Python exited ${processResult.exitCode} without a valid result` } };
@@ -169,6 +173,7 @@ export class PythonCapabilities {
                 : { rewards: reply.rewards, ...(reply.details ? { details: reply.details } : {}),
                     ...(evalFailed ? { error: { type: "EvalFailed", message: "Eval reported passed=false" } } : {}) }) }
           : { rewards: reply.rewards, ...(reply.details ? { details: reply.details } : {}) }),
+        ...(reply.timing ? { timing: reply.timing } : {}),
         exitCode: processResult.exitCode, stderr: processResult.stderr };
       this.emit("python_eval_result", { ...details, outcome: failed ? "error" : "success", durationMs: performance.now() - started }, trace);
       return { content: [{ type: "text" as const, text: JSON.stringify(failed ? { error: details.error } : { rewards: details.rewards, ...(details.details ? { details: details.details } : {}) }) }], details, isError: failed };

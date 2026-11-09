@@ -17,7 +17,7 @@
 
 为避免 30Hz 常驻循环刷爆事件流，连续采样与动作循环采用 **5 秒固定窗口统计 + 故障区间（Fault Span）合并**：
 
-- **5 秒窗口统计**：常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`。进程正常停止时自动补写尾段统计。
+- **5 秒窗口统计**：常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数与 `sleepStarved` 失步计数、窗口实际采样率 `realizedHz` 与占空比 `utilization`、`history` 热缓冲水位 `hotRecords/hotBytes/hotLimitBytes`、代次累计 `lifetime` 快照，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`。进程正常停止时自动补写尾段统计。
 - **故障区间合并**：连续感知首次出错时立即写入 `perception_fault` / `device_sampling_error`，后续同类重试错误仅累加区间内的 `fault.count`，即便成功与失败交替出现也不会每帧反复开关故障事件。待观察到恢复成功且历经至少一个完整 5 秒窗口无同类错误（或进程正常停止）时，闭合该故障区间。
 
 ## 文件与事件身份
@@ -66,11 +66,12 @@
 | --- | --- |
 | `capability_start / capability_end` | `ludens controller` 的 `list / help / call` 边界，记录参数、能力 ID、epoch 校验结果、终态（`success / error / cancelled`）与耗时。 |
 | `python_capabilities_start / python_capabilities` | 工作区 `@capability` AST 静态扫描发现的独立子 Span。 |
-| `python_capability / python_capability_result` | CLI 单次 Python 能力运行器的函数位置、源码哈希、入参与返回结果。 |
-| `python_call_start / python_call_end` | 工作区 `@capability` 装饰器函数的实际执行 Span，记录 PID、源码哈希、终态与耗时（不强制序列化原生 Python 入参/返回对象）。`normal` 下省略的常驻父层会在子事件标记 `parentOmitted: true`。 |
+| `python_capability / python_capability_result` | CLI 单次 Python 能力运行器的函数位置、源码哈希、入参、返回结果及 `timing: {importDurationMs, executionDurationMs}` 模块加载/执行耗时拆分（`python_eval_result` 携带相同 `timing` 字段）。 |
+| `python_call_start / python_call_end` | 工作区 `@capability` 装饰器函数的实际执行 Span，记录 PID、源码哈希、终态、耗时，以及在作用域内跨嵌套 `Client` IPC 调用自动聚合的 `rpc: {calls, errors, durationMs, controllerCalls, observeCalls}`（不强制序列化原生 Python 入参/返回对象）。`normal` 下省略的常驻父层会在子事件标记 `parentOmitted: true`。 |
 | `command / execution / execution_error` | Baseware 设备操作请求与终态；同次调用产出的媒体摘要直接内嵌于 `execution.observations`。 |
 | `action_start / action_end` | 已提交异步手柄动作（`pad.play`）的独立硬件执行生命周期，携带 `actionId` 并沿用提交时的 `trace / epoch`，不会挂到后续的 `pad.wait / status` 请求下。 |
-| `perception_status / perception_fault / perception_fault_end / perception_stats` | 常驻 `perception.py` 进程的生命周期、故障区间与 5 秒统计；生命周期与故障事件进入 Activity 与桌宠；统计保留在诊断分类。 |
+| `perception_status / perception_fault / perception_fault_end / perception_stats` | 常驻 `perception.py` 进程的生命周期（含从 `loading` 切入 `ready / error / unimplemented` 时的 `startupDurationMs` 冷启动耗时）、故障区间与 5 秒统计；生命周期与故障事件进入 Activity 与桌宠；统计保留在诊断分类。 |
+| `control / runtime_stats` | 控制权变迁（`auto` 启动与携带 `elapsedMs` 接管总时长的 `manual` 交还）以及可选的周期性 Host 运行时快照（`activeCalls`、队列水位及进程内存 `rss / heapUsed / heapTotal`）。 |
 | `background_start / background_result` | OMP 原生异步 `bash` 任务（`async`）或命名服务（`service`）的启动与完成通知，按 `jobId` 或 `service name + PID` 配对并保留启动时的 `trace / epoch`。 |
 
 **Python 异常链归并规则**：`python_call_end.outcome = "error"` 仅代表该层函数抛出异常（外层调用方可能已 `try/except` 捕获）。分析器与 Dashboard 按显式 Python 父子关系将相邻未捕获的异常归并为一条异常链（`localPythonExceptionGroups`），一旦祖先调用成功返回即截断，不会用内部捕获的异常覆写外层工具的成功状态。
@@ -145,6 +146,8 @@ core/bin/ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
 
 [analyze-run.py](../../../core/scripts/analyze-run.py) 的核心指标统计口径：
 
-- **模型延迟与缓存命中率**：统计已完成的模型请求，P95 采用 nearest-rank；Prompt Cache 命中率按 Token 加权计算，分母为 `input + cacheRead + cacheWrite`（`warm` 口径仅剔除周期首请求，不剔除后续压缩引起的缓存重建）。
+- **模型延迟、解码吞吐与缓存命中率**：统计已完成的模型请求，P95 采用 nearest-rank；Prompt Cache 命中率按 Token 加权计算，分母为 `input + cacheRead + cacheWrite`（`warm` 口径仅剔除周期首请求，不剔除后续压缩引起的缓存重建）。`afterFirstStreamMs` 剥离首包等待后的纯流式解码耗时，`outputTokensPerSecond` 衡量解码 Token 吞吐率。
+- **感知采样器与观测新鲜度（`perceptionSampler`）**：聚合 5 秒 `perception_stats` 窗口（`realizedHz`、`utilization`、`sleepStarvedTicks`、`peakHotBytes`），并直接基于引擎落盘 `recordedAt` 计算所有返回观测记录的 `recordAgeMs`。
+- **运行效率与自主化率（`efficiency`）**：汇总 `modelTimeRatio`、`deviceActionDutyCycle`、`localPythonTimeRatio`、`localPythonRpcCalls` 以及 `autonomyActionRatio`（经由工作区 Python 能力而非裸 `controller/*` 工具调用发起动作的占比）。
 - **有效设备动作频率**：仅计入成功的 `action_end` 以及不带 `actionId`、要求控制权且非只读的成功 `execution`；异步动作提交（`pad.play` 请求本身）、状态查询、`pad.wait` 与感知采样均不重复计入动作次数。
 - **嵌套耗时不重复相加**：Shiori 总耗时包含模型与工具耗时，工具耗时包含内部能力与设备调用耗时，各层级独立展示而不做简单累加。

@@ -10,11 +10,21 @@ import threading
 import time
 from typing import Any
 import uuid
-from ._context import LudensError, continuous, current, request, scope
+from ._context import LudensError, continuous, current, record_client_rpc, request, scope
 from ._observation_history import MAIN_CAPABILITY, _StreamMediaRef, _iso, read_timeline, timestamp
-
 _in_eval_env_observe = ContextVar("ludens_in_eval_env_observe", default=False)
 _LATEST_OBSERVE_LOCK = threading.Lock()
+
+def _timed_request(method, context, message):
+    """One driver RPC, timed and rolled into the active invocation's rpc stats."""
+    started = time.perf_counter()
+    try:
+        return request(context["socket_path"], message, context["timeout"])
+    except BaseException:
+        record_client_rpc(method, round((time.perf_counter() - started) * 1000), False)
+        raise
+    record_client_rpc(method, round((time.perf_counter() - started) * 1000), True)
+
 _LATEST_OBSERVE_CACHE: dict[tuple[str, str], tuple[int, dict[str, Any]]] = {}
 
 
@@ -94,7 +104,7 @@ class Client:
             message["epoch"] = context["epoch"]
         if context["trace"]:
             message["trace"] = context["trace"]
-        return request(context["socket_path"], message, context["timeout"])
+        return _timed_request(f"controller.{action}", context, message)
 
     def list(self) -> Any:
         """List registered driver and workspace capabilities."""
@@ -113,10 +123,10 @@ class Client:
     def state(self) -> Any:
         """Inspect the active capability and arguments of the resident perception state machine."""
         context = self._context()
-        return request(context["socket_path"], {
+        return _timed_request("perception.state", context, {
             "kind": "perception", "argv": ["state"],
             **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-        }, context["timeout"])
+        })
 
     def transition(self, to: str, arguments: dict[str, Any] | None = None) -> Any:
         """Transition the resident perception state machine to another capability."""
@@ -127,10 +137,10 @@ class Client:
         if not isinstance(arguments, dict) or not all(isinstance(key, str) for key in arguments):
             raise TypeError("Transition arguments must be a JSON object")
         context = self._context()
-        return request(context["socket_path"], {
+        return _timed_request("perception.transition", context, {
             "kind": "perception", "argv": ["transition", to], "arguments": arguments,
             **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-        }, context["timeout"])
+        })
 
     def observe(self, query: dict[str, Any] | None = None) -> Any:
         """Read timeline history without sampling; returns the same envelope as ludens observe."""
@@ -161,10 +171,10 @@ class Client:
                 cached = _LATEST_OBSERVE_CACHE.get(cache_key)
         req_query = {**q, "ifNoneMatchSequence": cached[0]} if cached is not None else q
         try:
-            reply = request(context["socket_path"], {
+            reply = _timed_request("perception.observe", context, {
                 "kind": "perception", "argv": ["observe"], "query": req_query,
                 **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-            }, context["timeout"])
+            })
         except (FileNotFoundError, ConnectionRefusedError):
             return self._offline_timeline(context, query)
         except LudensError as error:
@@ -321,20 +331,20 @@ class Client:
     def machines(self) -> Any:
         """List mounted and registered machines in the current workspace."""
         context = self._context()
-        return request(context["socket_path"], {
+        return _timed_request("machine.list", context, {
             "kind": "machine", "argv": ["list"],
             **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-        }, context["timeout"])
+        })
 
     def use_machine(self, machine_id: str) -> Any:
         """Switch the active primary machine in the current workspace."""
         if not isinstance(machine_id, str) or not machine_id.strip():
             raise ValueError("machine_id must be a non-empty string")
         context = self._context()
-        return request(context["socket_path"], {
+        return _timed_request("machine.use", context, {
             "kind": "machine", "argv": ["use", machine_id.strip()],
             **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-        }, context["timeout"])
+        })
 
     def connect_machines(self, *machine_ids: str) -> Any:
         """Mount one or more machines concurrently in Baseware."""
@@ -342,20 +352,20 @@ class Client:
         if not cleaned:
             raise ValueError("connect_machines requires at least one machine_id")
         context = self._context()
-        return request(context["socket_path"], {
+        return _timed_request("machine.connect", context, {
             "kind": "machine", "argv": ["connect", *cleaned],
             **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-        }, context["timeout"])
+        })
 
     def disconnect_machines(self, machine_id: str) -> Any:
         """Unmount a secondary machine from Baseware."""
         if not isinstance(machine_id, str) or not machine_id.strip():
             raise ValueError("machine_id must be a non-empty string")
         context = self._context()
-        return request(context["socket_path"], {
+        return _timed_request("machine.disconnect", context, {
             "kind": "machine", "argv": ["disconnect", machine_id.strip()],
             **({"epoch": context["epoch"]} if context["epoch"] is not None else {}), "trace": context["trace"],
-        }, context["timeout"])
+        })
 
 
 def replay(window: Any = None, *, start: str | float | int | None = None,

@@ -334,3 +334,37 @@ test("a stuck device release completes stop as disconnected instead of admitting
     await expect(runtime.start()).rejects.toThrow("disconnected");
   } finally { gate.resolve(); await runtime.close(); }
 });
+
+test("takeover stop reports elapsed control time and periodic stats only when configured", async () => {
+  const { devices } = createTestDeviceSession({ controllers: [] });
+  type StatsEvent = { reason: string; mode: string; elapsedMs: number; memory: Record<string, unknown> };
+  const events: { type: string; data: unknown }[] = [];
+  const now = spyOn(Date, "now").mockReturnValue(1_000);
+  const runtime = new Runtime(devices, (type, data) => events.push({ type, data }), 300, "stats", "normal", undefined, 30_000, 5);
+  try {
+    await runtime.start();
+    expect(events.filter(event => event.type === "runtime_stats")).toEqual([]);
+    // A real setInterval is the behavior under test; await its first emission.
+    const firstTick = Promise.withResolvers<void>();
+    const poll = setInterval(() => { if (events.some(event => event.type === "runtime_stats")) { clearInterval(poll); firstTick.resolve(); } }, 1);
+    await firstTick.promise;
+    now.mockReturnValue(1_060);
+    await runtime.stop("human");
+    const stats = events.filter(event => event.type === "runtime_stats").map(event => event.data as StatsEvent);
+    expect(stats.length).toBeGreaterThanOrEqual(2);
+    expect(stats[0]).toMatchObject({ reason: "periodic", mode: "auto", elapsedMs: 0 });
+    expect(Object.keys(stats[0].memory)).toEqual(["rss", "heapUsed", "heapTotal", "external"]);
+    expect(stats.at(-1)!.reason).toBe("stopped");
+    const controls = events.filter(event => event.type === "control").map(event => event.data as { elapsedMs?: number });
+    expect(controls.at(-1)!.elapsedMs).toBe(60);
+    events.length = 0;
+    const plain = new Runtime(devices, (type, data) => events.push({ type, data }));
+    await plain.start();
+    await plain.stop();
+    expect(events.filter(event => event.type === "runtime_stats")).toEqual([]);
+    expect((events.filter(event => event.type === "control").at(-1)!.data as { elapsedMs?: number }).elapsedMs).toBe(0);
+  } finally {
+    now.mockRestore();
+    await runtime.close();
+  }
+});

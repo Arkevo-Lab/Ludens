@@ -282,8 +282,10 @@ def run_continuously(method, hz, context, stopped, send, *, role, video_metrics=
                 send({"event": "status", "state": status[0], "error": status[1],
                       "transient": True})
             previous_status = status
-            recording.sampled((time.monotonic() - started) * 1000, status[0] == "ready")
+            interval = 1.0 / hz
+            elapsed = time.monotonic() - started
+            recording.sampled(elapsed * 1000.0, status[0] == "ready", starved=elapsed > interval)
             recording.flush(video=video_metrics() if video_metrics else None)
-            stopped.wait(max(0, 1 / hz - (time.monotonic() - started)))
+            stopped.wait(max(0, interval - (time.monotonic() - started)))
     finally:
         recording.flush(reason=reason, video=video_metrics() if video_metrics else None)

@@ -52,6 +52,8 @@ export class Runtime {
   private consolidating = false;
   private timer?: ReturnType<typeof setTimeout>;
   private takeoverDeadlineMs = 0;
+  private takeoverStartedAtMs: number | null = null;
+  private statsTimer: ReturnType<typeof setInterval> | null = null;
   private readonly budgetEnded = () => { void this.stop("time budget").catch(error => this.record("error", String(error))); };
   private reason = "startup";
   private connected = true;
@@ -73,7 +75,7 @@ export class Runtime {
     if ("perception" in subsystems) this._perception = subsystems.perception;
   }
 
-  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000) {
+  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0) {
     if (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647) throw new Error("Invalid Shiori time budget");
     if (budget && !Number.isFinite(budget.deadlineMs)) throw new Error("Invalid shared Shiori deadline");
     devices?.onReconnect?.(() => { void this.reconnected(); });
@@ -173,6 +175,8 @@ export class Runtime {
     this.takeoverDeadlineMs = performance.now() + (this.budget ? this.budget.deadlineMs - Date.now() : this.maxSeconds * 1000);
     this.mode = "auto";
     this.reason = "enabled";
+    this.takeoverStartedAtMs = Date.now();
+    this.startStatsTimer();
     this.record("control", this.status(), { epoch });
     if (message) this.record("user_message", { text: message, mode: "start" }, { epoch });
     if (!this.budget) this.timer = setTimeout(this.budgetEnded, this.maxSeconds * 1000);
@@ -283,11 +287,15 @@ export class Runtime {
       }
       return;
     }
+    const wasAuto = this.mode === "auto";
+    const elapsedMs = this.takeoverStartedAtMs !== null ? Math.max(0, Date.now() - this.takeoverStartedAtMs) : undefined;
+    this.takeoverStartedAtMs = null;
     this.mode = "releasing";
     this.reason = reason;
     this.control?.abort(reason === "time budget" ? new DOMException(reason, "AbortError") : undefined);
+    if (this.statsTimer) { clearInterval(this.statsTimer); this.statsTimer = null; }
+    if (this.runtimeStatsIntervalMs > 0 && wasAuto) this.emitRuntimeStats("stopped");
     clearTimeout(this.timer);
-    this.budget?.signal.removeEventListener("abort", this.budgetEnded);
     // Revoking the device never waits for model cancellation.
     this.abortAgent();
     const perceptionRevoked = this._perception?.setLease(null);
@@ -306,9 +314,8 @@ export class Runtime {
       // Handback is confirmed or the connection has failed closed. Drain
       // cancelled workspace calls before another epoch can start.
       await Promise.allSettled(this.calls);
-      await perceptionRevoked?.catch(() => {});
       this.mode = "manual";
-      this.record("control", this.status(), { epoch: this.epoch });
+      this.record("control", { ...this.status(), ...(elapsedMs !== undefined ? { elapsedMs } : {}) }, { epoch: this.epoch });
     })().finally(() => { this.stopping = undefined; });
     return this.stopping;
   }
@@ -335,5 +342,21 @@ export class Runtime {
     } finally {
       await this._perception?.stop();
     }
+  }
+
+  private startStatsTimer() {
+    if (this.runtimeStatsIntervalMs <= 0) return;
+    this.statsTimer = setInterval(() => { if (this.mode === "auto") this.emitRuntimeStats("periodic"); }, this.runtimeStatsIntervalMs);
+    this.statsTimer.unref?.();
+  }
+
+  private emitRuntimeStats(reason: "periodic" | "stopped") {
+    const memory = process.memoryUsage();
+    this.record("runtime_stats", { reason, mode: this.mode, epoch: this.epoch,
+      elapsedMs: this.takeoverStartedAtMs !== null ? Math.max(0, Date.now() - this.takeoverStartedAtMs) : 0,
+      remainingSeconds: this.mode === "auto" ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null,
+      queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 },
+      memory: { rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal, external: memory.external },
+    }, this.epoch ? { epoch: this.epoch } : {});
   }
 }

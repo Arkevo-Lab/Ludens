@@ -7,8 +7,8 @@ import math
 import os
 from pathlib import Path
 import sys
+import time
 import traceback
-
 from ludens_tools._capabilities import discover, load_eval_function, load_function, validate
 from ludens_tools._context import current, offline_timeline_append, scope
 
@@ -30,10 +30,23 @@ def invoke(workspace, request):
     # Give this fresh process a nonexistent cache root so quick helper edits load.
     sys.pycache_prefix = str(workspace / "__pycache__" / ("ludens-" + os.urandom(12).hex()))
     with invocation_output():
+        import_started = time.perf_counter()
         function = load_function(workspace, capability["origin"]["path"], capability["origin"]["function"], raw=raw)
-        result = function(**request["arguments"])
+        import_duration_ms = round((time.perf_counter() - import_started) * 1000)
+        execution_started = time.perf_counter()
+        try:
+            result = function(**request["arguments"])
+        except BaseException as error:
+            execution_duration_ms = round((time.perf_counter() - execution_started) * 1000)
+            # JSON is the cross-process contract; incidental prints go to stderr.
+            return json.dumps({"ok": False, "timing": {
+                "importDurationMs": import_duration_ms, "executionDurationMs": execution_duration_ms},
+                "error": {"type": type(error).__name__, "message": str(error),
+                          "traceback": traceback.format_exc()}}, allow_nan=False)
+        execution_duration_ms = round((time.perf_counter() - execution_started) * 1000)
         # JSON is the cross-process contract; incidental prints go to stderr.
-        encoded = json.dumps({"ok": True, "result": result}, allow_nan=False)
+        encoded = json.dumps({"ok": True, "result": result, "timing": {
+            "importDurationMs": import_duration_ms, "executionDurationMs": execution_duration_ms}}, allow_nan=False)
     return encoded
 
 
@@ -85,11 +98,17 @@ def evaluate(workspace, request):
     os.environ.pop("BASEWARE_EPOCH", None)
     sys.pycache_prefix = str(workspace / "__pycache__" / ("ludens-" + os.urandom(12).hex()))
     with invocation_output():
+        import_started = time.perf_counter()
         function = load_eval_function(workspace, binding["origin"]["path"], binding["origin"]["function"],
                                       raw=sources[binding["origin"]["path"]])
+        import_duration_ms = round((time.perf_counter() - import_started) * 1000)
+        execution_started = time.perf_counter()
         with scope({**current(), "timeline_append": offline_timeline_append()}):
             rewards, details, passed = _eval_rewards(function())
+        execution_duration_ms = round((time.perf_counter() - execution_started) * 1000)
         encoded = json.dumps({"ok": True, "passed": passed, "rewards": rewards,
+                              "timing": {"importDurationMs": import_duration_ms,
+                                         "executionDurationMs": execution_duration_ms},
                               **({"details": details} if details is not None else {})}, allow_nan=False)
     return encoded
 

@@ -37,6 +37,14 @@ class RecordingWindow:
         self.interval = interval
         self.faults = {}
         self.window = 0
+        self._started_at_iso = _now()
+        self._started_perf = self.clock()
+        self._windows_flushed = 0
+        self._lifetime_attempted = 0
+        self._lifetime_completed = 0
+        self._lifetime_failed = 0
+        self._lifetime_recorded = 0
+        self._lifetime_sleep_starved = 0
         self._reset()
 
     def _reset(self):
@@ -44,6 +52,8 @@ class RecordingWindow:
         self.started_at = _now()
         self.sample = {"attempted": 0, "completed": 0, "failed": 0, "recorded": 0,
                        "durationMs": _duration()}
+        self._sleep_starved = 0
+        self._latest_history = None
         self.capabilities = {}
 
     def event(self, event_type, data, trace=None):
@@ -85,28 +95,56 @@ class RecordingWindow:
     def _fault_data(fault):
         return {key: value for key, value in fault.items() if key != "window"}
 
-    def sampled(self, duration_ms, succeeded):
+    def sampled(self, duration_ms, succeeded, starved=False):
         self.sample["attempted"] += 1
         self.sample["completed" if succeeded else "failed"] += 1
+        if starved:
+            self._sleep_starved += 1
+            self._lifetime_sleep_starved += 1
+        self._lifetime_attempted += 1
+        self._lifetime_completed += 1 if succeeded else 0
+        self._lifetime_failed += 0 if succeeded else 1
         _add_duration(self.sample["durationMs"], duration_ms)
 
     def recorded(self):
         self.sample["recorded"] += 1
+        self._lifetime_recorded += 1
 
-    def flush(self, *, reason=None, video=None):
+    def set_history_metrics(self, metrics):
+        self._latest_history = metrics
+
+    def flush(self, *, reason=None, video=None, history=None):
         ended = self.clock()
         if reason is None and ended - self.started < self.interval:
             return
         ended_at = _now()
+        elapsed_ms = max(0, round((ended - self.started) * 1000))
+        realized_hz = round(self.sample["completed"] / (elapsed_ms / 1000.0), 2) if elapsed_ms > 0 else 0.0
+        sample_total_ms = self.sample["durationMs"]["total"]
+        utilization = round(min(1.0, sample_total_ms / elapsed_ms), 4) if elapsed_ms > 0 else 0.0
+        uptime_ms = max(0, round((ended - self._started_perf) * 1000))
+        lifetime_hz = round(self._lifetime_completed / (uptime_ms / 1000.0), 2) if uptime_ms > 0 else 0.0
+        if history is not None:
+            self._latest_history = history
         if self.sample["attempted"] or self.capabilities:
             self.event(f"{self.role}_stats", {
                 "window": {"startedAt": self.started_at, "endedAt": ended_at,
                            "durationMs": (ended - self.started) * 1000},
-                "sampleHz": self.sample_hz, "sample": self.sample,
+                "sampleHz": self.sample_hz,
+                "sample": {**self.sample, "sleepStarved": self._sleep_starved},
+                "realizedHz": realized_hz,
+                "utilization": utilization,
+                "lifetime": {
+                    "startedAt": self._started_at_iso, "uptimeMs": uptime_ms,
+                    "windows": self._windows_flushed + 1,
+                    "attempted": self._lifetime_attempted, "completed": self._lifetime_completed,
+                    "failed": self._lifetime_failed, "recorded": self._lifetime_recorded,
+                    "sleepStarved": self._lifetime_sleep_starved, "realizedHz": lifetime_hz},
                 "capabilities": list(self.capabilities.values()),
                 "faults": [self._fault_data(fault) for fault in self.faults.values()],
                 **({"video": video} if video is not None else {}),
                 **({"reason": reason} if reason else {}),
+                **({"history": dict(self._latest_history)} if self._latest_history is not None else {}),
             })
         for key, fault in list(self.faults.items()):
             if reason is not None or fault["window"] < self.window:
@@ -115,5 +153,6 @@ class RecordingWindow:
                     "reason": reason or "recovered",
                 })
                 del self.faults[key]
+        self._windows_flushed += 1
         self.window += 1
         self._reset()
