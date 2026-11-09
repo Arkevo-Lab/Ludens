@@ -1,11 +1,18 @@
-# Baseware
+# @ludens/baseware
 
-Standalone device service: registers drivers, exposes unified `Controller` capabilities over CLI, API, and MCP, and owns device protocols and control-lease arbitration.
+Standalone device driver and control-plane service for Ludens: loads built-in (`cua`) and external emulator/runtime driver packages, validates `Controller` calls against JSON Schema, arbitrates `epoch` control leases, records device events, and exposes a unified interface across CLI, TypeScript/Python APIs, and MCP.
 
-- [Baseware Design Philosophy and Capability Contract](../docs/en/reference/baseware.md)
+## Scripts
+
+```sh
+cd baseware && bun run typecheck
+cd baseware && bun test
+```
+
+## Documentation
+
+- [Baseware Design Philosophy and Controlled Node Pool Contract](../docs/en/reference/baseware.md)
 - [Driver Bridge Protocol](../docs/en/reference/driver-bridge-protocol.md)
+- [Devices, Drivers & Multi-Machine Pool](../docs/en/tutorials/devices.md)
 - [Architecture and Boundaries](../docs/en/reference/architecture.md)
-- [Devices and Driver Setup](../docs/en/tutorials/devices.md)
-- [Install and Workspace Lifecycle](../docs/en/tutorials/quickstart.md)
-- [Workspaces and Capability Programming](../docs/en/tutorials/workspace.md)
 - [Logging and Call Chains](../docs/en/reference/logging.md)
