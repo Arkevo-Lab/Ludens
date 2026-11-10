@@ -11,7 +11,7 @@
 `perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [core/templates/perception.py](../../../core/templates/perception.py)）：
 
 - `start(self, context)`：进程启动或 `reload` 时执行一次，可在此加载深度学习权重、初始化状态或后台采样线程。`context` 包含 `workspace`、`runDir` 与 `generation`。
-- `sample(self)`：需标注 `@observe`、`@record` 与 `@capability`；其中 `@observe` 将其选为工作区的主观测能力。调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用当前状态。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
+- `sample(self)`：需标注 `@observe`、`@record` 与 `@capability`；其中 `@observe` 将其选为工作区的主观测能力。控制租约（`auto` epoch）活跃期间，调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用当前状态。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
 - `close(self)`：在 `reload`、`stop` 或 Host 退出时调用，用于释放自建资源。
 
 常驻进程在同一个 Python 进程中运行连续状态机。任何活动能力都可以返回可选的 `effect`（`{"id": "controller/...", "arguments": {...}}` 或此类对象的列表）请求闭环执行，以及可选的 `transition`（`"method_name"` 或 `{"to": "method_name", "arguments": {...}}`）选择下一次 tick 调用的能力。转换目标在同一实例、模块或工作区内解析，无需跨进程，因此实例属性与模块全局变量可在 tick 之间共享内存上下文。
@@ -20,7 +20,7 @@
 
 没有 `Perception` 类时，`perception.py` 也可定义任意名称的顶层 `@observe @record @capability` 函数。实时与离线时空轴默认读取唯一的 `@observe` 通道，包括其他工作区模块中的已记录能力；`@observe` 不会自动调度其他模块。没有标记时，默认通道仍为 `python/perception.py:Perception.sample`。重复标记会为每个冲突声明生成诊断，并阻止常驻进程开始运行。
 
-宿主进入 `auto` 时将控制 epoch 授予常驻进程，感知重载时保留该租约，交还控制时撤销租约但不停止观测。手动模式下没有租约时会跳过 controller effect；本地 `python/` effect 仍在进程内执行。常驻进程的 `state`、`transition` 和 `lease` RPC 分别查看当前能力、选择其下一组参数、更新 epoch/input generation。跨模块目标使用 `python/path.py:function`；后续不带路径的函数名会在当前活动模块中解析。只有 `@record` 状态会发布观测，活动状态变化不会改变默认观测通道。
+宿主进入 `auto` 时将控制 epoch 授予常驻进程，感知重载时保留该租约，交还控制时撤销租约。Shiori 的控制周期就是常驻进程的生命周期：连续采样与视频分段录制只在该租约活跃期间运行。进入 `auto` 会立即启动采样器；交还时会等待在途 tick 完成、刷出最后一条 `perception_stats`，并在周期 `control(manual)` 事件之前把活跃的 fMP4 视频分段封口为 `status: "ready"`，而 `manual` 待机期间时间线读取（`observe`）、`append` 与状态机 RPC 仍然可用、只是不采样。手动模式下没有租约时会跳过 controller effect；本地 `python/` effect 仍在进程内执行。常驻进程的 `state`、`transition` 和 `lease` RPC 分别查看当前能力、选择其下一组参数、更新 epoch/input generation。跨模块目标使用 `python/path.py:function`；后续不带路径的函数名会在当前活动模块中解析。只有 `@record` 状态会发布观测，活动状态变化不会改变默认观测通道。
 
 ```python
 from ludens_tools import capability, observe, record

@@ -31,11 +31,27 @@ async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: nu
       }));
   };
   return { workspace, runtime, events, observe, wait, samples,
-    load: async (code: string) => {
+    load: async (code: string, { lease = "test-epoch" }: { lease?: string | null } = {}) => {
       await writeFile(join(workspace, "perception.py"), code);
       const status = await runtime.reload({ epoch: "reload-epoch", modelCallId: "reload-call" });
       await wait(() => runtime.status().state !== "loading");
+      // Loading grants a lease by default: continuous sampling now follows
+      // Shiori's control cycle instead of starting with the worker.
+      if (lease) await runtime.setLease(lease);
       return status;
+    },
+    // Under the lease contract a fresh generation reports ready before its
+    // first sample commits; latest retries that transient NOT_READY window.
+    // The resident sampler runs on a real Python scheduler, so fake timers
+    // cannot drive the commit; poll on the real record like wait() does.
+    latest: async () => {
+      const deadline = Date.now() + 4000;
+      let read = await observe();
+      while (Date.now() < deadline && (read.error?.code === "NOT_READY" || (read.ok && !read.records.length))) {
+        await Bun.sleep(10);
+        read = await observe();
+      }
+      return read;
     },
     cleanup: async () => { await runtime.stop(); await rm(workspace, { recursive: true, force: true }); } };
 }
@@ -79,11 +95,11 @@ test("empty implementation stays blind; sampler failure can be repaired without 
     expect((await f.runtime.reload()).state).toBe("unimplemented");
     expect((await f.observe()).records).toEqual([]);
     await f.load(source('        raise NotImplementedError("Implement sample")'));
-    expect((await f.observe()).error?.message).toContain("Implement sample");
+    expect((await f.latest()).error?.message).toContain("Implement sample");
     await f.load(source('        return {"media": [{"path": "missing.png", "mediaType": "image/png"}]}'));
-    expect(f.runtime.status().state).toBe("error");
+    await f.wait(() => f.runtime.status().state === "error");
     await f.load(source('        return {"text": "fixed"}'));
-    expect((await f.observe()).records[0]!.text).toBe("fixed");
+    expect((await f.latest()).records[0]!.text).toBe("fixed");
     await f.runtime.stop();
     expect((await f.observe()).error?.code).toBe("UNAVAILABLE");
     expect(f.runtime.status().state).toBe("stopped");
@@ -99,7 +115,7 @@ test("retention policy reaches the worker and expired history cannot invalidate 
         return {"text": str(self.count), "media": [{"path": "frame.txt", "mediaType": "text/plain"}]}`));
     expect(f.runtime.status().history?.persistent).toBe(false);
     expect(f.runtime.status().history?.hotSeconds).toBe(0.15);
-    const delivered = await f.observe();
+    const delivered = await f.latest();
     const file = delivered.records[0]!.media[0]!;
     expect((await observationBytes(file)).toString("utf8")).toBe(delivered.records[0]!.text);
     const first = delivered.records[0]!;
@@ -125,7 +141,7 @@ test("cold history remains queryable across segments and worker reload", async (
   try {
     const code = source('        self.count += 1\n        return {"text": str(self.count)}');
     await f.load(code);
-    const first = (await f.observe()).records[0]!;
+    const first = (await f.latest()).records[0]!;
     await f.wait(() => f.samples().length >= 8);
     expect((await f.observe({ at: first.recordedAt })).records[0]?.id).toBe(first.id);
     await f.load(code);
@@ -160,8 +176,8 @@ test("sampling continues without reads, archives overwritten files, and queries 
   const f = await fixture();
   try {
     await f.load(source(`        self.count += 1
-        assert current()["epoch"] is None
-        assert "epoch" not in current()["trace"]
+        assert current()["epoch"] == "test-epoch"
+        assert current()["trace"].get("epoch") == "test-epoch"
         Path("frame.txt").write_text(str(self.count))
         return {"text": str(self.count), "media": [{"path":"frame.txt","mediaType":"text/plain"}]}`));
     await f.wait(() => f.samples().length >= 5);
@@ -199,7 +215,7 @@ test("sampling continues without reads, archives overwritten files, and queries 
     const expanded = await f.observe({ start: first.recordedAt, end: latest.records[0]!.recordedAt });
     expect(expanded.records.length).toBeGreaterThan(1);
     const sampleEvent = f.samples()[0]!;
-    expect(sampleEvent.trace.epoch).toBeUndefined();
+    expect(sampleEvent.trace.epoch).toBe("test-epoch");
     expect(sampleEvent.trace.modelCallId).toBeUndefined();
     const read = f.events.find(e => e.type === "perception_observe_end")!;
     expect(read.trace.parentSpanId).toBe("model-span");
@@ -246,14 +262,14 @@ test("editing python sources auto-reloads the worker, preserves generations, and
       '        import helper\n        self.value = helper.VALUE + ":" + Path("weights.txt").read_text()',
       '        Path("closed").write_text(str(os.getpid()))');
     const old = await f.load(code);
-    const first = await f.observe();
+    const first = await f.latest();
     await writeFile(helper, 'VALUE = "new"\n'); await utimes(helper, stamp, new Date());
     await writeFile(join(f.workspace, "weights.txt"), "new weights");
     await f.wait(() => f.runtime.status().generation !== old.generation);
-    expect((await f.observe()).records[0]!.text).toBe("new:new weights");
+    expect((await f.latest()).records[0]!.text).toBe("new:new weights");
     // Non-Python assets alone never trigger a reload: the running worker keeps serving.
     await writeFile(join(f.workspace, "weights.txt"), "old weights");
-    expect((await f.observe()).records[0]!.text).toBe("new:new weights");
+    expect((await f.latest()).records[0]!.text).toBe("new:new weights");
     const fresh = f.runtime.status();
     expect(fresh.pid).not.toBe(old.pid);
     expect(await readFile(join(f.workspace, "closed"), "utf8")).toBe(String(old.pid));
@@ -275,7 +291,7 @@ test("editing python sources auto-reloads the worker, preserves generations, and
     expect(f.runtime.accepts("epoch-one", fresh.generation!)).toBe(false);
     await f.runtime.setLease(null);
     await f.load(source('        raise RuntimeError("broken sampler")'));
-    const failed = await f.observe();
+    const failed = await f.latest();
     expect(failed.error?.message).toContain("broken sampler");
     expect(failed.records).toEqual([]);
     const emptyLatest = await f.observe({ at: "", start: null, end: " ", limit: null, after: null });
@@ -328,7 +344,7 @@ test("invalid query does not damage sampler health and stuck startup is recovera
     expect((await f.observe({ at: "bad" })).error?.code).toBe("QUERY_FAILED");
     expect((await f.observe({ at: "2026-01-01T00:00:00Z", start: "2026-01-01T00:00:00Z" })).error).toBeDefined();
     expect(f.runtime.status().state).toBe("ready");
-    expect((await f.observe()).records[0]!.text).toBe("ok");
+    expect((await f.latest()).records[0]!.text).toBe("ok");
   } finally { await f.cleanup(); }
 });
 
@@ -365,11 +381,11 @@ from ludens_tools._context import current
 @capability
 def inspect() -> dict:
     """A named observation entry."""
-    assert current()["epoch"] is None
-    assert "epoch" not in current()["trace"]
+    assert current()["epoch"] is not None
+    assert current()["trace"].get("epoch") == current()["epoch"]
     return {"text": "custom observation"}
 `);
-    expect((await f.observe()).records[0]?.capability).toBe("python/perception.py:inspect");
+    expect((await f.latest()).records[0]?.capability).toBe("python/perception.py:inspect");
     await host.start();
     expect((await f.runtime.stateMachine()).epoch).toBe(host.status().epoch);
     await f.runtime.reload();
@@ -387,8 +403,8 @@ def sense() -> dict:
     return {"text": "external observation"}
 `);
     await f.load(source('        from sensing import sense\n        sense()\n        return {"text": "entry"}'));
-    expect((await f.observe()).records[0]?.capability).toBe("python/sensing.py:sense");
-    const previous = (await f.observe()).records[0]!;
+    expect((await f.latest()).records[0]?.capability).toBe("python/sensing.py:sense");
+    const previous = (await f.latest()).records[0]!;
     await f.load(source('        raise RuntimeError("unavailable")'));
     expect((await f.observe()).ok).toBe(false);
     expect((await f.observe({ id: previous.id })).records[0]?.text).toBe("external observation");
@@ -402,6 +418,10 @@ test("observe envelopes preserve effects and drive in-process state transitions"
   const f = await fixture({ env: { LUDENS_PERCEPTION_SAMPLE_HZ: "5" } });
   try {
     await f.load(`from ludens_tools import capability, observe, record
+@capability
+def noop(value: int):
+    """A local effect target executing inside the resident process."""
+    return {}
 class Perception:
     def start(self, context):
         self.shared = {"ticks": 0}
@@ -411,7 +431,7 @@ class Perception:
     def sample(self):
         self.shared["ticks"] += 1
         return {"text": "observed", "data": self.shared,
-                "effect": {"id": "controller/test.noop", "arguments": {"value": 1}},
+                "effect": {"id": "python/perception.py:noop", "arguments": {"value": 1}},
                 "transition": {"to": "hold", "arguments": {"mode": "automatic"}}}
     @capability
     def hold(self, mode: str):
@@ -426,7 +446,7 @@ class Perception:
       await Bun.sleep(20);
       state = await f.runtime.stateMachine();
     }
-    expect(state).toMatchObject({ state: "python/perception.py:Perception.hold", arguments: { mode: "automatic" }, epoch: null });
+    expect(state).toMatchObject({ state: "python/perception.py:Perception.hold", arguments: { mode: "automatic" }, epoch: "test-epoch" });
     const transitioned = await f.runtime.transitionState("hold", { mode: "manual" });
     expect(transitioned).toMatchObject({ state: "python/perception.py:Perception.hold", arguments: { mode: "manual" } });
     await f.runtime.setLease("epoch-1", "generation-1");
@@ -434,11 +454,11 @@ class Perception:
     await f.runtime.setLease(null);
     const read = await f.observe({ capability: "python/perception.py:Perception.sample" });
     expect(read.records[0]).toMatchObject({
-      effect: { id: "controller/test.noop", arguments: { value: 1 } },
+      effect: { id: "python/perception.py:noop", arguments: { value: 1 } },
       transition: { to: "hold", arguments: { mode: "automatic" } },
     });
     expect(perceptionInput(read).records[0]).toMatchObject({
-      effect: { id: "controller/test.noop", arguments: { value: 1 } },
+      effect: { id: "python/perception.py:noop", arguments: { value: 1 } },
       transition: { to: "hold", arguments: { mode: "automatic" } },
     });
   } finally { await f.cleanup(); }
@@ -486,7 +506,7 @@ test("immediate latest reads and concurrent state RPCs coalesce source edits int
     const old = await f.load(code);
     await writeFile(join(f.workspace, "perception.py"), code.replace('"old"', '"new"'));
     const [read, state] = await Promise.all([
-      f.observe({ at: "", start: null, end: " ", after: null, id: null }),
+      f.latest(),
       f.runtime.stateMachine(), f.runtime.stateMachine(),
     ]);
     expect(read.records[0]?.text).toBe("new");
@@ -521,11 +541,11 @@ def hold():
     await writeFile(join(f.workspace, "perception.py"), "import helper\n" + source('        return {"text": "repaired"}'));
     expect((await f.observe()).ok).toBe(false);
     await writeFile(helper, helperCode);
-    expect((await f.observe()).records[0]?.text).toBe("repaired");
+    expect((await f.latest()).records[0]?.text).toBe("repaired");
     await rm(helper);
     expect((await f.observe()).ok).toBe(false);
     await writeFile(helper, helperCode);
-    expect((await f.observe()).records[0]?.text).toBe("repaired");
+    expect((await f.latest()).records[0]?.text).toBe("repaired");
   } finally { await f.cleanup(); }
 });
 
@@ -544,7 +564,7 @@ def capture():
     Path("effect.json").write_text(json.dumps({"epoch": context.get("epoch"), "generation": context["trace"].get("inputGeneration")}))
 `);
     const code = source('        return {"text": "running", "effect": {"id": "python/effects.py:capture"}}');
-    const old = await f.load(code);
+    const old = await f.load(code, { lease: null });
     await f.runtime.setLease("epoch");
     await f.runtime.setLease("epoch"); // Repeating the same lease must not reset device inputs.
     expect(grants).toEqual([["epoch", old.generation]]);
@@ -584,7 +604,7 @@ test("stop fences an automatic reload already flushing Python and disables the w
     expect((await f.observe()).error?.code).toBe("UNAVAILABLE");
     expect(f.runtime.status().generation).toBe(old.generation);
     await f.runtime.reload();
-    expect((await f.observe()).records[0]?.text).toBe("restarted");
+    expect((await f.latest()).records[0]?.text).toBe("restarted");
   } finally {
     await writeFile(join(f.workspace, "release-close"), "go");
     await f.cleanup();
@@ -599,7 +619,7 @@ test("stop compensates a delayed device grant without admitting it or leaving a 
     if (generation) { entered.resolve(); await release.promise; }
   } });
   try {
-    const old = await f.load(source('        return {"text": "running"}'));
+    const old = await f.load(source('        return {"text": "running"}'), { lease: null });
     const granting = f.runtime.setLease("epoch");
     await entered.promise;
     expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
@@ -620,7 +640,7 @@ test("failed grants never admit input and failed cleanup still stops Python and 
     if (generation === null && failCleanup) throw new Error("cleanup failed");
   }, onCleanupError: error => { failures.push(error); } });
   try {
-    const old = await f.load(source('        return {"text": "running"}'));
+    const old = await f.load(source('        return {"text": "running"}'), { lease: null });
     await expect(f.runtime.setLease("epoch")).rejects.toThrow("grant failed");
     expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
     failGrant = false;
@@ -639,7 +659,7 @@ test("unexpected worker exit revokes its device generation", async () => {
   const grants: Array<string | null> = [];
   const f = await fixture({ setInputGeneration: async (_epoch, generation) => { grants.push(generation); } });
   try {
-    const old = await f.load(source('        return {"text": "running"}'));
+    const old = await f.load(source('        return {"text": "running"}'), { lease: null });
     await f.runtime.setLease("epoch");
     process.kill(old.pid!, "SIGKILL");
     await f.wait(() => f.runtime.status().state === "error" && grants.at(-1) === null);
@@ -651,8 +671,11 @@ test("unexpected worker exit revokes its device generation", async () => {
 test("freshness failures keep the observation error envelope and cancellation remains abortable", async () => {
   const f = await fixture({ observeTimeoutMs: 30 });
   try {
-    await writeFile(join(f.workspace, "perception.py"), source('        time.sleep(0.2)\n        return {"text": "ready"}'));
-    await f.runtime.reload();
+    await f.load(source('        return {"text": "ready"}'));
+    // Readiness no longer waits for the first tick, so freshness is measured
+    // on the reload itself: a start() slower than the observe budget fails
+    // the read with a clean envelope.
+    await writeFile(join(f.workspace, "perception.py"), source('        return {"text": "ready"}', '        time.sleep(0.2)'));
     const read = await f.observe();
     expect(read).toMatchObject({ ok: false, records: [], error: { code: "QUERY_FAILED" } });
     expect(read.error?.message).toContain("freshness timed out");
@@ -661,6 +684,50 @@ test("freshness failures keep the observation error envelope and cancellation re
     abort.abort(new Error("cancelled freshness"));
     await expect(cancelled).rejects.toThrow("cancelled freshness");
     await f.wait(() => f.runtime.status().state === "ready");
-    expect((await f.observe()).records[0]?.text).toBe("ready");
+    expect((await f.latest()).records[0]?.text).toBe("ready");
   } finally { await f.cleanup(); }
 });
+
+test("standby samples nothing until a control lease starts and seals segments at handback", async () => {
+  const png = "iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAIAAAD8GO2jAAAAKElEQVR4nO3NsQ0AAAzCMP5/un0CNkuZ41wybXsHAAAAAAAAAAAAxR4yw/wuPL6QkAAAAABJRU5ErkJggg==";
+  const f = await fixture();
+  const host = createTestRuntime({ controllers: [] }, (type, data, trace) => f.events.push({ type, data, trace }));
+  host.attach({ perception: f.runtime });
+  try {
+    // Manual standby: loaded and ready, but zero sampling and zero segments.
+    expect((await f.load(source(`        self.count = 0
+        return {"text": "tracked", "media": [{"data": "${png}", "mediaType": "image/png"}]}`,
+      '        self.count = 0'), { lease: null })).state).toBe("ready");
+    await Bun.sleep(300); // Negative evidence needs a real window; nothing to await.
+    expect(f.samples()).toEqual([]);
+    expect(f.events.filter(e => e.type === "perception_stats")).toEqual([]);
+    expect(existsSync(join(f.workspace, ".ludens/timeline/video"))).toBe(false);
+    const appended = await f.runtime.append({ sample: { text: "manual" }, identity: { id: "python/cli.py:note" },
+      generation: "g", sampling: { clock: "test", startedAtMs: 0, finishedAtMs: 1 } }, new AbortController().signal) as { timeline: { sequence: number } };
+    expect(appended.timeline.sequence).toBe(1);
+    // A control lease starts continuous sampling immediately under its epoch.
+    const { epoch } = await host.start();
+    await f.wait(() => f.samples().filter(s => s.data.snapshot.capability === "python/perception.py:Perception.sample").length >= 2);
+    for (const sample of f.samples()) {
+      if (sample.data.snapshot.capability === "python/perception.py:Perception.sample")
+        expect(sample.trace.epoch).toBe(epoch);
+    }
+    const video = join(f.workspace, ".ludens/timeline/video");
+    const asset = readdirSync(video).find(name => name.endsWith(".mp4.json"))!;
+    expect(JSON.parse(readFileSync(join(video, asset), "utf8")).status).toBe("pending");
+    // Handback joins the sampler: final stats land before control(manual) and
+    // the active fMP4 segment is sealed to "ready" before stop() returns.
+    await host.stop("human");
+    const manualIndex = f.events.findLastIndex(e => e.type === "control" && e.data.mode === "manual");
+    expect(manualIndex).toBeGreaterThan(0);
+    expect(f.events.map(e => e.type).lastIndexOf("perception_stats")).toBeLessThan(manualIndex);
+    expect(manualIndex).toBe(f.events.length - 1); // The handback closes the cycle.
+    expect(JSON.parse(readFileSync(join(video, asset), "utf8")).status).toBe("ready");
+    const frozen = f.samples().length;
+    await Bun.sleep(200); // Standby again: no new records without a lease.
+    expect(f.samples()).toHaveLength(frozen);
+  } finally {
+    await host.close();
+    await f.cleanup();
+  }
+}, 15_000);

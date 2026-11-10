@@ -513,6 +513,7 @@ def broken():
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             worker = Worker(root, SOURCE)
+            worker.request(action="lease", epoch="sampler-lease", inputGeneration="one")
             socket_path = "/tmp/ludens-timeline-test-" + uuid.uuid4().hex[:12] + ".sock"
             class Handler(socketserver.StreamRequestHandler):
                 def handle(self):

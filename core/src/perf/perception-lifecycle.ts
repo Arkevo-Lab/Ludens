@@ -47,22 +47,34 @@ export async function measurePerceptionLifecycle(ctx: PerfContext): Promise<Reco
     await perception.reload();
     const deadline = Date.now() + 5000;
     while (perception.status().state === "loading" && Date.now() < deadline) await Bun.sleep(10);
+    // Production sampling follows Shiori's control lease; grant one so the
+    // benchmark exercises the leased sampler exactly like a control cycle.
+    await perception.setLease("benchmark-epoch");
   };
   const statuses: Record<string, PerceptionStatus> = {};
-  const read = async (stage: string) => {
+  const read = async (stage: string, expectRecords = true) => {
     signal.throwIfAborted();
-    const result = await perception.observe(signal);
+    let result = await perception.observe(signal);
+    if (expectRecords) {
+      // A fresh generation reports ready before its first sample commits.
+      const deadline = Date.now() + 5000;
+      while ((result.error?.code === "NOT_READY" || (result.ok && !result.records.length)) && Date.now() < deadline) {
+        await Bun.sleep(10);
+        result = await perception.observe(signal);
+      }
+    }
     statuses[stage] = perception.status();
     record("benchmark_perception_step", { stage, queryId: result.queryId, status: statuses[stage] });
     return result;
   };
+
   let missing!: PerceptionRead, first!: PerceptionRead, second!: PerceptionRead;
   let beforeReload!: PerceptionRead, reloaded!: PerceptionRead, failed!: PerceptionRead, repaired!: PerceptionRead;
   let historical!: PerceptionRead;
   let archived = "", archiveUnchanged = false, startsBeforeReload = 0, coldMs = 0, warmMs = 0;
   try {
     await reload();
-    missing = await read("unimplemented");
+    missing = await read("unimplemented", false);
     await writeFile(join(ctx.workspace, "helper.py"), "def transform(value):\n    return value + 1\n");
     await writeFile(join(ctx.workspace, "weights.json"), '{"value":10}');
     await writeFile(join(ctx.workspace, "perception.py"), implementation);
@@ -91,7 +103,7 @@ export async function measurePerceptionLifecycle(ctx: PerfContext): Promise<Reco
       "self.sequence += 1", 'raise RuntimeError("fixture perception failure")'));
     const failedDeadline = Date.now() + 5000;
     while (perception.status().state !== "error" && Date.now() < failedDeadline) await Bun.sleep(25);
-    failed = await read("failed");
+    failed = await read("failed", false);
     await writeFile(join(ctx.workspace, "perception.py"), implementation);
     const repairedDeadline = Date.now() + 5000;
     while (perception.status().state !== "ready" && Date.now() < repairedDeadline) await Bun.sleep(25);

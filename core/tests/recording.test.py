@@ -93,7 +93,7 @@ class Perception:
                     reader.start()
                     try:
                         process.stdin.write(json.dumps({"id": "start", "action": "start", "workspace": str(root),
-                            "runDir": str(root / "run"), "generation": "one", "source": source,
+                            "runDir": str(root / "run"), "generation": "one", "source": source, "epoch": "fixed-epoch",
                             "diagnostics": mode, "trace": {"recordingId": "run"}}) + "\n")
                         process.stdin.flush()
                         deadline = time.monotonic() + 4

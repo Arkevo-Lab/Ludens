@@ -27,6 +27,14 @@ test("perception injection CLI changes only context policy and rejects stale epo
     const deadline = Date.now() + 4000;
     while (runtime.perception!.status().state === "loading" && Date.now() < deadline) await Bun.sleep(10);
     expect(runtime.perception!.status().state).toBe("ready");
+    // Sampling runs under a granted control lease; wait for its first record.
+    await runtime.perception!.setLease("injection-cli");
+    while (Date.now() < deadline) {
+      const sampled = await read();
+      if (sampled.ok && sampled.records.length) return;
+      await Bun.sleep(10);
+    }
+    throw new Error("perception sampling did not start under the lease");
   };
   try {
     await writeFile(join(workspace, "perception.py"), `from ludens_tools import capability, record

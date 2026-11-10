@@ -706,6 +706,19 @@ class ObservationHistory:
         with self.lock:
             self._prune()
 
+    def seal(self):
+        """Flush and seal active segments at a control-lease boundary.
+
+        The writer stays open for the next epoch: only the active video
+        segment is finalized ("ready") and the timeline segment metadata is
+        persisted.
+        """
+        with self.lock:
+            if self._video is not None:
+                self._video.seal()
+            if self.persistent and self._active is not None:
+                self._save_meta(self._active)
+
     def close(self):
         if self._writer.closed:
             return

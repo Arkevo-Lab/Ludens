@@ -476,7 +476,8 @@ class Perception:
 
                 try:
                     send({"id": "start", "action": "start", "workspace": str(root), "runDir": str(root / "run"),
-                          "generation": "one", "source": source, "trace": {"traceId": "background", "epoch": "must-not-leak"}})
+                          "generation": "one", "source": source, "epoch": "worker-lease",
+                          "trace": {"traceId": "background", "epoch": "must-not-leak"}})
                     self.assertTrue(reply("start")["ok"])
                     deadline = time.monotonic() + 3
                     while not (root / "sampling").exists() and time.monotonic() < deadline:
@@ -493,8 +494,8 @@ class Perception:
                     self.assertLessEqual(len(records), 3)
                     for record in records:
                         payload = json.loads(record["text"])
-                        self.assertIsNone(payload["epoch"])
-                        self.assertNotIn("epoch", payload["trace"])
+                        self.assertEqual(payload["epoch"], "worker-lease")
+                        self.assertEqual(payload["trace"]["epoch"], "worker-lease")
                     send({"id": "bad", "action": "observe", "query": {"limit": -1}})
                     self.assertFalse(reply("bad")["ok"])
                     send({"id": "alive", "action": "observe"})
@@ -511,6 +512,107 @@ class Perception:
                     reader.join(timeout=1)
                 self.assertEqual(process.returncode, 0)
                 self.assertEqual((root / "closed").read_text(), "yes")
+
+    def test_sampling_follows_the_control_lease_and_seals_video_segments(self):
+        frame = "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAE0lEQVR4nGM8oWHDAANMcBZeDgA8KAE0dQVQXAAAAABJRU5ErkJggg=="
+        source = f"""
+from pathlib import Path
+from ludens_tools._context import current
+from ludens_tools import capability, record
+FRAME = "{frame}"
+class Perception:
+    def start(self, context):
+        self.count = 0
+    @record
+    @capability
+    def sample(self):
+        self.count += 1
+        Path("sampling").write_text(str(self.count))
+        return {{"text": str(self.count), "data": {{"epoch": current()["epoch"]}},
+                "media": [{{"data": FRAME, "mediaType": "image/png"}}]}}
+    def close(self):
+        pass
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "python")}
+            with (root / "stderr.log").open("w") as stderr:
+                process = subprocess.Popen([sys.executable, "-u", "-m", "ludens_tools._perception"], cwd=root,
+                                           env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                           stderr=stderr, text=True)
+                incoming = queue.Queue()
+                reader = threading.Thread(target=lambda: [incoming.put(json.loads(line)) for line in process.stdout], daemon=True)
+                reader.start()
+
+                def send(message):
+                    process.stdin.write(json.dumps(message) + "\n")
+                    process.stdin.flush()
+
+                def reply(identity):
+                    deadline = time.monotonic() + 5
+                    while time.monotonic() < deadline:
+                        message = incoming.get(timeout=5)
+                        if message.get("id") == identity:
+                            return message
+                    self.fail("worker reply timed out")
+
+                def until(predicate, timeout=5):
+                    deadline = time.monotonic() + timeout
+                    while time.monotonic() < deadline:
+                        if predicate():
+                            return True
+                        time.sleep(0.01)
+                    return False
+
+                def video_states():
+                    folder = root / ".ludens" / "timeline" / "video"
+                    return [json.loads(path.read_text())["status"]
+                            for path in sorted(folder.glob("*.mp4.json"))] if folder.exists() else []
+
+                try:
+                    # Standby: the worker is ready but never samples without a lease.
+                    send({"id": "start", "action": "start", "workspace": str(root), "runDir": str(root / "run"),
+                          "generation": "one", "source": source, "trace": {"recordingId": "run"}})
+                    started = reply("start")
+                    self.assertTrue(started["ok"])
+                    self.assertEqual(started["result"]["state"], "ready")
+                    time.sleep(0.4)
+                    self.assertFalse((root / "sampling").exists())
+                    self.assertEqual(video_states(), [])
+                    # Granting the lease starts continuous sampling immediately.
+                    send({"id": "lease-on", "action": "lease", "epoch": "epoch-one", "inputGeneration": "one"})
+                    self.assertTrue(reply("lease-on")["ok"])
+                    self.assertTrue(until(lambda: (root / "sampling").exists()))
+                    segments = root / ".ludens" / "timeline" / "segments"
+                    self.assertTrue(until(lambda: any(segments.glob("*.jsonl"))))
+                    send({"id": "samples", "action": "observe", "query": {"capability": "*", "after": 0}})
+                    records = reply("samples")["result"]["records"]
+                    self.assertGreaterEqual(len(records), 1)
+                    self.assertEqual(records[0]["data"]["epoch"], "epoch-one")
+                    # Revoking the lease joins the sampler, flushes its final
+                    # stats, and seals the open fMP4 segment before replying.
+                    self.assertTrue(until(lambda: len(video_states()) >= 1))
+                    self.assertIn("pending", video_states())
+                    send({"id": "lease-off", "action": "lease", "epoch": None})
+                    revoked = reply("lease-off")
+                    self.assertEqual(revoked["result"], {"epoch": None, "inputGeneration": None})
+                    self.assertEqual(video_states(), ["ready"])
+                    stopped_at = (root / "sampling").read_text()
+                    time.sleep(0.4)
+                    self.assertEqual((root / "sampling").read_text(), stopped_at)
+                    self.assertEqual(revoked["history"]["persistent"], True)
+                finally:
+                    process.terminate()
+                    try:
+                        process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait()
+                    process.stdin.close()
+                    process.stdout.close()
+                    reader.join(timeout=1)
+                self.assertEqual(process.returncode, 0)
+                self.assertEqual((root / "stderr.log").read_text(), "")
 
 
 if __name__ == "__main__":
