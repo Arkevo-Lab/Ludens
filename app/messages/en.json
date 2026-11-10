@@ -1809,6 +1809,7 @@
     "requestUnavailable": "Selected request unavailable",
     "requestUnavailableHint": "This read did not contain the selected request. Choose another request or read again.",
     "performanceOverview": "Performance overview",
+    "requestHistoryTab": "Request & Trace History",
     "overviewCount": "{count} requests in this selection",
     "overviewHint": "Summary for the selected scope and recorded metrics for the requests on this page. Charts appear only when their metrics were recorded.",
     "requestCharts": "Recorded request metrics",

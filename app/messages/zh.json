@@ -1809,6 +1809,7 @@
     "requestUnavailable": "选中的请求不可用",
     "requestUnavailableHint": "本次读取未包含选中的请求。请选择另一条请求，或重新读取。",
     "performanceOverview": "性能概览",
+    "requestHistoryTab": "请求与调用链回溯",
     "overviewCount": "当前范围共 {count} 条请求",
     "overviewHint": "当前范围汇总与本页请求已记录的指标。仅在记录了对应指标时显示图表。",
     "requestCharts": "已记录的请求指标",

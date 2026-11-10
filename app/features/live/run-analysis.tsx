@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useId, useRef, type ReactNode } from "react";
-import { BarChart3, ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { BarChart3, ChevronLeft, ChevronRight, ListTree } from "lucide-react";
 import { useTranslations } from "@/lib/locale";
 import type { Call, RunData } from "@/lib/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { bytes, clockTime, percent, requestBytes, RequestChart, RequestDetails, seconds, transport } from "@/features/live/run-visuals";
 
 export interface RunAnalysisProps {
@@ -18,6 +20,9 @@ export interface RunAnalysisProps {
   error: string;
   retrying: boolean;
   metrics: ReactNode;
+  telemetrySlot?: ReactNode;
+  activeTab?: "overview" | "requests";
+  onTabChange?(tab: "overview" | "requests"): void;
   pageRange: string;
   panel: string;
   onPanel(panel: string): void;
@@ -28,8 +33,8 @@ export interface RunAnalysisProps {
   onLoadMore(): void;
 }
 
-export function RunAnalysis({ data, detailData, call, requestedCall, pending, error, retrying, metrics, pageRange,
-  panel, onPanel, onSelect, onInspect, onRetry, onFollowLatest, onLoadMore }: RunAnalysisProps) {
+export function RunAnalysis({ data, detailData, call, requestedCall, pending, error, retrying, metrics, telemetrySlot,
+  activeTab, onTabChange, pageRange, panel, onPanel, onSelect, onInspect, onRetry, onFollowLatest, onLoadMore }: RunAnalysisProps) {
   const t = useTranslations("runAnalysis");
   const dt = useTranslations("dashboard");
   const rt = useTranslations("runVisuals");
@@ -105,81 +110,113 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
     retryIntent.current = document.activeElement === control ? { control, selection } : null;
     onRetry(control);
   };
+  const [localTab, setLocalTab] = useState<"overview" | "requests">(requestedCall ? "requests" : "overview");
+  const currentTab = activeTab ?? localTab;
+  const handleTabChange = (next: "overview" | "requests") => {
+    setLocalTab(next);
+    onTabChange?.(next);
+  };
   const retryButton = <Button type="button" variant="outline" size="sm" aria-disabled={retrying}
     className="aria-disabled:opacity-50" onClick={event => retry(event.currentTarget)}>{t(retrying ? "reading" : "retry")}</Button>;
 
-  return <div className="run-analysis">
-    <div className="run-analysis-grid">
-      <section className="surface run-analysis-requests" aria-labelledby={`${id}-requests`}>
-        <div className="surface-heading"><h2 id={`${id}-requests`}>{t("requests")}</h2>
-          <Button type="button" variant="ghost" size="xs" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>
+  return <Tabs value={currentTab} onValueChange={value => handleTabChange(value as "overview" | "requests")} className="run-analysis">
+    <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1.5 bg-[var(--surface-inset)] p-1.5">
+      <TabsTrigger value="overview" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
+        <BarChart3 className="size-4" aria-hidden="true" />
+        {t("performanceOverview")}
+      </TabsTrigger>
+      <TabsTrigger value="requests" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
+        <ListTree className="size-4" aria-hidden="true" />
+        {t("requestHistoryTab")}
+        <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
+          {data.paging.totalCalls}
+        </Badge>
+      </TabsTrigger>
+    </TabsList>
+
+    <TabsContent value="overview" className="space-y-4">
+      <section className="surface run-analysis-overview">
+        <div className="run-analysis-overview-header">
+          <span><BarChart3 aria-hidden="true" />{t("performanceOverview")}</span>
+          <span>{t("overviewCount").replace("{count}", String(data.paging.totalCalls))}</span>
         </div>
-        <p className="feed-notice">{pageRange}</p>
-        <div ref={picker} className="run-analysis-picker">
-          <label htmlFor={`${id}-request`} className="sr-only">{t("chooseRequest")}</label>
-          <NativeSelect id={`${id}-request`} value={selectedId} wrapperClassName="w-full" disabled={!rows.length && !requestedCall}
-            onChange={event => { if (event.target.value) onSelect(event.target.value); }}>
-            {!selectedId && <NativeSelectOption value="">{t(rows.length ? "chooseRequest" : "noRequests")}</NativeSelectOption>}
-            {selectedId && position < 0 && <NativeSelectOption value={selectedId}>{call ? title : t("selectedRequest")} · {t("outsidePage")}</NativeSelectOption>}
-            {rows.map(item => <NativeSelectOption key={item.id} value={item.id}>
-              #{String(item.index).padStart(3, "0")} · {description(item).slice(0, 100)} · {clockTime(item.at)}
-            </NativeSelectOption>)}
-          </NativeSelect>
-          <div className="run-analysis-step-controls">
-            <Button type="button" size="sm" variant="outline" aria-disabled={!older} className="aria-disabled:opacity-50"
-              onClick={() => { if (older) onSelect(older.id); }}><ChevronLeft aria-hidden="true" />{t("olderRequest")}</Button>
-            <Button type="button" size="sm" variant="outline" aria-disabled={!newer} className="aria-disabled:opacity-50"
-              onClick={() => { if (newer) onSelect(newer.id); }}>{t("newerRequest")}<ChevronRight aria-hidden="true" /></Button>
-          </div>
+        <div className="run-analysis-overview-body"><p className="help-text">{t("overviewHint")}</p>{metrics}
+          <section className="charts" aria-label={t("requestCharts")}>
+            {(["latency", "cache", "body"] as const).map(type => <div className="surface chart-card" key={type}>
+              <div className="surface-heading"><h2>{dt(type === "latency" ? "chart.latency" : type === "cache" ? "chart.cache" : "chart.body")}</h2>
+                <span>{type === "latency" ? dt("chart.latencyHint") : type === "cache" ? "%" : dt("chart.bodyHint")}</span>
+              </div><RequestChart type={type} calls={data.calls} selected={selectedId} onSelect={callId => {
+                onSelect(callId);
+                handleTabChange("requests");
+              }} />
+            </div>)}
+          </section>
         </div>
-        <div ref={list} className="timeline-list run-analysis-list">
-          {rows.map(item => <button type="button" key={item.id} data-request-id={item.id}
-            className={"request-row" + (item.id === selectedId ? " selected" : "")} aria-pressed={item.id === selectedId}
-            onClick={() => onSelect(item.id)}>
-            <div><b>#{String(item.index).padStart(3, "0")}</b><span className={"request-state " + item.status}>
-              {item.status === "pending" ? dt("req.pending") : item.status === "error" ? dt("req.failed")
-                : item.status === "aborted" ? dt("req.aborted") : seconds(item.durationMs)}
-            </span></div>
-            <p>{description(item)}</p>
-            <small>{clockTime(item.at)}<span>{transport(item, rt)}</span></small>
-            <small>{bytes(requestBytes(item))}<span>{percent(item.cacheHit)}</span></small>
-          </button>)}
-        </div>
-        {!rows.length && <p className="run-analysis-no-requests">{data.activeCompaction ? dt("callsEmpty.compacting")
-          : data.selectedEpoch ? dt("callsEmpty.noEpochCalls") : dt("callsEmpty.noTakeover")}</p>}
-        {data.paging.hasMore && data.paging.beforeCall !== null && <div className="run-analysis-pagination">
-          <Button type="button" size="sm" variant="outline" onClick={onLoadMore}>{dt("loadMore")}</Button>
-        </div>}
       </section>
-      <div ref={details} className="run-analysis-detail" tabIndex={-1} aria-label={t("selectedRequest")}
-        aria-busy={retrying || pending && !error} data-request-id={selectedId || undefined} data-detail-state={error ? "error" : pending ? "loading" : missing ? "missing" : "ready"}>
-        {error && <Alert variant="destructive" className="run-analysis-read-error"><AlertDescription>
-          <p className="font-medium">{t(detailData ? "refreshFailed" : "readFailed")}</p>
-          {detailData && <p>{t("showingCached")}</p>}
-          <details className="w-full text-xs"><summary>{t("technicalDetails")}</summary><p className="mt-2 break-words">{error}</p></details>
-        </AlertDescription></Alert>}
-        {pending || !detailData ? <section className="surface run-analysis-placeholder">
-          <h2>{title}</h2><p role="status">{t(error ? "chooseOrRetry" : "loadingRequest")}</p>
-        </section> : missing ? <section className="surface run-analysis-placeholder">
-          <h2>{t("requestUnavailable")}</h2><p>{t("requestUnavailableHint")}</p>
-        </section> : null}
-        {(error || missing) && <div className="my-3 flex flex-wrap gap-2">{retryButton}
-          {missing && <Button type="button" variant="ghost" size="sm" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>}
-        </div>}
-        {!pending && detailData && !missing && <RequestDetails data={detailData} call={call} panel={panel} onPanel={onPanel} onSelect={onSelect} onInspect={onInspect} />}
-      </div>
-    </div>
-    <details className="surface run-analysis-overview" open>
-      <summary><span><BarChart3 aria-hidden="true" />{t("performanceOverview")}</span><span>{t("overviewCount").replace("{count}", String(data.paging.totalCalls))}</span></summary>
-      <div className="run-analysis-overview-body"><p className="help-text">{t("overviewHint")}</p>{metrics}
-        <section className="charts" aria-label={t("requestCharts")}>
-          {(["latency", "cache", "body"] as const).map(type => <div className="surface chart-card" key={type}>
-            <div className="surface-heading"><h2>{dt(type === "latency" ? "chart.latency" : type === "cache" ? "chart.cache" : "chart.body")}</h2>
-              <span>{type === "latency" ? dt("chart.latencyHint") : type === "cache" ? "%" : dt("chart.bodyHint")}</span>
-            </div><RequestChart type={type} calls={data.calls} selected={selectedId} onSelect={onSelect} />
-          </div>)}
+      {telemetrySlot}
+    </TabsContent>
+
+    <TabsContent value="requests">
+      <div className="run-analysis-grid">
+        <section className="surface run-analysis-requests" aria-labelledby={`${id}-requests`}>
+          <div className="surface-heading"><h2 id={`${id}-requests`}>{t("requests")}</h2>
+            <Button type="button" variant="ghost" size="xs" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>
+          </div>
+          <p className="feed-notice">{pageRange}</p>
+          <div ref={picker} className="run-analysis-picker">
+            <label htmlFor={`${id}-request`} className="sr-only">{t("chooseRequest")}</label>
+            <NativeSelect id={`${id}-request`} value={selectedId} wrapperClassName="w-full" disabled={!rows.length && !requestedCall}
+              onChange={event => { if (event.target.value) onSelect(event.target.value); }}>
+              {!selectedId && <NativeSelectOption value="">{t(rows.length ? "chooseRequest" : "noRequests")}</NativeSelectOption>}
+              {selectedId && position < 0 && <NativeSelectOption value={selectedId}>{call ? title : t("selectedRequest")} · {t("outsidePage")}</NativeSelectOption>}
+              {rows.map(item => <NativeSelectOption key={item.id} value={item.id}>
+                #{String(item.index).padStart(3, "0")} · {description(item).slice(0, 100)} · {clockTime(item.at)}
+              </NativeSelectOption>)}
+            </NativeSelect>
+            <div className="run-analysis-step-controls">
+              <Button type="button" size="sm" variant="outline" aria-disabled={!older} className="aria-disabled:opacity-50"
+                onClick={() => { if (older) onSelect(older.id); }}><ChevronLeft aria-hidden="true" />{t("olderRequest")}</Button>
+              <Button type="button" size="sm" variant="outline" aria-disabled={!newer} className="aria-disabled:opacity-50"
+                onClick={() => { if (newer) onSelect(newer.id); }}>{t("newerRequest")}<ChevronRight aria-hidden="true" /></Button>
+            </div>
+          </div>
+          <div ref={list} className="timeline-list run-analysis-list">
+            {rows.map(item => <button type="button" key={item.id} data-request-id={item.id}
+              className={"request-row" + (item.id === selectedId ? " selected" : "")} aria-pressed={item.id === selectedId}
+              onClick={() => onSelect(item.id)}>
+              <div><b>#{String(item.index).padStart(3, "0")}</b><span className={"request-state " + item.status}>
+                {item.status === "pending" ? dt("req.pending") : item.status === "error" ? dt("req.failed")
+                  : item.status === "aborted" ? dt("req.aborted") : seconds(item.durationMs)}
+              </span></div>
+              <p>{description(item)}</p>
+              <small>{clockTime(item.at)}<span>{transport(item, rt)}</span></small>
+              <small>{bytes(requestBytes(item))}<span>{percent(item.cacheHit)}</span></small>
+            </button>)}
+          </div>
+          {!rows.length && <p className="run-analysis-no-requests">{data.activeCompaction ? dt("callsEmpty.compacting")
+            : data.selectedEpoch ? dt("callsEmpty.noEpochCalls") : dt("callsEmpty.noTakeover")}</p>}
+          {data.paging.hasMore && data.paging.beforeCall !== null && <div className="run-analysis-pagination">
+            <Button type="button" size="sm" variant="outline" onClick={onLoadMore}>{dt("loadMore")}</Button>
+          </div>}
         </section>
+        <div ref={details} className="run-analysis-detail" tabIndex={-1} aria-label={t("selectedRequest")}
+          aria-busy={retrying || pending && !error} data-request-id={selectedId || undefined} data-detail-state={error ? "error" : pending ? "loading" : missing ? "missing" : "ready"}>
+          {error && <Alert variant="destructive" className="run-analysis-read-error"><AlertDescription>
+            <p className="font-medium">{t(detailData ? "refreshFailed" : "readFailed")}</p>
+            {detailData && <p>{t("showingCached")}</p>}
+            <details className="w-full text-xs"><summary>{t("technicalDetails")}</summary><p className="mt-2 break-words">{error}</p></details>
+          </AlertDescription></Alert>}
+          {pending || !detailData ? <section className="surface run-analysis-placeholder">
+            <h2>{title}</h2><p role="status">{t(error ? "chooseOrRetry" : "loadingRequest")}</p>
+          </section> : missing ? <section className="surface run-analysis-placeholder">
+            <h2>{t("requestUnavailable")}</h2><p>{t("requestUnavailableHint")}</p>
+          </section> : null}
+          {(error || missing) && <div className="my-3 flex flex-wrap gap-2">{retryButton}
+            {missing && <Button type="button" variant="ghost" size="sm" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>}
+          </div>}
+          {!pending && detailData && !missing && <RequestDetails data={detailData} call={call} panel={panel} onPanel={onPanel} onSelect={onSelect} onInspect={onInspect} />}
+        </div>
       </div>
-    </details>
-  </div>;
+    </TabsContent>
+  </Tabs>;
 }
