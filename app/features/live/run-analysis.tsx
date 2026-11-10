@@ -1,11 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
-import { BarChart3, ChevronLeft, ChevronRight, ListTree } from "lucide-react";
+import { ArrowRight, BarChart3, ChevronLeft, ChevronRight, ListTree } from "lucide-react";
 import { useTranslations } from "@/lib/locale";
 import type { Call, RunData } from "@/lib/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -20,9 +19,11 @@ export interface RunAnalysisProps {
   error: string;
   retrying: boolean;
   metrics: ReactNode;
+  statusSlot?: ReactNode;
   telemetrySlot?: ReactNode;
   activeTab?: "overview" | "requests";
   onTabChange?(tab: "overview" | "requests"): void;
+  onSelectChartCall?(id: string): void;
   pageRange: string;
   panel: string;
   onPanel(panel: string): void;
@@ -33,8 +34,8 @@ export interface RunAnalysisProps {
   onLoadMore(): void;
 }
 
-export function RunAnalysis({ data, detailData, call, requestedCall, pending, error, retrying, metrics, telemetrySlot,
-  activeTab, onTabChange, pageRange, panel, onPanel, onSelect, onInspect, onRetry, onFollowLatest, onLoadMore }: RunAnalysisProps) {
+export function RunAnalysis({ data, detailData, call, requestedCall, pending, error, retrying, metrics, statusSlot, telemetrySlot,
+  activeTab, onTabChange, onSelectChartCall, pageRange, panel, onPanel, onSelect, onInspect, onRetry, onFollowLatest, onLoadMore }: RunAnalysisProps) {
   const t = useTranslations("runAnalysis");
   const dt = useTranslations("dashboard");
   const rt = useTranslations("runVisuals");
@@ -116,43 +117,81 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
     setLocalTab(next);
     onTabChange?.(next);
   };
+  useEffect(() => {
+    if (currentTab !== "requests" || !selectedId) return;
+    const frame = requestAnimationFrame(() => {
+      const container = list.current;
+      const target = container?.querySelector<HTMLElement>(`[data-request-id="${CSS.escape(selectedId)}"]`);
+      if (!container || !target) return;
+      const top = target.offsetTop - container.offsetTop;
+      const visibleHeight = Math.min(container.clientHeight, 380);
+      if (top < container.scrollTop || top + target.offsetHeight > container.scrollTop + visibleHeight) {
+        container.scrollTop = Math.max(0, top - Math.round(visibleHeight * 0.35));
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [currentTab, selectedId]);
   const retryButton = <Button type="button" variant="outline" size="sm" aria-disabled={retrying}
     className="aria-disabled:opacity-50" onClick={event => retry(event.currentTarget)}>{t(retrying ? "reading" : "retry")}</Button>;
 
   return <Tabs value={currentTab} onValueChange={value => handleTabChange(value as "overview" | "requests")} className="run-analysis">
-    <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1.5 bg-[var(--surface-inset)] p-1.5">
-      <TabsTrigger value="overview" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
-        <BarChart3 className="size-4" aria-hidden="true" />
-        {t("performanceOverview")}
-      </TabsTrigger>
-      <TabsTrigger value="requests" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
-        <ListTree className="size-4" aria-hidden="true" />
-        {t("requestHistoryTab")}
-        <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
-          {data.paging.totalCalls}
-        </Badge>
-      </TabsTrigger>
-    </TabsList>
+    <div className="perf-toolbar">
+      <TabsList className="perf-tabs-list">
+        <TabsTrigger value="overview" className="perf-tab-trigger">
+          <BarChart3 className="size-4" aria-hidden="true" />
+          <span>{t("performanceOverview")}</span>
+        </TabsTrigger>
+        <TabsTrigger value="requests" className="perf-tab-trigger">
+          <ListTree className="size-4" aria-hidden="true" />
+          <span>{t("requestHistoryTab")}</span>
+          <span className="perf-tab-badge">{data.paging.totalCalls}</span>
+        </TabsTrigger>
+      </TabsList>
+      {statusSlot}
+    </div>
 
-    <TabsContent value="overview" className="space-y-4">
-      <section className="surface run-analysis-overview">
-        <div className="run-analysis-overview-header">
-          <span><BarChart3 aria-hidden="true" />{t("performanceOverview")}</span>
-          <span>{t("overviewCount").replace("{count}", String(data.paging.totalCalls))}</span>
+    <TabsContent value="overview" className="perf-overview-pane">
+      <section className="surface perf-kpi-surface">
+        <div className="perf-kpi-header">
+          <p className="perf-kpi-hint">{t("overviewHint")}</p>
+          <span className="perf-kpi-scope">{pageRange}</span>
         </div>
-        <div className="run-analysis-overview-body"><p className="help-text">{t("overviewHint")}</p>{metrics}
-          <section className="charts" aria-label={t("requestCharts")}>
-            {(["latency", "cache", "body"] as const).map(type => <div className="surface chart-card" key={type}>
-              <div className="surface-heading"><h2>{dt(type === "latency" ? "chart.latency" : type === "cache" ? "chart.cache" : "chart.body")}</h2>
-                <span>{type === "latency" ? dt("chart.latencyHint") : type === "cache" ? "%" : dt("chart.bodyHint")}</span>
-              </div><RequestChart type={type} calls={data.calls} selected={selectedId} onSelect={callId => {
-                onSelect(callId);
-                handleTabChange("requests");
-              }} />
-            </div>)}
-          </section>
-        </div>
+        {metrics}
       </section>
+
+      <div className="perf-charts-block">
+        <div className="perf-section-bar">
+          <span className="perf-section-note">{t("chartClickHint")}</span>
+          {indexedCall && (
+            <button
+              type="button"
+              className="perf-jump-call"
+              onClick={() => handleTabChange("requests")}
+            >
+              <b>#{String(indexedCall.index).padStart(3, "0")}</b>
+              <span>{seconds(indexedCall.durationMs)}</span>
+              <span>· {t("inspectSelectedRequest").replace("{index}", String(indexedCall.index).padStart(3, "0"))}</span>
+              <ArrowRight className="size-3.5" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        <section className="charts" aria-label={t("requestCharts")}>
+          {(["latency", "cache", "body"] as const).map(type => <div className="surface chart-card" key={type}>
+            <div className="surface-heading"><h2>{dt(type === "latency" ? "chart.latency" : type === "cache" ? "chart.cache" : "chart.body")}</h2>
+              <span>{type === "latency" ? dt("chart.latencyHint") : type === "cache" ? "%" : dt("chart.bodyHint")}</span>
+            </div><RequestChart type={type} calls={data.calls} selected={selectedId} onSelect={callId => {
+              setLocalTab("requests");
+              if (onSelectChartCall) {
+                onSelectChartCall(callId);
+              } else {
+                onSelect(callId);
+                onTabChange?.("requests");
+              }
+            }} />
+          </div>)}
+        </section>
+      </div>
+
       {telemetrySlot}
     </TabsContent>
 
@@ -162,7 +201,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
           <div className="surface-heading"><h2 id={`${id}-requests`}>{t("requests")}</h2>
             <Button type="button" variant="ghost" size="xs" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>
           </div>
-          <p className="feed-notice">{pageRange}</p>
+          <p className="perf-request-range">{pageRange}</p>
           <div ref={picker} className="run-analysis-picker">
             <label htmlFor={`${id}-request`} className="sr-only">{t("chooseRequest")}</label>
             <NativeSelect id={`${id}-request`} value={selectedId} wrapperClassName="w-full" disabled={!rows.length && !requestedCall}

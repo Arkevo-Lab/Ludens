@@ -13,6 +13,12 @@ import { mediaFailureMessage, observationTime, perceptionAgeMs, perceptionStateL
 
 export const seconds = (ms: number | null | undefined) =>
   ms == null ? "—" : (ms / 1000).toFixed(1) + " s";
+export const compactDuration = (ms: number | null | undefined) =>
+  ms == null
+    ? "—"
+    : ms < 1000
+      ? `${ms > 0 && ms < 10 ? ms.toFixed(1) : Math.round(ms)}ms`
+      : `${(ms / 1000).toFixed(1)}s`;
 export const percent = (n: number | null | undefined) =>
   n == null ? "—" : (n * 100).toFixed(1) + "%";
 export const bytes = (n: number | null | undefined) =>
@@ -765,7 +771,7 @@ export function RequestDetails({
           </div>
           <p className="request-caption">
             {transport(call, t)} · {t("request.input")} {call.inputTokens.toLocaleString()} tokens
-            {call.outputTokens != null ? ` · ${t("request.output")} ${call.outputTokens.toLocaleString()} tokens` : ""}
+            {call.outputTokens != null ? ` · ${t("request.output")} ${call.outputTokens.toLocaleString()} tokens` : ""}{" "}
             ·{" "}
             {call.transport === "websocket"
               ? call.wsFrames + " " + t("request.frames")
@@ -776,8 +782,8 @@ export function RequestDetails({
         </>
       )}
       <Tabs value={activePanel} onValueChange={onPanel} className="gap-0">
-        <div className="overflow-x-auto border-y pb-1">
-          <TabsList variant="line" className="w-max min-w-full justify-start rounded-none px-4" aria-label={t("request.evidenceLabel")}>
+        <div className="overflow-x-auto overflow-y-hidden border-y border-[var(--line)] bg-[var(--surface-inset)]">
+          <TabsList variant="line" className="h-10 w-max min-w-full justify-start gap-2 rounded-none px-4" aria-label={t("request.evidenceLabel")}>
             {[
               ["trace", t("tabs.trace")],
               ["tools", t("tabs.tools")],
@@ -787,7 +793,7 @@ export function RequestDetails({
               <TabsTrigger
                 type="button"
                 value={id}
-                className="flex-none px-3 text-xs"
+                className="flex-none h-10 rounded-none px-3 text-xs data-[state=active]:text-[var(--gold)] after:!bottom-0 after:!bg-[var(--gold)]"
                 onFocus={event => event.currentTarget.scrollIntoView({ block: "nearest", inline: "nearest" })}
                 key={id}
               >

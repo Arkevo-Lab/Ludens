@@ -21,7 +21,7 @@ import { replayEvidenceFromSearch, replayEvidencePatch } from "@/features/replay
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { ArchiveBuild } from "@/shell/archive-build";
 import { WorkspacesView } from "@/features/workspaces/workspaces-view";
-import { Metric, ObservationPanel, seconds, percent, bytes, clockTime } from "@/features/live/run-visuals";
+import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clockTime } from "@/features/live/run-visuals";
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
 export default function ConsoleShell() {
@@ -315,20 +315,6 @@ export default function ConsoleShell() {
                 />
               ) : (
                 <>
-                  <div className="run-status">
-                    <span className={"status-dot " + (auto && !staleStatus ? "online" : "")} />
-                    <strong>{status}</strong>
-                    {phase?.elapsedMs != null && !staleStatus && (
-                      <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
-                    )}
-                    <i />
-                    <span>{data.manifest.model ?? dt("deviceOnly")}</span>
-                    <span className="run-time">
-                      {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
-                      {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>{dt("budget")}{" "}
-                      {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}
-                    </span>
-                  </div>
                   <RunAnalysis
                     data={data}
                     detailData={analysis.detail}
@@ -338,8 +324,25 @@ export default function ConsoleShell() {
                     error={error}
                     retrying={retryingRun}
                     metrics={metrics}
-                    activeTab={query.get("perfTab") === "requests" || (!query.get("perfTab") && !!requestedCall) ? "requests" : "overview"}
+                    statusSlot={
+                      <div className="run-status perf-run-status">
+                        <span className={"status-dot " + (auto && !staleStatus ? "online" : "")} />
+                        <strong>{status}</strong>
+                        {phase?.elapsedMs != null && !staleStatus && (
+                          <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
+                        )}
+                        <i />
+                        <span>{data.manifest.model ?? dt("deviceOnly")}</span>
+                        <span className="run-time">
+                          {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
+                          {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>{dt("budget")}{" "}
+                          {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}
+                        </span>
+                      </div>
+                    }
+                    activeTab={query.get("perfTab") === "requests" ? "requests" : "overview"}
                     onTabChange={nextTab => navigate({ perfTab: nextTab === "overview" ? null : nextTab })}
+                    onSelectChartCall={callId => navigate({ ...pinned, call: callId, perfTab: "requests", image: null, block: null })}
                     pageRange={pageRange}
                     panel={panel}
                     onPanel={setPanel}
@@ -450,7 +453,7 @@ export default function ConsoleShell() {
                                   <dt>{dt("telemetry.shioriLoops")} <small>({data.telemetry.shiori.stats.started})</small></dt>
                                   <dd>
                                     <strong>
-                                      {seconds(data.telemetry.shiori.stats.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.shiori.stats.durationMs.p95).replace(" ", "")}
+                                      {compactDuration(data.telemetry.shiori.stats.durationMs.median)} / {compactDuration(data.telemetry.shiori.stats.durationMs.p95)}
                                     </strong>
                                   </dd>
                                 </div>
@@ -458,7 +461,7 @@ export default function ConsoleShell() {
                                   <dt>{dt("telemetry.capabilities")} <small>({data.telemetry.capabilities.stats.started})</small></dt>
                                   <dd>
                                     <strong>
-                                      {seconds(data.telemetry.capabilities.stats.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.capabilities.stats.durationMs.p95).replace(" ", "")}
+                                      {compactDuration(data.telemetry.capabilities.stats.durationMs.median)} / {compactDuration(data.telemetry.capabilities.stats.durationMs.p95)}
                                     </strong>
                                   </dd>
                                 </div>
@@ -466,7 +469,7 @@ export default function ConsoleShell() {
                                   <dt>{dt("telemetry.localPython")} <small>({data.telemetry.capabilities.localPython.started})</small></dt>
                                   <dd>
                                     <strong>
-                                      {seconds(data.telemetry.capabilities.localPython.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.capabilities.localPython.durationMs.p95).replace(" ", "")}
+                                      {compactDuration(data.telemetry.capabilities.localPython.durationMs.median)} / {compactDuration(data.telemetry.capabilities.localPython.durationMs.p95)}
                                     </strong>
                                   </dd>
                                 </div>
@@ -474,7 +477,7 @@ export default function ConsoleShell() {
                                   <dt>{dt("telemetry.deviceExecs")} <small>({data.telemetry.devices.started})</small></dt>
                                   <dd>
                                     <strong>
-                                      {seconds(data.telemetry.devices.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.devices.durationMs.p95).replace(" ", "")}
+                                      {compactDuration(data.telemetry.devices.durationMs.median)} / {compactDuration(data.telemetry.devices.durationMs.p95)}
                                     </strong>
                                   </dd>
                                 </div>
@@ -482,13 +485,13 @@ export default function ConsoleShell() {
                                   <dt>{dt("telemetry.perceptionReads")} <small>({data.telemetry.perception.started})</small></dt>
                                   <dd>
                                     <strong>
-                                      {seconds(data.telemetry.perception.durationMs.median).replace(" ", "")}/{seconds(data.telemetry.perception.durationMs.p95).replace(" ", "")}
+                                      {compactDuration(data.telemetry.perception.durationMs.median)} / {compactDuration(data.telemetry.perception.durationMs.p95)}
                                     </strong>
                                   </dd>
                                 </div>
                                 <div>
                                   <dt>{dt("telemetry.perceptionStartup")}</dt>
-                                  <dd><strong>{seconds(sampler?.startupDurationMs).replace(" ", "")}</strong></dd>
+                                  <dd><strong>{compactDuration(sampler?.startupDurationMs)}</strong></dd>
                                 </div>
                               </dl>
                             </article>

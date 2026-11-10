@@ -1813,6 +1813,8 @@
     "overviewCount": "{count} requests in this selection",
     "overviewHint": "Summary for the selected scope and recorded metrics for the requests on this page. Charts appear only when their metrics were recorded.",
     "requestCharts": "Recorded request metrics",
+    "chartClickHint": "Click any chart point to inspect that request's trace",
+    "inspectSelectedRequest": "Inspect Request #{index} Trace",
     "pageRange": "Page #{first}–#{last} · {total} requests"
   },
   "shioriCockpit": {
