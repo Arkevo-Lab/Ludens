@@ -17,7 +17,7 @@
 
 为避免 30Hz 常驻循环刷爆事件流，连续采样与动作循环采用 **5 秒固定窗口统计 + 故障区间（Fault Span）合并**：
 
-- **5 秒窗口统计**：常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数与 `sleepStarved` 失步计数、窗口实际采样率 `realizedHz` 与占空比 `utilization`、`history` 热缓冲水位 `hotRecords/hotBytes/hotLimitBytes`、代次累计 `lifetime` 快照，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`。进程正常停止时自动补写尾段统计。
+- **5 秒窗口统计**：控制租约（`auto` epoch）活跃期间，常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数与 `sleepStarved` 失步计数、窗口实际采样率 `realizedHz` 与占空比 `utilization`、`history` 热缓冲水位 `hotRecords/hotBytes/hotLimitBytes`、代次累计 `lifetime` 快照，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`。进程正常停止时自动补写尾段统计；交还时撤销租约会在周期 `control(manual)` 事件之前刷出最后一个窗口（`reason: "stopped"`），`manual` 待机期间不产生采样统计。
 - **故障区间合并**：连续感知首次出错时立即写入 `perception_fault` / `device_sampling_error`，后续同类重试错误仅累加区间内的 `fault.count`，即便成功与失败交替出现也不会每帧反复开关故障事件。待观察到恢复成功且历经至少一个完整 5 秒窗口无同类错误（或进程正常停止）时，闭合该故障区间。
 
 ## 文件与事件身份

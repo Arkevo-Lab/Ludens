@@ -21,8 +21,11 @@ def main():
     sys.stdout = sys.stderr
     messages = queue.Queue()
     protocol_lock = threading.Lock()
-    stopped = threading.Event()
-    instance = sampler = history = state_machine = None
+    instance = history = state_machine = context = None
+    sample_hz = None
+    sampler_thread = None
+    sampler_stopped = None
+    active_sampler_epoch = None
 
     def send(value):
         with protocol_lock:
@@ -56,6 +59,40 @@ def main():
 
     def terminate(_signum, _frame):
         raise SystemExit(0)
+
+    def stop_sampler():
+        """Join the lease-scoped sampler, then seal its recorded segments.
+
+        Joining lets any in-flight tick finish and the sampler's final
+        RecordingWindow flush emit its last perception_stats before the
+        sealing and the lease RPC reply.
+        """
+        nonlocal sampler_thread, sampler_stopped, active_sampler_epoch
+        if sampler_thread is not None:
+            if sampler_thread.is_alive():
+                sampler_stopped.set()
+                sampler_thread.join()
+            sampler_thread = None
+            active_sampler_epoch = None
+        if history is not None:
+            history.seal()
+
+    def start_sampler(epoch):
+        """Sample continuously only under an active control-lease epoch."""
+        nonlocal sampler_thread, sampler_stopped, active_sampler_epoch
+        if (instance is None or state_machine is None or sampler_thread is not None
+                or not isinstance(epoch, str) or not epoch):
+            return
+        sampler_stopped = threading.Event()
+        lease_context = {**context, "epoch": epoch, "trace": {**context["trace"], "epoch": epoch}}
+        sampler_thread = threading.Thread(target=run_continuously,
+            args=(instance.sample, sample_hz, lease_context, sampler_stopped, send),
+            kwargs={"role": "perception",
+                    "video_metrics": lambda: history._video.metrics() if history._video else None,
+                    "tick": state_machine.tick},
+            daemon=True)
+        active_sampler_epoch = epoch
+        sampler_thread.start()
 
     signal.signal(signal.SIGTERM, terminate)
     threading.Thread(target=read_requests, daemon=True).start()
@@ -108,21 +145,19 @@ def main():
                             history.sample_hz = sample_hz
                             instance.start({"workspace": str(workspace), "runDir": message["runDir"],
                                             "generation": message["generation"], "epoch": message.get("epoch")})
+                        # Standby is healthy as soon as loading and start()
+                        # succeed; continuous sampling waits for a lease epoch.
+                        result["state"] = "ready"
                         result["sampleHz"] = sample_hz
-                        sampler = threading.Thread(target=run_continuously,
-                            args=(instance.sample, sample_hz, context, stopped, send),
-                            kwargs={"role": "perception",
-                                    "video_metrics": lambda: history._video.metrics() if history._video else None,
-                                    "tick": state_machine.tick},
-                            daemon=True)
                     except Exception as error:
                         result.update(state="unimplemented" if isinstance(error, NotImplementedError) else "error",
                                       error=f"{type(error).__name__}: {error}")
                         traceback.print_exc(file=sys.stderr)
                     result["observeCapability"] = history.main_capability
                     send({**reply, "ok": True, "result": result})
-                    if sampler is not None:
-                        sampler.start()
+                    # A reload inside an active auto cycle carries its epoch
+                    # and resumes continuous sampling immediately.
+                    start_sampler(message.get("epoch"))
                     continue
                 if history is None:
                     raise ValueError("Workspace timeline has not started")
@@ -146,6 +181,12 @@ def main():
                         result = {"epoch": message.get("epoch"), "inputGeneration": message.get("inputGeneration")}
                     else:
                         result = state_machine.set_lease(message.get("epoch"), message.get("inputGeneration"))
+                        new_epoch = message.get("epoch")
+                        if new_epoch != active_sampler_epoch:
+                            # Stop, flush, and seal the old epoch's sampling
+                            # before a new epoch starts; null returns to standby.
+                            stop_sampler()
+                            start_sampler(new_epoch)
                 else:
                     raise ValueError(f"Unknown perception action: {action}")
                 response = {**reply, "ok": True, "result": result}
@@ -154,9 +195,7 @@ def main():
                     "type": type(error).__name__, "message": str(error), "traceback": traceback.format_exc()}}
             send(response)
     finally:
-        stopped.set()
-        if sampler is not None and sampler.is_alive():
-            sampler.join()
+        stop_sampler()
         if instance is not None:
             try:
                 instance.close()

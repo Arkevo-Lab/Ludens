@@ -298,8 +298,11 @@ export class Runtime {
     clearTimeout(this.timer);
     // Revoking the device never waits for model cancellation.
     this.abortAgent();
-    const perceptionRevoked = this._perception?.setLease(null);
-    void perceptionRevoked?.catch(error => this.record("error", String(error), { epoch: this.epoch }));
+    // Perception revocation joins the handback barrier: its sampler stops,
+    // final perception_stats flush, and segments seal strictly before the
+    // cycle's control(manual) event.
+    const perceptionRevoked = this._perception?.setLease(null)
+      ?.catch(error => this.record("error", String(error), { epoch: this.epoch }));
     this.stopping = (async () => {
       // Release also covers a pending acquisition. Send it immediately after
       // cancellation instead of waiting for the acquisition RPC to return.
@@ -310,7 +313,7 @@ export class Runtime {
           this.record("error", String(error));
         }
       })();
-      await Promise.all([this.opening?.catch(() => {}), release]);
+      await Promise.all([this.opening?.catch(() => {}), release, perceptionRevoked]);
       // Handback is confirmed or the connection has failed closed. Drain
       // cancelled workspace calls before another epoch can start.
       await Promise.allSettled(this.calls);

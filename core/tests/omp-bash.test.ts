@@ -385,6 +385,10 @@ class Perception:
     f.runtime.attach({ perception: new PerceptionRuntime({ workspace: f.workspace, runDir: f.runDir, record: f.runtime.record }) });
     await f.runtime.perception!.reload();
     await until(() => f.runtime.perception!.status().state === "ready");
+    // Sampling follows the active control epoch; grant it explicitly because
+    // this fixture started its Runtime before attaching perception.
+    await f.runtime.perception!.setLease(f.epoch());
+    await until(async () => (await f.runtime.perception!.observe(new AbortController().signal)).records.length > 0);
     const old = await f.runtime.perception!.observe(new AbortController().signal);
     await writeFile(join(f.workspace, "frame"), "latest");
     await until(async () => (await f.runtime.perception!.observe(new AbortController().signal)).records[0]?.text === "latest");

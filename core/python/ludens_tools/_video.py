@@ -397,6 +397,25 @@ class VideoRecorder:
             self.condition.notify()
         self.thread.join()
 
+    def seal(self) -> None:
+        """Flush and seal open segments at a lease boundary without closing.
+
+        Later submits open fresh segments, so a new control epoch never
+        appends to a previous epoch's fragmented MP4.
+        """
+        with self.condition:
+            sealing = [segment for segment in self.channels.values() if not segment.sealed]
+            for segment in sealing:
+                segment.sealed = True
+            self.channels.clear()
+            self.condition.notify()
+            # Publishing happens on the encoding thread after it drains the
+            # sealed segments' queued frames; wait until every one of them has
+            # finished so lease end implies "ready" (or "error") on disk.
+            while (any(segment.asset in self.segments for segment in sealing)
+                    and self.thread.is_alive() and self.failure is None):
+                self.condition.wait(timeout=0.05)
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Read one recorded timeline video frame without starting a worker")

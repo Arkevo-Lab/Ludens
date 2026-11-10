@@ -59,6 +59,9 @@ class Perception:
     await until(async () => runtime.perception!.status().state === "ready");
     const generation = runtime.perception!.status().generation;
     const { epoch } = await runtime.start();
+    // Continuous sampling now starts with this control lease; wait for its
+    // first record so the prompt-start delivery has live evidence.
+    await until(async () => (await records()).length > 0);
     const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")), runDir,
       basewareSocket: "/tmp/unused.sock", ludensSocket: socket, binDir: resolve(import.meta.dir, "../bin"),
       maxRequests: 12, cycle: () => ({ epoch: epoch!, signal: abort.signal }) });

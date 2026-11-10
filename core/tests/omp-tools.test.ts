@@ -101,6 +101,9 @@ class Perception:
     runtime.attach({ perception: new PerceptionRuntime({ workspace: work, runDir: join(directory, "run"), record: runtime.record }) });
     await runtime.perception!.reload();
   for (let i = 0; i < 200 && runtime.perception!.status().state === "loading"; i++) await Bun.sleep(10);
+  // Continuous capture runs only under a granted control lease.
+  await runtime.perception!.setLease("test-epoch");
+  for (let i = 0; i < 200 && !(await runtime.perception!.observe(new AbortController().signal)).records.length; i++) await Bun.sleep(10);
   }
   const control = new AbortController();
   const extension = createLudensExtension({ runtime, workspace: new Workspace(join(directory, "workspace"), join(directory, "skill-versions")),
@@ -148,6 +151,9 @@ class Perception:
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir: join(directory, "run"), env: { LUDENS_PERCEPTION_SAMPLE_HZ: "0.01" }, record: runtime.record }) });
   await runtime.perception!.reload();
   for (let i = 0; i < 200 && runtime.perception!.status().state === "loading"; i++) await Bun.sleep(10);
+  // Text sampling also follows the control lease, not the worker start.
+  await runtime.perception!.setLease("test");
+  for (let i = 0; i < 200 && !(await runtime.perception!.observe(new AbortController().signal)).records.length; i++) await Bun.sleep(10);
   const control = new AbortController();
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 3,
