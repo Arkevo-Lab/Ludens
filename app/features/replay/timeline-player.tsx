@@ -321,6 +321,10 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
   const imageReady = !!activeWindow && (!activeWindow.nextCursor || frameTail === undefined || at <= frameTail) && (!target?.urls.length || !pending) && !stepping;
   const shownFrames = (target && !target.urls.length ? visibleFrames : displayed?.value ?? [])
     .filter(frame => frame.at <= at || !pastCapabilities.has(frame.capability));
+  const visualFrames = shownFrames.filter(frame => frame.media.length > 0 || Boolean(frame.text));
+  const dataOnlyFrames = shownFrames.filter(frame => frame.media.length === 0 && !frame.text);
+  const compactDataFrames = visualFrames.length > 0 ? dataOnlyFrames : dataOnlyFrames.length > 1 ? dataOnlyFrames : [];
+  const stageFrames = visualFrames.length > 0 ? visualFrames : dataOnlyFrames.length === 1 ? dataOnlyFrames : [];
   const videoSlots = visibleFrames.flatMap(frame => frame.media.filter(media => media.video)
     .map(media => ({ slot: frame.capability + ":" + media.index, video: media.video! })));
   const slotsKey = JSON.stringify(videoSlots.map(({ slot }) => slot));
@@ -494,34 +498,65 @@ export function TimelinePlayer({ project, run, epoch, position, evidence = null,
         </header>
 
         <div className="replay-frames" aria-busy={!ready}>
-          {shownFrames.length ? shownFrames.map(frame => {
-            const isPreview = frame.at > at;
-            return (
-              <article className="replay-frame" key={frame.capability} data-frame-id={frame.id}>
-                <div className="replay-frame-meta">
-                  <Button type="button" variant="ghost" size="xs" title={frame.capability} onClick={event => selectFrame(frame, event.currentTarget)}>
-                    {shortCapabilityName(frame.capability)} · #{frame.sequence} ↗
-                  </Button>
-                  {isPreview ? (
-                    <span className="replay-preview-badge">
-                      {t("initialPreview")} · {wallTime(frame.at)}
-                    </span>
-                  ) : (
-                    <span>
-                      {t("sampled")} {wallTime(frame.at)}
-                      {ready ? " · " + (Math.max(0, at - frame.at) / 1000).toFixed(1) + " " + t("secondsAgo") : t("previousFrame")}
-                    </span>
-                  )}
+          {shownFrames.length ? (
+            <>
+              {stageFrames.map(frame => {
+                const isPreview = frame.at > at;
+                return (
+                  <article className="replay-frame" key={frame.capability} data-frame-id={frame.id}>
+                    <div className="replay-frame-meta">
+                      <Button type="button" variant="ghost" size="xs" title={frame.capability} onClick={event => selectFrame(frame, event.currentTarget)}>
+                        {shortCapabilityName(frame.capability)} · #{frame.sequence} ↗
+                      </Button>
+                      {isPreview ? (
+                        <span className="replay-preview-badge">
+                          {t("initialPreview")} · {wallTime(frame.at)}
+                        </span>
+                      ) : (
+                        <span>
+                          {t("sampled")} {wallTime(frame.at)}
+                          {ready ? " · " + (Math.max(0, at - frame.at) / 1000).toFixed(1) + " " + t("secondsAgo") : t("previousFrame")}
+                        </span>
+                      )}
+                    </div>
+                    <FrameMedia
+                      key={refresh + ":" + retry}
+                      frame={frame}
+                      images={displayed?.images ?? new Map()}
+                      playback={{ at, playing: playing && !isPreview, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }}
+                    />
+                  </article>
+                );
+              })}
+              {compactDataFrames.length > 0 && (
+                <div className="replay-data-frames">
+                  {compactDataFrames.map(frame => {
+                    const isPreview = frame.at > at;
+                    return (
+                      <article className="replay-frame replay-frame-compact" key={frame.capability} data-frame-id={frame.id}>
+                        <div className="replay-frame-meta">
+                          <Button type="button" variant="ghost" size="xs" title={frame.capability} onClick={event => selectFrame(frame, event.currentTarget)}>
+                            {shortCapabilityName(frame.capability)} · #{frame.sequence} ↗
+                          </Button>
+                          {isPreview ? (
+                            <span className="replay-preview-badge">
+                              {t("initialPreview")} · {wallTime(frame.at)}
+                            </span>
+                          ) : (
+                            <span>
+                              {t("sampled")} {wallTime(frame.at)}
+                              {ready ? " · " + (Math.max(0, at - frame.at) / 1000).toFixed(1) + " " + t("secondsAgo") : t("previousFrame")}
+                            </span>
+                          )}
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
-                <FrameMedia
-                  key={refresh + ":" + retry}
-                  frame={frame}
-                  images={displayed?.images ?? new Map()}
-                  playback={{ at, playing: playing && !isPreview, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }}
-                />
-              </article>
-            );
-          }) : (
+              )}
+              {!stageFrames.length && <p className="replay-no-media">{t("noMedia")}</p>}
+            </>
+          ) : (
             <div className="replay-loading">
               {!ready ? t("loadingFrames") : capability ? t("noFramesFiltered") : t("noFramesAll")}
               <small>{t("playbackContinues")}</small>
