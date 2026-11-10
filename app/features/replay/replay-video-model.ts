@@ -35,9 +35,12 @@ export function videoSyncState(state: { at: number; originAt: number; sampledAt:
   const sample = videoPosition(Math.min(state.at, state.sampledAt), state.originAt);
   // Only a sparse recording's final-sample region may need a precise decoder
   // recovery. Ordinary mid-stream waits must be left to the media element.
+  const finalSample = state.duration * 1000 - (state.sampledAt - state.originAt) <= 100;
+  const singleFrame = finalSample && sample === 0;
   const tailRecovery = state.playing && state.readyState < 2 && !state.ended
-    && state.duration * 1000 - (state.sampledAt - state.originAt) <= 100 && state.currentTime > sample;
-  const target = state.ended || clock >= state.duration || state.playing && state.readyState < 2 && !state.explicitSeek ? sample : clock;
+    && finalSample && state.currentTime > sample;
+  const target = state.ended || clock >= state.duration || (finalSample && state.at >= state.sampledAt)
+    || state.playing && state.readyState < 2 && !state.explicitSeek ? sample : clock;
   // Natural playback tolerates short-lived drift. A large discrepancy must
   // remain visible for one second before it justifies another decoder seek.
   const resync = state.playing && state.clockReady && !state.waiting && state.readyState >= 2
@@ -48,5 +51,5 @@ export function videoSyncState(state: { at: number; originAt: number; sampledAt:
   return { target, seek, ready,
     // React retains playback intent while the shared clock is frozen. Holding
     // the decoder too prevents it from running ahead and forcing a later resync.
-    play: state.playing && !state.ended && state.at < state.originAt + state.duration * 1000 && state.clockReady };
+    play: state.playing && !state.ended && !singleFrame && state.at < state.originAt + state.duration * 1000 && state.clockReady };
 }

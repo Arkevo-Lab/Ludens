@@ -121,3 +121,15 @@ test("buffering is not a user pause, while backward seeks and explicit pauses st
   assert.equal(waiting.ready, false); assert.equal(waiting.play, false);
   assert.equal(videoSyncState({ ...state, currentTime: 10, ended: true, explicitSeek: true }).seek, true);
 });
+
+test("single-frame sparse capability segments stay pinned at frame 0 without seeking or playing into EOF", () => {
+  // Real 1-frame map_step clip: originAt 19:22:00.057, duration 0.033333s, playhead at 19:22:00.090 (clock = 0.033s).
+  const oneFrame = { at: 1033, originAt: 1000, sampledAt: 1000, duration: 0.033333,
+    currentTime: 0, readyState: 4, seeking: false, ended: false, playing: true, clockReady: true, explicitSeek: true };
+  assert.deepEqual(videoSyncState(oneFrame), { target: 0, seek: false, ready: true, play: false });
+  // Final-sample tail on a multi-frame clip also targets the recorded sample PTS rather than trailing container time.
+  const finalTail = { at: 10000, originAt: 0, sampledAt: 9979, duration: 10.012333,
+    currentTime: 9.979, readyState: 4, seeking: false, ended: false, playing: true, clockReady: true, explicitSeek: true };
+  assert.equal(videoSyncState(finalTail).target, 9.979);
+  assert.equal(videoSyncState(finalTail).seek, false);
+});
