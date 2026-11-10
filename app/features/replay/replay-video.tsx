@@ -55,7 +55,15 @@ function Surface({ source, at, sampledAt, playing, clockReady, speed, visible, c
     const video = element.current;
     // Development StrictMode replays setup after cleanup without remounting the DOM node.
     if (video && video.getAttribute("src") !== source.url) video.src = source.url;
-    return () => { video?.pause(); video?.removeAttribute("src"); video?.load(); };
+    return () => {
+      queueMicrotask(() => {
+        if (video && !video.isConnected) {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        }
+      });
+    };
   }, [source.url]);
   return <video ref={element} src={source.url} muted playsInline preload="auto" aria-label={label} aria-hidden={!visible}
     width={source.width} height={source.height} className={visible ? "replay-video-surface visible" : "replay-video-surface"}
