@@ -1813,6 +1813,8 @@
     "overviewCount": "当前范围共 {count} 条请求",
     "overviewHint": "当前范围汇总与本页请求已记录的指标。仅在记录了对应指标时显示图表。",
     "requestCharts": "已记录的请求指标",
+    "chartClickHint": "点击图表采样点可跳转至对应请求与调用链",
+    "inspectSelectedRequest": "查看请求 #{index} 调用链",
     "pageRange": "本页 #{first}–#{last} · 共 {total} 个请求"
   },
   "shioriCockpit": {
