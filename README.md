@@ -17,7 +17,7 @@ Ludens connects coding agents to arbitrary PC desktops, game emulators, and remo
 - **Multi-Machine Device Control Plane (`@ludens/baseware`).** Manage a persistent pool of controlled nodes (`~/.ludens/machines.json`) across local `stdio` drivers, emulator TCP bridges (such as mGBA `:47653`), remote `ssh` CUA tunnels, and `http`/`sse` MCP endpoints. Mount multiple devices into a single workspace simultaneously and switch or route targets on the fly (`ludens machine use | connect | disconnect`).
 - **Resident Self-Adaptation (`perception.py`).** A hot-reloading resident Python worker keeps vision models, state machines, and high-frequency fMP4/H.264 timeline sampling in memory across turns without restarting the agent runtime.
 - **Verifiable Self-Improvement (`Capability – Eval – Env` Triad).** Agents distill raw controller actions into typed `@capability` functions, pair them with `@eval_capability` assertions and offline `@eval_env` surrogate environments, and track reward trajectories across code revisions via `ludens eval`.
-- **Long-Horizon Multimodal Transport Resilience.** Built on **Shiori** (powered by **OMP `18.18.3`**), Ludens supports stateful WebSocket delta transport (`previous_response_id` with 60s transient cooldown self-healing and `15 MiB` compaction-gated frame recovery), stateless prefix KV cache preservation (`appendOnlyContext`), and SHA-256 deduplicated image URL offloading (`blob-broker`).
+- **Long-Horizon Multimodal Transport Resilience.** Built on **Shiori** (powered by **OMP `18.18.8`**), Ludens supports stateful WebSocket delta transport (`previous_response_id` with 60s transient cooldown self-healing and `15 MiB` compaction-gated frame recovery), stateless prefix KV cache preservation (`appendOnlyContext`), and SHA-256 deduplicated image URL offloading (`blob-broker`).
 - **Full-Trace Live & Replay Console (`@ludens/app`).** Inspect live multi-device video streams, steer running loops in real time, scrub 30-second replay windows with millisecond precision, trigger 1-click service lifecycles and capability evaluations, or follow runs from the optional **Ludens Pet** desktop companion.
 
 ---
@@ -72,7 +72,7 @@ flowchart LR
   end
 
   subgraph ControlPlane["@ludens/core · Agent Harness"]
-    Host["Ludens Host Daemon\nShiori (OMP 18.18.3)"]
+    Host["Ludens Host Daemon\nShiori (OMP 18.18.8)"]
     Worker["Resident Python Worker\nperception.py · @capability · ludens eval"]
   end
 
@@ -93,7 +93,7 @@ flowchart LR
 | --- | --- |
 | [`@ludens/protocol`](protocol/README.md) | Zero-dependency contract layer: RPC schemas, run-event envelopes, content-addressed archive formats (`.ludens/archive/`), and shared Console/Pet DTOs. |
 | [`@ludens/baseware`](baseware/README.md) | Standalone device service: driver loader, `Controller` JSON Schema validation, `epoch` control-lease arbitration, and CLI / API / MCP endpoints. |
-| [`@ludens/core`](core/README.md) | Recursive self-adaptation harness: `launchd` service orchestration, Shiori (`OMP 18.18.3`) runtime, resident Python `perception.py` worker, multi-machine routing, and `ludens eval`. |
+| [`@ludens/core`](core/README.md) | Recursive self-adaptation harness: `launchd` service orchestration, Shiori (`OMP 18.18.8`) runtime, resident Python `perception.py` worker, multi-machine routing, and `ludens eval`. |
 | [`@ludens/app`](app/README.md) | Browser-first Next.js 16 observability and control console (`http://127.0.0.1:3015`), plus the optional Electron **Ludens Pet** desktop companion. |
 
 ### Workspace Layout
