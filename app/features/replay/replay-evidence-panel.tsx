@@ -19,7 +19,7 @@ interface EvidenceRead {
   error: string;
 }
 
-function useEvidenceRead(url: string, onLoaded?: (detail: ReplayDetail) => void) {
+function useEvidenceRead(url: string, onLoaded?: (detail: ReplayDetail) => void, refreshRevision = 0) {
   const [state, setState] = useState<EvidenceRead | null>(null);
   const [revision, setRevision] = useState(0);
   const currentUrl = useRef(url);
@@ -45,7 +45,7 @@ function useEvidenceRead(url: string, onLoaded?: (detail: ReplayDetail) => void)
       controller.abort();
       if (request.current === controller) request.current = null;
     };
-  }, [url, revision]);
+  }, [url, revision, refreshRevision]);
   const current = state?.url === url ? state : null;
   const loading = !current || current.loading;
   return { detail: current?.detail, error: current?.error ?? "", loading,
@@ -87,9 +87,10 @@ function RawRecord({ data }: { data: unknown }) {
   </details>;
 }
 
-export function ReplayEvidencePanel({ scope, selection, onClose, onLoaded, focusRef }: {
+export function ReplayEvidencePanel({ scope, selection, refreshRevision = 0, onClose, onLoaded, focusRef }: {
   scope: string;
   selection: ReplayEvidenceSelection;
+  refreshRevision?: number;
   onClose(): void;
   onLoaded?(detail: ReplayDetail): void;
   /** The parent owns opening/closing focus, including responsive Dialog behavior. */
@@ -100,13 +101,13 @@ export function ReplayEvidencePanel({ scope, selection, onClose, onLoaded, focus
   const { locale } = useLocale();
   const headingId = useId();
   const url = replayEvidenceUrl(scope, selection);
-  const { detail, error, loading, retry } = useEvidenceRead(url, onLoaded);
+  const { detail, error, loading, retry } = useEvidenceRead(url, onLoaded, refreshRevision);
   const summary = detail?.summary;
   const statusKey = summary?.status && Object.hasOwn(statuses, summary.status) ? statuses[summary.status] : null;
   const source: NonNullable<ReplayDetail["summary"]>["source"] = summary?.source
     ?? (selection.kind === "frame" ? { recordId: selection.record, sequence: selection.sequence } : { eventId: selection.id });
   const time = (at: number) => new Date(at).toLocaleString(locale === "zh" ? "zh-CN" : "en-GB", {
-    hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3,
+    hour12: false, timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", fractionalSecondDigits: 3,
   });
   return <section ref={focusRef} tabIndex={-1} aria-labelledby={headingId} aria-busy={loading}
     className="replay-evidence-panel min-w-0 bg-card outline-none">

@@ -11,7 +11,7 @@ interface ControlStatus { mode: string; epoch: string | null; connected: boolean
   source?: EventSourceDescriptor; seq?: number; diagnostics?: "normal" | "full" }
 
 /** One persistent control connection; shell/API clients share its epoch. */
-export async function connectBaseware(options: { socket: string; seconds: number; runDir: string; record: RecordEvent; reconnectAttempts?: number; reconnectDelayMs?: number }) {
+export async function connectBaseware(options: { socket: string; seconds?: number | null; runDir: string; record: RecordEvent; reconnectAttempts?: number; reconnectDelayMs?: number }) {
   let owner: string | undefined;
   let pendingOwner: string | undefined;
   let disconnected: Error | undefined;
@@ -150,16 +150,18 @@ export async function connectBaseware(options: { socket: string; seconds: number
     if (initial.source) eventSources.push({ ...initial.source, recordingId,
       windows: [{ afterSeq: initial.seq ?? 0, throughSeq: initial.seq ?? 0 }] });
     const watermark = setInterval(persistSources, 5000); watermark.unref();
-    async function acquire(epoch: string, signal?: AbortSignal) {
+    async function acquire(epoch: string, signal?: AbortSignal, seconds?: number | null) {
       signal?.throwIfAborted();
       if (disconnected) throw disconnected;
       if (owner || pendingOwner) throw new Error("Baseware control is already owned or changing");
+      // An explicit per-cycle duration overrides the session default; null means unbounded.
+      const leaseSeconds = seconds !== undefined ? seconds : (options.seconds ?? null);
       pendingOwner = epoch;
       try {
-        const state = await client.request({ kind: "acquire", epoch, seconds: options.seconds, trace: { recordingId } }, signal) as ControlStatus;
+        const state = await client.request({ kind: "acquire", epoch, ...(leaseSeconds != null ? { seconds: leaseSeconds } : {}), trace: { recordingId } }, signal) as ControlStatus;
         signal?.throwIfAborted();
         if (pendingOwner !== epoch || state.mode !== "auto" || state.epoch !== epoch || !state.connected
-          || state.remainingSeconds === null || state.remainingSeconds <= 0) {
+          || (leaseSeconds != null && (state.remainingSeconds === null || state.remainingSeconds <= 0))) {
           throw new Error("Baseware control acquisition was revoked before completion");
         }
         owner = epoch;

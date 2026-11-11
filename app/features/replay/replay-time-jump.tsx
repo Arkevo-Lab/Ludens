@@ -30,6 +30,11 @@ export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number;
     });
   }, [editing]);
 
+  const displayElapsed =
+    duration >= 3_600_000 ? replayElapsedInput(elapsed, "seconds") : replayDuration(elapsed);
+  const displayDuration =
+    duration >= 3_600_000 ? replayElapsedInput(duration, "seconds") : replayDuration(duration);
+
   if (!editing) {
     return (
       <div className="replay-timecode-group">
@@ -37,7 +42,7 @@ export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number;
           type="button"
           className="replay-timecode-trigger mono"
           title={`${t("jumpLabel")} (${t("timeFormat")})`}
-          aria-label={`${t("jumpLabel")}: ${replayDuration(elapsed)} / ${replayDuration(duration)}`}
+          aria-label={`${t("jumpLabel")}: ${displayElapsed} / ${displayDuration}`}
           onClick={() => {
             setDraft(elapsedInput);
             setInvalid(false);
@@ -45,8 +50,8 @@ export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number;
             setEditing(true);
           }}
         >
-          <strong>{replayDuration(elapsed)}</strong>
-          <small>/ {replayDuration(duration)}</small>
+          <strong>{displayElapsed}</strong>
+          <small>/ {displayDuration}</small>
         </button>
         {clamped && (
           <span className="replay-jump-feedback" role="status">

@@ -187,10 +187,26 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       if (argv.length === 2 && argv[0] === "--seconds") return runtime.consolidate(Number(argv[1]));
       throw new Error("Usage: ludens consolidate [--seconds <n>]");
     }
-    if (argv.length === 1 && argv[0] === "on") return runtime.start();
-    if (argv.length === 3 && argv[0] === "on" && argv[1] === "--message" && argv[2]?.trim()) return runtime.start(argv[2]);
+    if (argv[0] === "on") {
+      // ludens auto on [--message <text>] [--seconds <n>], flags in any order.
+      const usage = "Usage: ludens auto on [--message <text>] [--seconds <n>] | ludens auto off";
+      let message: string | undefined;
+      let seconds: number | null = null;
+      for (let index = 1; index < argv.length; index++) {
+        const flag = argv[index];
+        if (flag === "--message" && argv[index + 1]?.trim() && !argv[index + 1]!.startsWith("--")) {
+          message = argv[++index];
+        } else if (flag === "--seconds" && argv[index + 1] !== undefined) {
+          const sec = Number(argv[++index]);
+          if (!Number.isFinite(sec) || sec <= 0 || sec * 1000 > 2_147_483_647) throw new Error("--seconds must be positive and within the timer range");
+          seconds = sec;
+        } else throw new Error(usage);
+      }
+      // Without --seconds the cycle runs unbounded until auto off.
+      return runtime.start(message, undefined, seconds);
+    }
     if (argv.length === 1 && argv[0] === "off") { await runtime.stop(); return runtime.status(); }
-    throw new Error("Usage: ludens auto on [--message <text>] | ludens auto off");
+    throw new Error("Usage: ludens auto on [--message <text>] [--seconds <n>] | ludens auto off");
   }
   throw new Error("Unknown command; see ludens --help");
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adjacentReplayFrame, clampReplayTime, mergeReplayPages, replayFramesAt, replayItemActive,
+import { adjacentReplayFrame, clampReplayTime, coalesceReplayFrameTicks, mergeReplayPages, replayFramesAt, replayItemActive,
   replayStageFramesAt, replayWindowBounds, retainReplayWindows } from "../features/replay/replay-model";
 import type { ReplayFrame, ReplayItem, ReplayWindow } from "../lib/replay-types";
 
@@ -54,4 +54,15 @@ test("active spans include crossed windows and open ends without claiming a comp
   assert.equal(replayItemActive(item, 30), true);
   assert.equal(replayItemActive(item, 51), false);
   assert.equal(replayItemActive({ ...item, endAt: null }, 100), true);
+});
+
+test("dense perception frames coalesce into bounded timeline ticks without losing counts or order", () => {
+  const sparse = [frame("a", 1_000), frame("b", 2_000), frame("c", 3_000)];
+  assert.equal(coalesceReplayFrameTicks(sparse, 0, 30_000, 120).length, 3);
+
+  const dense = Array.from({ length: 900 }, (_, index) => frame(`f-${index}`, index * 33));
+  const coalesced = coalesceReplayFrameTicks(dense, 0, 30_000, 120);
+  assert.ok(coalesced.length <= 120);
+  assert.equal(coalesced[0].frame.id, "f-0");
+  assert.equal(coalesced.reduce((sum, tick) => sum + tick.count, 0), 900);
 });

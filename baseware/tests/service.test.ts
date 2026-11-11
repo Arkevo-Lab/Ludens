@@ -73,6 +73,22 @@ test("client API and CLI use the same catalog, epoch checks and device journal",
   await expect(f.client.request({ kind: "controller", id: "motor", arguments: {}, epoch: f.epoch })).rejects.toThrow("STALE_EPOCH");
 });
 
+test("a null or omitted duration grants an unbounded lease that never expires on a timer", async () => {
+  const f = await fixture();
+  await f.core.acquire(f.epoch, null, { id: "owner" });
+  expect(f.core.status()).toMatchObject({ mode: "auto", epoch: f.epoch, remainingSeconds: null });
+  // Any expiry timer below this window would have released the lease.
+  await Bun.sleep(50);
+  expect(f.core.status()).toMatchObject({ mode: "auto", remainingSeconds: null });
+  await f.core.release(f.epoch, "human");
+  const wireEpoch = crypto.randomUUID();
+  // Omitting seconds on the wire requests the same unbounded lease.
+  await f.client.request({ kind: "acquire", epoch: wireEpoch });
+  expect(await f.client.request({ kind: "status" })).toMatchObject({ mode: "auto", epoch: wireEpoch, remainingSeconds: null });
+  await f.client.request({ kind: "release", epoch: wireEpoch });
+  expect(f.core.status()).toMatchObject({ mode: "manual", epoch: null, remainingSeconds: null });
+});
+
 test("sensing uses the same controller call without a lease and preserves the last action", async () => {
   const f = await fixture();
   const sample = () => f.client.request({ kind: "controller", id: "thermal", arguments: {} }) as Promise<ExecutionResult>;

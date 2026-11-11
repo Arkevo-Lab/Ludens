@@ -4,7 +4,7 @@ import { send } from "../../daemon/transport.ts";
 
 export type RuntimeControlCommand =
   | { action: "status" }
-  | { action: "auto_on"; message?: string; runId?: string; expectedEpoch?: string | null }
+  | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; delivery?: "steer" | "follow_up"; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
@@ -65,7 +65,10 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
     case "status":
       return await status();
     case "auto_on":
-      return await scoped({ kind: "auto", argv: command.message?.trim() ? ["on", "--message", command.message.trim()] : ["on"], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
+      const argv = ["on"];
+      if (command.message?.trim()) argv.push("--message", command.message.trim());
+      if (command.seconds != null) argv.push("--seconds", String(command.seconds));
+      return await scoped({ kind: "auto", argv, runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "auto_off":
       return await scoped({ kind: "auto", argv: ["off"], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "steer":

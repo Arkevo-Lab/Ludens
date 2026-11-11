@@ -12,7 +12,7 @@ export function createTestDeviceSession(capabilities: Capabilities, record: Reco
   const client = { id: crypto.randomUUID() };
   const devices: DeviceSession = {
     catalog: core.list(),
-    async acquire(epoch, signal) { await core.acquire(epoch, maxSeconds, client, signal); },
+    async acquire(epoch, signal, seconds) { await core.acquire(epoch, seconds !== undefined ? seconds : maxSeconds, client, signal); },
     async release(epoch) { await core.release(epoch); },
     execute: (id, args, epoch, signal, trace, origin) => core.execute(id, args, epoch, signal, { ...trace }, undefined, origin),
   };

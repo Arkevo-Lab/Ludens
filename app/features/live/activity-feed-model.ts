@@ -1,7 +1,16 @@
 import type { LogBlock } from "@/lib/activity";
-import type { ActivityBlock } from "@ludens/protocol/activity";
+import type { ActivityBlock, ActivityScope } from "@ludens/protocol/activity";
 export { sameScope, acceptsScope } from "@ludens/protocol/activity";
 export type { ActivityBlock, ActivityScope } from "@ludens/protocol/activity";
+
+/** Preserve whole-run scope (`epoch === null`) explicitly as `epoch=all` so server history/block queries never default to latest epoch. */
+export function activityScopeParams(scope: ActivityScope): URLSearchParams {
+  return new URLSearchParams({
+    project: scope.project,
+    run: scope.runId ?? "",
+    epoch: scope.epoch ?? "all",
+  });
+}
 
 export type ActivityFilter = "all" | LogBlock["kind"];
 

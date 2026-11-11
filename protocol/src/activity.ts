@@ -65,7 +65,7 @@ export function sameScope(left: ActivityScope | null, right: ActivityScope | nul
 }
 export function acceptsScope(scope: ActivityScope, project: string, run?: string, epoch?: string): boolean {
   return scope.project === project && (run === undefined || scope.runId === run)
-    && (epoch === undefined || scope.epoch === epoch);
+    && (epoch === undefined || (epoch === "all" ? scope.epoch === null : scope.epoch === epoch));
 }
 
 /** HTTP reads wait for a finite archive build; abort only stops this reader. */

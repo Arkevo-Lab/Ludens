@@ -1297,6 +1297,11 @@
     "noFramesFiltered": "No perception records from this source yet",
     "noFramesAll": "No perception records yet",
     "playbackContinues": "Playback follows record time.",
+    "jumpNextFrame": "Jump to next frame ›",
+    "showAllCapabilities": "Show all perception",
+    "jumpToSample": "Jump to {time} ›",
+    "inspectRecordDetails": "Inspect record details ↗",
+    "sampledWindowHint": "Sampled 30s frame window",
     "segmentFailed": "This segment failed to load",
     "buffering": "Buffering…",
     "retrySegment": "Retry segment",
@@ -1440,7 +1445,10 @@
       "frameDelta": "Frame delta",
       "afterExecution": "Post-action sample request",
       "perceptionDetails": "Perception & record details",
-      "detailsBelow": "Details below"
+      "detailsBelow": "Details below",
+      "latestRequestSuffix": " (latest #{number})",
+      "newerFailurePrefix": "Latest request #{number} perception failed: ",
+      "keepingLastVisual": " · keeping frame from #{number}"
     },
     "fact": {
       "readMs": "Read time",
@@ -1459,6 +1467,7 @@
     },
     "meta": {
       "recordedAt": "recorded at ",
+      "agoSuffix": " ago",
       "textObservation": "Text observation",
       "records": "Timeline records",
       "noMedia": "No input media",
@@ -1657,6 +1666,10 @@
   },
   "runPicker": {
     "description": "Choose a recorded run by its full ID. Timestamp summaries use the Asia/Shanghai time zone.",
+    "quickJumpLabel": "Quick Jump",
+    "quickJumpHint": "Jump directly to any run or cycle segment in the continuous session stream",
+    "quickJumpDescription": "All runs and control cycles in this workspace form a single continuous session. Select any segment to scroll to it.",
+    "latestSegment": "Latest live stream",
     "close": "Close",
     "current": "Current",
     "empty": "No recorded runs"
@@ -1738,6 +1751,7 @@
     "continueSearch": "Continue scan",
     "restartSearch": "Reload",
     "nextResults": "Next batch",
+    "locatePlayhead": "At playhead",
     "backTen": "Back 10 seconds",
     "forwardTen": "Forward 10 seconds",
     "minutes": "min",
@@ -1947,7 +1961,24 @@
     "inputSamplingMs": "Sampled {ms}ms",
     "inputExpandPayload": "View model input payload",
     "inputPreviewInStage": "Click to inspect in viewport",
-    "jumpToReplayAt": "Replay {time} ↗"
+    "jumpToReplayAt": "Replay {time} ↗",
+    "durationUnbounded": "Continuous",
+    "durationUnboundedDesc": "Run indefinitely until manually stopped",
+    "durationMenuTitle": "Takeover Duration (Optional)",
+    "durationCustomLabel": "Custom duration (minutes)",
+    "durationCustomApply": "Apply",
+    "durationPillHint": "Optional takeover duration for auto mode (defaults to continuous until stopped)",
+    "sessionGapLabel": "Paused {gap}",
+    "segmentActive": "Active Cycle",
+    "segmentCompleted": "Session Segment",
+    "segmentRanFor": "Ran {duration}",
+    "segmentLimitLabel": "Limit",
+    "stopReasonManual": "Stopped manually",
+    "stopReasonBudget": "Duration reached",
+    "loadPreviousRunSegment": "Load earlier run segment",
+    "olderRunLoadFailed": "Failed to load earlier run segment",
+    "retryOlderRun": "Retry",
+    "postCycleMaintenance": "Post-cycle activity"
   },
   "workspaceStudio": {
     "title": "Workspace Config & Runtime Studio",

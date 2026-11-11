@@ -634,6 +634,7 @@ function newestPointers(limit: number) {
   };
 }
 function selectedEpoch(index: LogIndex, requested?: string) {
+  if (requested === "all") return null;
   const epochs: string[] = JSON.parse(index.meta("activityEpochs") ?? "[]");
   if (requested && !epochs.includes(requested)) throw new Error("未找到接管轮次");
   return requested ?? epochs.at(-1) ?? null;
@@ -740,23 +741,26 @@ export async function getActivity(project: string, run?: string, epoch?: string,
   // A published generation remains readable while its writer is frozen for rebuild.
   const selectedState = (() => {
     const scope = { project, runId, epoch: selectedEpoch(index, epoch) };
-    const state: CurrentState = JSON.parse(index.meta(`current:${scope.epoch ?? ""}`) ?? "null") ?? emptyCurrent();
-    return { scope, state };
+    // epoch="all" spans every cycle; current status still tracks the active one.
+    const epochs: string[] = JSON.parse(index.meta("activityEpochs") ?? "[]");
+    const effectiveEpoch = scope.epoch ?? epochs.at(-1) ?? null;
+    const state: CurrentState = JSON.parse(index.meta(`current:${effectiveEpoch ?? ""}`) ?? "null") ?? emptyCurrent();
+    return { scope, state, effectiveEpoch };
   })();
   // Pointer snapshots refer to immutable versions. A long history search does
   // not hold the writer lock or delay Pet's next incremental page.
   const result = { ...await queryActivity(index, selectedState.scope, query, signal), state: selectedState.state };
   const live = latest === runId
     ? await hostRequest(manifest.socket, { kind: "status", argv: [] }).catch(() => null) : null;
-  const selectedCurrent = live?.runId === runId && (live.mode === "manual" || live.epoch === result.scope.epoch);
+  const selectedCurrent = live?.runId === runId && (live.mode === "manual" || live.epoch === selectedState.effectiveEpoch);
   const connected = selectedCurrent && live?.connected;
-  const activity = connected ? (live.mode === "auto" && live.epoch === result.scope.epoch ? "running" : "manual") : "offline";
+  const activity = connected ? (live.mode === "auto" && live.epoch === selectedState.effectiveEpoch ? "running" : "manual") : "offline";
   const { state, ...response } = result;
   response.projection.durationMs = performance.now() - started;
   return { ...response, current: { workspace: selected.workspace ?? manifest.workspace ?? null, runId, epoch: result.scope.epoch,
     activity, phase: activity === "running" ? livePhaseValue(state.phase)?.label ?? "等待下一步"
       : activity === "manual" ? (result.scope.epoch ? "已交还控制权" : "已连接，等待 AI 接管")
-      : live?.runId === runId && live.mode === "auto" && live.epoch !== result.scope.epoch ? "历史运行，仅供回放"
+      : live?.runId === runId && live.mode === "auto" && live.epoch !== selectedState.effectiveEpoch ? "历史运行，仅供回放"
       : live?.runId === runId && !live.connected ? "设备连接已断开" : "Host 离线",
     intent: state.intent, observationId: state.observationId, updatedAt: state.updatedAt, error: state.error } };
   } finally { release(); }

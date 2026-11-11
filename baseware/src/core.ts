@@ -68,7 +68,7 @@ export class BasewareCore {
   private stopping?: Promise<ReturnType<BasewareCore["status"]>>;
   private acquired: Capabilities["controllers"] = [];
   private timer?: ReturnType<typeof setTimeout>;
-  private deadline = 0;
+  private deadline: number | null = null;
   private lastExecution?: { result: ExecutionResult; trace: Trace };
   private previousObservations = new Map<string, Observation>();
   private sequence = 0;
@@ -192,7 +192,7 @@ export class BasewareCore {
       inputGeneration: this.inputGeneration, inputResetting: this.inputResetting,
       connected: this.connected, reason: this.reason,
       activeMachineId: this.activeMachineId ?? null, machines: this.getMountedMachines(),
-      remainingSeconds: this.mode === "auto" ? Math.max(0, Math.ceil((this.deadline - performance.now()) / 1000)) : null };
+      remainingSeconds: this.mode === "auto" && this.deadline !== null ? Math.max(0, Math.ceil((this.deadline - performance.now()) / 1000)) : null };
   }
 
   list(): Catalog {
@@ -210,9 +210,11 @@ export class BasewareCore {
     return tool;
   }
 
-  async acquire(epoch: string, seconds: number, client: ClientContext, signal?: AbortSignal, trace: Trace = {}) {
+  async acquire(epoch: string, seconds: number | null | undefined, client: ClientContext, signal?: AbortSignal, trace: Trace = {}) {
     if (!epoch?.trim()) throw new Error("acquire requires an epoch");
-    if (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647) throw new Error("seconds must be positive and within the timer range");
+    // A null or undefined duration requests an unbounded lease with no timer.
+    if (seconds !== undefined && seconds !== null
+      && (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647)) throw new Error("seconds must be positive and within the timer range");
     if (this.mode !== "manual") throw new Error("Device control is already owned or changing");
     if (!this.connected) throw new Error("Driver disconnected; restart Baseware");
     signal?.throwIfAborted();
@@ -257,10 +259,16 @@ export class BasewareCore {
     catch (error) { if (this.control === control) await this.release(epoch, String(error)); throw error; }
     finally { signal?.removeEventListener("abort", cancel); }
     if (control.signal.aborted || this.control !== control) return this.status();
-    this.deadline = performance.now() + seconds * 1000;
+    if (seconds !== undefined && seconds !== null) {
+      this.deadline = performance.now() + seconds * 1000;
+      this.timer = setTimeout(() => { void this.release(epoch, "lease expired"); }, seconds * 1000);
+    } else {
+      // An unbounded lease never expires on a timer; only explicit release.
+      this.deadline = null;
+      this.timer = undefined;
+    }
     this.mode = "auto";
     this.reason = "acquired";
-    this.timer = setTimeout(() => { void this.release(epoch, "lease expired"); }, seconds * 1000);
     this.record("baseware_control", this.status(), this.controlTrace);
     return this.status();
   }
@@ -275,6 +283,8 @@ export class BasewareCore {
     this.control?.abort();
     this.stream.stopProducers();
     clearTimeout(this.timer);
+    this.timer = undefined;
+    this.deadline = null;
     this.stopping = (async () => {
       // Try to unblock a pending native OWN now. Its late-success path also
       // releases the same epoch if this early release preceded the grant.
@@ -338,7 +348,7 @@ export class BasewareCore {
     this.record("input_reset_start", { previousGeneration: previous, generation }, { ...trace, epoch });
     const controls = [...this.acquired];
     const stillOwned = () => this.mode === "auto" && this.epoch === epoch && this.owner?.id === client.id && this.connected
-      && performance.now() < this.deadline;
+      && (this.deadline === null || performance.now() < this.deadline);
     const revoked = new Error("STALE_EPOCH: input reset was revoked");
     const assertOwned = () => { if (!stillOwned()) throw revoked; };
     const work = (async () => {
@@ -372,7 +382,7 @@ export class BasewareCore {
       this.record("input_reset_end", { previousGeneration: previous, generation, outcome: "error", error: String(error) }, { ...trace, epoch });
       if (error !== revoked) this.connected = false;
       if (this.mode === "auto" && this.epoch === epoch) {
-        if (performance.now() >= this.deadline) await this.release(epoch, "lease expired");
+        if (this.deadline !== null && performance.now() >= this.deadline) await this.release(epoch, "lease expired");
         else {
           await this.release(epoch, "input reset failed");
         }
@@ -535,7 +545,7 @@ export class BasewareCore {
         case "list": return this.list();
         case "subscribe": this.clients.set(client.id, client); return this.status();
         case "help": if (!request.id) throw new Error("Missing capability ID"); return this.help(request.id);
-        case "acquire": return await this.acquire(request.epoch!, request.seconds!, client, signal, request.trace);
+        case "acquire": return await this.acquire(request.epoch!, request.seconds, client, signal, request.trace);
         case "release": if (!request.epoch) throw new Error("release requires an epoch"); return await this.release(request.epoch);
         case "input_generation":
           if (!request.epoch) throw new Error("input_generation requires an epoch");

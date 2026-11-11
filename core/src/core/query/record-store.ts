@@ -173,7 +173,7 @@ export class FileRecords {
   }
   /** Cold snapshots expose final versions only, even when an earlier buffer spilled. */
   private seedSnapshotHistory(maxBytes: number) {
-    const temporary = join(this.pageDirectory, "history-import"); mkdirSync(temporary);
+    const temporary = join(this.pageDirectory, "history-import"); mkdirSync(temporary, { recursive: true });
     let batch: ImportRow[] = [], batchBytes = 0, chunks: string[] = [], nextChunk = 0, ordinal = 0;
     let history: RecordPointer[] = [], historyBytes = 0;
     const flushBatch = () => {
@@ -221,7 +221,7 @@ export class FileRecords {
     this.bulk.budget.trim();
   }
   private importRecords(records: Iterable<RecordPointer>, options: { sorted?: boolean; maxBytes?: number } = {}) {
-    const temporary = join(this.pageDirectory, "import"); mkdirSync(temporary);
+    const temporary = join(this.pageDirectory, "import"); mkdirSync(temporary, { recursive: true });
     let chunks: string[] = [], batch: ImportRow[] = [], batchBytes = 0, ordinal = 0, nextChunk = 0;
     let history: RecordPointer[] = [], historyBytes = 0, latest: RecordPointer[] = [], latestBytes = 0;
     const flushBatch = () => {

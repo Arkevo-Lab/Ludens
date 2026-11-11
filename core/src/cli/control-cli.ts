@@ -5,7 +5,7 @@ import { readToolArguments } from "@ludens/baseware/tool-contract";
 import type { ExecutionResult } from "@ludens/baseware/contracts";
 
 export const HELP = `ludens status
-ludens auto on [--message <text>]
+ludens auto on [--message <text>] [--seconds <n>]
 ludens auto off
 ludens steer [--follow-up] <message>
 ludens consolidate [--seconds <n>]

@@ -5,7 +5,7 @@ import type { Project, RunData } from "@/lib/types";
 import type { ReplayOverviewResult } from "@/lib/replay-types";
 import { initialSelection, latestGameRun } from "@/lib/initial-selection";
 import { workspaceRunEntry } from "@/lib/workspace-run-entry";
-import { hasSelectedEvidence, latestLiveUrl, liveContext, resolveLiveSelection, type PausedLiveSelection } from "@/lib/live-follow";
+import { cleanViewSearchParams, hasSelectedEvidence, latestLiveUrl, liveContext, resolveLiveSelection, type PausedLiveSelection } from "@/lib/live-follow";
 import { ReadPoller } from "@/lib/read-poller";
 import { analysisRequest, runAnalysisSnapshot, type RunReadSnapshot } from "@/lib/run-analysis-selection";
 import { useActivityFeed } from "@/features/live/use-activity-feed";
@@ -81,6 +81,7 @@ export function useDashboardController() {
   const pet = usePetFollow();
   const [stopping, setStopping] = useState(false);
   const [panel, setPanel] = useState("trace");
+  const [liveJumpTarget, setLiveJumpTarget] = useState<{ value: string; seq: number } | null>(null);
   const requested = initialSelection(search, projects);
   const requestedLatest = latestGameRun(projects.find(p => p.id === requested.project));
   const followed = resolveLiveSelection({ location: search, project: requested.project, requestedRun: requested.run,
@@ -89,17 +90,21 @@ export function useDashboardController() {
   const project = projects.find((p) => p.id === selection.project);
   const latest = latestGameRun(project);
   const run = followed.run;
+  const effectiveEpoch = view === "live" && !selection.epoch ? "all" : selection.epoch;
+  useEffect(() => {
+    setLiveJumpTarget(null);
+  }, [selection.project]);
   // A URL change is intentional navigation even while paused. Latch its new default
   // before the next catalog poll can replace it; an empty workspace stays empty too.
   if (!refresh && catalogReady && !followed.frozen) {
     setPausedSelection({ location: search, project: selection.project, run, requestedRun: selection.run, epoch: selection.epoch, archiveRevision });
   }
   const entry = workspaceRunEntry({ catalogReady, catalogError, project, run });
-  const scopeKey = selection.project + "/" + run + "/" + selection.epoch;
+  const scopeKey = selection.project + "/" + run + "/" + effectiveEpoch;
   const beforeCall = query.get("beforeCall") ?? "";
   const requestedCall = query.get("call") ?? "";
   const selectedImage = query.get("image") ?? undefined;
-  const readScope = { project: selection.project, workspace: project?.workspace ?? "", run, epoch: selection.epoch, beforeCall };
+  const readScope = { project: selection.project, workspace: project?.workspace ?? "", run, epoch: effectiveEpoch, beforeCall };
   const key = JSON.stringify([scopeKey, readScope.workspace, beforeCall, requestedCall, selectedImage]);
   const error = runFailure?.key === key ? runFailure.message : "";
   const analysis = runAnalysisSnapshot(loaded, key, readScope);
@@ -108,23 +113,32 @@ export function useDashboardController() {
   const cycles = view === "replay"
     ? replayCycles?.key === JSON.stringify([selection.project, run]) ? replayCycles.cycles : []
     : data?.cycles ?? [];
-  const activity = useActivityFeed({ project: selection.project, run, epoch: selection.epoch || undefined,
+  const activity = useActivityFeed({ project: selection.project, run, epoch: effectiveEpoch || undefined,
     enabled: view === "live", refresh, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined });
   const call = analysingRun ? analysisRequest(analysis.detail, requestedCall)
     : data?.selectedCall ?? data?.calls.find((c) => c.id === requestedCall) ?? data?.calls.at(-1);
-  const navigateUrl = useCallback((target: string) => {
+  const navigateUrl = useCallback((target: string, options?: { replace?: boolean }) => {
     const url = new URL(target, window.location.href);
     if (url.origin !== window.location.origin) return;
     const next = url.pathname + url.search;
     if (next === window.location.pathname + window.location.search) return;
-    window.history.pushState(null, "", next);
+    if (options?.replace) {
+      window.history.replaceState(null, "", next);
+    } else {
+      window.history.pushState(null, "", next);
+    }
     window.dispatchEvent(new PopStateEvent("popstate"));
   }, []);
-  const navigate = (patch: Record<string, string | null>) => {
-    const params = new URLSearchParams(window.location.search);
+  const navigate = (patch: Record<string, string | null>, options?: { replace?: boolean }) => {
+    const rawParams = new URLSearchParams(window.location.search);
+    const nextView = patch.view ?? rawParams.get("view") ?? "live";
+    const params =
+      patch.view && patch.view !== view
+        ? cleanViewSearchParams(rawParams, nextView, { project: selection.project, latestRunId: latest?.id })
+        : rawParams;
     for (const [name, value] of Object.entries(patch))
       value ? params.set(name, value) : params.delete(name);
-    navigateUrl("/?" + params.toString());
+    navigateUrl("/?" + params.toString(), options);
   };
   const createWithDriver = (driver: DiscoveredDriver) => {
     setVerifiedCreationDriver(driver);
@@ -146,6 +160,7 @@ export function useDashboardController() {
     const revision = snapshotRevision + 1;
     // The explicit revision matters when the URL is already clean and polling is off.
     setSnapshotRevision(revision);
+    setLiveJumpTarget(null);
     returnFocus.current = document.activeElement === returnButton.current;
     setLatestRequest({ revision, location: target.slice(1) });
     setRunFailure(null);
@@ -153,10 +168,10 @@ export function useDashboardController() {
     navigateUrl(target);
   };
   const viewLink = (id: View) => {
-    const params = new URLSearchParams(query);
-    params.set("view", id);
-    if (id !== "workspaces") { params.delete("create"); params.delete("driverPackage"); }
-    if (id !== "replay" && params.get("epoch") === "all") params.delete("epoch");
+    const params = cleanViewSearchParams(query, id, {
+      project: selection.project,
+      latestRunId: latest?.id,
+    });
     return "?" + params.toString();
   };
   const pinned = {
@@ -198,7 +213,7 @@ export function useDashboardController() {
     const params = new URLSearchParams({
       project: selection.project,
       run,
-      ...(selection.epoch ? { epoch: selection.epoch } : {}),
+      ...(effectiveEpoch ? { epoch: effectiveEpoch } : {}),
       ...(beforeCall ? { beforeCall } : {}),
       ...(requestedCall ? { call: requestedCall } : {}),
       ...(selectedImage ? { image: selectedImage } : {}),
@@ -231,7 +246,7 @@ export function useDashboardController() {
   }, [
     selection.project,
     run,
-    selection.epoch,
+    effectiveEpoch,
     beforeCall,
     requestedCall,
     selectedImage,
@@ -300,8 +315,28 @@ export function useDashboardController() {
   const latestReadsDone = loaded?.key === key && loaded.revision === snapshotRevision
     && activity.loadedRevision === snapshotRevision && !activity.loading;
   const latestScopeMatches = activity.scope?.project === selection.project && activity.scope?.runId === run
-    && activity.scope?.epoch === data?.selectedEpoch;
+    && (effectiveEpoch === "all" ? activity.scope?.epoch === null : activity.scope?.epoch === data?.selectedEpoch);
   const latestReady = latestReadsDone && latestScopeMatches;
+  const clearLiveJumpTarget = useCallback(() => {
+    setLiveJumpTarget(null);
+  }, []);
+  const jumpToLiveSegment = useCallback((value: string) => {
+    setLiveJumpTarget({ value, seq: Date.now() });
+    if (selection.run || selection.epoch || hasSelectedEvidence(search)) {
+      navigate({
+        run: null,
+        epoch: null,
+        beforeCall: null,
+        call: null,
+        block: null,
+        image: null,
+        at: null,
+        replayItem: null,
+        replayRecord: null,
+        replaySequence: null,
+      });
+    }
+  }, [selection.run, selection.epoch, search]);
   const latestRequested = latestRequest?.revision === snapshotRevision && latestRequest.location === search;
   const latestScopeChanged = latestRequested && latestReadsDone && !latestScopeMatches
     && !error && !activity.error;
@@ -451,5 +486,8 @@ export function useDashboardController() {
     runContent,
     catalogFocus,
     returnButton,
+    liveJumpTarget,
+    clearLiveJumpTarget,
+    jumpToLiveSegment,
   };
 }
