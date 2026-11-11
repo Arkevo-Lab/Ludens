@@ -42,7 +42,7 @@ transform and opacity only. No blur, no easing curves. Reduced motion turns all 
   a rotating refresh arrow already says what the button does.
 - Assemble: play once per browser session on first console load.
 
-### 3 · Live
+### 3 · Live (done)
 - Status pixel: `PixelMark` replaces `.codex-status-dot`. State is derived from what the pill already has
   (`data-tone`, host online, phase); no new backend fields.
 - Pixel meter: `.shiori-budget-bar` becomes 24 blocks with the leading block in orange. Keep

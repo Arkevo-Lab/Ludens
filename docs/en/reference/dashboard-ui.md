@@ -142,3 +142,9 @@ In the console shell:
 - **Sidebar cursor.** Above 680px an orange pixel marks the active navigation link and steps to a newly selected one in four jumps. Its position is measured from the active link, so it follows scrolling and resizing without the stepped travel. At 680px and below the menu keeps its static underline.
 - **Loader.** Waiting states that are not a refresh action use `<PixelMark loading />` instead of a circular spinner. Refresh buttons keep their rotating arrow.
 - **Assemble.** The sidebar brand assembles once per browser session, tracked by the `ludens:brand-assembled` session key.
+
+On Live:
+
+- **Status pixel.** The status pill carries a `PixelMark` in place of a round dot. It pulses while Shiori is reasoning or consolidating, blinks grey on standby, and holds steady otherwise.
+- **Control handoff.** While a human holds control (host online, manual mode) the mark is `filled`: the hollow L and the loose pixel turn blue, filling cell by cell on takeover and draining on release.
+- **Budget blocks.** The run budget bar is 24 blocks. Elapsed blocks are lit and the leading one is orange. It keeps `role="progressbar"` with the same 0–100 values.
