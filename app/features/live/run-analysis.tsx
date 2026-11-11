@@ -20,6 +20,9 @@ export interface RunAnalysisProps {
   retrying: boolean;
   metrics: ReactNode;
   statusSlot?: ReactNode;
+  runPicker?: ReactNode;
+  handoverSlot?: ReactNode;
+  mobileNavSlot?: ReactNode;
   telemetrySlot?: ReactNode;
   activeTab?: "overview" | "requests";
   onTabChange?(tab: "overview" | "requests"): void;
@@ -34,7 +37,7 @@ export interface RunAnalysisProps {
   onLoadMore(): void;
 }
 
-export function RunAnalysis({ data, detailData, call, requestedCall, pending, error, retrying, metrics, statusSlot, telemetrySlot,
+export function RunAnalysis({ data, detailData, call, requestedCall, pending, error, retrying, metrics, statusSlot, runPicker, handoverSlot, mobileNavSlot, telemetrySlot,
   activeTab, onTabChange, onSelectChartCall, pageRange, panel, onPanel, onSelect, onInspect, onRetry, onFollowLatest, onLoadMore }: RunAnalysisProps) {
   const t = useTranslations("runAnalysis");
   const dt = useTranslations("dashboard");
@@ -124,7 +127,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
       const target = container?.querySelector<HTMLElement>(`[data-request-id="${CSS.escape(selectedId)}"]`);
       if (!container || !target) return;
       const top = target.offsetTop - container.offsetTop;
-      const visibleHeight = Math.min(container.clientHeight, 380);
+      const visibleHeight = container.clientHeight || 380;
       if (top < container.scrollTop || top + target.offsetHeight > container.scrollTop + visibleHeight) {
         container.scrollTop = Math.max(0, top - Math.round(visibleHeight * 0.35));
       }
@@ -135,19 +138,28 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
     className="aria-disabled:opacity-50" onClick={event => retry(event.currentTarget)}>{t(retrying ? "reading" : "retry")}</Button>;
 
   return <Tabs value={currentTab} onValueChange={value => handleTabChange(value as "overview" | "requests")} className="run-analysis">
-    <div className="perf-toolbar">
-      <TabsList className="perf-tabs-list">
-        <TabsTrigger value="overview" className="perf-tab-trigger">
-          <BarChart3 className="size-4" aria-hidden="true" />
-          <span>{t("performanceOverview")}</span>
-        </TabsTrigger>
-        <TabsTrigger value="requests" className="perf-tab-trigger">
-          <ListTree className="size-4" aria-hidden="true" />
-          <span>{t("requestHistoryTab")}</span>
-          <span className="perf-tab-badge">{data.paging.totalCalls}</span>
-        </TabsTrigger>
-      </TabsList>
-      {statusSlot}
+    <div className="perf-toolbar flex min-h-[48px] flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2 min-[1080px]:flex-nowrap">
+      <div className="perf-toolbar-left flex min-w-0 items-center gap-2">
+        {mobileNavSlot}
+        <TabsList className="perf-tabs-list h-auto shrink-0">
+          <TabsTrigger value="overview" className="perf-tab-trigger">
+            <BarChart3 className="size-4" aria-hidden="true" />
+            <span>{t("performanceOverview")}</span>
+          </TabsTrigger>
+          <TabsTrigger value="requests" className="perf-tab-trigger">
+            <ListTree className="size-4" aria-hidden="true" />
+            <span>{t("requestHistoryTab")}</span>
+            <span className="perf-tab-badge">{data.paging.totalCalls}</span>
+          </TabsTrigger>
+        </TabsList>
+      </div>
+      {(statusSlot || runPicker || handoverSlot) && (
+        <div className="perf-toolbar-right ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 min-[1080px]:flex-nowrap [&_.perf-run-status]:ml-0 [&_.perf-run-status]:px-2.5 [&_.perf-run-status]:py-1">
+          {statusSlot}
+          {runPicker}
+          {handoverSlot}
+        </div>
+      )}
     </div>
 
     <TabsContent value="overview" className="perf-overview-pane">
@@ -195,9 +207,9 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
       {telemetrySlot}
     </TabsContent>
 
-    <TabsContent value="requests">
-      <div className="run-analysis-grid">
-        <section className="surface run-analysis-requests" aria-labelledby={`${id}-requests`}>
+    <TabsContent value="requests" className="min-h-0">
+      <div className="run-analysis-grid run-analysis-workbench min-[1080px]:max-h-[calc(100dvh-76px)] min-[1080px]:grid-rows-[minmax(0,1fr)] min-[1080px]:items-stretch min-[1080px]:overflow-hidden">
+        <section className="surface run-analysis-requests min-[1080px]:flex min-[1080px]:max-h-full min-[1080px]:min-h-0 min-[1080px]:flex-col min-[1080px]:overflow-hidden" aria-labelledby={`${id}-requests`}>
           <div className="surface-heading"><h2 id={`${id}-requests`}>{t("requests")}</h2>
             <Button type="button" variant="ghost" size="xs" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>
           </div>
@@ -219,7 +231,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
                 onClick={() => { if (newer) onSelect(newer.id); }}>{t("newerRequest")}<ChevronRight aria-hidden="true" /></Button>
             </div>
           </div>
-          <div ref={list} className="timeline-list run-analysis-list">
+          <div ref={list} className="timeline-list run-analysis-list min-[1080px]:max-h-none min-[1080px]:min-h-0 min-[1080px]:flex-1 min-[1080px]:overflow-y-auto">
             {rows.map(item => <button type="button" key={item.id} data-request-id={item.id}
               className={"request-row" + (item.id === selectedId ? " selected" : "")} aria-pressed={item.id === selectedId}
               onClick={() => onSelect(item.id)}>
@@ -234,11 +246,11 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
           </div>
           {!rows.length && <p className="run-analysis-no-requests">{data.activeCompaction ? dt("callsEmpty.compacting")
             : data.selectedEpoch ? dt("callsEmpty.noEpochCalls") : dt("callsEmpty.noTakeover")}</p>}
-          {data.paging.hasMore && data.paging.beforeCall !== null && <div className="run-analysis-pagination">
+          {data.paging.hasMore && data.paging.beforeCall !== null && <div className="run-analysis-pagination shrink-0">
             <Button type="button" size="sm" variant="outline" onClick={onLoadMore}>{dt("loadMore")}</Button>
           </div>}
         </section>
-        <div ref={details} className="run-analysis-detail" tabIndex={-1} aria-label={t("selectedRequest")}
+        <div ref={details} className="run-analysis-detail min-[1080px]:max-h-full min-[1080px]:min-h-0 min-[1080px]:overflow-y-auto min-[1080px]:pr-1 min-[1080px]:[&_.detail-body]:max-h-none min-[1080px]:[&_.detail-body]:overflow-visible" tabIndex={-1} aria-label={t("selectedRequest")}
           aria-busy={retrying || pending && !error} data-request-id={selectedId || undefined} data-detail-state={error ? "error" : pending ? "loading" : missing ? "missing" : "ready"}>
           {error && <Alert variant="destructive" className="run-analysis-read-error"><AlertDescription>
             <p className="font-medium">{t(detailData ? "refreshFailed" : "readFailed")}</p>

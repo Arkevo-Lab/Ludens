@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { CheckCircle2, Cpu, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
+import { Bot, Cable, CheckCircle2, Cpu, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
 import { ModelPickerDialog } from "@/components/model-picker-dialog";
@@ -17,45 +17,116 @@ import type { Project } from "@/lib/types";
 import type { GlobalDefaultsResult, WorkspaceSettings } from "@/lib/workspaces";
 import type { PetFollow } from "@/features/pet/pet-follow";
 
+type SettingsSectionId = "settings-console" | "settings-defaults" | "settings-connection" | "settings-pet";
+
 export function SettingsView({ follow, projects }: { follow: PetFollow; projects: Project[] }) {
   const { locale, setLocale } = useLocale();
   const t = useTranslations("settings");
   const languageId = useId();
+  const [activeSection, setActiveSection] = useState<SettingsSectionId>("settings-console");
+  const sections: { id: SettingsSectionId; label: string; icon: typeof Monitor }[] = [
+    { id: "settings-console", label: t("sections.console"), icon: Monitor },
+    { id: "settings-defaults", label: t("sections.defaults"), icon: SlidersHorizontal },
+    { id: "settings-connection", label: t("sections.connection"), icon: Cable },
+    { id: "settings-pet", label: t("sections.pet"), icon: Bot },
+  ];
+
+  useEffect(() => {
+    if (typeof IntersectionObserver === "undefined") return;
+    const ids: SettingsSectionId[] = ["settings-console", "settings-defaults", "settings-connection", "settings-pet"];
+    const elements = ids
+      .map(sectionId => document.getElementById(sectionId))
+      .filter((element): element is HTMLElement => element !== null);
+    if (!elements.length) return;
+    const observer = new IntersectionObserver(
+      entries => {
+        const visible = entries
+          .filter(entry => entry.isIntersecting)
+          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
+        if (visible[0]?.target.id) {
+          setActiveSection(visible[0].target.id as SettingsSectionId);
+        }
+      },
+      { rootMargin: "-72px 0px -65% 0px", threshold: [0, 0.15] },
+    );
+    for (const element of elements) observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <section className="settings-page mx-auto grid w-full max-w-5xl gap-6">
-      <Card>
-        <CardHeader className="flex flex-row items-start gap-3.5">
-          <div className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--surface-inset)] text-[var(--gold)]">
-            <Monitor aria-hidden="true" className="size-4" />
-          </div>
-          <div className="space-y-1">
-            <CardTitle role="heading" aria-level={2}>{t("consoleTitle")}</CardTitle>
-            <CardDescription>{t("consoleDescription")}</CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
-            <div className="min-w-0 space-y-1">
-              <Label htmlFor={languageId}>{t("language")}</Label>
-              <p id={`${languageId}-hint`} className="text-xs text-muted-foreground">{t("languageDescription")}</p>
-            </div>
-            <NativeSelect
-              id={languageId}
-              value={locale}
-              onChange={event => setLocale(event.target.value === "zh" ? "zh" : "en")}
-              aria-describedby={`${languageId}-hint`}
-              wrapperClassName="w-full min-[480px]:w-48"
-              className="w-full"
+    <section className="settings-page mx-auto grid w-full max-w-5xl gap-5">
+      <nav
+        aria-label={t("sectionsNavLabel")}
+        data-settings-jump-nav
+        className="sticky top-0 z-20 flex items-center gap-1.5 overflow-x-auto rounded-lg border border-border/80 bg-background/90 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/75"
+      >
+        {sections.map(section => {
+          const Icon = section.icon;
+          const active = activeSection === section.id;
+          return (
+            <a
+              key={section.id}
+              href={`#${section.id}`}
+              aria-current={active ? "true" : undefined}
+              onClick={event => {
+                event.preventDefault();
+                setActiveSection(section.id);
+                document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+              }}
+              className={
+                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium whitespace-nowrap transition-colors " +
+                (active
+                  ? "border-[color-mix(in_srgb,var(--gold)_45%,var(--border))] bg-[var(--surface-inset)] text-foreground shadow-xs"
+                  : "border-transparent text-muted-foreground hover:bg-[var(--surface-inset)]/60 hover:text-foreground")
+              }
             >
-              <NativeSelectOption value="en">{t("languageEnglish")}</NativeSelectOption>
-              <NativeSelectOption value="zh">{t("languageChinese")}</NativeSelectOption>
-            </NativeSelect>
-          </div>
-        </CardContent>
-      </Card>
-      <GlobalDefaultsCard />
-      <ConnectionSettings projects={projects} />
-      <PetSettings follow={follow} projects={projects} />
+              <Icon className={"size-3.5 shrink-0 " + (active ? "text-[var(--gold)]" : "")} aria-hidden="true" />
+              <span>{section.label}</span>
+            </a>
+          );
+        })}
+      </nav>
+      <div id="settings-console" className="min-w-0 scroll-mt-16">
+        <Card>
+          <CardHeader className="flex flex-row items-start gap-3.5">
+            <div className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--surface-inset)] text-[var(--gold)]">
+              <Monitor aria-hidden="true" className="size-4" />
+            </div>
+            <div className="space-y-1">
+              <CardTitle role="heading" aria-level={2}>{t("consoleTitle")}</CardTitle>
+              <CardDescription>{t("consoleDescription")}</CardDescription>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
+              <div className="min-w-0 space-y-1">
+                <Label htmlFor={languageId}>{t("language")}</Label>
+                <p id={`${languageId}-hint`} className="text-xs text-muted-foreground">{t("languageDescription")}</p>
+              </div>
+              <NativeSelect
+                id={languageId}
+                value={locale}
+                onChange={event => setLocale(event.target.value === "zh" ? "zh" : "en")}
+                aria-describedby={`${languageId}-hint`}
+                wrapperClassName="w-full min-[480px]:w-48"
+                className="w-full"
+              >
+                <NativeSelectOption value="en">{t("languageEnglish")}</NativeSelectOption>
+                <NativeSelectOption value="zh">{t("languageChinese")}</NativeSelectOption>
+              </NativeSelect>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+      <div id="settings-defaults" className="min-w-0 scroll-mt-16">
+        <GlobalDefaultsCard />
+      </div>
+      <div id="settings-connection" className="min-w-0 scroll-mt-16">
+        <ConnectionSettings projects={projects} />
+      </div>
+      <div id="settings-pet" className="min-w-0 scroll-mt-16">
+        <PetSettings follow={follow} projects={projects} />
+      </div>
     </section>
   );
 }

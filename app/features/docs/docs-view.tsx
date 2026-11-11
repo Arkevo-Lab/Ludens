@@ -220,12 +220,31 @@ export function DocsView({ search, navigate }: {
     requestAnimationFrame(() => focusArticle(nextDoc === doc?.id ? anchor : null));
   };
 
-  const documentMenu = <div className="docs-menu-content">
+  const languageSelect = (selectId: string, wrapperClassName = "min-w-0 flex-1") => <>
+    <label className="sr-only" htmlFor={selectId}>{t("languageLabel")}</label>
+    <NativeSelect
+      id={selectId}
+      size="sm"
+      value={languageChoice}
+      wrapperClassName={wrapperClassName}
+      className="w-full"
+      onChange={event => navigate({ docLang: event.target.value === "auto" ? null : event.target.value, docAnchor: null })}
+    >
+      <NativeSelectOption value="auto">{t("followInterface")}</NativeSelectOption>
+      <NativeSelectOption value="en">English</NativeSelectOption>
+      <NativeSelectOption value="zh">中文</NativeSelectOption>
+    </NativeSelect>
+  </>;
+  const renderDocumentMenu = (selectId: string) => <div className="docs-menu-content">
     <div className="relative">
       <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" aria-hidden="true" />
       <Input type="search" className="pl-9" aria-label={t("searchLabel")} placeholder={t("searchPlaceholder")} value={filter} onChange={event => setFilter(event.target.value)} />
     </div>
-    <p className="text-xs text-muted-foreground">{t("searchHint")}</p>
+    <div className="flex items-center gap-1.5">
+      {languageSelect(selectId)}
+      <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 text-muted-foreground" aria-label={t("refreshIndex")} title={t("refreshIndex")} aria-disabled={groupsLoad.loading}
+        onClick={() => { if (!groupsLoad.loading) groupsLoad.retry(); }}><RefreshCw className={groupsLoad.loading ? "animate-spin" : ""} aria-hidden="true" /></Button>
+    </div>
     {groupsLoad.error && <ReadNotice title={t("indexFailed")} error={groupsLoad.error} cached={!!groups} loading={groupsLoad.loading} retry={control => retryRead("index", control)} />}
     {!groups && !groupsLoad.error && <p role="status" className="text-sm text-muted-foreground">{t("loadingTitle")}</p>}
     {groups && <>
@@ -247,8 +266,6 @@ export function DocsView({ search, navigate }: {
         </div>)}
       </nav>
     </>}
-    <Button type="button" variant="ghost" size="sm" className="justify-start text-muted-foreground" aria-disabled={groupsLoad.loading}
-      onClick={() => { if (!groupsLoad.loading) groupsLoad.retry(); }}><RefreshCw aria-hidden="true" />{t("refreshIndex")}</Button>
   </div>;
   const headingMenu = <nav aria-label={t("onThisPage")} className="docs-heading-links" onClick={followDoc}>
     {headings.map(heading => <a key={heading.id} href={documentUrl(search, docId, heading.id)} data-doc={docId} data-doc-anchor={heading.id}
@@ -283,28 +300,21 @@ export function DocsView({ search, navigate }: {
       </div>
       <div className="docs-navigation-body min-h-0 min-w-0 overflow-y-auto overscroll-contain px-5 py-4">
         <DialogDescription className="mb-4 break-words">{kind === "docs" ? t("menuDescription") : doc?.title}</DialogDescription>
-        {kind === "docs" ? documentMenu : headingMenu}
+        {kind === "docs" ? renderDocumentMenu("docs-language-dialog") : headingMenu}
       </div>
     </DialogContent>
   </Dialog>;
 
   return <div className="docs-layout" data-has-toc={headings.length > 0}>
-    <div className="docs-toolbar">
+    <div className="docs-toolbar min-[901px]:hidden">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <a href={documentUrl(search, null)} data-doc="" onClick={followDoc} className="docs-home-link"><BookOpen className="size-4" aria-hidden="true" />{t("title")}</a>
-        {dialogMenu("docs")}{headings.length > 0 && dialogMenu("headings")}
+        {dialogMenu("docs")}
       </div>
       <div className="flex min-w-0 items-center gap-2">
-        <label className="sr-only" htmlFor="docs-language">{t("languageLabel")}</label>
-        <NativeSelect id="docs-language" size="sm" value={languageChoice} onChange={event => navigate({ docLang: event.target.value === "auto" ? null : event.target.value, docAnchor: null })}>
-          <NativeSelectOption value="auto">{t("followInterface")}</NativeSelectOption>
-          <NativeSelectOption value="en">English</NativeSelectOption><NativeSelectOption value="zh">中文</NativeSelectOption>
-        </NativeSelect>
-        {docId && <Button type="button" variant="ghost" size="icon-sm" aria-label={t("refreshArticle")} title={t("refreshArticle")} aria-disabled={docLoad.loading}
-          onClick={() => { if (!docLoad.loading) docLoad.retry(); }}><RefreshCw className={docLoad.loading ? "animate-spin" : ""} aria-hidden="true" /></Button>}
+        {languageSelect("docs-language-mobile", "w-auto")}
       </div>
     </div>
-    <aside ref={library} className="docs-nav" aria-label={t("libraryLabel")}>{documentMenu}</aside>
+    <aside ref={library} className="docs-nav" aria-label={t("libraryLabel")}>{renderDocumentMenu("docs-language")}</aside>
     <article id="docs-article" ref={article} tabIndex={-1} className="surface docs-article" onClick={followDoc} aria-busy={docId ? docLoad.loading : groupsLoad.loading}>
       {!docId && <>
         <div className="docs-article-header"><h1>{t("overviewTitle")}</h1><p className="text-muted-foreground">{t("overviewBlurb")}</p></div>
@@ -323,7 +333,14 @@ export function DocsView({ search, navigate }: {
       {docId && !doc && !docLoad.error && <p role="status" className="docs-body py-8">{t("loadingArticle")}</p>}
       {doc && <>
         <div className="docs-article-header">
-          <p className="docs-breadcrumb">{currentGroup?.title ?? t(`groups.${doc.group}`)}<span aria-hidden="true">/</span><span lang={doc.lang}>{doc.lang === "zh" ? "中文" : "English"}</span></p>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="docs-breadcrumb">{currentGroup?.title ?? t(`groups.${doc.group}`)}<span aria-hidden="true">/</span><span lang={doc.lang}>{doc.lang === "zh" ? "中文" : "English"}</span></p>
+            <div className="flex items-center gap-1.5">
+              {headings.length > 0 && dialogMenu("headings")}
+              <Button type="button" variant="ghost" size="icon-sm" aria-label={t("refreshArticle")} title={t("refreshArticle")} aria-disabled={docLoad.loading}
+                onClick={() => { if (!docLoad.loading) docLoad.retry(); }}><RefreshCw className={docLoad.loading ? "animate-spin" : ""} aria-hidden="true" /></Button>
+            </div>
+          </div>
           <h1 lang={doc.lang}>{doc.title}</h1>
         </div>
         {doc.fallback && <Alert role="status" className="docs-read-notice"><AlertDescription>{t(doc.lang === "zh" ? "fallbackChinese" : "fallbackEnglish")}</AlertDescription></Alert>}

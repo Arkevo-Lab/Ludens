@@ -57,6 +57,13 @@
     }
   },
   "settings": {
+    "sectionsNavLabel": "Settings sections",
+    "sections": {
+      "console": "Display & Language",
+      "defaults": "Workspace Defaults",
+      "connection": "Model & Transport",
+      "pet": "Desktop Companion"
+    },
     "language": "Language",
     "languageDescription": "Console and desktop pet display language. Follows your browser by default.",
     "languageEnglish": "English",
@@ -523,6 +530,8 @@
     "boundCapabilitiesLabel": "Bound capabilities",
     "contextManagedEnv": "Used as context manager (with Env(...))",
     "analyticsSectionLabel": "Triad visual telemetry",
+    "toggleAnalyticsShow": "Show triad overview",
+    "toggleAnalyticsHide": "Hide triad overview",
     "healthChartTitle": "Triad Verification & Coverage",
     "healthChartVerifiedRate": "Verified",
     "coverageCapabilityObserve": "Live @record observe",
@@ -1685,7 +1694,8 @@
     "empty": "No workspaces — add one to begin",
     "unavailable": "Workspace list unavailable",
     "emptyHint": "Create a workspace or add an existing one from Workspaces.",
-    "errorHint": "The workspace list could not be loaded. Open Workspaces to retry."
+    "errorHint": "The workspace list could not be loaded. Open Workspaces to retry.",
+    "globalScopeHint": "Selected workspace (applies in workspace views)"
   },
   "liveContext": {
     "autoRefreshOn": "Auto-refresh on",
@@ -1764,7 +1774,11 @@
     "eventsTab": "Events",
     "momentTab": "At Playhead",
     "evidenceTab": "Node Details",
-    "evidenceDialogHint": "Inspect the selected recorded node and its source."
+    "evidenceDialogHint": "Inspect the selected recorded node and its source.",
+    "showInspector": "Show events & evidence",
+    "hideInspector": "Hide events & evidence",
+    "closeInspector": "Close events & evidence",
+    "compactCount": "{count} events"
   },
   "replayEvidence": {
     "recordedOnly": "Archived record",
@@ -1867,6 +1881,8 @@
     "collapseStepsBtn": "Collapse steps",
     "expandAllStepsBtn": "Expand all steps",
     "toggleDockHint": "Toggle right viewport & tools dock",
+    "dockHeaderTitle": "Telemetry & Observation",
+    "closeDock": "Close inspector",
     "loadingOlder": "Loading earlier messages…",
     "loadOlderMessages": "Load earlier messages",
     "emptyThreadTitle": "Start a session with Shiori",
