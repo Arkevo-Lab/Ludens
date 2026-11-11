@@ -7,7 +7,8 @@ import type { ExecutionResult } from "@ludens/baseware/contracts";
 export const HELP = `ludens status
 ludens auto on [--message <text>] [--seconds <n>]
 ludens auto off
-ludens steer [--follow-up] <message>
+ludens steer <message>
+ludens event <list|send|reply|ack>
 ludens consolidate [--seconds <n>]
 ludens perception status | state | reload | stop
 ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]

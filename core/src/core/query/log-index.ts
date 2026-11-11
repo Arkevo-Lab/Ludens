@@ -183,7 +183,7 @@ export class LogIndex {
         return value;
       } catch (error) {
         // No mutation journal/transactions: failed cache work is simply reconstructible.
-        if (this.dirty) { if ((error as Error).name !== "AbortError") this.reset(); await this.flush(); }
+        if (this.dirty || error instanceof SourceChanged) { if ((error as Error).name !== "AbortError") this.reset(); await this.flush(); }
         throw error;
       }
     });

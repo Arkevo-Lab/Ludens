@@ -44,6 +44,8 @@ As of 2026-10-29 the end-of-batch channel is deleted as a whole:
 - **When it needs a frame mid-turn, the model calls `observe` itself** — it has always been a first-class tool, supporting queries by id / timestamp / range / capability, and explicit reads always get a complete response;
 - Explicit `observe` and native tool images each open their own delivery receipts (`origin` of `explicit` / `tool_result`), so trace attribution is preserved; the `tool_result` hook only records the delivery fact of native tool images and no longer rewrites any tool result.
 
+The same hook carries the Event Pool digest under the same budget discipline: `before_agent_start` appends a compact `{ eventPool: { pendingInbound, items } }` digest only when `pendingInbound > 0`, listing each pending inbound event's id, kind, optional title, and a 72-character single-line preview. An idle pool contributes zero bytes, so prefix KV cache stays valid across turns; full text is pulled on demand with `event_pool({ action: "read" })`, which acknowledges by default.
+
 The "fresh frame before deciding" need has not gone away; it just changed hands: instead of the host appending frames at every batch boundary, the model pulls on demand. The sampler-state notification at turn boundaries remains — if the sampler stops, the model is not misled into "no new frames"; the explicit `observe` error codes (`UNAVAILABLE` and friends) are the unambiguous signal.
 
 ## Trade-offs and record

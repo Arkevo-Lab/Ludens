@@ -4,6 +4,7 @@ import type { Runtime } from "../core/shiori/runtime.ts";
 import { childTrace, type EventTrace, type EventMetadata } from "../core/storage/events.ts";
 import { observationMetadata, type ObservationQuery, type TimelineAppend, type TimelineDerive } from "../core/subsystems/perception.ts";
 import type { ExecutionResult } from "@ludens/baseware/contracts";
+import { parseEventCommandArgs } from "../cli/event-cli.ts";
 
 export interface Request {
   kind: string; argv: string[]; epoch?: string; runId?: string; expectedEpoch?: string | null;
@@ -61,7 +62,10 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
   // Completed records may arrive late; fresh calls and management must belong
   // to the still-running program, even when its parent epoch has not changed.
   if (kind !== "workspace_event" && kind !== "timeline") runtime.checkInputGeneration(epoch, request.trace);
-  if (kind === "status") return runtime.status();
+  if (kind === "status") {
+    await runtime.refreshEventPool();
+    return runtime.status();
+  }
   if (kind === "timeline") {
     if (!runtime.perception) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
     if (request.action === "derive") {
@@ -170,12 +174,23 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
     const status = runtime.status();
     if (request.runId && request.runId !== status.runId) throw new Error("STALE_RUN: refresh the host status before changing control");
     if (request.expectedEpoch !== undefined && request.expectedEpoch !== status.epoch) throw new Error("STALE_EPOCH: the control cycle changed");
-    const followUp = argv[0] === "--follow-up";
-    const messageArgs = followUp ? argv.slice(1) : argv;
-    const message = messageArgs[0] === "--message" ? messageArgs[1] : messageArgs[0];
-    if (messageArgs.length > 2 || (messageArgs[0] === "--message" && messageArgs.length !== 2) || !message?.trim())
-      throw new Error("Usage: ludens steer [--follow-up] --message <text> | ludens steer [--follow-up] <text>");
-    return runtime.steer(message, followUp ? "follow_up" : "steer");
+    const message = argv[0] === "--message" ? argv[1] : argv[0];
+    if (argv.length > 2 || (argv[0] === "--message" && argv.length !== 2) || !message?.trim() || message.startsWith("--"))
+      throw new Error("Usage: ludens steer --message <text> | ludens steer <text>");
+    return runtime.steer(message);
+  }
+  if (kind === "event") {
+    const parsed = parseEventCommandArgs(argv);
+    if (epoch !== undefined && parsed.subcommand !== "list") {
+      throw new Error("Human Event Pool actions belong to the human; inside an agent cycle use the event_pool tool");
+    }
+    if (request.runId && request.runId !== runtime.status().runId) {
+      throw new Error("STALE_RUN: refresh the host status before mutating the Event Pool");
+    }
+    if (parsed.subcommand === "list") return runtime.eventPoolSnapshot(parsed.filter);
+    if (parsed.subcommand === "send") return runtime.postInboundEvent({ text: parsed.text, title: parsed.title });
+    if (parsed.subcommand === "reply") return runtime.postInboundEvent({ text: parsed.text, replyTo: parsed.replyTo });
+    return runtime.ackPoolEvents(parsed.ids, "human");
   }
   if (kind === "auto" || kind === "consolidate") {
     if (epoch !== undefined) throw new Error("Control management belongs to the human, not an agent cycle");

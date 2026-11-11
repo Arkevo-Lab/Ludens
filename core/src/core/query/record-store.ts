@@ -1,4 +1,4 @@
-import { mkdirSync, openSync, closeSync, readSync, writeSync, statSync, existsSync, renameSync, rmSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { mkdirSync, openSync, closeSync, readSync, writeSync, statSync, fstatSync, existsSync, renameSync, rmSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
 const CHUNK = 1024 * 1024, SEGMENT = 8 * CHUNK, PAGE_ROWS = 1024;
@@ -431,9 +431,15 @@ export class FileRecords {
     const file = pointer.file ?? this.sourceFile;
     if (!file || !Number.isSafeInteger(pointer.offset) || !Number.isSafeInteger(pointer.length))
       throw new Error("This index row has no source body");
+    const isInternalData = file.startsWith(this.directory);
     let fd = this.readers.get(file);
     if (fd === undefined) {
-      fd = openSync(file, "r"); this.readers.set(file, fd);
+      try { fd = openSync(file, "r"); }
+      catch (error) {
+        if (isInternalData && (error as NodeJS.ErrnoException).code === "ENOENT") throw new SourceChanged(file);
+        throw error;
+      }
+      this.readers.set(file, fd);
       if (this.readers.size > 8) { const oldest = this.readers.keys().next().value!; closeSync(this.readers.get(oldest)!); this.readers.delete(oldest); }
     } else { this.readers.delete(file); this.readers.set(file, fd); }
     const buffer = Buffer.alloc(pointer.length!); let offset = 0;
@@ -442,7 +448,14 @@ export class FileRecords {
       storageMetrics.bodyReadCalls++; storageMetrics.bodyReadBytes += n;
       if (!n) throw new SourceChanged(file); offset += n;
     }
-    storageMetrics.bodyParses++; return JSON.parse(buffer.toString("utf8"));
+    storageMetrics.bodyParses++;
+    const text = buffer.toString("utf8");
+    if (isInternalData && !text.endsWith("\n")) throw new SourceChanged(file);
+    try { return JSON.parse(text); }
+    catch (error) {
+      if (isInternalData && error instanceof SyntaxError) throw new SourceChanged(file);
+      throw error;
+    }
   }
   async get<T = any>(id: string): Promise<T | undefined> { const pointer = this.meta(id); return pointer ? this.read<T>(pointer) : undefined; }
   /** A rebuildable directory row; unlike put(), this does not copy a body. */
@@ -452,13 +465,15 @@ export class FileRecords {
   }
   async put(id: string, value: unknown, metadata: Record<string, unknown> = {}) {
     this.onWrite(); const bytes = Buffer.from(JSON.stringify(value) + "\n");
-    if (this.dataFd !== undefined && this.dataOffset >= SEGMENT) { closeSync(this.dataFd); this.dataFd = undefined; this.part++; }
+    if (this.dataFd !== undefined && fstatSync(this.dataFd).size >= SEGMENT) { closeSync(this.dataFd); this.dataFd = undefined; this.part++; }
     if (this.dataFd === undefined) {
       this.dataFile = join(this.directory, `data-${String(this.part).padStart(6, "0")}.jsonl`);
-      this.dataFd = openSync(this.dataFile, "a"); this.dataOffset = statSync(this.dataFile).size;
+      this.dataFd = openSync(this.dataFile, "a");
     }
+    const offset = fstatSync(this.dataFd).size;
     let written = 0; while (written < bytes.length) written += writeSync(this.dataFd, bytes, written);
-    this.reference(id, this.dataFile, this.dataOffset, bytes.length, metadata); this.dataOffset += bytes.length;
+    this.dataOffset = offset + bytes.length;
+    this.reference(id, this.dataFile, offset, bytes.length, metadata);
   }
   async delete(id: string) {
     if (!this.meta(id)) return;

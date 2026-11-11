@@ -175,6 +175,16 @@ function extractToolSummary(block: LogBlock): { badge: string; detail: string; k
     const limit = typeof args?.limit === "number" ? ` · limit=${args.limit}` : "";
     return { badge: "👁 observe", detail: `${cap}${limit}`, kind: "observe" };
   }
+  if (name === "event_pool") {
+    const act = typeof args?.action === "string" ? args.action : "pool";
+    const detailText =
+      typeof args?.title === "string" && args.title.trim()
+        ? ` · ${args.title.trim()}`
+        : typeof args?.text === "string" && args.text.trim()
+          ? ` · ${args.text.trim().replace(/\s+/g, " ").slice(0, 64)}`
+          : "";
+    return { badge: "📬 event_pool", detail: `${act}${detailText}`, kind: "generic" };
+  }
   if (name === "wait") {
     const sec = typeof args?.seconds === "number" ? `${args.seconds}s` : typeof args?.ms === "number" ? `${args.ms}ms` : "";
     return { badge: "⏱ wait", detail: sec || "pause", kind: "generic" };
@@ -189,6 +199,11 @@ function extractUserPrompt(block: LogBlock): { text: string; mode: string } | nu
   if (block.title === "user_message" || block.data?.role === "user") {
     const text = typeof block.data?.text === "string" ? block.data.text : block.text;
     const mode = typeof block.data?.mode === "string" ? block.data.mode : "start";
+    return { text, mode };
+  }
+  if (block.data?.role === "shiori_event") {
+    const text = typeof block.data?.text === "string" ? block.data.text : block.text;
+    const mode = typeof block.data?.mode === "string" ? block.data.mode : "help_request";
     return { text, mode };
   }
   return null;
@@ -250,7 +265,15 @@ function ActivityBlock({
           <Badge variant="secondary" className="rounded px-1.5 py-0 text-[11px]">{t(`kind.${block.kind}`)}</Badge>
           {userPrompt && (
             <span className="codex-user-badge" data-mode={userPrompt.mode}>
-              {userPrompt.mode === "steer" ? "⚡ STEER" : userPrompt.mode === "follow_up" ? "↳ FOLLOW-UP" : "▶ PROMPT"}
+              {userPrompt.mode === "steer"
+                ? "⚡ STEER"
+                : userPrompt.mode === "event"
+                  ? "📥 EVENT POOL"
+                  : userPrompt.mode === "help_request"
+                    ? "🆘 HELP REQUEST"
+                    : userPrompt.mode === "notice"
+                      ? "📌 NOTICE"
+                      : "▶ PROMPT"}
             </span>
           )}
           {toolSummary && (

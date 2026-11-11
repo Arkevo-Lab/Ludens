@@ -4,13 +4,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import {
   ArrowDown,
   Bot,
+  Check,
   ChevronDown,
   ChevronRight,
   Clock,
-  CornerDownLeft,
+  CornerUpLeft,
   Eye,
   EyeOff,
   FileText,
+  Inbox,
   Infinity as InfinityIcon,
   PanelRight,
   Play,
@@ -20,6 +22,7 @@ import {
   X,
   Zap,
 } from "lucide-react";
+import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
 import { useTranslations } from "@/lib/locale";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
@@ -35,10 +38,58 @@ export type RuntimeControlAction =
   | { action: "status" }
   | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
-  | { action: "steer"; message: string; delivery?: "steer" | "follow_up"; runId?: string; expectedEpoch?: string | null }
+  | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
   | { action: "perception_inject"; enabled: boolean; runId?: string }
   | { action: "perception_reload"; runId?: string };
+
+export type EventPoolClientCommand =
+  | { action: "send"; text: string; title?: string }
+  | { action: "reply"; replyTo: string; text: string; resumeAuto?: boolean; seconds?: number | null }
+  | { action: "ack"; ids: string[] };
+
+interface EventPoolApiReadPayload {
+  snapshot: EventPoolSnapshot;
+  hostOnline: boolean;
+  hostStatus?: Record<string, unknown>;
+}
+
+interface EventPoolApiMutatePayload extends EventPoolApiReadPayload {
+  createdEvent?: PoolEvent;
+  resolvedOutbound?: PoolEvent;
+  updatedEvents?: PoolEvent[];
+}
+
+async function fetchEventPool(
+  project: string,
+  workspace: string,
+  signal?: AbortSignal,
+): Promise<EventPoolApiReadPayload> {
+  const params = new URLSearchParams({ project, workspace });
+  const response = await fetch(`/api/event-pool?${params}`, { signal, cache: "no-store" });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload?.error === "string" ? payload.error : `Event Pool read failed (${response.status})`);
+  }
+  return payload as EventPoolApiReadPayload;
+}
+
+async function mutateEventPool(
+  project: string,
+  workspace: string,
+  command: EventPoolClientCommand,
+): Promise<EventPoolApiMutatePayload> {
+  const response = await fetch("/api/event-pool", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ project, workspace, command }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(typeof payload?.error === "string" ? payload.error : `Event Pool request failed (${response.status})`);
+  }
+  return payload as EventPoolApiMutatePayload;
+}
 
 async function sendRuntimeControl(
   project: string,
@@ -70,585 +121,17 @@ function formatDurationCompact(secondsTotal: number | null | undefined): string 
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-function cleanErrorMessage(raw: string): string {
-  return raw.replace(/(?:LudensError:\s*|Error:\s*)+/gi, "").trim() || raw;
-}
-
-function cleanInlinePreview(raw: string | undefined | null): string {
-  if (!raw) return "";
-  const firstLine =
-    raw
-      .split("\n")
-      .map(line => line.trim())
-      .find(
-        line =>
-          Boolean(line) &&
-          line !== "{" &&
-          line !== "[" &&
-          line !== "参数：" &&
-          line !== "Arguments:" &&
-          line !== "结果：" &&
-          line !== "Result:" &&
-          !line.startsWith('{"') &&
-          !line.startsWith("{ "),
-      ) ?? "";
-  if (!firstLine) return "";
-  return cleanErrorMessage(
-    firstLine
-      .replace(/\*\*([^*]+)\*\*/g, "$1")
-      .replace(/^\*\*+|\*\*+$/g, "")
-      .replace(/`([^`]+)`/g, "$1")
-      .trim(),
-  ).slice(0, 96);
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
-}
-
-function isUserMessageBlock(block: ActivityBlock): boolean {
-  const record = asRecord(block.data);
-  if (block.kind === "text" && record?.role === "user") return true;
-  if (block.kind === "system" && block.title === "user_message") return true;
-  return false;
-}
-
-function isAssistantTextBlock(block: ActivityBlock): boolean {
-  const record = asRecord(block.data);
-  return block.kind === "text" && block.source?.component === "shiori" && record?.role !== "user";
-}
-
-function extractReadableText(block: ActivityBlock): string {
-  const record = asRecord(block.data);
-  if (typeof record?.text === "string" && record.text.trim()) {
-    return record.text.trim();
-  }
-  if (typeof block.text === "string" && block.text.trim()) {
-    return block.text.trim();
-  }
-  return block.title;
-}
-
-function summarizeStepBlock(block: ActivityBlock): { badge: string; detail: string } {
-  const args = asRecord(block.tool?.args) ?? asRecord(block.data);
-  const titleLower = block.title.toLowerCase();
-  const previewText = cleanInlinePreview(block.text);
-  const intent = cleanInlinePreview(block.tool?.intent);
-
-  if (block.kind === "tool") {
-    if (titleLower === "bash" || titleLower.endsWith(":bash")) {
-      const cmd = typeof args?.command === "string" ? args.command.trim().split("\n")[0]?.slice(0, 96) : "";
-      return {
-        badge: "$ bash",
-        detail: cmd || intent || previewText || (block.status === "running" ? "Running command…" : "bash"),
-      };
-    }
-    if (titleLower === "observe" || titleLower.includes("observe")) {
-      return { badge: "👁 observe", detail: intent || previewText || "Capture frame" };
-    }
-    if (titleLower.includes("capability") || typeof args?.capability === "string") {
-      return {
-        badge: "⚡ capability",
-        detail: (typeof args?.capability === "string" ? args.capability : intent || previewText) || block.title,
-      };
-    }
-    const patchText =
-      typeof args?.input === "string"
-        ? args.input
-        : typeof args?.patch === "string"
-          ? args.patch
-          : typeof args?.patchText === "string"
-            ? args.patchText
-            : "";
-    const patchedFile = patchText.includes("*** Begin Patch")
-      ? patchText.match(/^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+)$/m)?.[1]?.trim()
-      : undefined;
-    const targetArg = [
-      patchedFile,
-      args?.path,
-      args?.file_path,
-      args?.file,
-      args?.pattern,
-      args?.query,
-      args?.url,
-      args?.action,
-      args?.name,
-    ].find((v): v is string => typeof v === "string" && v.trim().length > 0);
-    const compactArgs = !targetArg && args
-      ? Object.entries(args)
-          .filter(
-            ([k, v]) =>
-              k !== "intent" &&
-              (typeof v === "string" || typeof v === "number" || typeof v === "boolean") &&
-              !String(v).startsWith("*** Begin Patch"),
-          )
-          .slice(0, 2)
-          .map(([k, v]) => `${k}=${String(v).slice(0, 36)}`)
-          .join(" ")
-      : "";
-    return {
-      badge: `⚙ ${block.title}`,
-      detail: intent || targetArg || compactArgs || previewText || block.title,
-    };
-  }
-
-  if (block.kind === "thinking") {
-    return { badge: "🧠 thinking", detail: previewText || "Reasoning…" };
-  }
-
-  if (block.kind === "system") {
-    const rec = asRecord(block.data);
-    const sysDetail = [
-      rec?.summary,
-      rec?.message,
-      rec?.error,
-      rec?.reason,
-      rec?.state,
-      rec?.status,
-      rec?.outcome,
-      rec?.capability,
-    ]
-      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
-      .map(v => cleanErrorMessage(v.trim()))
-      .join(" · ");
-    const tokenSummary =
-      typeof rec?.tokensBefore === "number" && typeof rec?.tokensAfter === "number"
-        ? `${rec.tokensBefore.toLocaleString()} → ${rec.tokensAfter.toLocaleString()} tokens`
-        : "";
-    return {
-      badge: `● ${block.title}`,
-      detail: sysDetail || tokenSummary || previewText || block.title,
-    };
-  }
-
-  return { badge: block.source?.component ?? "step", detail: previewText || block.title };
-}
-
-function isBackgroundResultBlock(block: ActivityBlock): boolean {
-  return block.kind === "system" && block.title === "background_result";
-}
-
-function callHasExternalInput(call: Call): boolean {
-  return (
-    call.inputObservations.length > 0 ||
-    Boolean(call.inputText && call.inputText.trim()) ||
-    Boolean(call.perception)
-  );
-}
-
-function isControlBlock(block: ActivityBlock): boolean {
-  return block.kind === "system" && block.title === "control";
-}
-
-type StreamSegment =
-  | {
-      kind: "session_divider";
-      id: string;
-      runId: string;
-      epoch: string | null;
-      cycleIndex: number;
-      startedAt: string;
-      endedAt: string | null;
-      durationSeconds: number | null;
-      maxSeconds: number | null;
-      stopReason: string | null;
-      gapSeconds: number | null;
-      isActive: boolean;
-    }
-  | { kind: "user"; id: string; block: ActivityBlock; text: string; mode: string }
-  | {
-      kind: "input";
-      id: string;
-      runId?: string;
-      call?: Call;
-      observations: Observation[];
-      bgBlock?: ActivityBlock;
-      at: string;
-    }
-  | {
-      kind: "turn";
-      id: string;
-      runId?: string;
-      steps: ActivityBlock[];
-      responseBlock: ActivityBlock | null;
-      responseText: string | null;
-    };
-
-interface BuildSegmentsOptions {
-  runId?: string;
-  cycles?: RunData["cycles"];
-  prevEndedAt?: string | null;
-  isLatestRun?: boolean;
-  isAuto?: boolean;
-}
-
-/**
- * Groups raw ActivityBlocks and external Call inputs into Codex-style conversational segments:
- * - Explicit Session Segment & Time-Gap Dividers (`session_divider`) across control cycles (`epoch`) and runs
- * - User bubbles (`user_message`)
- * - External Agent Loop Input blocks (`CodexInputCard` from `call.inputObservations` / `call.inputText` / `call.perception` / `background_result`)
- * - Collapsed intermediate step groups (`上 N 条消息 / 执行步骤 >`) paired with Shiori's readable prose response
- */
-function buildCodexSegments(
-  rawBlocks: ActivityBlock[],
-  calls: Call[] = [],
-  observations: Observation[] = [],
-  options: BuildSegmentsOptions = {},
-): StreamSegment[] {
-  const blocks = rawBlocks.filter(block => block.kind !== "diagnostic");
-  const callsById = new Map(calls.map(c => [c.id, c]));
-  const obsById = new Map(observations.map(o => [o.id, o]));
-  const cyclesByEpoch = new Map((options.cycles ?? []).map((c, idx) => [c.epoch, { ...c, index: idx + 1 }]));
-  const emittedCallInputIds = new Set<string>();
-  const emittedDividerEpochs = new Set<string>();
-  const segments: StreamSegment[] = [];
-  let pendingSteps: ActivityBlock[] = [];
-  let currentEpoch: string | null = null;
-  let lastSegmentEndedAt: string | null = options.prevEndedAt ?? null;
-  let lastPostBlockMs = 0;
-  let autoCycleCounter = 0;
-
-  // Pre-scan control(manual) blocks so we know end times and stop reasons even before cycle index updates
-  const manualEndByEpoch = new Map<string, { endedAt: string; reason: string | null; elapsedMs: number | null }>();
-  for (const block of blocks) {
-    if (!isControlBlock(block)) continue;
-    const rec = asRecord(block.data);
-    if (rec?.mode === "manual") {
-      const ep = block.trace?.epoch ?? (typeof rec?.epoch === "string" ? rec.epoch : "");
-      if (ep) {
-        manualEndByEpoch.set(ep, {
-          endedAt: block.at,
-          reason: typeof rec?.reason === "string" ? rec.reason : null,
-          elapsedMs: typeof rec?.elapsedMs === "number" ? rec.elapsedMs : null,
-        });
-      }
-    }
-  }
-
-  const emitDividerForEpoch = (epoch: string | null, fallbackStartAt: string, autoBlockData?: Record<string, unknown> | null) => {
-    const key = `${options.runId ?? ""}:${epoch ?? "default"}`;
-    if (emittedDividerEpochs.has(key)) return;
-
-    const indexed = epoch ? cyclesByEpoch.get(epoch) : undefined;
-    if (indexed && indexed.index > 1 && options.cycles) {
-      for (let i = 0; i < indexed.index - 1; i++) {
-        const earlier = options.cycles[i];
-        if (earlier) {
-          emitDividerForEpoch(earlier.epoch, earlier.startedAt);
-        }
-      }
-    }
-
-    emittedDividerEpochs.add(key);
-    const manualEnd = epoch ? manualEndByEpoch.get(epoch) : undefined;
-    const cycleIndex = indexed?.index ?? ++autoCycleCounter;
-    const startedAt = indexed?.startedAt ?? fallbackStartAt;
-    const isLatestCycleInRun = Boolean(
-      options.isLatestRun &&
-        epoch &&
-        (options.cycles?.length ? options.cycles.at(-1)?.epoch === epoch : true),
-    );
-    const isActive = Boolean(isLatestCycleInRun && options.isAuto && !manualEnd && !indexed?.endedAt);
-    const endedAt = isActive ? null : (indexed?.endedAt ?? manualEnd?.endedAt ?? null);
-    const stopReason = isActive ? null : (indexed?.reason ?? manualEnd?.reason ?? null);
-    const maxSeconds =
-      indexed && "maxSeconds" in indexed
-        ? (indexed.maxSeconds ?? null)
-        : typeof autoBlockData?.maxSeconds === "number"
-          ? autoBlockData.maxSeconds
-          : null;
-
-    const startMs = Date.parse(startedAt);
-    const endMs = endedAt ? Date.parse(endedAt) : NaN;
-    const prevCycleEndedAt =
-      indexed && indexed.index > 1 ? (options.cycles?.[indexed.index - 2]?.endedAt ?? null) : null;
-    const effectivePrevEndedAt = prevCycleEndedAt ?? lastSegmentEndedAt;
-    const prevEndMs = effectivePrevEndedAt ? Date.parse(effectivePrevEndedAt) : NaN;
-    const gapSeconds =
-      Number.isFinite(startMs) && Number.isFinite(prevEndMs) && startMs > prevEndMs
-        ? Math.max(0, Math.round((startMs - prevEndMs) / 1000))
-        : null;
-    const durationSeconds =
-      manualEnd?.elapsedMs != null
-        ? Math.max(0, Math.round(manualEnd.elapsedMs / 1000))
-        : Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
-          ? Math.max(0, Math.round((endMs - startMs) / 1000))
-          : null;
-
-    segments.push({
-      kind: "session_divider",
-      id: `divider:${options.runId ?? "run"}:${epoch ?? cycleIndex}`,
-      runId: options.runId ?? "",
-      epoch,
-      cycleIndex,
-      startedAt,
-      endedAt,
-      durationSeconds,
-      maxSeconds,
-      stopReason,
-      gapSeconds,
-      isActive,
-    });
-
-    if (endedAt) {
-      lastSegmentEndedAt = endedAt;
-    }
-  };
-
-  const synthesizeAutonomousNarrative = (steps: ActivityBlock[]): { block: ActivityBlock; text: string } | null => {
-    // 1. Prefer a substantial thinking block (>= 60 chars beyond a short **heading**)
-    for (let i = steps.length - 1; i >= 0; i--) {
-      if (steps[i].kind === "thinking") {
-        const text = extractReadableText(steps[i]);
-        const stripped = text.replace(/^\*\*[^*\n]+\*\*\s*/, "").trim();
-        if (stripped.length >= 40 || text.length >= 90) {
-          return { block: steps[i], text };
-        }
-      }
-    }
-
-    // 2. Otherwise combine the latest **Thinking Heading** with recent tool.intent descriptions
-    const latestThinking = [...steps].reverse().find(s => s.kind === "thinking");
-    const intents = steps
-      .filter(s => s.kind === "tool" && typeof s.tool?.intent === "string" && s.tool.intent.trim())
-      .map(s => s.tool!.intent!.trim());
-    const uniqueIntents = [...new Set(intents)].slice(-3);
-
-    if (latestThinking && uniqueIntents.length > 0) {
-      const heading = extractReadableText(latestThinking);
-      return {
-        block: latestThinking,
-        text: `${heading} — ${uniqueIntents.join("；")}.`,
-      };
-    }
-    if (uniqueIntents.length > 0) {
-      const lastTool = [...steps].reverse().find(s => s.kind === "tool") ?? steps[steps.length - 1];
-      return {
-        block: lastTool,
-        text: uniqueIntents.join("；") + ".",
-      };
-    }
-    if (latestThinking) {
-      return {
-        block: latestThinking,
-        text: extractReadableText(latestThinking),
-      };
-    }
-    return null;
-  };
-
-  const flushTurn = (explicitResponse?: ActivityBlock) => {
-    const anchorId = pendingSteps[0]?.id ?? explicitResponse?.id ?? "turn";
-    const stableId = `turn:${options.runId ?? ""}:${anchorId}`;
-    if (explicitResponse) {
-      segments.push({
-        kind: "turn",
-        id: stableId,
-        runId: options.runId,
-        steps: pendingSteps,
-        responseBlock: explicitResponse,
-        responseText: extractReadableText(explicitResponse),
-      });
-      pendingSteps = [];
-      return;
-    }
-    if (pendingSteps.length === 0) return;
-
-    const synthesized = synthesizeAutonomousNarrative(pendingSteps);
-    if (synthesized) {
-      const otherSteps = pendingSteps.filter(item => item.id !== synthesized.block.id);
-      segments.push({
-        kind: "turn",
-        id: stableId,
-        runId: options.runId,
-        steps: otherSteps,
-        responseBlock: synthesized.block,
-        responseText: synthesized.text,
-      });
-    } else {
-      segments.push({
-        kind: "turn",
-        id: stableId,
-        runId: options.runId,
-        steps: pendingSteps,
-        responseBlock: null,
-        responseText: null,
-      });
-    }
-    pendingSteps = [];
-  };
-
-  const referencedCallIds = new Set(
-    blocks.map(b => b.trace?.modelCallId).filter((id): id is string => Boolean(id)),
-  );
-  const windowStartMs = blocks.length > 0 ? (Date.parse(blocks[0].at) || 0) - 5_000 : 0;
-  const orphanInputCalls = calls
-    .filter(
-      call =>
-        callHasExternalInput(call) &&
-        !referencedCallIds.has(call.id) &&
-        (blocks.length === 0 || (call.atMs || Date.parse(call.at) || 0) >= windowStartMs),
-    )
-    .sort((a, b) => (a.atMs || Date.parse(a.at) || 0) - (b.atMs || Date.parse(b.at) || 0));
-  let orphanIdx = 0;
-
-  const emitCallInputCard = (call: Call) => {
-    if (emittedCallInputIds.has(call.id)) return;
-    flushTurn();
-    emittedCallInputIds.add(call.id);
-    const resolvedObs = call.inputObservations
-      .map(obsId => obsById.get(obsId))
-      .filter((item): item is Observation => Boolean(item));
-    segments.push({
-      kind: "input",
-      id: `input-call:${call.id}`,
-      runId: options.runId,
-      call,
-      observations: resolvedObs,
-      at: call.perception?.snapshot?.recordedAt ?? resolvedObs[0]?.at ?? call.at,
-    });
-  };
-
-  for (const block of blocks) {
-    const blockMs = Date.parse(block.at) || 0;
-    while (
-      orphanIdx < orphanInputCalls.length &&
-      (orphanInputCalls[orphanIdx].atMs || Date.parse(orphanInputCalls[orphanIdx].at) || 0) <= blockMs
-    ) {
-      if (segments.length === 0 && options.runId) {
-        emitDividerForEpoch(options.cycles?.[0]?.epoch ?? null, orphanInputCalls[orphanIdx].at);
-      }
-      emitCallInputCard(orphanInputCalls[orphanIdx]);
-      orphanIdx++;
-    }
-
-    if (isControlBlock(block)) {
-      flushTurn();
-      const rec = asRecord(block.data);
-      const ep = block.trace?.epoch ?? (typeof rec?.epoch === "string" ? rec.epoch : null);
-      if (rec?.mode === "auto") {
-        currentEpoch = ep;
-        lastPostBlockMs = 0;
-        emitDividerForEpoch(ep, block.at, rec);
-      } else if (rec?.mode === "manual") {
-        if (ep || currentEpoch) {
-          lastSegmentEndedAt = block.at;
-        }
-        currentEpoch = null;
-        lastPostBlockMs = 0;
-      }
-      continue;
-    }
-
-    const blockEpoch = block.trace?.epoch ?? null;
-    if (blockEpoch && blockEpoch !== currentEpoch) {
-      flushTurn();
-      currentEpoch = blockEpoch;
-      lastPostBlockMs = 0;
-      emitDividerForEpoch(blockEpoch, block.at);
-    } else if (!blockEpoch && currentEpoch) {
-      const closedEnd =
-        cyclesByEpoch.get(currentEpoch)?.endedAt ?? manualEndByEpoch.get(currentEpoch)?.endedAt ?? null;
-      const closedMs = closedEnd ? Date.parse(closedEnd) : NaN;
-      if (Number.isFinite(closedMs) && blockMs > closedMs + 30_000) {
-        flushTurn();
-        lastSegmentEndedAt = closedEnd;
-        currentEpoch = null;
-        lastPostBlockMs = blockMs;
-        emitDividerForEpoch(`post:${block.id}`, block.at);
-      }
-    } else if (!blockEpoch && !currentEpoch && segments.length > 0 && blockMs > 0) {
-      if (lastPostBlockMs === 0) {
-        const prevEndMs = lastSegmentEndedAt ? Date.parse(lastSegmentEndedAt) : NaN;
-        if (Number.isFinite(prevEndMs) && blockMs > prevEndMs + 30_000) {
-          flushTurn();
-          lastPostBlockMs = blockMs;
-          emitDividerForEpoch(`post:${block.id}`, block.at);
-        }
-      } else if (blockMs - lastPostBlockMs > 5 * 60_000) {
-        flushTurn();
-        lastSegmentEndedAt = new Date(lastPostBlockMs).toISOString();
-        lastPostBlockMs = blockMs;
-        emitDividerForEpoch(`post:${block.id}`, block.at);
-      } else {
-        lastPostBlockMs = Math.max(lastPostBlockMs, blockMs);
-      }
-    } else if (!blockEpoch && segments.length === 0 && pendingSteps.length === 0 && options.runId) {
-      const fallbackCycle = options.cycles?.[0];
-      const fallbackClosedEnd = fallbackCycle?.endedAt ?? (fallbackCycle ? manualEndByEpoch.get(fallbackCycle.epoch)?.endedAt : null) ?? null;
-      const fallbackClosedMs = fallbackClosedEnd ? Date.parse(fallbackClosedEnd) : NaN;
-      if (fallbackCycle && Number.isFinite(fallbackClosedMs) && blockMs > fallbackClosedMs + 30_000) {
-        emitDividerForEpoch(fallbackCycle.epoch, fallbackCycle.startedAt);
-        lastPostBlockMs = blockMs;
-        emitDividerForEpoch(`post:${block.id}`, block.at);
-      } else {
-        emitDividerForEpoch(fallbackCycle?.epoch ?? null, block.at);
-      }
-    }
-
-    if (isUserMessageBlock(block)) {
-      flushTurn();
-      const record = asRecord(block.data);
-      segments.push({
-        kind: "user",
-        id: block.id,
-        block,
-        text: extractReadableText(block),
-        mode: typeof record?.mode === "string" ? record.mode : "start",
-      });
-      continue;
-    }
-
-    if (isBackgroundResultBlock(block)) {
-      flushTurn();
-      segments.push({
-        kind: "input",
-        id: `input-bg:${block.id}`,
-        runId: options.runId,
-        observations: [],
-        bgBlock: block,
-        at: block.at,
-      });
-      continue;
-    }
-
-    const callId = block.trace?.modelCallId;
-    if (callId && !emittedCallInputIds.has(callId)) {
-      const call = callsById.get(callId);
-      if (call && callHasExternalInput(call)) {
-        emitCallInputCard(call);
-      }
-    }
-
-    if (isAssistantTextBlock(block)) {
-      flushTurn(block);
-      continue;
-    }
-
-    pendingSteps.push(block);
-    // Fallback turn split only when calls don't carry turn-boundary input headers
-    if (
-      callsById.size === 0 &&
-      pendingSteps.length >= 6 &&
-      block.kind === "tool" &&
-      (pendingSteps.some(item => item.kind === "thinking") || Boolean(block.tool?.intent))
-    ) {
-      flushTurn();
-    }
-  }
-
-  flushTurn();
-  while (orphanIdx < orphanInputCalls.length) {
-    if (segments.length === 0 && options.runId) {
-      emitDividerForEpoch(options.cycles?.[0]?.epoch ?? null, orphanInputCalls[orphanIdx].at);
-    }
-    emitCallInputCard(orphanInputCalls[orphanIdx]);
-    orphanIdx++;
-  }
-  return segments;
-}
+import {
+  asRecord,
+  buildCodexSegments,
+  cleanErrorMessage,
+  cleanInlinePreview,
+  extractReadableText,
+  summarizeStepBlock,
+  type BuildSegmentsOptions,
+  type StreamSegment,
+} from "@/features/live/shiori-segments";
+export { buildCodexSegments, type BuildSegmentsOptions, type StreamSegment };
 
 function renderInlineFormatting(text: string): ReactNode[] {
   const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
@@ -674,7 +157,8 @@ function renderInlineFormatting(text: string): ReactNode[] {
 function formatStopReason(reason: string | null, t: (key: string) => string): string | null {
   if (!reason || reason === "enabled") return null;
   if (reason === "manual") return t("stopReasonManual");
-  if (reason.toLowerCase().includes("budget exhausted")) return t("stopReasonBudget");
+  if (reason === "awaiting human") return t("stopReasonAwaitingHuman");
+  if (reason.toLowerCase().includes("budget exhausted") || reason === "time budget") return t("stopReasonBudget");
   return reason;
 }
 
@@ -1127,6 +611,8 @@ function resolveCallForTurn(
   return [...calls].reverse().find(c => c.inputObservations.length > 0) ?? calls.at(-1);
 }
 
+export type ComposerMode = "event" | "start" | "steer";
+
 export function ShioriComposer({
   project,
   workspace,
@@ -1136,6 +622,11 @@ export function ShioriComposer({
   onHostStatusChange,
   perceptionInjectOverride,
   onPerceptionChange,
+  poolSnapshot,
+  replyTarget,
+  replyAutoResumeDefault,
+  onSelectReplyTarget,
+  onPoolMutated,
   externalMode,
   externalDraft,
   onExternalConsumed,
@@ -1150,7 +641,12 @@ export function ShioriComposer({
   onHostStatusChange?: (status: Record<string, unknown>) => void;
   perceptionInjectOverride?: boolean | null;
   onPerceptionChange?: (enabled: boolean) => void;
-  externalMode?: "start" | "steer" | "follow_up" | null;
+  poolSnapshot?: EventPoolSnapshot | null;
+  replyTarget?: PoolEvent | null;
+  replyAutoResumeDefault?: boolean;
+  onSelectReplyTarget?: (event: PoolEvent | null, autoResume?: boolean) => void;
+  onPoolMutated?: (snapshot: EventPoolSnapshot, hostStatus?: Record<string, unknown>) => void;
+  externalMode?: ComposerMode | null;
   externalDraft?: string | null;
   onExternalConsumed?(): void;
   onReturnLatest?(): void;
@@ -1160,9 +656,10 @@ export function ShioriComposer({
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [draft, setDraft] = useState("");
-  const [selectedTab, setSelectedTab] = useState<"start" | "steer" | "follow_up" | null>(null);
+  const [selectedTab, setSelectedTab] = useState<ComposerMode | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
+  const [resumeOnReply, setResumeOnReply] = useState(false);
 
   useEffect(() => {
     if (!menuOpen && !durationMenuOpen) return;
@@ -1254,6 +751,23 @@ export function ShioriComposer({
   const perceptionInject =
     perceptionInjectOverride ?? localPerceptionInject ?? serverPerceptionInject;
   const isAuto = runtimeMode === "auto";
+  const hostOnline = Boolean(isLiveRun && (effectiveHost || data.controlAllowed));
+  const canResumeFromReply = Boolean(hostOnline && !isAuto && !consolidating);
+
+  useEffect(() => {
+    if (!replyTarget) {
+      setResumeOnReply(false);
+      return;
+    }
+    setResumeOnReply(
+      Boolean(
+        canResumeFromReply &&
+          (replyAutoResumeDefault ?? Boolean(replyTarget.pauseRequested)),
+      ),
+    );
+    const timer = setTimeout(() => textareaRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [replyTarget?.id, replyAutoResumeDefault, canResumeFromReply]);
 
   useEffect(() => {
     if (externalDraft == null && externalMode == null) return;
@@ -1264,26 +778,35 @@ export function ShioriComposer({
     return () => clearTimeout(timer);
   }, [externalDraft, externalMode, onExternalConsumed]);
 
-  const effectiveTab: "start" | "steer" | "follow_up" =
-    selectedTab ?? (isAuto ? "steer" : "start");
+  const effectiveTab: ComposerMode = replyTarget
+    ? "event"
+    : selectedTab ?? (hostOnline && !isAuto && !consolidating ? "start" : "event");
 
   const cycleModeTab = () => {
-    const order: Array<"start" | "steer" | "follow_up"> = ["start", "steer", "follow_up"];
-    const next = order[(order.indexOf(effectiveTab) + 1) % order.length];
+    if (replyTarget) {
+      onSelectReplyTarget?.(null);
+    }
+    const order: ComposerMode[] = hostOnline ? ["event", "start", "steer"] : ["event", "start"];
+    const idx = order.indexOf(effectiveTab);
+    const next = order[(idx >= 0 ? idx + 1 : 0) % order.length];
     setSelectedTab(next);
   };
 
-  const applyReturnedStatus = (res: unknown) => {
-    const status = asRecord(asRecord(res)?.status);
-    if (status) {
-      setLocalHostOverride({ project, run: data.run, baseUpdatedAt: data.updatedAt, status });
-      onHostStatusChange?.(status);
-      const contextRec = asRecord(status.context);
-      if (typeof contextRec?.perceptionInjection === "boolean") {
-        setLocalPerceptionInject(contextRec.perceptionInjection);
-        onPerceptionChange?.(contextRec.perceptionInjection);
-      }
+  const applyHostStatusObject = (status: Record<string, unknown> | undefined | null) => {
+    if (!status) return;
+    setLocalHostOverride({ project, run: data.run, baseUpdatedAt: data.updatedAt, status });
+    onHostStatusChange?.(status);
+    const contextRec = asRecord(status.context);
+    if (typeof contextRec?.perceptionInjection === "boolean") {
+      setLocalPerceptionInject(contextRec.perceptionInjection);
+      onPerceptionChange?.(contextRec.perceptionInjection);
     }
+  };
+
+  const applyReturnedStatus = (res: unknown) => {
+    const record = asRecord(res);
+    const status = asRecord(record?.status) ?? (typeof record?.mode === "string" ? record : null);
+    applyHostStatusObject(status);
   };
 
   const togglePerception = async () => {
@@ -1314,7 +837,24 @@ export function ShioriComposer({
     }
   };
 
-  const submitMessage = async (overrideText?: string) => {
+  const dismissOutboundEvent = async (eventId: string) => {
+    if (submitting || !project || !workspace) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      const res = await mutateEventPool(project, workspace, { action: "ack", ids: [eventId] });
+      applyHostStatusObject(res.hostStatus);
+      onPoolMutated?.(res.snapshot, res.hostStatus);
+      if (replyTarget?.id === eventId) onSelectReplyTarget?.(null);
+      onUpdated();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const submitMessage = async (overrideText?: string, forceResumeAuto?: boolean) => {
     const text = (overrideText ?? draft).trim();
     if (submitting || !project || !workspace) return;
     if (effectiveTab !== "start" && !text) return;
@@ -1322,13 +862,35 @@ export function ShioriComposer({
     setError(null);
     setDurationMenuOpen(false);
     try {
+      if (effectiveTab === "event") {
+        const shouldResume = Boolean((forceResumeAuto ?? resumeOnReply) && canResumeFromReply);
+        const res = await mutateEventPool(
+          project,
+          workspace,
+          replyTarget
+            ? {
+                action: "reply",
+                replyTo: replyTarget.id,
+                text,
+                ...(shouldResume ? { resumeAuto: true, seconds: durationSeconds } : {}),
+              }
+            : { action: "send", text },
+        );
+        applyHostStatusObject(res.hostStatus);
+        onPoolMutated?.(res.snapshot, res.hostStatus);
+        if (!overrideText) setDraft("");
+        onSelectReplyTarget?.(null);
+        setLastSent(res.hostOnline ? text : `${t("poolOfflineQueuedFeedback")} · ${text}`);
+        onUpdated();
+        return;
+      }
+
       let res: unknown;
-      if (effectiveTab === "steer" || effectiveTab === "follow_up") {
+      if (effectiveTab === "steer") {
         try {
           res = await sendRuntimeControl(project, workspace, {
             action: "steer",
             message: text,
-            delivery: effectiveTab,
             runId: data.run,
             expectedEpoch: effectiveHost?.epoch ?? undefined,
           });
@@ -1392,12 +954,20 @@ export function ShioriComposer({
     }
   };
 
-  const presets = [
-    { label: t("presetExploreStart"), prompt: t("presetExploreStartPrompt"), tab: "start" as const },
-    { label: t("presetEval"), prompt: t("presetEvalPrompt"), tab: isAuto ? ("steer" as const) : ("start" as const) },
-    { label: t("presetAdapt"), prompt: t("presetAdaptPrompt"), tab: "steer" as const },
-    { label: t("presetMemory"), prompt: t("presetMemoryPrompt"), tab: "follow_up" as const },
+  const presets: Array<{ label: string; prompt: string; tab: ComposerMode }> = [
+    { label: t("presetExploreStart"), prompt: t("presetExploreStartPrompt"), tab: "start" },
+    { label: t("presetEval"), prompt: t("presetEvalPrompt"), tab: isAuto ? "event" : "start" },
+    { label: t("presetAdapt"), prompt: t("presetAdaptPrompt"), tab: isAuto ? "steer" : "event" },
+    { label: t("presetMemory"), prompt: t("presetMemoryPrompt"), tab: "event" },
   ];
+
+  const pendingOutboundEvents = useMemo(
+    () =>
+      (poolSnapshot?.events ?? []).filter(
+        item => item.direction === "outbound" && item.status === "pending" && item.id !== replyTarget?.id,
+      ),
+    [poolSnapshot, replyTarget?.id],
+  );
 
   const durationPresets: Array<{ label: string; seconds: number | null; desc: string }> = [
     { label: `∞ ${t("durationUnbounded")}`, seconds: null, desc: t("durationUnboundedDesc") },
@@ -1536,6 +1106,89 @@ export function ShioriComposer({
         </div>
       )}
 
+      {pendingOutboundEvents.length > 0 && (
+        <div className="codex-pool-tray" data-event-pool-tray>
+          {pendingOutboundEvents.map(item => {
+            const isHelp = item.kind === "help_request";
+            return (
+              <div
+                key={item.id}
+                className="codex-pool-tray-card"
+                data-kind={item.kind}
+                data-pool-outbound-card={item.id}
+              >
+                <div className="codex-pool-tray-summary">
+                  <span className="codex-outbound-badge">
+                    {isHelp ? "🆘" : "📌"} {isHelp ? t("poolHelpRequestBadge") : t("poolNoticeBadge")}
+                  </span>
+                  {item.pauseRequested && (
+                    <span className="codex-outbound-paused">{t("poolPausedTag")}</span>
+                  )}
+                  <span className="codex-pool-tray-inline-text" title={item.text}>
+                    {item.title ? (
+                      <>
+                        <strong className="font-semibold text-foreground">{item.title}</strong>
+                        <span className="text-muted-foreground"> · {item.text}</span>
+                      </>
+                    ) : (
+                      item.text
+                    )}
+                  </span>
+                </div>
+                <div className="codex-pool-tray-actions">
+                  <button
+                    type="button"
+                    className="codex-pool-btn"
+                    data-variant={canResumeFromReply ? undefined : "primary"}
+                    disabled={submitting}
+                    onClick={() => {
+                      setSelectedTab("event");
+                      onSelectReplyTarget?.(item, false);
+                      textareaRef.current?.focus();
+                    }}
+                  >
+                    <CornerUpLeft className="size-3" aria-hidden="true" />
+                    <span>{t("poolReplyBtn")}</span>
+                  </button>
+                  {canResumeFromReply && (
+                    <button
+                      type="button"
+                      className="codex-pool-btn"
+                      data-variant="primary"
+                      disabled={submitting}
+                      onClick={() => {
+                        setSelectedTab("event");
+                        if (replyTarget?.id === item.id && draft.trim()) {
+                          void submitMessage(undefined, true);
+                        } else {
+                          onSelectReplyTarget?.(item, true);
+                          textareaRef.current?.focus();
+                        }
+                      }}
+                    >
+                      <Play className="size-3 fill-current" aria-hidden="true" />
+                      <span>{t("poolReplyResumeBtn")}</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="codex-pool-btn"
+                    data-variant="ghost"
+                    title={t("poolDismissBtn")}
+                    aria-label={t("poolDismissBtn")}
+                    disabled={submitting}
+                    onClick={() => void dismissOutboundEvent(item.id)}
+                  >
+                    <Check className="size-3" aria-hidden="true" />
+                    <span>{t("poolDismissBtn")}</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div className="codex-pill-composer">
         {!isLiveRun && (
           <div className="codex-composer-notice">
@@ -1548,19 +1201,61 @@ export function ShioriComposer({
           </div>
         )}
 
+        {replyTarget && (
+          <div className="codex-reply-context-bar" data-reply-context={replyTarget.id}>
+            <div className="codex-reply-context-main">
+              <CornerUpLeft className="size-3.5 text-primary shrink-0" aria-hidden="true" />
+              <strong className="shrink-0">
+                {t("poolReplyingTo").replace(
+                  "{kind}",
+                  replyTarget.kind === "help_request" ? t("poolHelpRequestBadge") : t("poolNoticeBadge"),
+                )}
+              </strong>
+              <span className="codex-reply-context-quote">
+                {replyTarget.title || replyTarget.text}
+              </span>
+            </div>
+            <div className="codex-reply-context-right">
+              {canResumeFromReply && (
+                <button
+                  type="button"
+                  className="codex-reply-resume-toggle"
+                  data-active={resumeOnReply ? "true" : undefined}
+                  aria-pressed={resumeOnReply}
+                  onClick={() => setResumeOnReply(prev => !prev)}
+                >
+                  <Play className="size-2.5 fill-current" aria-hidden="true" />
+                  <span>{t("poolAutoResumeToggle")}</span>
+                </button>
+              )}
+              <button
+                type="button"
+                className="codex-icon-btn !size-5"
+                title={t("poolCancelReply")}
+                aria-label={t("poolCancelReply")}
+                onClick={() => onSelectReplyTarget?.(null)}
+              >
+                <X className="size-3.5" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
+        )}
+
         <textarea
           ref={textareaRef}
           rows={2}
           className="codex-pill-textarea"
           placeholder={
-            effectiveTab === "start"
-              ? t("startPlaceholder")
-              : effectiveTab === "steer"
-                ? t("steerPlaceholder")
-                : t("followUpPlaceholder")
+            replyTarget
+              ? t("eventReplyPlaceholder")
+              : effectiveTab === "start"
+                ? t("startPlaceholder")
+                : effectiveTab === "steer"
+                  ? t("steerPlaceholder")
+                  : t("eventPoolPlaceholder")
           }
           value={draft}
-          disabled={submitting || consolidating}
+          disabled={submitting || (effectiveTab !== "event" && consolidating)}
           onChange={event => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}
         />
@@ -1580,7 +1275,7 @@ export function ShioriComposer({
               <Plus className="size-4" aria-hidden="true" />
             </button>
 
-            {/* Codex-style Mode Pill (like "完全访问" in the ChatGPT/Codex desktop app) */}
+            {/* Codex-style Mode Pill */}
             <button
               type="button"
               className="codex-access-pill"
@@ -1600,8 +1295,8 @@ export function ShioriComposer({
                 </>
               ) : (
                 <>
-                  <CornerDownLeft className="size-3.5" aria-hidden="true" />
-                  <span>{t("deliveryFollowUp")}</span>
+                  <Inbox className="size-3.5" aria-hidden="true" />
+                  <span>{t("deliveryEventPool")}</span>
                 </>
               )}
               <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
@@ -1674,12 +1369,20 @@ export function ShioriComposer({
             <button
               type="button"
               className="codex-send-circle"
-              disabled={submitting || consolidating || (effectiveTab !== "start" && !draft.trim())}
+              disabled={
+                submitting ||
+                (effectiveTab !== "event" && consolidating) ||
+                (effectiveTab !== "start" && !draft.trim())
+              }
               title={
                 effectiveTab === "steer"
                   ? t("sendSteer")
-                  : effectiveTab === "follow_up"
-                    ? t("sendFollowUp")
+                  : effectiveTab === "event"
+                    ? replyTarget
+                      ? resumeOnReply && canResumeFromReply
+                        ? t("sendReplyAndResume")
+                        : t("sendReply")
+                      : t("sendEventPool")
                     : draft.trim()
                       ? t("sendStartWithPrompt")
                       : t("sendResumeLoop")
@@ -1699,7 +1402,7 @@ export function ShioriComposer({
       )}
       {!error && lastSent && (
         <p className="codex-composer-feedback" role="status">
-          ✓ {t("sentFeedback")}: <code>{lastSent.slice(0, 68)}</code>
+          ✓ {t("sentFeedback")}: <code>{lastSent.length > 72 ? `${lastSent.slice(0, 72)}…` : lastSent}</code>
         </p>
       )}
     </div>
@@ -1793,9 +1496,12 @@ export function ShioriWorkbench({
     at: string;
   } | null>(null);
   const [workflowCommand, setWorkflowCommand] = useState<{
-    mode: "start" | "steer" | "follow_up";
+    mode: ComposerMode;
     prompt: string;
   } | null>(null);
+  const [poolSnapshot, setPoolSnapshot] = useState<EventPoolSnapshot | null>(null);
+  const [replyTarget, setReplyTarget] = useState<PoolEvent | null>(null);
+  const [replyAutoResumeDefault, setReplyAutoResumeDefault] = useState<boolean | undefined>(undefined);
   const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
@@ -1805,6 +1511,9 @@ export function ShioriWorkbench({
     setInspectedTurn(null);
     setPerceptionOverride(null);
     setHostStatusOverride(null);
+    setPoolSnapshot(null);
+    setReplyTarget(null);
+    setReplyAutoResumeDefault(undefined);
     try {
       if (typeof window !== "undefined" && project) {
         const stored = window.localStorage.getItem(`ludens:perception-inject:${project}`);
@@ -1815,6 +1524,36 @@ export function ShioriWorkbench({
       // Ignore storage errors
     }
   }, [project]);
+
+  useEffect(() => {
+    if (!isLiveRun || !project || !workspace) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    const pull = async () => {
+      try {
+        const payload = await fetchEventPool(project, workspace, controller.signal);
+        if (cancelled) return;
+        setPoolSnapshot(payload.snapshot);
+      } catch {
+        // Non-fatal background refresh
+      }
+    };
+    void pull();
+    if (!refresh) {
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+    }
+    const timer = setInterval(() => {
+      void pull();
+    }, 3500);
+    return () => {
+      cancelled = true;
+      controller.abort();
+      clearInterval(timer);
+    };
+  }, [isLiveRun, project, workspace, data.updatedAt, refresh]);
 
   useEffect(() => {
     if (!requestedCall && !selectedImage) return;
@@ -1842,7 +1581,8 @@ export function ShioriWorkbench({
     remainingSeconds?: number | null;
     consolidating?: boolean;
     context?: { perceptionInjection?: boolean };
-    queue?: { steering?: number; followUp?: number };
+    queue?: { steering?: number };
+    eventPool?: { pendingInbound?: number; pendingOutbound?: number; latestSeq?: number };
   }) | null;
   const control = data.lastControl;
   const hostOnline = Boolean(isLiveRun && (live || data.controlAllowed));
@@ -1959,6 +1699,15 @@ export function ShioriWorkbench({
     [loadedOlderRuns, data.calls],
   );
 
+  const poolEventsById = useMemo(
+    () => new Map((poolSnapshot?.events ?? []).map(item => [item.id, item])),
+    [poolSnapshot],
+  );
+  const pendingOutboundCount =
+    poolSnapshot?.summary.pendingOutbound ?? live?.eventPool?.pendingOutbound ?? 0;
+  const pendingInboundCount =
+    poolSnapshot?.summary.pendingInbound ?? live?.eventPool?.pendingInbound ?? 0;
+
   const computedSegments = useMemo(() => {
     const allSegments: StreamSegment[] = [];
     // Determine the run immediately preceding the earliest loaded run in `runs` (if any) so we can show inter-run gap
@@ -1990,8 +1739,54 @@ export function ShioriWorkbench({
       isAuto,
     });
     allSegments.push(...currentSegs);
+
+    // Append workspace Event Pool items not yet projected in `feed.blocks` (e.g. standby/offline submissions)
+    if (isLiveRun && !feed.historical && poolSnapshot?.events.length) {
+      const seenPoolIds = new Set<string>();
+      for (const seg of allSegments) {
+        if (seg.kind === "user" && seg.poolEvent?.id) seenPoolIds.add(seg.poolEvent.id);
+        if (seg.kind === "outbound_event") seenPoolIds.add(seg.event.id);
+      }
+      const runWindowStartMs = Date.parse(data.cycles[0]?.startedAt ?? data.updatedAt) - 60_000;
+      for (const item of poolSnapshot.events) {
+        if (seenPoolIds.has(item.id)) continue;
+        // Show all pending events plus any offline/current-run events created at or after this run's window
+        const createdMs = Date.parse(item.createdAt) || 0;
+        if (item.status !== "pending" && item.runId && item.runId !== data.run && createdMs < runWindowStartMs) {
+          continue;
+        }
+        const syntheticBlock: ActivityBlock = {
+          id: `pool-live:${item.id}`,
+          kind: "text",
+          at: item.createdAt,
+          title: item.direction === "inbound" ? (item.kind === "reply" ? "Reply" : "Event") : "Help Request",
+          text: item.text,
+          status: "complete",
+          createdRevision: item.seq,
+          revision: item.seq,
+        };
+        if (item.direction === "inbound") {
+          allSegments.push({
+            kind: "user",
+            id: syntheticBlock.id,
+            block: syntheticBlock,
+            text: item.text,
+            mode: "event",
+            poolEvent: item,
+          });
+        } else {
+          allSegments.push({
+            kind: "outbound_event",
+            id: syntheticBlock.id,
+            block: syntheticBlock,
+            event: item,
+          });
+        }
+      }
+    }
+
     return allSegments;
-  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, data.calls, data.observations, data.run, data.cycles, isLiveRun, isAuto]);
+  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, feed.historical, data.calls, data.observations, data.run, data.cycles, data.updatedAt, isLiveRun, isAuto, poolSnapshot]);
 
   if (computedSegments.length > 0) {
     cachedSegmentsRef.current = { run: data.run, segments: computedSegments };
@@ -2197,6 +1992,32 @@ export function ShioriWorkbench({
                 {displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}
               </span>
             )}
+            {isLiveRun && pendingOutboundCount > 0 && (
+              <button
+                type="button"
+                className="codex-pool-header-pill"
+                data-tone="outbound"
+                onClick={() => {
+                  const firstPending = (poolSnapshot?.events ?? []).find(
+                    item => item.direction === "outbound" && item.status === "pending",
+                  );
+                  if (firstPending) {
+                    setReplyTarget(firstPending);
+                    setReplyAutoResumeDefault(Boolean(firstPending.pauseRequested));
+                  }
+                  scrollToBottom();
+                }}
+              >
+                <span>🆘</span>
+                <span>{t("poolOutboundBadge").replace("{count}", String(pendingOutboundCount))}</span>
+              </button>
+            )}
+            {isLiveRun && pendingInboundCount > 0 && (
+              <span className="codex-pool-header-pill" data-tone="inbound">
+                <span>📥</span>
+                <span>{t("poolInboundBadge").replace("{count}", String(pendingInboundCount))}</span>
+              </span>
+            )}
           </div>
 
           <div className="codex-thread-actions">
@@ -2294,16 +2115,137 @@ export function ShioriWorkbench({
                 }
 
                 if (seg.kind === "user") {
+                  const livePoolItem = seg.poolEvent ? (poolEventsById.get(seg.poolEvent.id) ?? seg.poolEvent) : undefined;
+                  const isReply = livePoolItem?.kind === "reply";
+                  const isRead = livePoolItem?.status === "handled";
                   return (
                     <article key={seg.id} className="codex-turn-user">
                       <div className="codex-user-bubble" data-mode={seg.mode}>
                         {seg.mode !== "start" && (
                           <span className="codex-user-mode-tag">
-                            {seg.mode === "steer" ? "⚡ Steer" : "↳ Follow-up"}
+                            {seg.mode === "steer"
+                              ? "⚡ Steer"
+                              : isReply
+                                ? `↩ ${t("poolReplyBtn")}`
+                                : `📥 ${t("deliveryEventPool")}`}
                           </span>
                         )}
+                        {livePoolItem?.title && (
+                          <strong className="codex-user-event-title">{livePoolItem.title}</strong>
+                        )}
                         <p>{seg.text}</p>
+                        {livePoolItem && (
+                          <div className="codex-user-event-footer">
+                            <span
+                              className="codex-user-event-status"
+                              data-read={isRead ? "true" : undefined}
+                            >
+                              {isRead ? `✓ ${t("poolStatusRead")}` : `⏳ ${t("poolStatusPending")}`}
+                            </span>
+                            <time dateTime={livePoolItem.createdAt}>{clockTime(livePoolItem.createdAt)}</time>
+                          </div>
+                        )}
                       </div>
+                    </article>
+                  );
+                }
+
+                if (seg.kind === "outbound_event") {
+                  const liveEvent = poolEventsById.get(seg.event.id) ?? seg.event;
+                  const isHelp = liveEvent.kind === "help_request";
+                  const isPending = liveEvent.status === "pending";
+                  return (
+                    <article
+                      key={seg.id}
+                      className="codex-outbound-card"
+                      data-kind={liveEvent.kind}
+                      data-handled={!isPending ? "true" : undefined}
+                      data-pool-stream-card={liveEvent.id}
+                    >
+                      <header className="codex-outbound-header">
+                        <div className="codex-outbound-badges">
+                          <span className="codex-outbound-badge">
+                            {isHelp ? "🆘" : "📌"}{" "}
+                            {isHelp ? t("poolHelpRequestBadge") : t("poolNoticeBadge")}
+                          </span>
+                          {liveEvent.pauseRequested && (
+                            <span className="codex-outbound-paused">{t("poolPausedTag")}</span>
+                          )}
+                        </div>
+                        <div className="codex-outbound-meta">
+                          <span
+                            className="codex-outbound-status"
+                            data-pending={isPending ? "true" : undefined}
+                          >
+                            {isPending ? `● ${t("poolStatusAwaitingHuman")}` : `✓ ${t("poolStatusHandled")}`}
+                          </span>
+                          <time dateTime={liveEvent.createdAt}>{clockTime(liveEvent.createdAt)}</time>
+                        </div>
+                      </header>
+                      {liveEvent.title && <h4 className="codex-outbound-title">{liveEvent.title}</h4>}
+                      <p className="codex-outbound-body">{liveEvent.text}</p>
+                      {isLiveRun && isPending && (
+                        <div className="codex-outbound-actions">
+                          <button
+                            type="button"
+                            className="codex-pool-btn"
+                            data-variant={hostOnline && !isAuto && !consolidating ? undefined : "primary"}
+                            onClick={() => {
+                              setReplyTarget(liveEvent);
+                              setReplyAutoResumeDefault(false);
+                            }}
+                          >
+                            <CornerUpLeft className="size-3" aria-hidden="true" />
+                            <span>{t("poolReplyBtn")}</span>
+                          </button>
+                          {hostOnline && !isAuto && !consolidating && (
+                            <button
+                              type="button"
+                              className="codex-pool-btn"
+                              data-variant="primary"
+                              onClick={() => {
+                                setReplyTarget(liveEvent);
+                                setReplyAutoResumeDefault(true);
+                              }}
+                            >
+                              <Play className="size-3 fill-current" aria-hidden="true" />
+                              <span>{t("poolReplyResumeBtn")}</span>
+                            </button>
+                          )}
+                          {workspace && (
+                            <button
+                              type="button"
+                              className="codex-pool-btn"
+                              data-variant="ghost"
+                              onClick={() => {
+                                void mutateEventPool(project, workspace, {
+                                  action: "ack",
+                                  ids: [liveEvent.id],
+                                })
+                                  .then(res => {
+                                    setPoolSnapshot(res.snapshot);
+                                    if (res.hostStatus) {
+                                      setHostStatusOverride({
+                                        project,
+                                        run: data.run,
+                                        baseUpdatedAt: data.updatedAt,
+                                        status: res.hostStatus,
+                                      });
+                                    }
+                                    if (replyTarget?.id === liveEvent.id) {
+                                      setReplyTarget(null);
+                                    }
+                                    onUpdated();
+                                  })
+                                  .catch(() => {});
+                              }}
+                            >
+                              <Check className="size-3" aria-hidden="true" />
+                              <span>{t("poolDismissBtn")}</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </article>
                   );
                 }
@@ -2391,6 +2333,24 @@ export function ShioriWorkbench({
           }
           perceptionInjectOverride={perceptionInject}
           onPerceptionChange={setPerceptionOverride}
+          poolSnapshot={poolSnapshot}
+          replyTarget={replyTarget}
+          replyAutoResumeDefault={replyAutoResumeDefault}
+          onSelectReplyTarget={(event, autoResume) => {
+            setReplyTarget(event);
+            setReplyAutoResumeDefault(autoResume);
+          }}
+          onPoolMutated={(snapshot, hostStatus) => {
+            setPoolSnapshot(snapshot);
+            if (hostStatus) {
+              setHostStatusOverride({
+                project,
+                run: data.run,
+                baseUpdatedAt: data.updatedAt,
+                status: hostStatus,
+              });
+            }
+          }}
           externalMode={workflowCommand?.mode ?? null}
           externalDraft={workflowCommand?.prompt ?? null}
           onExternalConsumed={() => setWorkflowCommand(null)}

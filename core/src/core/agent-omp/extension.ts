@@ -7,6 +7,14 @@ import { resizeImage } from "@oh-my-pi/pi-coding-agent/utils/image-resize";
 import { refreshShellConfigCache } from "@oh-my-pi/pi-utils/procmgr";
 import * as z from "@oh-my-pi/omptype/zod";
 import type { Clock, Observation } from "@ludens/baseware/contracts";
+import type {
+  EventDirection,
+  EventPoolDigest,
+  EventPoolSummary,
+  OutboundEventKind,
+  PoolEvent,
+  PoolEventActor,
+} from "@ludens/protocol/event-pool";
 import type { DiagnosticsMode } from "../storage/events.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
 import { Workspace } from "../storage/workspace.ts";
@@ -19,9 +27,24 @@ export interface ExtensionHost {
   readonly diagnostics: DiagnosticsMode;
   readonly record: RecordEvent;
   readonly perception?: PerceptionRuntime;
-  status(): { runId: string; perception?: PerceptionStatus };
+  status(): { runId: string; perception?: PerceptionStatus; eventPool?: EventPoolSummary };
   perceptionInjectionEnabled(): boolean;
   stop(reason?: string): Promise<unknown>;
+  eventPoolDigest?(): Promise<EventPoolDigest>;
+  readInboundEvents?(
+    options?: { ids?: string[]; includeHandled?: boolean; ack?: boolean },
+    trace?: EventTrace,
+  ): Promise<{ events: PoolEvent[]; acknowledged: PoolEvent[]; summary: EventPoolSummary }>;
+  ackPoolEvents?(
+    ids: readonly string[],
+    actor: PoolEventActor,
+    direction?: EventDirection,
+    trace?: EventTrace,
+  ): Promise<{ updated: PoolEvent[]; summary: EventPoolSummary }>;
+  emitOutboundEvent?(
+    input: { kind?: OutboundEventKind; text: string; title?: string; pause?: boolean },
+    trace?: EventTrace,
+  ): Promise<{ event: PoolEvent; paused: boolean; summary: EventPoolSummary }>;
 }
 
 export async function media(observations: Observation[], record?: RecordEvent, trace?: EventTrace, derive?: DeriveMedia) {
@@ -116,6 +139,100 @@ export function createLudensExtension(options: {
       // The explicit read is its own delivery; receipt it for trace attribution.
       receipt(trace(id), "explicit", read.records.flatMap(record => record.media.map(item => item.id)), [read.queryId]);
       return { ...rendered, details: { queryId: read.queryId, ok: read.ok } };
+    },
+  };
+
+  const eventPoolParameters = z.object({
+    action: z.enum(["read", "ack", "emit"]).describe("Event Pool operation: 'read' inbound messages/replies from the human, 'ack' inbound events by ID, or 'emit' an outbound help_request/notice to the human."),
+    ids: z.array(z.string()).nullable().optional().describe("Optional event IDs for 'read', or required event IDs for 'ack'. Omit on 'read' to read all pending inbound events."),
+    includeHandled: z.boolean().nullable().optional().describe("For 'read': include already-handled inbound events when true. Default false."),
+    ack: z.boolean().nullable().optional().describe("For 'read': mark returned pending inbound events as handled (default true). Pass false to peek while deferring."),
+    kind: z.enum(["help_request", "notice"]).nullable().optional().describe("For 'emit': 'help_request' when asking the human for assistance/guidance (default), or 'notice' for non-blocking status updates."),
+    title: z.string().nullable().optional().describe("For 'emit': optional short one-line subject."),
+    text: z.string().nullable().optional().describe("For 'emit': message body describing what happened or what assistance is needed."),
+    pause: z.boolean().nullable().optional().describe("For 'emit': default false (continue playing asynchronously). Set true only when completely blocked to hand back device control and pause auto mode until the human resumes."),
+  });
+
+  const eventPool: CustomTool<typeof eventPoolParameters> = {
+    name: "event_pool", label: "Event Pool", loadMode: "essential", approval: "read",
+    description: "Interact with the workspace duplex Event Pool without blocking gameplay. When a round-start digest reports pending inbound events, call event_pool({ action: 'read' }) when ready (acknowledges by default, or pass ack: false to defer while busy). When stuck or needing human guidance, call event_pool({ action: 'emit', kind: 'help_request', text: '...', pause: false|true }) — omit pause or pass false to keep playing asynchronously, or pass pause: true to hand back control and wait for the human.",
+    parameters: eventPoolParameters,
+    async execute(id, params) {
+      const callTrace = trace(id);
+      try {
+        if (params.action === "read") {
+          if (!runtime.readInboundEvents) throw new Error("Workspace Event Pool is unavailable");
+          const result = await runtime.readInboundEvents(
+            {
+              ...(params.ids?.length ? { ids: params.ids } : {}),
+              includeHandled: Boolean(params.includeHandled),
+              ack: params.ack ?? true,
+            },
+            callTrace,
+          );
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                action: "read",
+                events: result.events,
+                acknowledgedIds: result.acknowledged.map(item => item.id),
+                summary: result.summary,
+              }),
+            }],
+            details: { ok: true, count: result.events.length },
+          };
+        }
+        if (params.action === "ack") {
+          if (!runtime.ackPoolEvents) throw new Error("Workspace Event Pool is unavailable");
+          if (!params.ids?.length) throw new Error("ids is required when action is 'ack'");
+          const result = await runtime.ackPoolEvents(params.ids, "shiori", "inbound", callTrace);
+          return {
+            content: [{
+              type: "text" as const,
+              text: JSON.stringify({
+                ok: true,
+                action: "ack",
+                updatedIds: result.updated.map(item => item.id),
+                summary: result.summary,
+              }),
+            }],
+            details: { ok: true, count: result.updated.length },
+          };
+        }
+        if (!runtime.emitOutboundEvent) throw new Error("Workspace Event Pool is unavailable");
+        if (!params.text?.trim()) throw new Error("text is required when action is 'emit'");
+        const result = await runtime.emitOutboundEvent(
+          {
+            kind: params.kind ?? "help_request",
+            title: params.title ?? undefined,
+            text: params.text,
+            pause: Boolean(params.pause),
+          },
+          callTrace,
+        );
+        return {
+          content: [{
+            type: "text" as const,
+            text: JSON.stringify({
+              ok: true,
+              action: "emit",
+              event: result.event,
+              paused: result.paused,
+              summary: result.summary,
+            }),
+          }],
+          details: { ok: true, eventId: result.event.id, paused: result.paused },
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          content: [{ type: "text" as const, text: JSON.stringify({ ok: false, error: message }) }],
+          isError: true,
+          details: { ok: false },
+        };
+      }
     },
   };
 
@@ -236,8 +353,23 @@ export function createLudensExtension(options: {
       // Suppressed or cancelled delivery must leave the state notice pending.
       lastPerceptionState = stateVersion;
     }
+    const hasPerceptionContent = content.length > 0;
+    if (!consolidating && runtime.eventPoolDigest) {
+      const digest = await runtime.eventPoolDigest();
+      if (digest.pendingInbound > 0) {
+        content.push({
+          type: "text",
+          text: JSON.stringify({
+            eventPool: {
+              ...digest,
+              hint: "Use event_pool({ action: 'read' }) to read full text and acknowledge when ready, or defer if busy.",
+            },
+          }),
+        });
+      }
+    }
     latestContext = { observations: [], deliveryIds: [] };
-    if (content.length) receipt(parent, origin, delivered, queries);
+    if (hasPerceptionContent) receipt(parent, origin, delivered, queries);
     return content;
   }
 
@@ -324,5 +456,5 @@ export function createLudensExtension(options: {
       runtime.record("context", { request: ++requests, purpose: cycle.purpose, ...latestContext }, { epoch: cycle.epoch });
     });
   };
-  return { factory, tools: [observe], context: () => ({ ...latestContext }) };
+  return { factory, tools: [observe, eventPool], context: () => ({ ...latestContext }) };
 }

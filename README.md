@@ -13,7 +13,7 @@ Instead of locking an agent behind static prompts and fixed action spaces, Luden
 - **Any Screen, Any Controller** — Connect local desktops (`CUA`), real consoles over capture + HID bridges (e.g. Raspberry Pi via SSH), emulators, or MCP endpoints. Mount multiple machines into one workspace and route actions on the fly.
 - **Code-First Perception** — A resident Python worker continuously records fMP4 video into a searchable 30 Hz timeline while executing and hot-reloading the agent's own detectors and closed-loop reflexes in `perception.py`.
 - **Self-Verified Skills** — Agents turn trial-and-error into typed `@capability` functions paired with `@eval_env` surrogate environments and `@eval_capability` checks, iterating in milliseconds via `ludens eval`.
-- **Live Cockpit & Frame-Exact Replay** — Watch live multi-device streams, steer an active run (`steer`), revoke control instantly (`epoch` leases), and scrub 30 Hz replays alongside model traces in the Web Console—or follow along with the optional **Ludens Pet** desktop companion.
+- **Live Cockpit & Frame-Exact Replay** — Watch live multi-device streams, collaborate asynchronously via the duplex **Event Pool** (`ludens event`), interrupt mid-turn (`steer`), revoke control instantly (`epoch` leases), and scrub 30 Hz replays alongside model traces in the Web Console—or follow along with the optional **Ludens Pet** desktop companion.
 
 ## How It Works
 
@@ -92,7 +92,8 @@ Open [`http://127.0.0.1:3015`](http://127.0.0.1:3015) to manage devices, watch l
 
 ```sh
 ludens auto on --message "Explore the environment and build reusable capabilities"
-ludens steer "Focus on navigating the main menu first"
+ludens event send "Check the inventory screen when the current fight ends"
+ludens steer "Stop and dodge right now"
 ludens auto off
 ```
 

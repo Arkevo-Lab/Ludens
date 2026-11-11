@@ -1,3 +1,4 @@
+import type { EventPoolSummary } from "@ludens/protocol/event-pool";
 import { globalHome, workspaceForProject } from "./data";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { send } from "../../daemon/transport.ts";
@@ -6,7 +7,7 @@ export type RuntimeControlCommand =
   | { action: "status" }
   | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
-  | { action: "steer"; message: string; delivery?: "steer" | "follow_up"; runId?: string; expectedEpoch?: string | null }
+  | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
   | { action: "perception_inject"; enabled: boolean }
   | { action: "perception_reload" };
@@ -16,7 +17,8 @@ export interface HostControlStatus {
   runId: string;
   epoch: string | null;
   mode: string;
-  queue: { steering: number; followUp: number };
+  queue: { steering: number };
+  eventPool?: EventPoolSummary;
   [key: string]: unknown;
 }
 
@@ -73,7 +75,7 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
       return await scoped({ kind: "auto", argv: ["off"], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "steer":
       return await scoped({ kind: "steer",
-        argv: command.delivery === "follow_up" ? ["--follow-up", "--message", command.message] : ["--message", command.message],
+        argv: ["--message", command.message],
         runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "consolidate":
       return await scoped({ kind: "consolidate", argv: command.seconds ? ["--seconds", String(command.seconds)] : [], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
