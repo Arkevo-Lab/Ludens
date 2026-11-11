@@ -30,7 +30,7 @@ export interface Catalog {
   activeMachineId?: string;
 }
 export interface Request {
-  kind: "status" | "list" | "help" | "acquire" | "release" | "revoke" | "input_generation" | "controller" | "cancel" | "subscribe" | "reconnect" | "machines";
+  kind: "status" | "list" | "help" | "acquire" | "release" | "revoke" | "input_generation" | "lease_duration" | "controller" | "cancel" | "subscribe" | "reconnect" | "machines";
   id?: string;
   machine?: string;
   action?: "list" | "use" | "connect" | "disconnect";

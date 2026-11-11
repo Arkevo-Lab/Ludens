@@ -1,7 +1,7 @@
 "use client";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, History } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ActivityFeed } from "@/features/live/activity-feed";
@@ -25,7 +25,7 @@ import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clo
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
 export default function ConsoleShell() {
-  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, jumpToLiveSegment, clearLiveJumpTarget} = useDashboardController();
+  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, activeLiveSegment, setActiveLiveSegment, jumpToLiveSegment, clearLiveJumpTarget} = useDashboardController();
   const openReplayAtFrame = (frame: { run?: string; at?: number; record: string; sequence: number }) => {
     navigate({
       view: "replay",
@@ -118,7 +118,7 @@ export default function ConsoleShell() {
               <RunPicker runs={project?.runs ?? []} latest={latest}
                 cycles={view === "live" ? cycles : undefined}
                 quickJump={view === "live"}
-                value={view === "live" ? (liveJumpTarget?.value || selection.run || "") : (!refresh && !selection.run ? run : selection.run)}
+                value={view === "live" ? (activeLiveSegment || liveJumpTarget?.value || "") : (!refresh && !selection.run ? run : selection.run)}
                 onChange={value =>
                   view === "live"
                     ? jumpToLiveSegment(value)
@@ -190,26 +190,6 @@ export default function ConsoleShell() {
               </div>
             </AlertDescription></Alert>
           )}
-          {view === "live" && entry === "ready" && ((context && context.kind !== "latest") || latestRequested) && <section
-            className={"live-context-banner "
-              + ((context?.kind ?? "latest") === "latest" ? "border-border bg-card" : "border-primary/40 bg-primary/5")}
-            aria-labelledby="live-context-title"
-          >
-            <History className="live-context-icon size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <div className="live-context-copy">
-              <h2 id="live-context-title" className="text-sm font-semibold" aria-live="polite">
-                {returningLatest ? lt("returning") : lt(contextTitles[(context?.kind ?? "latest")])}
-              </h2>
-              {data && <p className="live-context-checked">{lt("lastChecked")} {clockTime(data.updatedAt)}</p>}
-              <p className={(latestScopeChanged || latestFailed ? "live-context-error" : "live-context-description")}>
-                {latestScopeChanged ? lt("scopeChanged") : latestFailed ? lt("refreshFailed") : lt("detail")}
-              </p>
-            </div>
-            <Button ref={returnButton} type="button" size="sm" variant={(context?.kind ?? "latest") === "latest" ? "outline" : "default"}
-              className="shrink-0" onClick={returnToLatest} disabled={returningLatest || !latest}>
-              {lt("returnLatest")} <ArrowRight className="size-4" aria-hidden="true" />
-            </Button>
-          </section>}
           {view === "workspaces" ? (
             <WorkspacesView onChanged={refreshCatalog} onOpen={id => navigateUrl("/?" + new URLSearchParams({ view: "live", project: id }))}
               onConfigure={id => navigateUrl("/?" + new URLSearchParams({ view: "perception", project: id }))}
@@ -282,13 +262,11 @@ export default function ConsoleShell() {
                   runs={project?.runs ?? []}
                   jumpTarget={liveJumpTarget}
                   onClearJumpTarget={clearLiveJumpTarget}
+                  onActiveSegmentChange={setActiveLiveSegment}
                   data={data}
                   feed={activity}
                   refresh={refresh}
-                  isLiveRun={
-                    Boolean(!selection.run || selection.run === latest?.id) &&
-                    (!selection.epoch || selection.epoch === cycles.at(-1)?.epoch)
-                  }
+                  isLiveRun={true}
                   phaseLabel={!staleStatus ? phase?.label : null}
                   phaseElapsedMs={!staleStatus ? phase?.elapsedMs : null}
                   selectedBlock={query.get("block") ?? undefined}
@@ -397,8 +375,10 @@ export default function ConsoleShell() {
                         <span>{data.manifest.model ?? dt("deviceOnly")}</span>
                         <span className="run-time">
                           {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
-                          {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>{dt("budget")}{" "}
-                          {Math.floor(data.manifest.seconds / 60)}{dt("minLong")}
+                          {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>
+                          {data.manifest.seconds != null && data.manifest.seconds > 0
+                            ? `${dt("budget")} ${Math.floor(data.manifest.seconds / 60)}${dt("minLong")}`
+                            : "∞"}
                         </span>
                       </div>
                     }

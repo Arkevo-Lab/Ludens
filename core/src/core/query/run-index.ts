@@ -340,6 +340,22 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
         }
         if (d.mode === "manual") activeEpoch = "";
       }
+      if (event.type === "control_budget") {
+        if (state.lastControl) state.lastControl = { ...state.lastControl,
+          maxSeconds: typeof d.maxSeconds === "number" ? d.maxSeconds : null,
+          remainingSeconds: typeof d.remainingSeconds === "number" ? d.remainingSeconds : null,
+          at: event.at };
+        if (epoch || activeEpoch) {
+          // A live timer change updates its cycle in place; the start record stays untouched.
+          const targetEpoch = epoch || activeEpoch;
+          const cycleStore = index.store("run-cycles");
+          const existing = await cycleStore.get<{ epoch: string; startedAt: string; maxSeconds?: number | null; endedAt?: string; reason?: string }>(targetEpoch);
+          if (existing) {
+            await cycleStore.put(targetEpoch, { ...existing, maxSeconds: typeof d.maxSeconds === "number" ? d.maxSeconds : null },
+              { position: cycleStore.meta(targetEpoch)?.position ?? position, epoch: targetEpoch });
+          }
+        }
+      }
       if (event.type === "perception_stats" || event.type === "perception_status") {
         updateSampler(state, event);
         if (epoch === "" && activeEpoch) {

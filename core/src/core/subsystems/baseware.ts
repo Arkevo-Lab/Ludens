@@ -188,6 +188,10 @@ export async function connectBaseware(options: { socket: string; seconds?: numbe
       async setInputGeneration(epoch, generation) {
         await client.request({ kind: "input_generation", epoch, generation, trace: { recordingId } });
       },
+      async setLeaseDuration(epoch: string, seconds: number | null) {
+        const state = await client.request({ kind: "lease_duration", epoch, seconds: seconds ?? null, trace: { recordingId } }) as ControlStatus;
+        if (!state.connected || state.mode !== "auto" || state.epoch !== epoch) throw new Error("Baseware lease update was revoked before completion");
+      },
       async execute(id, args, epoch, signal, trace, origin, machine) {
         const omitInlineMedia = trace?.recordingPurpose === "continuous-perception";
         const result = await client.request({ kind: "controller", id, arguments: args, epoch, trace: { ...trace, recordingId }, origin,

@@ -243,7 +243,7 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
     const failed = !raised && (data.outcome === "error"
       || (event.type === "perception_status" && data.state === "error") || (data.outcome !== "cancelled" && !data.aborted
       && (event.type.endsWith("_error") || event.type === "perception_fault" || (event.type === "event_source_gap" && data.phase === "start") || data.isError === true || data.stopReason === "error")));
-    const system = failed || event.type === "control" || ["perception_status", "perception_fault", "perception_fault_end"].includes(event.type)
+    const system = failed || event.type === "control" || event.type === "control_budget" || ["perception_status", "perception_fault", "perception_fault_end"].includes(event.type)
     || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
     || event.type.startsWith("background_") || event.type.includes("compaction") || event.type === "run_end";
   if (event.type === "user_message" && typeof data?.text === "string") return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`,
@@ -335,6 +335,12 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
         });
         continue;
       }
+    }
+    if (event.type === "control_budget") {
+      blocks.set(header.id, { ...header,
+        text: data?.requestedSeconds == null ? "Timer cleared (continuous run)" : `Timer set: ${data.requestedSeconds}s`,
+        data: { requestedSeconds: data?.requestedSeconds ?? null, maxSeconds: data?.maxSeconds ?? null, remainingSeconds: data?.remainingSeconds ?? null } });
+      continue;
     }
     const text = readable(data);
     blocks.set(header.id, { ...header, text, data: structuredText(text) as Record<string, unknown> });

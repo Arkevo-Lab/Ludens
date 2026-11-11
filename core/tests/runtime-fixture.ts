@@ -14,6 +14,7 @@ export function createTestDeviceSession(capabilities: Capabilities, record: Reco
     catalog: core.list(),
     async acquire(epoch, signal, seconds) { await core.acquire(epoch, seconds !== undefined ? seconds : maxSeconds, client, signal); },
     async release(epoch) { await core.release(epoch); },
+    async setLeaseDuration(epoch, seconds) { await core.setLeaseDuration(epoch, seconds, client); },
     execute: (id, args, epoch, signal, trace, origin) => core.execute(id, args, epoch, signal, { ...trace }, undefined, origin),
   };
   return { core, devices };
