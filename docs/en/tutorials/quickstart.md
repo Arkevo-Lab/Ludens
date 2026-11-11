@@ -8,9 +8,9 @@ Unless a `cd` into the target workspace is shown explicitly, run all commands fr
 
 ### 1. Environment prerequisites & credentials
 
-- **OS**: full background-service orchestration (`ludens up` / `ludens down` / `ludens services`) requires **macOS launchd**.
-- **Toolchain**: **Bun 1.4**, **Python 3.12+**, **Node.js 22.x (22.13+) or 24+**, and **uv**. The optional pet shares the same JavaScript workspace install (Electron is a `app` devDependency).
-- **Model credentials**: complete **OMP model login** on the machine before starting an agent. Ludens pins **OMP 18.14.0** and reuses its credential store directly; the default model is `openai-codex/gpt-6.1-sol`.
+- **OS**: macOS, Linux, or Windows (desktop control via the built-in `cua` driver follows upstream Cua Driver platform permissions).
+- **Toolchain**: **Bun 1.4+**, **Python 3.12+**, **Node.js 22.x (22.13+) or 24+**, and **uv**. The optional pet shares the same JavaScript workspace install (Electron is a `app` devDependency).
+- **Model credentials**: complete **OMP model login** on the machine before starting an agent. Ludens pins **OMP 18.18.8** and reuses its credential store directly; the default model is `openai-codex/gpt-6.1-sol`.
 
 ### 2. Install core components
 
@@ -84,7 +84,7 @@ Quick reference for common workspace and control commands:
 | `ludens workspace forget <id>` | Removes only the index entry; it does not delete files, sessions, or logs, or stop services. |
 | `ludens up --dry-run` | Validates the config and prints the full process start plan without starting services; the Dashboard build check only runs on a real `ludens up` when a new Dashboard is needed. |
 | `ludens up [--pet / --no-pet]` | Starts or reuses the emulator, Baseware, Host, and Dashboard on demand; enables the pet per the `pet` setting, or override just this start with the mutually exclusive `--pet` / `--no-pet` without writing back to the config. A newly started Host is in `manual` mode; reusing an already-`auto` Host continues its control cycle. Repeating `up` does not hot-reload an edited `ludens.json`, and reusing an existing Dashboard does not hot-update its build. |
-| `ludens services` | Shows the PID, status, and latest exit code of the launchd tasks bound to the current workspace. |
+| `ludens services` | Shows the PID, status, and latest exit code of the managed background jobs bound to the current workspace. |
 | `ludens auto on [--message 'text'] [--seconds <n>]` | Starts a new control cycle (new `epoch`, resetting request budgets) and issues inference to the model. When `--seconds <n>` is omitted, the cycle runs continuously without a time limit until manually stopped (`auto off`); passing `--seconds <n>` bounds the takeover to `<n>` seconds. `--message` is attached once on the first round of that takeover only, never re-injected in later rounds. |
 | `ludens auto off` | Immediately revokes device operation rights and cancels in-flight Ludens-managed calls; the emulator keeps running. Wait for the current cycle to finish cleaning up before `auto on` again. |
 | `ludens down --keep-emulator` | Hands back control and stops Host and Baseware, keeping the emulator window and game state; suitable for re-running `ludens up` after editing `ludens.json` (e.g. budgets or model). |
@@ -152,4 +152,4 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 ### 3. Session resumption & background service directories
 
 - **Session resumption**: workspace OMP sessions live in `.ludens/shiori/sessions/`, with the current resume pointer at `.ludens/shiori/current-session.json`. Restarting Host resumes the original session by default and opens a new `logs/<run-id>/` directory. Foreground `ludens run` accepts `--new-session` to start a fresh context (keeping workspace files), or `--resume /absolute/path/to/session.jsonl` to switch to a given historical session of the same workspace.
-- **Background service logs**: [launch-background.py](../../../core/scripts/launch-background.py) writes stdio and launchd state for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (launchd label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. Background services detach from the terminal without boot-time autostart or crash-loop restarts; check `ludens services` and the corresponding logs first when troubleshooting.
+- **Background service logs**: [launch-background.py](../../../core/scripts/launch-background.py) writes stdio logs (`<name>.log`) and detached job state (`<name>.job.json`) for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (job label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. Background services detach from the terminal without boot-time autostart or crash-loop restarts; check `ludens services` and the corresponding logs first when troubleshooting.

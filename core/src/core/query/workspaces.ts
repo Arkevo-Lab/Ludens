@@ -4,6 +4,7 @@ import { readdir, readFile, realpath, rename, stat, unlink, writeFile } from "no
 import { createConnection } from "node:net";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repoRoot } from "./repo";
+import { jobStateFilePath, jobTargetLabel, ludensSocketPath, readBackgroundJobState } from "../../daemon/background-jobs";
 import {
   readGlobalConfig,
   updateGlobalConfig,
@@ -341,9 +342,16 @@ export async function updateWorkspaceConnection(
   });
 }
 
-async function runCommandShort(argv: string[], timeoutMs = 2500): Promise<{ code: number; stdout: string; stderr: string }> {
+async function runCommandShort(
+  argv: string[],
+  timeoutMs = 2500,
+  extraEnv?: Record<string, string>,
+): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise(resolvePromise => {
-    const child = spawn(argv[0]!, argv.slice(1), { stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(argv[0]!, argv.slice(1), {
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(extraEnv ? { env: { ...process.env, ...extraEnv } } : {}),
+    });
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     const timer = setTimeout(() => {
@@ -379,31 +387,27 @@ async function readLogTail(logPath: string, maxLines = 24): Promise<string[]> {
 async function inspectWorkspaceServices(workspacePath: string, home: string): Promise<WorkspaceServicesSnapshot> {
   const canonical = await realpath(workspacePath).catch(() => resolve(workspacePath));
   const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
-  const uid = process.getuid ? process.getuid() : 0;
-  const hostSocket = `/tmp/ludens-core-${uid}-${hash}.sock`;
+  const hostSocket = ludensSocketPath("core", hash);
   const hostSocketExists = await stat(hostSocket).then(() => true).catch(() => false);
   const names = ["emulator", "baseware", "host", "dashboard", "pet"] as const;
   const jobs = await Promise.all(
     names.map(async (name): Promise<WorkspaceServiceJobSnapshot> => {
-      const label = name === "pet" ? "dev.ludens.pet" : `dev.ludens.core.${hash}.${name}`;
-      const target = `gui/${uid}/${label}`;
-      const logPath = join(
-        name === "pet" ? join(home, "pet/background") : join(canonical, "logs/background"),
-        `${name}.log`,
-      );
-      const [result, logTail] = await Promise.all([
-        runCommandShort(["launchctl", "print", target], 2000),
+      const target = jobTargetLabel(hash, name);
+      const logDir = name === "pet" ? join(home, "pet/background") : join(canonical, "logs/background");
+      const logPath = join(logDir, `${name}.log`);
+      const stateFile = jobStateFilePath(logDir, name);
+      const [jobState, logTail] = await Promise.all([
+        readBackgroundJobState(stateFile, target),
         readLogTail(logPath, 20),
       ]);
-      const exitMatch = result.stdout.match(/^\s*last exit code = (-?\d+)$/m);
       return {
         name,
         scope: name === "pet" ? "shared" : "workspace",
         target,
-        registered: result.code === 0,
-        pid: Number(result.stdout.match(/^\s*pid = (\d+)$/m)?.[1]) || null,
-        state: result.stdout.match(/^\s*state = (.+)$/m)?.[1] ?? null,
-        lastExitCode: exitMatch ? Number(exitMatch[1]) : null,
+        registered: jobState.registered,
+        pid: jobState.pid,
+        state: jobState.state,
+        lastExitCode: jobState.lastExitCode,
         logPath,
         logTail,
       };
@@ -498,15 +502,16 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
   if (entry) {
     const canonical = await realpath(entry.workspace).catch(() => resolve(entry.workspace));
     const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
-    const uid = process.getuid ? process.getuid() : 0;
-    const basewareSocket = `/tmp/ludens-baseware-${uid}-${hash}.sock`;
+    const basewareSocket = ludensSocketPath("baseware", hash);
     const [services, basewareSocketExists] = await Promise.all([
       inspectWorkspaceServices(entry.workspace, resolve(home)),
       stat(basewareSocket).then(() => true).catch(() => false),
     ]);
     let status: WorkspaceBasewareSnapshot["daemon"]["status"] = null;
     if (basewareSocketExists) {
-      const result = await runCommandShort(["env", `BASEWARE_SOCKET=${basewareSocket}`, join(repoRoot, "baseware/bin/baseware"), "status"], 1500);
+      const result = await runCommandShort([join(repoRoot, "baseware/bin/baseware"), "status"], 1500, {
+        BASEWARE_SOCKET: basewareSocket,
+      });
       if (result.code === 0) {
         try {
           const value = JSON.parse(result.stdout) as Record<string, unknown>;

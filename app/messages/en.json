@@ -2039,7 +2039,7 @@
     "operationFailed": "Operation failed",
     "servicesSection": {
       "title": "Background Services & Process Diagnostics",
-      "description": "Live status of the workspace's launchd background jobs (emulator, baseware, host, dashboard, pet) and recent log tails.",
+      "description": "Live status of the workspace's managed background jobs (emulator, baseware, host, dashboard, pet) and recent log tails.",
       "state": "State",
       "viewLogs": "View log tail",
       "cmdUp": "Start workspace services (ludens up)",

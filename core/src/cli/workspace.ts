@@ -8,7 +8,7 @@ import { ensureWorkspaceIdentity, readGlobalConfig, readMachinesConfig, register
 import type { BasewareMachineSpec } from "@ludens/protocol/machines";
 import { parseConfig, launchPlan, WorkspaceLauncher } from "../daemon/launcher.ts";
 
-export const WORKSPACE_HELP = `Workspace startup (macOS):
+export const WORKSPACE_HELP = `Workspace startup:
 ludens init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]
 ludens up [--dry-run] [--pet | --no-pet]
 ludens services
@@ -102,7 +102,6 @@ export async function workspaceCommand(command: string, args: string[], selected
   }
   const plan = await launchPlan(config, workspace, resolve(import.meta.dir, "../../.."), undefined, manifest, activeMachine);
   if (values["dry-run"]) { console.log(JSON.stringify(plan, null, 2)); return; }
-  if (process.platform !== "darwin") throw new Error("Workspace service commands currently use macOS launchd");
   if (command === "up") {
     const repo = resolve(import.meta.dir, "../../..");
     const managedGame = activeMachine

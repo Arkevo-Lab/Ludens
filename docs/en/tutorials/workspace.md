@@ -45,7 +45,7 @@ workspace/
 │       └── current-session.json # Default session-resume pointer
 └── logs/
     ├── <run-id>/            # Event and stream records for a single Host run
-    └── background/          # launchd background service logs and status
+    └── background/          # Detached background service logs and job state
 ```
 
 ### 2. Templates and Session Lifecycle

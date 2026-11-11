@@ -56,7 +56,16 @@ class FakeServices implements LaunchIO {
   constructor(readonly plan: LaunchPlan) { this.bridgePort = plan.config.port; }
   target(name: string) {
     const hash = createHash("sha256").update(this.plan.workspace).digest("hex").slice(0, 16);
-    return `gui/${process.getuid!()}/${name === "pet" ? "dev.ludens.pet" : `dev.ludens.core.${hash}.${name}`}`;
+    return name === "pet" ? "dev.ludens.pet" : `dev.ludens.core.${hash}.${name}`;
+  }
+  stateFile(name: string) {
+    return join(name === "pet" ? this.plan.sharedPet.background : this.plan.background, `${name}.job.json`);
+  }
+  targetForStateFile(path: string) {
+    for (const name of ["emulator", "baseware", "host", "dashboard", "pet"] as const) {
+      if (this.stateFile(name) === path) return this.target(name);
+    }
+    return path;
   }
   seed(name: string) { this.jobs.set(this.target(name), 100 + this.jobs.size); }
   dashboardReady = async () => this.dashboard;
@@ -91,13 +100,16 @@ class FakeServices implements LaunchIO {
       this.cleanupReads = 2;
       return result();
     }
-    if (argv[0] === "launchctl" && argv[1] === "print") {
-      const pid = this.jobs.get(argv[2]!);
-      return pid ? result(`state = running\n pid = ${pid}\n`) : result("", 1);
+    if (argv[0] === "python3" && argv[1] === this.plan.launcher && argv[2] === "--status") {
+      const pid = this.jobs.get(this.targetForStateFile(argv[3]!));
+      return result(JSON.stringify(pid
+        ? { registered: true, pid, state: "running", lastExitCode: null }
+        : { registered: false, pid: null, state: null, lastExitCode: null }));
     }
-    if (argv[0] === "launchctl" && argv[1] === "bootout") {
-      this.events.push(`stop:${argv[2]}`);
-      this.jobs.delete(argv[2]!);
+    if (argv[0] === "python3" && argv[1] === this.plan.launcher && argv[2] === "--stop") {
+      const target = this.targetForStateFile(argv[3]!);
+      this.events.push(`stop:${target}`);
+      this.jobs.delete(target);
       return result();
     }
     if (argv[0] === "python3" && argv[1] === this.plan.launcher) {
@@ -122,7 +134,6 @@ class FakeServices implements LaunchIO {
       const baseware = this.jobs.get(this.target("baseware"));
       return result(argv.includes("-sTCP:ESTABLISHED") ? [pid, ...(baseware ? [baseware] : []), ...this.bridgeClientPids].join("\n") : String(pid));
     }
-    if (argv[0] === "kill" && argv[1] === "-0") return result("", [...this.jobs.values()].includes(Number(argv[2])) ? 0 : 1);
     throw new Error(`Unexpected command: ${JSON.stringify(argv)}`);
   }
 }
@@ -179,7 +190,7 @@ test("default web startup starts the Dashboard without launching or waiting for 
   io.seed("pet");
   await launcher.up();
   expect(io.jobs.has(io.target("pet"))).toBe(true);
-  expect(io.calls.some(argv => argv[1] === "bootout")).toBe(false);
+  expect(io.calls.some(argv => argv[2] === "--stop")).toBe(false);
 });
 
 test("system Pet readiness uses the Dashboard pet endpoint", async () => {
@@ -190,7 +201,7 @@ test("system Pet readiness uses the Dashboard pet endpoint", async () => {
     paths.push(path);
     return path === "/api/pet" ? Response.json({ connected }, { status }) : new Response("missing", { status: 404 });
   } });
-  // Exercise the real HTTP probe without running launchctl or any device command.
+  // Exercise the real HTTP probe without running any service or device command.
   const io = new WorkspaceLauncher(await plan())["io"];
   try {
     expect(await io.petReady(server.url.origin)).toBe(true);
@@ -217,7 +228,7 @@ test("Dashboard reuse requires the same global home and rejects occupied mismatc
     occupied.occupiedDashboard = true;
     await expect(new WorkspaceLauncher(value, occupied).up()).rejects.toThrow("different Ludens home");
     expect(occupied.starts).toEqual([]);
-    expect(occupied.calls.some(argv => argv[1] === "bootout")).toBe(false);
+    expect(occupied.calls.some(argv => argv[2] === "--stop")).toBe(false);
   } finally { server.stop(true); }
 });
 
@@ -310,7 +321,7 @@ test("Cua startup and shutdown only manage its services, without emulator bridge
   await launcher.up();
   expect(io.starts).toEqual(["baseware", "host"]);
   await launcher.down(false);
-  expect(io.calls.filter(argv => argv[1] === "bootout").map(argv => argv[2])).toEqual(
+  expect(io.calls.filter(argv => argv[2] === "--stop").map(argv => io.targetForStateFile(argv[3]!))).toEqual(
     ["host", "baseware"].map(name => io.target(name)));
   expect(io.calls.some(argv => ["pgrep", "lsof"].includes(argv[0]!))).toBe(false);
 });
@@ -341,7 +352,7 @@ test("init and dry-run preserve existing workspace files and never invoke servic
     await mkdir(workspace);
     await mkdir(bin);
     // Trap any attempt to execute service commands; the CLI itself uses an absolute Bun path.
-    for (const name of ["launchctl", "python3", "pgrep", "lsof", "npm", "env"]) {
+    for (const name of ["python3", "pgrep", "lsof", "npm", "env"]) {
       const file = join(bin, name);
       await writeFile(file, '#!/bin/sh\nprintf called > "$SERVICE_MARKER"\nexit 97\n');
       await chmod(file, 0o755);
@@ -401,7 +412,7 @@ test("external packages resolve workspace-relative file specs and check only exe
     }));
     await writeFile(join(driver, "index.ts"), 'export default { id: "fixture", transport: "bridge", defaultPort: 47991, launchCommand: ["fixture-emulator", "--headless", "literal argument"], load: async () => { throw new Error("Provider must not load during discovery"); } };');
     await writeFile(join(workspace, "game.rom"), "");
-    for (const name of ["fixture-emulator", "launchctl", "python3", "lsof", "env", "pgrep"]) {
+    for (const name of ["fixture-emulator", "python3", "lsof", "env", "pgrep"]) {
       const path = join(bin, name);
       await writeFile(path, '#!/bin/sh\necho launch-stopped >&2\nexit 97\n');
       await chmod(path, 0o755);
@@ -424,7 +435,7 @@ test("external packages resolve workspace-relative file specs and check only exe
     const plan = JSON.parse(preview.stdout);
     expect(plan.commands.baseware).toContain(`file:${await realpath(driver)}`);
     expect(plan.commands.emulator).toEqual(["env", "LUDENS_BRIDGE_PORT=47991", "fixture-emulator", "--headless", "literal argument", join(await realpath(workspace), "game.rom")]);
-    if (process.platform === "darwin") {
+    if (process.platform !== "win32") {
       const startup = await run("up");
       expect(startup.code).not.toBe(0);
       expect(startup.stderr).toContain("launch-stopped");
@@ -451,14 +462,14 @@ test("failed startup preserves ready services and repeated up resumes without du
   expect(io.starts).toEqual(["emulator", "baseware", "host", "dashboard", "dashboard", "pet"]);
   expect(recovered.baseware).toMatchObject({ connected: true, serviceId: "device-session" });
   expect(io.calls.some(argv => argv[1] === "auto")).toBe(false);
-  expect(io.calls.some(argv => argv[1] === "bootout")).toBe(false);
+  expect(io.calls.some(argv => argv[2] === "--stop")).toBe(false);
 });
 
 test("down waits for takeover cleanup, stops only owned jobs, and keeps the shared Dashboard and Pet", async () => {
   const value = await plan();
   const io = new FakeServices(value);
   for (const name of ["host", "baseware", "emulator", "pet", "dashboard"]) io.seed(name);
-  const foreign = "gui/501/dev.ludens.core.another-workspace.host";
+  const foreign = "dev.ludens.core.another-workspace.host";
   io.jobs.set(foreign, 999);
   io.dashboard = true;
   io.mode = "auto";
@@ -468,7 +479,7 @@ test("down waits for takeover cleanup, stops only owned jobs, and keeps the shar
   expect(io.events.indexOf("auto off")).toBeLessThan(stopHost);
   expect(io.events.indexOf("host:manual:false")).toBeGreaterThan(io.events.indexOf("auto off"));
   expect(io.events.indexOf("host:manual:false")).toBeLessThan(stopHost);
-  expect(io.calls.filter(argv => argv[1] === "bootout").map(argv => argv[2])).toEqual(
+  expect(io.calls.filter(argv => argv[2] === "--stop").map(argv => io.targetForStateFile(argv[3]!))).toEqual(
     ["host", "baseware", "emulator"].map(name => io.target(name)));
   expect([...io.jobs.keys()]).toEqual([io.target("pet"), io.target("dashboard"), foreign]);
 
@@ -476,7 +487,7 @@ test("down waits for takeover cleanup, stops only owned jobs, and keeps the shar
   for (const name of ["host", "baseware", "emulator", "pet", "dashboard"]) keep.seed(name);
   keep.dashboard = true;
   await new WorkspaceLauncher(value, keep).down(false, true);
-  expect(keep.calls.filter(argv => argv[1] === "bootout").map(argv => argv[2])).toEqual(
+  expect(keep.calls.filter(argv => argv[2] === "--stop").map(argv => keep.targetForStateFile(argv[3]!))).toEqual(
     ["host", "baseware"].map(name => keep.target(name)));
   expect([...keep.jobs.keys()]).toEqual([keep.target("emulator"), keep.target("pet"), keep.target("dashboard")]);
 });
@@ -515,7 +526,7 @@ test("up reuses an independently opened Ludens Pet and down never closes that ap
   expect(status.jobs.find(job => job.name === "pet")).toMatchObject({ registered: false, pid: null });
   expect(io.starts).not.toContain("pet");
   await launcher.down(false, true, true);
-  expect(io.calls.some(argv => argv[1] === "bootout" && argv[2] === io.target("pet"))).toBe(false);
+  expect(io.calls.some(argv => argv[2] === "--stop" && io.targetForStateFile(argv[3]!) === io.target("pet"))).toBe(false);
   expect((await launcher.status()).pet.connected).toBe(true);
 });
 
@@ -529,45 +540,95 @@ test("managed Ludens Pet startup waits for its activity connection after the pro
   expect(io.starts.filter(name => name === "pet")).toEqual(["pet"]);
 });
 
-test("shared launchd options preserve the working directory, Python override and driver cache environment", async () => {
+test("detached background launcher preserves environment, records exit codes, and stops process trees", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ludens-shared-launch-"));
   try {
-    const bin = join(directory, "bin");
     const stableCwd = join(directory, "source");
     const logs = join(directory, "shared", "alice", "background");
     const driverState = join(directory, "isolated driver state");
-    const python = join(directory, "custom Python", "bin", "python3");
-    await mkdir(bin);
+    const pythonOverride = join(directory, "custom Python", "bin", "python3");
     await mkdir(stableCwd);
-    const launchctl = join(bin, "launchctl");
-    await writeFile(launchctl, '#!/bin/sh\nif [ "$1" = print ]; then exit 1; fi\nexit 0\n');
-    await chmod(launchctl, 0o755);
+    const pyBin = Bun.which("python3") ?? Bun.which("python") ?? "python3";
     const script = resolve(import.meta.dir, "../scripts/launch-background.py");
-    const child = Bun.spawn(["/usr/bin/python3", script, "--label", "dev.ludens.pet", "--log-dir", logs, "pet", "/bin/echo", "--workspace", "/tmp/seed workspace"], {
-      cwd: stableCwd, env: { ...process.env, PATH: bin, LUDENS_WORKSPACE: "/tmp/stale",
-        XDG_STATE_HOME: driverState, LUDENS_PYTHON: python, LUDENS_HOME: join(directory, "global"), SSH_AUTH_SOCK: join(directory, "agent.sock"),
-        LUDENS_PERCEPTION_PERSIST: "0", LUDENS_PERCEPTION_HOT_SECONDS: "600" }, stdout: "pipe", stderr: "pipe",
+
+    const child = Bun.spawn([
+      pyBin, script, "--label", "dev.ludens.pet", "--log-dir", logs, "pet",
+      "env", "EXTRA_FLAG=active", process.execPath, "-e",
+      "console.log(JSON.stringify({ cwd: process.cwd(), extra: process.env.EXTRA_FLAG })); process.exit(7);",
+    ], {
+      cwd: stableCwd,
+      env: {
+        ...process.env,
+        LUDENS_WORKSPACE: "/tmp/stale",
+        BASEWARE_EPOCH: "stale-epoch",
+        XDG_STATE_HOME: driverState,
+        LUDENS_PYTHON: pythonOverride,
+        LUDENS_HOME: join(directory, "global"),
+        SSH_AUTH_SOCK: join(directory, "agent.sock"),
+        LUDENS_PERCEPTION_PERSIST: "0",
+        LUDENS_PERCEPTION_HOT_SECONDS: "600",
+      },
+      stdout: "pipe",
+      stderr: "pipe",
     });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect(stderr).toBe("");
     expect(code).toBe(0);
     const canonicalCwd = await realpath(stableCwd);
     const canonicalLogs = await realpath(logs);
+    const stateFile = join(canonicalLogs, "pet.job.json");
     expect(JSON.parse(stdout)).toMatchObject({
-      target: `gui/${process.getuid!()}/dev.ludens.pet`, workspace: canonicalCwd,
-      log: join(canonicalLogs, "pet.log"), plist: join(canonicalLogs, "pet.plist"),
+      target: "dev.ludens.pet",
+      workspace: canonicalCwd,
+      log: join(canonicalLogs, "pet.log"),
+      stateFile,
     });
-    const plist = await readFile(join(logs, "pet.plist"), "utf8");
-    expect(plist).toContain("<string>dev.ludens.pet</string>");
-    expect(plist).toContain(`<key>WorkingDirectory</key>\n\t<string>${canonicalCwd}</string>`);
-    expect(plist).toContain(`<string>${join(canonicalLogs, "pet.log")}</string>`);
-    expect(plist).not.toContain("LUDENS_WORKSPACE");
-    expect(plist).toContain(`<key>XDG_STATE_HOME</key>\n\t\t<string>${driverState}</string>`);
-    expect(plist).toContain(`<key>LUDENS_PYTHON</key>\n\t\t<string>${python}</string>`);
-    expect(plist).toContain(`<key>LUDENS_HOME</key>\n\t\t<string>${join(directory, "global")}</string>`);
-    expect(plist).toContain(`<key>SSH_AUTH_SOCK</key>\n\t\t<string>${join(directory, "agent.sock")}</string>`);
-    expect(plist).toContain("<key>LUDENS_PERCEPTION_PERSIST</key>\n\t\t<string>0</string>");
-    expect(plist).toContain("<key>LUDENS_PERCEPTION_HOT_SECONDS</key>\n\t\t<string>600</string>");
+
+    // Wait briefly for the short-lived child to exit and record exit code 7.
+    let finalStatus: { registered: boolean; pid: number | null; state: string | null; lastExitCode: number | null } | null = null;
+    for (let i = 0; i < 40; i++) {
+      const check = Bun.spawn([pyBin, script, "--status", stateFile], { stdout: "pipe", stderr: "pipe" });
+      const [statusCode, statusOut] = await Promise.all([check.exited, new Response(check.stdout).text()]);
+      expect(statusCode).toBe(0);
+      const parsed = JSON.parse(statusOut);
+      if (parsed.state === "exited") {
+        finalStatus = parsed;
+        break;
+      }
+      await Bun.sleep(50);
+    }
+    expect(finalStatus).toEqual({ registered: true, pid: null, state: "exited", lastExitCode: 7 });
+
+    const saved = JSON.parse(await readFile(stateFile, "utf8"));
+    expect(saved.label).toBe("dev.ludens.pet");
+    expect(saved.workspace).toBe(canonicalCwd);
+    expect(saved.env.LUDENS_WORKSPACE).toBeUndefined();
+    expect(saved.env.BASEWARE_EPOCH).toBeUndefined();
+    expect(saved.env.XDG_STATE_HOME).toBe(driverState);
+    expect(saved.env.LUDENS_PYTHON).toBe(pythonOverride);
+    expect(saved.env.LUDENS_HOME).toBe(join(directory, "global"));
+    expect(saved.env.SSH_AUTH_SOCK).toBe(join(directory, "agent.sock"));
+    expect(saved.env.LUDENS_PERCEPTION_PERSIST).toBe("0");
+    expect(saved.env.LUDENS_PERCEPTION_HOT_SECONDS).toBe("600");
+    expect(saved.env.EXTRA_FLAG).toBe("active");
+    expect(await readFile(join(canonicalLogs, "pet.log"), "utf8")).toContain('"extra":"active"');
+
+    // Stopping unregisters the state file, allowing a fresh job to start and be stopped while running.
+    const cleanup = Bun.spawn([pyBin, script, "--stop", stateFile], { stdout: "pipe", stderr: "pipe" });
+    expect(await cleanup.exited).toBe(0);
+    expect(await Bun.file(stateFile).exists()).toBe(false);
+
+    const sleeper = Bun.spawn([
+      pyBin, script, "--label", "dev.ludens.pet", "--log-dir", logs, "pet",
+      process.execPath, "-e", "setInterval(() => {}, 1000);",
+    ], { cwd: stableCwd, stdout: "pipe", stderr: "pipe" });
+    expect(await sleeper.exited).toBe(0);
+    const sleeperInfo = JSON.parse(await new Response(sleeper.stdout).text()) as { pid: number };
+    expect(sleeperInfo.pid).toBeGreaterThan(0);
+
+    const stopLive = Bun.spawn([pyBin, script, "--stop", stateFile], { stdout: "pipe", stderr: "pipe" });
+    expect(await stopLive.exited).toBe(0);
+    expect(await Bun.file(stateFile).exists()).toBe(false);
     expect(await readdir(stableCwd)).toEqual([]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
@@ -578,7 +639,7 @@ test("an externally started emulator process blocks startup before spawning or s
   io.externalEmulator = true;
   await expect(new WorkspaceLauncher(value, io).up()).rejects.toThrow("already running outside this workspace");
   expect(io.starts).toEqual([]);
-  expect(io.calls.some(argv => argv[1] === "bootout" || argv[1] === "auto")).toBe(false);
+  expect(io.calls.some(argv => argv[2] === "--stop" || argv[1] === "auto")).toBe(false);
 });
 
 test("emulator process matching treats custom executable paths as POSIX regex literals", async () => {
@@ -625,7 +686,7 @@ test("package launch wrappers cannot start another emulator on an externally occ
   io.preparedBridgePid = 700;
   await expect(new WorkspaceLauncher(value, io).up()).rejects.toThrow("already listening outside this workspace");
   expect(io.starts).toEqual([]);
-  expect(io.calls.some(argv => argv[1] === "bootout" || argv[1] === "auto")).toBe(false);
+  expect(io.calls.some(argv => argv[2] === "--stop" || argv[1] === "auto")).toBe(false);
 });
 
 test("a bridge used by another workspace neither receives a second host nor gets stopped", async () => {
@@ -644,7 +705,7 @@ test("a bridge used by another workspace neither receives a second host nor gets
   owner.bridgeClientPids = [701];
   await expect(new WorkspaceLauncher(value, owner).down(false)).rejects.toThrow("bridge client from another Baseware service");
   expect(owner.jobs.has(owner.target("emulator"))).toBe(true);
-  expect(owner.calls.some(argv => argv[1] === "bootout")).toBe(false);
+  expect(owner.calls.some(argv => argv[2] === "--stop")).toBe(false);
 });
 
 test("a connected Baseware service is reused without probing its occupied emulator bridge", async () => {
@@ -683,7 +744,7 @@ test("down preserves Baseware and its emulator while an unmanaged host or lease 
     io.externalHost = owner === "host";
     io.basewareMode = owner === "lease" ? "auto" : "manual";
     await expect(new WorkspaceLauncher(value, io).down(false)).rejects.toThrow(owner === "host" ? "unmanaged host" : "active owner");
-    expect(io.calls.some(argv => argv[1] === "bootout")).toBe(false);
+    expect(io.calls.some(argv => argv[2] === "--stop")).toBe(false);
   }
 });
 
