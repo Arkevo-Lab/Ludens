@@ -13,7 +13,16 @@ const navSections: Array<{ label: string; ids: ConsoleView[] }> = [
   { label: "navSectionGlobal", ids: ["workspaces", "baseware", "docs"] },
 ];
 
-function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
+function BrandMark() {
+  return (
+    <svg viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
+      <path fill="currentColor" d="M14 2h24v12H14zM2 14h12v36H2zM26 14h12v24H26zM38 26h24v12H38zM50 38h12v12H50zM14 50h36v12H14z" />
+      <path fill="var(--gold)" d="M50 2h12v12H50z" />
+    </svg>
+  );
+}
+
+function NavIcon({ kind }: { kind: ConsoleView }) {
   return (
     <svg
       viewBox="0 0 24 24"
@@ -24,12 +33,7 @@ function NavIcon({ kind }: { kind: ConsoleView | "logo" }) {
       strokeWidth="1.5"
       aria-hidden="true"
     >
-      {kind === "logo" ? (
-        <>
-          <path d="m12 2 9 5v10l-9 5-9-5V7Z" />
-          <path d="m3 7 9 5 9-5M12 12v10" />
-        </>
-      ) : kind === "live" ? (
+      {kind === "live" ? (
         <path d="m8 5 11 7-11 7Z" fill="currentColor" stroke="none" />
       ) : kind === "replay" ? (
         <><path d="M3 10a9 9 0 1 1 1 7M3 4v6h6" /><path d="m10 8 6 4-6 4Z" /></>
@@ -154,7 +158,7 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
     <a className="brand" href={viewLink("live")} onClick={event => {
       if (!isPlainNavigationClick(event)) return;
       event.preventDefault(); closeMenu(); onNavigate(viewLink("live"));
-    }}><NavIcon kind="logo" /><span>Ludens</span></a>
+    }}><BrandMark /><span>Ludens</span></a>
     <div className="sidebar-menu-control">
       <Button ref={menuButton} type="button" variant="ghost" size="sm" className="sidebar-menu-toggle"
         aria-expanded={expanded} aria-controls={`${id}-content ${id}-footer`}

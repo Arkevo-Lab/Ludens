@@ -1,3 +1,10 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="app/public/brand/ludens-mark-dark.svg">
+    <img src="app/public/brand/ludens-mark-light.svg" alt="Ludens logo" width="88" height="88">
+  </picture>
+</p>
+
 # Ludens
 
 [English](README.md) · **简体中文**
