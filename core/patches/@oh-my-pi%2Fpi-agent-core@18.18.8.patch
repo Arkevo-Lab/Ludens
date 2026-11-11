@@ -84,7 +84,7 @@ index 1fe1085..df20487 100644
  			preferWebsockets: options.preferWebsockets,
  			codexAccessPrograms: options.codexAccessPrograms,
 diff --git a/src/compaction/compaction.ts b/src/compaction/compaction.ts
-index 49c6545..a59d9f6 100644
+index 99e8b67..ff45024 100644
 --- a/src/compaction/compaction.ts
 +++ b/src/compaction/compaction.ts
 @@ -736,6 +736,8 @@ export interface SummaryOptions {
@@ -96,7 +96,7 @@ index 49c6545..a59d9f6 100644
  	/** Prompt-cache key for conventional summary requests, gated against the summarizing model. */
  	promptCacheKey?: string;
  	/**
-@@ -1787,6 +1789,7 @@ export async function compact(
+@@ -1789,6 +1791,7 @@ export async function compact(
  		// at the call sites, leaked back in here. See resolveCompactionEffort.
  		thinkingLevel: options?.thinkingLevel,
  		sessionId: options?.sessionId,
@@ -104,7 +104,7 @@ index 49c6545..a59d9f6 100644
  		promptCacheKey: options?.promptCacheKey,
  		remotePromptCacheKey:
  			options && Object.hasOwn(options, "remotePromptCacheKey")
-@@ -2021,6 +2024,7 @@ export async function compact(
+@@ -2023,6 +2026,7 @@ export async function compact(
  			assertRemoteCompactionInputFits(trimmed, model);
  			const requestOptions = {
  				sessionId: summaryOptions.sessionId,

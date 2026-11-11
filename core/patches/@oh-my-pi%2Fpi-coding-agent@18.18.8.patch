@@ -1,5 +1,5 @@
 diff --git a/src/session/session-maintenance.ts b/src/session/session-maintenance.ts
-index 1c32f48..a97f6c9 100644
+index 2ff97de..c09ad0f 100644
 --- a/src/session/session-maintenance.ts
 +++ b/src/session/session-maintenance.ts
 @@ -1,5 +1,6 @@
@@ -18,7 +18,7 @@ index 1c32f48..a97f6c9 100644
  import * as snapcompact from "@oh-my-pi/snapcompact";
  import { writeArtifact } from "./artifacts";
  import type { ModelRegistry } from "../config/model-registry";
-@@ -341,15 +342,19 @@ const SNAPCOMPACT_POST_COMPACTION_TARGET = 0.6;
+@@ -346,15 +347,19 @@ const SNAPCOMPACT_POST_COMPACTION_TARGET = 0.6;
   *  occupancy stays under this ceiling (≥10% headroom) and reported usage stays within the window (#9235). */
  const PAYLOAD_REJECTION_OCCUPANCY_CEILING = 0.9;
  
@@ -39,7 +39,7 @@ index 1c32f48..a97f6c9 100644
  	contextTokensAtStart: number;
  }
  
-@@ -366,6 +371,9 @@ type CompactionProjectionArgs = {
+@@ -371,6 +376,9 @@ type CompactionProjectionArgs = {
  
  /** One background speculative-compaction run and (once resolved) its armed result. */
  interface SpeculationRun {
@@ -49,7 +49,7 @@ index 1c32f48..a97f6c9 100644
  	controller: AbortController;
  	promise: Promise<void>;
  	contextTokensAtStart: number;
-@@ -715,10 +723,20 @@ export class SessionMaintenance {
+@@ -720,10 +728,20 @@ export class SessionMaintenance {
  	}
  
  	/** Abort and discard any in-flight or armed speculative compaction. */
@@ -71,7 +71,7 @@ index 1c32f48..a97f6c9 100644
  		run.controller.abort();
  	}
  
-@@ -2324,17 +2342,13 @@ export class SessionMaintenance {
+@@ -2313,17 +2331,13 @@ export class SessionMaintenance {
  		const current = this.#speculation;
  		if (current) {
  			if (!current.armed) return; // one run at a time
@@ -96,7 +96,7 @@ index 1c32f48..a97f6c9 100644
  		}
  		const model = this.#model;
  		if (!model) return;
-@@ -2348,32 +2362,51 @@ export class SessionMaintenance {
+@@ -2337,32 +2351,51 @@ export class SessionMaintenance {
  	/** Install and launch one background speculation run for `method`. */
  	#startSpeculationRun(contextTokens: number, method: "remote" | "handoff" | "soft"): void {
  		const controller = new AbortController();
@@ -170,7 +170,7 @@ index 1c32f48..a97f6c9 100644
  	}
  
  	/** Identity of `model`'s native speculation in the current session. */
-@@ -2427,7 +2460,7 @@ export class SessionMaintenance {
+@@ -2416,7 +2449,7 @@ export class SessionMaintenance {
  		if (run) {
  			if (run.armed) {
  				if (!this.#armedSpeculationValid(run.armed, contextTokens)) {
@@ -179,7 +179,7 @@ index 1c32f48..a97f6c9 100644
  					return false;
  				}
  				return false; // ready — the real pass splices it in now
-@@ -2456,6 +2489,14 @@ export class SessionMaintenance {
+@@ -2445,6 +2478,14 @@ export class SessionMaintenance {
  		if (!snapshotLeafId) return clear();
  		const preparation = prepareCompaction(branch, effectiveSettings, model, this.#tokenizer);
  		if (!preparation) return clear();
@@ -194,7 +194,7 @@ index 1c32f48..a97f6c9 100644
  		const signal = run.controller.signal;
  		let armed: ArmedSpeculation;
  		if (method === "handoff") {
-@@ -2466,6 +2507,7 @@ export class SessionMaintenance {
+@@ -2455,6 +2496,7 @@ export class SessionMaintenance {
  			if (!generated) return clear();
  			const { summary, details } = handoffSummaryFromDocument(generated.document, preparation);
  			armed = {
@@ -202,7 +202,7 @@ index 1c32f48..a97f6c9 100644
  				result: {
  					summary,
  					shortSummary: undefined,
-@@ -2509,11 +2551,13 @@ export class SessionMaintenance {
+@@ -2498,11 +2540,13 @@ export class SessionMaintenance {
  					// sticky provider sessions by sessionId, and a speculation
  					// overlapping the live stream must never interleave with it.
  					sessionId: `${this.#host.sessionId()}:spec:${Snowflake.next()}`,
@@ -216,7 +216,7 @@ index 1c32f48..a97f6c9 100644
  				result: {
  					...result,
  					preserveData: mergeLlmCompactionPreserveData(compactionPrep.preserveData, result.preserveData),
-@@ -2528,8 +2572,11 @@ export class SessionMaintenance {
+@@ -2517,8 +2561,11 @@ export class SessionMaintenance {
  		if (signal.aborted || this.#speculation !== run) return;
  		run.armed = armed;
  		logger.debug("Speculative compaction armed", {
@@ -228,7 +228,7 @@ index 1c32f48..a97f6c9 100644
  			tokensBefore: armed.result.tokensBefore,
  		});
  	}
-@@ -2639,21 +2686,20 @@ export class SessionMaintenance {
+@@ -2628,21 +2675,20 @@ export class SessionMaintenance {
  	#claimArmedSpeculation(triggerContextTokens?: number, pendingContextTokens?: number): ArmedSpeculation | undefined {
  		const run = this.#speculation;
  		if (!run) return undefined;
@@ -257,7 +257,7 @@ index 1c32f48..a97f6c9 100644
  		return run.armed;
  	}
  
-@@ -3823,7 +3869,9 @@ export class SessionMaintenance {
+@@ -3812,7 +3858,9 @@ export class SessionMaintenance {
  						// (xai-oauth/grok-build) don't trip requireSupportedEffort.
  						thinkingLevel: this.#host.thinkingLevel(),
  						tools: this.#host.agent.state.tools,
@@ -268,7 +268,7 @@ index 1c32f48..a97f6c9 100644
  						// Explicit cache keys only (never a sessionId fallback): V2
  						// treats any truthy key as provenance for x-opencode-session.
  						// Conventional summaries run on `candidate`; remote compaction
-@@ -3831,7 +3879,7 @@ export class SessionMaintenance {
+@@ -3820,7 +3868,7 @@ export class SessionMaintenance {
  						promptCacheKey: this.#host.getPromptCacheKeyForModel(candidate),
  						remotePromptCacheKey: this.#host.getPromptCacheKeyForModel(remoteCompactionPolicyModel(candidate)),
  						providerSessionState: this.#host.providerSessionState,
@@ -277,7 +277,7 @@ index 1c32f48..a97f6c9 100644
  						codexAccessPrograms: cfgProvidersOpenaiCodexDaybreak.get(this.#host.settings),
  						// Route every summarization HTTP request through the
  						// session's side-stream transport so the provider
-@@ -5285,14 +5333,24 @@ export class SessionMaintenance {
+@@ -5292,14 +5340,24 @@ export class SessionMaintenance {
  				: COMPACTION_CHECK_NONE;
  		}
  
@@ -308,7 +308,7 @@ index 1c32f48..a97f6c9 100644
  
  		const effectiveSettings = resolveMethodSettings(compactionSettings, method);
  		const fallbackFromShake = options.fallbackFromShake === true;
-@@ -5341,6 +5399,28 @@ export class SessionMaintenance {
+@@ -5348,6 +5406,28 @@ export class SessionMaintenance {
  			// queue, not the core steering queue (which handoff's agent.reset() would wipe).
  			const startEvent = { type: "auto_compaction_start" as const, reason, action };
  			await this.#emitLifecycleEvent(startEvent, false);
@@ -337,7 +337,7 @@ index 1c32f48..a97f6c9 100644
  			if (armedSpec) {
  				// A background speculation already produced this compaction's
  				// summary; splice it in instead of paying for a blocking
-@@ -5348,7 +5428,10 @@ export class SessionMaintenance {
+@@ -5355,7 +5435,10 @@ export class SessionMaintenance {
  				// known — the armed value measured the smaller prefix at compute
  				// time.
  				logger.debug("Applying armed speculative compaction", {

@@ -17,7 +17,7 @@ Ludens 将编码智能体连接到任意 PC 桌面、游戏模拟器与远程受
 - **受控节点池与多设备并发挂载（`@ludens/baseware`）**：在 `~/.ludens/machines.json` 中统一管理本机 `stdio` 驱动、模拟器 TCP 桥接（如 mGBA `:47653` 预设）、远程 `ssh` CUA 隧道以及 `http`/`sse` MCP 端点。支持单个工作区并发挂载多台设备，并随时在运行期一键切换主控或定向调用（`ludens machine use | connect | disconnect`）。
 - **常驻内存的热重载感知状态机（`perception.py`）**：独立常驻的 Python 工作进程跨轮次保持视觉模型、状态机变量与高频 fMP4/H.264 时间轴采样，无需重启智能体宿主；修改 `perception.py` 或工作区模块即可热重载生效。
 - **可验证的能力三元闭环（`Capability – Eval – Env`）**：智能体将高频交互模式沉淀为带类型契约的 `@capability` 函数，编写配套的 `@eval_capability` 断言与 `@eval_env` 离线代理环境，通过 `ludens eval` 持续追踪每次代码演进后的评分轨迹。
-- **长周期多模态传输韧性**：基于 **Shiori**（内核搭载 **OMP `18.18.3`**），原生支持有状态 WebSocket 增量传输（`previous_response_id`，内置 60 秒断连冷却自愈与 `15 MiB` 单帧超限压缩后解封）、无状态 HTTP 前缀 KV 缓存保护（`appendOnlyContext`）以及基于 SHA-256 去重的图片外链卸载（`blob-broker`）。
+- **长周期多模态传输韧性**：基于 **Shiori**（内核搭载 **OMP `18.18.8`**），原生支持有状态 WebSocket 增量传输（`previous_response_id`，内置 60 秒断连冷却自愈与 `15 MiB` 单帧超限压缩后解封）、无状态 HTTP 前缀 KV 缓存保护（`appendOnlyContext`）以及基于 SHA-256 去重的图片外链卸载（`blob-broker`）。
 - **全链路实时驾驶舱与毫秒级回放台（`@ludens/app`）**：在浏览器控制台中实时查看多设备画面流、中途插话纠偏（`steer`）、按 30 秒分片毫秒级回放历史证据、一键启停后台服务与触发能力评测，或搭配可选的 **Ludens Pet** 桌面伴侣使用。
 
 ---
@@ -72,7 +72,7 @@ flowchart LR
   end
 
   subgraph ControlPlane["@ludens/core · 智能体基座"]
-    Host["Ludens Host 守护进程\nShiori (OMP 18.18.3)"]
+    Host["Ludens Host 守护进程\nShiori (OMP 18.18.8)"]
     Worker["常驻 Python 感知与评测进程\nperception.py · @capability · ludens eval"]
   end
 
@@ -93,7 +93,7 @@ flowchart LR
 | --- | --- |
 | [`@ludens/protocol`](protocol/README.md) | 零依赖契约层：跨包共享的 RPC Schema、运行事件信封、内容寻址归档格式（`.ludens/archive/`）与控制台/桌宠 DTO。 |
 | [`@ludens/baseware`](baseware/README.md) | 独立设备基座服务：驱动加载器、`Controller` JSON Schema 参数校验、`epoch` 控制权租约仲裁，以及 CLI / API / MCP 统一入口。 |
-| [`@ludens/core`](core/README.md) | 自适应智能体基座：`launchd` 后台服务编排、Shiori（`OMP 18.18.3`）会话运行时、常驻 Python `perception.py` 进程、多机路由与 `ludens eval` 评测引擎。 |
+| [`@ludens/core`](core/README.md) | 自适应智能体基座：`launchd` 后台服务编排、Shiori（`OMP 18.18.8`）会话运行时、常驻 Python `perception.py` 进程、多机路由与 `ludens eval` 评测引擎。 |
 | [`@ludens/app`](app/README.md) | 浏览器优先的 Next.js 16 可观测与控制工作台（`http://127.0.0.1:3015`），内置可选的 Electron **Ludens Pet** 桌面伴侣。 |
 
 ### 工作区目录结构
