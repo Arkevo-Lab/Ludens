@@ -442,7 +442,7 @@
 .codex-thread-title > strong {
   display: inline-flex;
   align-items: baseline;
-  min-width: 0;
+  min-width: 44px;
   flex: 0 1 auto;
   font-size: 13.5px;
   font-weight: 600;
@@ -455,6 +455,7 @@
 }
 .codex-thread-workspace {
   min-width: 0;
+  margin-left: 4px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2409,14 +2410,26 @@
   .codex-thread-workspace {
     display: none;
   }
+  .codex-thread-heading,
+  .codex-thread-title > strong {
+    flex: 0 0 auto;
+    overflow: visible;
+  }
   .codex-status-pill {
-    max-width: 168px;
+    max-width: 190px;
   }
   .codex-chat-scroll {
     padding: 22px 20px 22px;
   }
   .codex-composer-wrap {
     padding: 6px 16px 14px;
+  }
+}
+
+@media (min-width: 1100px) and (max-width: 1340px) {
+  .codex-workbench[data-dock-open] .codex-thread-doc-icon,
+  .codex-workbench[data-dock-open] .codex-live-phase {
+    display: none;
   }
 }
 
@@ -2469,11 +2482,15 @@
   .codex-thread-title {
     min-width: 84px;
   }
-  .codex-thread-doc-icon {
+  .codex-thread-doc-icon,
+  .codex-live-phase {
     display: none;
   }
   .codex-status-pill {
-    max-width: 124px;
+    max-width: 148px;
+  }
+  .codex-thread-run-picker button {
+    max-width: 168px;
   }
   .codex-pill-bar,
   .codex-pill-left {

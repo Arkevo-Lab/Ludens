@@ -161,7 +161,7 @@ export default function ConsoleShell() {
       type="button"
       variant="ghost"
       size="icon-sm"
-      className="mobile-nav-trigger"
+      className="mobile-nav-trigger min-[681px]:hidden"
       aria-expanded={mobileNavOpen}
       aria-label={st(mobileNavOpen ? "menuClose" : "menuOpen")}
       title={st(mobileNavOpen ? "menuClose" : "menuOpen")}

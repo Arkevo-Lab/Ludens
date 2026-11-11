@@ -276,6 +276,11 @@ h3 {
 .mobile-nav-trigger {
   display: none;
 }
+@media (min-width: 681px) {
+  .mobile-nav-trigger {
+    display: none !important;
+  }
+}
 .mobile-shell-bar {
   display: none;
 }
@@ -304,6 +309,11 @@ h3 {
   max-width: none;
   margin: 0;
   padding: 0;
+}
+@media (min-width: 1080px) {
+  .page-content.perf-page:has(.run-analysis-workbench) {
+    padding-bottom: 12px;
+  }
 }
 .page-heading {
   display: flex;
@@ -705,17 +715,30 @@ h3 {
   color: var(--gold);
 }
 .perf-run-status {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--surface-inset);
+  height: 28px;
   min-height: 28px;
-  padding: 4px 10px;
-  gap: 8px;
+  padding: 0 10px;
+  gap: 7px;
   font-size: 11.5px;
-  line-height: 1.2;
+  line-height: 1;
+}
+.perf-run-status > strong,
+.perf-run-status > span {
+  white-space: nowrap;
 }
 .perf-status-model {
-  max-width: 190px;
+  min-width: 0;
+  max-width: 175px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -725,6 +748,17 @@ h3 {
   padding-left: 8px;
   border-left: 1px solid var(--line);
   white-space: nowrap;
+}
+@media (max-width: 1420px) {
+  .perf-run-status .run-time {
+    display: none;
+  }
+}
+@media (min-width: 1080px) and (max-width: 1240px) {
+  .perf-run-status > i,
+  .perf-status-model {
+    display: none;
+  }
 }
 .perf-overview-pane {
   display: flex;

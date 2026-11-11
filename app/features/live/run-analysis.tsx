@@ -139,7 +139,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
 
   return <Tabs value={currentTab} onValueChange={value => handleTabChange(value as "overview" | "requests")} className="run-analysis">
     <div className="perf-toolbar flex min-h-[48px] flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2 min-[1080px]:flex-nowrap">
-      <div className="perf-toolbar-left flex min-w-0 items-center gap-2">
+      <div className="perf-toolbar-left flex shrink-0 items-center gap-2">
         {mobileNavSlot}
         <TabsList className="perf-tabs-list h-auto shrink-0">
           <TabsTrigger value="overview" className="perf-tab-trigger">
@@ -208,7 +208,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
     </TabsContent>
 
     <TabsContent value="requests" className="min-h-0">
-      <div className="run-analysis-grid run-analysis-workbench min-[1080px]:max-h-[calc(100dvh-76px)] min-[1080px]:grid-rows-[minmax(0,1fr)] min-[1080px]:items-stretch min-[1080px]:overflow-hidden">
+      <div className="run-analysis-grid run-analysis-workbench min-[1080px]:h-[calc(100dvh-100px)] min-[1080px]:max-h-[calc(100dvh-100px)] min-[1080px]:grid-rows-[minmax(0,1fr)] min-[1080px]:items-stretch min-[1080px]:overflow-hidden">
         <section className="surface run-analysis-requests min-[1080px]:flex min-[1080px]:max-h-full min-[1080px]:min-h-0 min-[1080px]:flex-col min-[1080px]:overflow-hidden" aria-labelledby={`${id}-requests`}>
           <div className="surface-heading"><h2 id={`${id}-requests`}>{t("requests")}</h2>
             <Button type="button" variant="ghost" size="xs" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>
