@@ -117,6 +117,22 @@ The Ludens mark is a 5 × 5 pixel ring around a hollow L, with one loose pixel a
 | Light backgrounds | `app/public/brand/ludens-mark-light.svg` |
 | App icon tile (desktop window and dock) | `app/public/brand/ludens-app-icon.svg` · `ludens-app-icon.png` |
 | Browser tab and touch icon | `app/app/icon.svg` · `app/app/apple-icon.png` |
-| Console sidebar | `BrandMark` in `app/shell/console-sidebar.tsx` |
+| Console sidebar and in-app use | `PixelMark` in `app/components/ui/pixel-mark.tsx` |
 
 The tray icon stays the Ludens Pet spider; it belongs to the pet catalog under `app/public/companion/ludens/`.
+
+### Motion
+
+The mark's parts carry the console's motion. Everything moves on the pixel grid, in steps: one timing token (`--step`, 60ms), `steps()` easing only, transform and opacity only. The global reduced-motion rule turns all of it off.
+
+`PixelMark` (`app/components/ui/pixel-mark.tsx`) draws the mark; `app/app/pixel-motion.css` holds the token and keyframes.
+
+| Prop | Effect |
+| --- | --- |
+| `state` | The loose pixel as a status light: `idle`, `reasoning` (pulse), `recording` (blink), `passed` (green), `failed` (red, with a shake), `waiting` (grey, slow blink) |
+| `loading` | A three-pixel tail runs round the ring |
+| `filled` | The hollow L fills cell by cell in blue: a human holds control |
+| `assemble` | The ring drops in clockwise and the loose pixel lands, once on mount |
+| `label` | Accessible name; without it the mark is decorative |
+
+At rest the ring is one outline. It splits into thirteen separate cells only while `loading` or `assemble` is set. Hovering or focusing the sidebar brand makes the loose pixel hop once.

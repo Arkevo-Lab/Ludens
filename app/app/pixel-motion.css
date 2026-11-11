@@ -1,0 +1,45 @@
+/* Pixel motion: everything moves on the logo's grid, in steps. Transform and opacity only, steps() easing only.
+   Reduced motion is switched off by the global rule in globals.css. */
+:root {
+  --step: 60ms;
+}
+
+.pixel-mark { display: block; flex-shrink: 0; overflow: visible; }
+.pixel-mark rect, .pixel-mark path { transform-box: fill-box; transform-origin: center; }
+.pixel-mark .pm-c { fill: currentColor; }
+.pixel-mark .pm-p { fill: var(--gold); }
+.pixel-mark .pm-h { fill: var(--blue); opacity: 0; }
+
+/* Status pixel */
+.pixel-mark[data-state="reasoning"] .pm-p { animation: pm-pulse 900ms steps(4, end) infinite alternate; }
+.pixel-mark[data-state="recording"] .pm-p { animation: pm-blink 1s steps(1, end) infinite; }
+.pixel-mark[data-state="passed"] .pm-p { fill: var(--sage); animation: pm-pop 2.4s steps(1, end) infinite; }
+.pixel-mark[data-state="failed"] .pm-p { fill: var(--danger); }
+.pixel-mark[data-state="failed"] { animation: pm-shake 2.4s steps(1, end) infinite; }
+.pixel-mark[data-state="waiting"] .pm-p { fill: var(--muted-foreground); animation: pm-blink 2s steps(1, end) infinite; }
+
+/* Chase loader */
+.pixel-mark[data-loading] .pm-c { animation: pm-chase 1.3s steps(1, end) infinite; animation-delay: calc(var(--i) * 100ms - 1.3s); }
+
+/* Control handoff: the hollow L fills cell by cell and drains in reverse. */
+.pixel-mark .pm-h { transition: opacity 0s; transition-delay: calc((4 - var(--j)) * var(--step)); }
+.pixel-mark[data-filled] .pm-h { opacity: 1; transition-delay: calc(var(--j) * var(--step)); }
+.pixel-mark .pm-p { transition: fill 0s calc(var(--step) * 5); }
+.pixel-mark[data-filled] .pm-p { fill: var(--blue); }
+
+/* Assemble, once on mount */
+.pixel-mark[data-assemble] .pm-c { animation: pm-drop calc(var(--step) * 4) steps(4, end) both; animation-delay: calc(var(--i) * 40ms); }
+.pixel-mark[data-assemble] .pm-p { animation: pm-land calc(var(--step) * 7) steps(7, end) both; animation-delay: 640ms; }
+
+/* Brand hop */
+.brand:hover .pixel-mark .pm-p,
+.brand:focus-visible .pixel-mark .pm-p { animation: pm-hop calc(var(--step) * 6) steps(6, end); }
+
+@keyframes pm-pulse { from { opacity: 1; } to { opacity: 0.2; } }
+@keyframes pm-blink { 0% { opacity: 1; } 50%, 100% { opacity: 0; } }
+@keyframes pm-pop { 0% { transform: scale(1.6); } 5% { transform: scale(1.3); } 10%, 100% { transform: none; } }
+@keyframes pm-shake { 0% { transform: translateX(-1px); } 4% { transform: translateX(1px); } 8% { transform: translateX(-1px); } 12%, 100% { transform: none; } }
+@keyframes pm-chase { 0% { opacity: 1; } 24%, 100% { opacity: 0.2; } }
+@keyframes pm-drop { from { opacity: 0; transform: translateY(-24px); } to { opacity: 1; transform: none; } }
+@keyframes pm-land { 0% { opacity: 0; transform: translateY(-36px); } 15% { opacity: 1; } 57% { transform: translateY(0); } 78% { transform: translateY(-8px); } 100% { opacity: 1; transform: none; } }
+@keyframes pm-hop { 0% { transform: none; } 34% { transform: translateY(-14px); } 67% { transform: translateY(0); } 84% { transform: translateY(-5px); } 100% { transform: none; } }

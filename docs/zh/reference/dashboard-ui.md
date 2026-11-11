@@ -117,6 +117,22 @@ Ludens 标识是一个 5 × 5 像素环，环内留出镂空的 L，右上角有
 | 浅色背景 | `app/public/brand/ludens-mark-light.svg` |
 | 应用图标底板（桌面窗口与程序坞） | `app/public/brand/ludens-app-icon.svg` · `ludens-app-icon.png` |
 | 浏览器标签页与触控图标 | `app/app/icon.svg` · `app/app/apple-icon.png` |
-| 控制台侧栏 | `app/shell/console-sidebar.tsx` 中的 `BrandMark` |
+| 控制台侧栏与应用内使用 | `app/components/ui/pixel-mark.tsx` 中的 `PixelMark` |
 
 托盘图标仍为 Ludens 桌宠蜘蛛，归属 `app/public/companion/ludens/` 下的桌宠资源目录。
+
+### 动效
+
+标识的各个部件承载控制台的动效。所有运动都落在像素网格上、按步进行：只有一个时间变量（`--step`，60ms），只使用 `steps()` 缓动，只改变 transform 与 opacity。全局的减少动态效果规则会关闭全部动效。
+
+`PixelMark`（`app/components/ui/pixel-mark.tsx`）负责绘制标识；`app/app/pixel-motion.css` 存放时间变量与关键帧。
+
+| 属性 | 效果 |
+| --- | --- |
+| `state` | 独立像素作为状态灯：`idle`、`reasoning`（脉动）、`recording`（闪烁）、`passed`（绿色）、`failed`（红色并抖动）、`waiting`（灰色慢闪） |
+| `loading` | 三像素的尾迹沿像素环循环 |
+| `filled` | 镂空的 L 以蓝色逐格填满：表示由人接管控制 |
+| `assemble` | 像素环顺时针落下，独立像素最后落位，仅在挂载时播放一次 |
+| `label` | 无障碍名称；未提供时标识仅作装饰 |
+
+静止时像素环是一条完整轮廓，只有设置了 `loading` 或 `assemble` 时才拆成十三个独立格子。鼠标悬停或键盘聚焦侧栏品牌时，独立像素会跳一下。
