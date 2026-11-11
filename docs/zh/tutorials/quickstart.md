@@ -8,9 +8,9 @@
 
 ### 1. 环境前提与凭据
 
-- **操作系统**：完整后台服务编排（`ludens up` / `ludens down` / `ludens services`）依赖 **macOS launchd**。
-- **工具链**：准备 **Bun 1.4**、**Python 3.12+**、**Node.js 22.x（22.13 起）或 24+** 与 **uv**。可选桌宠共用同一套 JavaScript workspace 安装（Electron 是 `app` 的 devDependency）。
-- **模型凭据**：启动 Agent 前需在本机完成 **OMP 模型登录**。Ludens 固定使用 **OMP 18.14.0** 并直接复用其凭据存储，默认模型为 `openai-codex/gpt-6.1-sol`。
+- **操作系统**：支持 macOS、Linux 与 Windows（使用内置 `cua` 驱动接管本机桌面时需按上游 Cua Driver 要求授予对应系统权限）。
+- **工具链**：准备 **Bun 1.4+**、**Python 3.12+**、**Node.js 22.x（22.13 起）或 24+** 与 **uv**。可选桌宠共用同一套 JavaScript workspace 安装（Electron 是 `app` 的 devDependency）。
+- **模型凭据**：启动 Agent 前需在本机完成 **OMP 模型登录**。Ludens 固定使用 **OMP 18.18.8** 并直接复用其凭据存储，默认模型为 `openai-codex/gpt-6.1-sol`。
 
 ### 2. 安装核心组件
 
@@ -84,7 +84,7 @@ ludens auto on
 | `ludens workspace forget <id>` | 只移除索引；不删目录、会话或日志，不停止服务。 |
 | `ludens up --dry-run` | 校验配置并打印完整进程启动计划，不实际拉起服务；需要新启动 Dashboard 时，实际 `ludens up` 才执行其构建检查。 |
 | `ludens up [--pet / --no-pet]` | 按需启动或复用模拟器、Baseware、Host 与 Dashboard；按 `pet` 设置启用桌宠，也可用互斥的 `--pet` / `--no-pet` 仅覆盖本次启动，不写回配置。新启动的 Host 处于 `manual` 模式；若复用已在 `auto` 运行的 Host 则继续原控制周期。重复 `up` 不会热加载修改后的 `ludens.json`，复用现有 Dashboard 也不会热更新其构建。 |
-| `ludens services` | 查询当前工作区关联的 launchd 任务 PID、状态与最近退出码。 |
+| `ludens services` | 查询当前工作区关联的后台受管任务 PID、状态与最近退出码。 |
 | `ludens auto on [--message '文本'] [--seconds <n>]` | 开启新控制周期（生成新 `epoch`，重置请求预算）并向模型发起推理。省略 `--seconds <n>` 时默认不设时间上限、持续运行直到手动执行 `auto off`；显式传入 `--seconds <n>` 时按指定秒数限时运行。`--message` 仅在该次接管的首轮附加一次，后续续轮不重复注入。 |
 | `ludens auto off` | 立即撤销设备操作权并取消 Ludens 管理的在途调用，模拟器保持运行；需等待当前周期清理完毕后方可再次 `auto on`。 |
 | `ludens down --keep-emulator` | 交还控制权并停止 Host 与 Baseware，保留模拟器窗口与游戏现场；适合修改 `ludens.json`（如预算或模型）后重新 `ludens up`。 |
@@ -152,4 +152,4 @@ ludens workspace import /absolute/path/to/workspace \
 ### 3. 会话续接与后台服务目录
 
 - **会话续接**：工作区 OMP 会话保存在 `.ludens/shiori/sessions/`，当前默认续接指针位于 `.ludens/shiori/current-session.json`。重启 Host 默认续接原会话并开启新的 `logs/<run-id>/` 目录。前台 `ludens run` 可传 `--new-session` 开启全新上下文（保留工作区文件），或传 `--resume /absolute/path/to/session.jsonl` 切换到同工作区的指定历史会话。
-- **后台服务日志**：[launch-background.py](../../../core/scripts/launch-background.py) 将工作区受管进程的标准输出与 launchd 状态写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（launchd label 为 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。所有后台服务均脱离终端运行，但不注册开机自启或崩溃死循环重启；排障时先查看 `ludens services` 与对应日志。
+- **后台服务日志**：[launch-background.py](../../../core/scripts/launch-background.py) 将工作区受管进程的标准输出（`<name>.log`）与后台任务状态（`<name>.job.json`）写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（任务标识 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。所有后台服务均脱离终端运行，但不注册开机自启或崩溃死循环重启；排障时先查看 `ludens services` 与对应日志。

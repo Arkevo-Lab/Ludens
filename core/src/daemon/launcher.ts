@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { defaultSocket } from "@ludens/baseware/address";
 import { ludensHome, validateConnectionConfig, type ModelConnectionConfig } from "@ludens/protocol/ludens";
 import {
@@ -8,6 +8,7 @@ import {
   type MachineTransportKind,
   type WorkspaceMachinesBinding,
 } from "@ludens/protocol/machines";
+import { jobStateFilePath, jobTargetLabel } from "./background-jobs.ts";
 
 export interface DriverManifest {
   id: string;
@@ -228,10 +229,32 @@ const systemIO: LaunchIO = {
     for (const key of Object.keys(env)) {
       if (key.startsWith("BASEWARE_") || ["LUDENS_SOCKET", "LUDENS_WORKSPACE"].includes(key)) delete env[key];
     }
-    const child = Bun.spawn(argv, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    let command = [...argv];
+    if (command[0] === "env") {
+      let idx = 1;
+      while (idx < command.length && command[idx]!.includes("=") && !command[idx]!.startsWith("=")) {
+        const eq = command[idx]!.indexOf("=");
+        env[command[idx]!.slice(0, eq)] = command[idx]!.slice(eq + 1);
+        idx++;
+      }
+      command = command.slice(idx);
+    }
+    if (command[0] === "python3" && !Bun.which("python3", { PATH: env.PATH })) {
+      command[0] = Bun.which("python", { PATH: env.PATH }) ?? "python3";
+    }
+    let child: ReturnType<typeof Bun.spawn>;
+    try {
+      child = Bun.spawn(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    } catch (error) {
+      return { code: 127, stdout: "", stderr: String(error) };
+    }
     const timer = setTimeout(() => child.kill(), 10_000);
     try {
-      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      const [code, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout as ReadableStream).text(),
+        new Response(child.stderr as ReadableStream).text(),
+      ]);
       return { code, stdout, stderr };
     } finally { clearTimeout(timer); }
   },
@@ -252,7 +275,34 @@ const systemIO: LaunchIO = {
   sleep: () => Bun.sleep(500), now: Date.now, note: message => console.error(message),
 };
 
-// Thin orchestration over the existing CLI and launchd script. No supervisor or restart loop.
+function parseSsPids(stdout: string, port: number, state: "LISTEN" | "ESTAB"): number[] {
+  const pids = new Set<number>();
+  for (const line of stdout.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    const cols = trimmed.split(/\s+/);
+    if (cols[0] !== state) continue;
+    const local = cols[3] ?? "";
+    if (!local.endsWith(`:${port}`)) continue;
+    for (const match of trimmed.matchAll(/pid=(\d+)/g)) pids.add(Number(match[1]));
+  }
+  return [...pids];
+}
+
+function parseNetstatPids(stdout: string, port: number, state: "LISTENING" | "ESTABLISHED"): number[] {
+  const pids = new Set<number>();
+  for (const line of stdout.split(/\r?\n/)) {
+    const cols = line.trim().split(/\s+/);
+    if (cols.length < 5 || cols[0]?.toUpperCase() !== "TCP") continue;
+    if (cols[3]?.toUpperCase() !== state) continue;
+    if (!(cols[1] ?? "").endsWith(`:${port}`)) continue;
+    const pid = Number(cols[4]);
+    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
+  }
+  return [...pids];
+}
+
+// Thin cross-platform orchestration over the CLI and detached background job script (no auto-restart loop).
 export class WorkspaceLauncher {
   constructor(readonly plan: LaunchPlan, private io: LaunchIO = systemIO) {}
 
@@ -262,15 +312,21 @@ export class WorkspaceLauncher {
     if (result.code !== 0) throw new Error(result.stderr.trim() || result.stdout.trim() || `${argv[0]} exited ${result.code}`);
     return result;
   }
+  private stateFile(name: ServiceName) {
+    return jobStateFilePath(name === "pet" ? this.plan.sharedPet.background : this.plan.background, name);
+  }
   async job(name: ServiceName): Promise<Job> {
     const hash = createHash("sha256").update(this.plan.workspace).digest("hex").slice(0, 16);
-    const label = name === "pet" ? "dev.ludens.pet" : `dev.ludens.core.${hash}.${name}`;
-    const target = `gui/${process.getuid!()}/${label}`;
-    const result = await this.run(["launchctl", "print", target]);
-    return { target, registered: result.code === 0,
-      pid: Number(result.stdout.match(/^\s*pid = (\d+)$/m)?.[1]) || null,
-      state: result.stdout.match(/^\s*state = (.+)$/m)?.[1] ?? null,
-      lastExitCode: result.stdout.match(/^\s*last exit code = (-?\d+)$/m) ? Number(result.stdout.match(/^\s*last exit code = (-?\d+)$/m)![1]) : null };
+    const target = jobTargetLabel(hash, name);
+    const result = await this.checked(["python3", this.plan.launcher, "--status", this.stateFile(name)]);
+    const parsed = JSON.parse(result.stdout) as { registered: boolean; pid: number | null; state: string | null; lastExitCode: number | null };
+    return {
+      target,
+      registered: Boolean(parsed.registered),
+      pid: typeof parsed.pid === "number" && parsed.pid > 0 ? parsed.pid : null,
+      state: parsed.state ?? null,
+      lastExitCode: typeof parsed.lastExitCode === "number" ? parsed.lastExitCode : null,
+    };
   }
   async host(): Promise<HostStatus | null> {
     const result = await this.run([this.plan.ludens, "status"]);
@@ -299,11 +355,14 @@ export class WorkspaceLauncher {
     } while (this.io.now() < deadline);
     throw new Error(`Timed out waiting for ${description}. Check ${this.plan.background}; use ludens services to inspect remaining processes.`);
   }
+  private async stopJob(name: ServiceName) {
+    await this.checked(["python3", this.plan.launcher, "--stop", this.stateFile(name)]);
+  }
   private async ensure(name: ServiceName) {
     const job = await this.job(name);
     if (job.pid) { this.io.note(`Reusing ${name} (PID ${job.pid}).`); return; }
-    // launchd retains completed jobs. Remove only this managed service's stopped registration.
-    if (job.registered) await this.checked(["launchctl", "bootout", job.target]);
+    // Remove only this managed service's stopped registration before starting fresh.
+    if (job.registered) await this.stopJob(name);
     this.io.note(`Starting ${name}; log: ${this.log(name)}`);
     await this.checked(["python3", this.plan.launcher,
       ...(name === "pet" ? ["--label", "dev.ludens.pet", "--log-dir", this.plan.sharedPet.background] : []),
@@ -315,13 +374,68 @@ export class WorkspaceLauncher {
     return job.pid;
   }
   private async listeningPids(port: number) {
+    if (process.platform === "win32") {
+      const netstat = await this.run(["netstat", "-ano", "-p", "tcp"]);
+      return parseNetstatPids(netstat.stdout, port, "LISTENING");
+    }
     const result = await this.run(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"]);
+    if (result.code === 127 && process.platform === "linux") {
+      const ss = await this.run(["ss", "-Htanp"]);
+      return parseSsPids(ss.stdout, port, "LISTEN");
+    }
     return result.stdout.trim().split(/\s+/).filter(Boolean).map(Number);
   }
   private async bridgeClients(port: number) {
     const listeners = await this.listeningPids(port);
+    if (process.platform === "win32") {
+      const netstat = await this.run(["netstat", "-ano", "-p", "tcp"]);
+      return parseNetstatPids(netstat.stdout, port, "ESTABLISHED").filter(pid => !listeners.includes(pid));
+    }
     const result = await this.run(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:ESTABLISHED", "-t"]);
+    if (result.code === 127 && process.platform === "linux") {
+      const ss = await this.run(["ss", "-Htanp"]);
+      return parseSsPids(ss.stdout, port, "ESTAB").filter(pid => !listeners.includes(pid));
+    }
     return result.stdout.trim().split(/\s+/).filter(Boolean).map(Number).filter(pid => !listeners.includes(pid));
+  }
+  private async listeningPortsForPid(pid: number): Promise<number[]> {
+    if (process.platform === "win32") {
+      const netstat = await this.run(["netstat", "-ano", "-p", "tcp"]);
+      const ports: number[] = [];
+      for (const line of netstat.stdout.split(/\r?\n/)) {
+        const cols = line.trim().split(/\s+/);
+        if (cols.length < 5 || cols[0]?.toUpperCase() !== "TCP" || cols[3]?.toUpperCase() !== "LISTENING") continue;
+        if (Number(cols[4]) !== pid) continue;
+        const portMatch = cols[1]?.match(/:(\d+)$/);
+        if (portMatch) ports.push(Number(portMatch[1]));
+      }
+      return ports;
+    }
+    const listeners = await this.run(["lsof", "-a", "-p", String(pid), "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "n"]);
+    if (listeners.code === 127 && process.platform === "linux") {
+      const ss = await this.run(["ss", "-Htanp"]);
+      const ports: number[] = [];
+      for (const line of ss.stdout.split(/\r?\n/)) {
+        const cols = line.trim().split(/\s+/);
+        if (cols[0] !== "LISTEN" || !line.includes(`pid=${pid},`)) continue;
+        const portMatch = cols[3]?.match(/:(\d+)$/);
+        if (portMatch) ports.push(Number(portMatch[1]));
+      }
+      return ports;
+    }
+    const ports: number[] = [];
+    for (const match of listeners.stdout.matchAll(/^n.*:(\d+)$/gm)) ports.push(Number(match[1]));
+    return ports;
+  }
+  private async isExternalExecutableRunning(executable: string): Promise<boolean> {
+    if (process.platform === "win32") {
+      const image = basename(executable);
+      const running = await this.run(["tasklist", "/FI", `IMAGENAME eq ${image}`, "/NH"]);
+      return running.code === 0 && running.stdout.toLowerCase().includes(image.toLowerCase());
+    }
+    const literalExecutable = executable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const running = await this.run(["pgrep", "-f", `^${literalExecutable}([[:space:]]|$)`]);
+    return running.code === 0;
   }
   async up() {
     // Fail before launching the device when the permanent Dashboard would run stale code.
@@ -357,10 +471,8 @@ export class WorkspaceLauncher {
                 throw new Error(`Bridge port ${port} is already listening outside this workspace's emulator job. Omit game to connect to the prepared device, or use its workspace.`);
               }
               const executable = manifest?.launchCommand?.[0];
-              if (executable) {
-                const literalExecutable = executable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-                const running = await this.run(["pgrep", "-f", `^${literalExecutable}([[:space:]]|$)`]);
-                if (running.code === 0) throw new Error(`${effectiveDriver} is already running outside this workspace's emulator job. Use its workspace, or omit game to explicitly connect to the prepared device.`);
+              if (executable && await this.isExternalExecutableRunning(executable)) {
+                throw new Error(`${effectiveDriver} is already running outside this workspace's emulator job. Use its workspace, or omit game to explicitly connect to the prepared device.`);
               }
             }
             await this.ensure("emulator");
@@ -447,13 +559,12 @@ export class WorkspaceLauncher {
       }
       if (name === "emulator" && job.pid) {
         // An external-device workspace may have attached to this emulator since our host stopped.
-        const listeners = await this.run(["lsof", "-a", "-p", String(job.pid), "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "n"]);
-        for (const match of listeners.stdout.matchAll(/^n.*:(\d+)$/gm)) {
-          if ((await this.bridgeClients(Number(match[1]))).length) throw new Error("Emulator still has a bridge client from another Baseware service; stop that service before closing it.");
+        for (const port of await this.listeningPortsForPid(job.pid)) {
+          if ((await this.bridgeClients(port)).length) throw new Error("Emulator still has a bridge client from another Baseware service; stop that service before closing it.");
         }
       }
-      await this.checked(["launchctl", "bootout", job.target]);
-      if (job.pid) await this.waitFor(`${name} to exit`, async () => (await this.run(["kill", "-0", String(job.pid)])).code !== 0);
+      await this.stopJob(name);
+      if (job.pid) await this.waitFor(`${name} to exit`, async () => !(await this.job(name)).pid);
       this.io.note(`Stopped ${name}.`);
     }
     return this.status();

@@ -5,6 +5,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ensureWorkspaceIdentity } from "@ludens/protocol/ludens";
+import { ludensSocketPath } from "../src/daemon/background-jobs.ts";
 
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-import-command-")));
@@ -25,7 +26,7 @@ async function fixture() {
 
 async function listening(workspace: string, service: "core" | "baseware") {
   const hash = createHash("sha256").update(workspace).digest("hex").slice(0, 16);
-  const path = `/tmp/ludens-${service}-${process.getuid!()}-${hash}.sock`;
+  const path = ludensSocketPath(service, hash);
   const server = createServer(socket => socket.end());
   await new Promise<void>((done, reject) => { server.once("error", reject); server.listen(path, done); });
   return () => new Promise<void>((done, reject) => server.close(error => error ? reject(error) : done()));
