@@ -9,6 +9,7 @@
   .capability-declaration-description { font-size:13px; line-height:1.6; color:var(--muted-foreground); }
   .capability-declaration-description > p { margin:0; }
   .capability-eval-status { font-family:ui-sans-serif,sans-serif; font-size:10px; line-height:1.4; text-transform:uppercase; letter-spacing:0.04em; }
+  .capability-eval-status::before { content:""; width:6px; height:6px; flex-shrink:0; background:currentColor; }
   .capability-eval-status[data-capability-eval-status="verified"] { border-color:var(--success); color:var(--success); background:color-mix(in srgb,var(--success) 10%,transparent); }
   .capability-eval-status[data-capability-eval-status="stale"],.capability-eval-status[data-capability-eval-status="unverified"] { border-color:var(--gold); color:var(--gold); background:color-mix(in srgb,var(--gold) 10%,transparent); }
   .capability-eval-status[data-capability-eval-status="adapting"] { border-color:var(--primary); color:var(--primary); background:color-mix(in srgb,var(--primary) 12%,transparent); }
@@ -49,7 +50,7 @@
   .triad-filter-chip:hover { color:var(--foreground); border-color:color-mix(in srgb,var(--foreground) 28%,var(--border)); }
   .triad-filter-chip[data-active] { color:var(--foreground); border-color:var(--primary); background:color-mix(in srgb,var(--primary) 12%,var(--card)); }
   .triad-filter-chip b { font-family:var(--font-mono); font-size:11px; font-variant-numeric:tabular-nums; color:var(--foreground); }
-  .triad-status-dot { width:7px; height:7px; border-radius:999px; background:var(--muted-foreground); }
+  .triad-status-dot { width:7px; height:7px; background:var(--muted-foreground); }
   .triad-status-dot[data-status="verified"] { background:var(--success); }
   .triad-status-dot[data-status="adapting"] { background:var(--primary); }
   .triad-status-dot[data-status="stale"],.triad-status-dot[data-status="unverified"] { background:var(--gold); }
