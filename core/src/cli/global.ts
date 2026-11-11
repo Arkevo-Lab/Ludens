@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { forgetWorkspace, listRegisteredWorkspaces, ludensHome, readGlobalConfig, readWorkspaceIdentity,
   registerWorkspace, renewWorkspaceIdentity, updateGlobalConfig } from "@ludens/protocol/ludens";
+import { ludensSocketPath } from "../daemon/background-jobs.ts";
 
 export const GLOBAL_HELP = `Ludens settings and workspace registry:
 ludens config [show]
@@ -32,8 +33,8 @@ function directory(value: string) {
 /** Read-only probe; never take over or stop a running workspace. */
 async function assertInactive(workspace: string) {
   const hash = createHash("sha256").update(workspace).digest("hex").slice(0, 16);
-  for (const service of ["core", "baseware"]) {
-    const path = `/tmp/ludens-${service}-${process.getuid?.() ?? "user"}-${hash}.sock`;
+  for (const service of ["core", "baseware"] as const) {
+    const path = ludensSocketPath(service, hash);
     await new Promise<void>((accept, reject) => {
       const socket = connect(path);
       const timer = setTimeout(() => { socket.destroy(); reject(new Error(`Cannot confirm workspace is stopped: ${path}`)); }, 1000);

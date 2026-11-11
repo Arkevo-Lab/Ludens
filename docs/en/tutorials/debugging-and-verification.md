@@ -1,6 +1,6 @@
 # Console Debugging and Verification
 
-This guide covers the naming conventions for each package's scripts, how to debug Baseware / Host / Dashboard / Ludens Pet step by step in the foreground without relying on `launchd`, and how to run repo-wide offline checks and emulator hardware tests. For the regular full start/stop flow see [Installation and Workspace Lifecycle](quickstart.md).
+This guide covers the naming conventions for each package's scripts, how to debug Baseware / Host / Dashboard / Ludens Pet step by step in the foreground without background service orchestration, and how to run repo-wide offline checks and emulator hardware tests. For the regular full start/stop flow see [Installation and Workspace Lifecycle](quickstart.md).
 
 Unless a command block explicitly `cd`s elsewhere, all commands below run at the **repo root**. After switching to a workspace for foreground debugging, return to the repo root before running further component commands. Browser console is used by default; pet-related commands require the [optional pet install](quickstart.md#optional-pet) first.
 
