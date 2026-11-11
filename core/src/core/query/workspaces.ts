@@ -134,6 +134,7 @@ export interface WorkspaceSessionEntry {
 }
 
 export interface WorkspaceShioriSnapshot {
+  model?: string | null;
   currentSessionFile: string | null;
   sessions: WorkspaceSessionEntry[];
   memory: {
@@ -898,7 +899,15 @@ async function inspectWorkspaceShiori(workspacePath: string, workspaceId: string
     // MEMORY.md may not exist yet
   }
 
-  return { currentSessionFile, sessions, memory };
+  let configuredModel: string | null = null;
+  try {
+    const raw = JSON.parse(await readFile(join(canonical, "ludens.json"), "utf8")) as Record<string, unknown>;
+    if (typeof raw?.model === "string" && raw.model.trim()) configuredModel = raw.model.trim();
+  } catch {
+    configuredModel = null;
+  }
+
+  return { model: configuredModel, currentSessionFile, sessions, memory };
 }
 
 export async function workspaceStudio(id: unknown, home = globalHome): Promise<WorkspaceStudioSnapshot> {
@@ -955,10 +964,12 @@ export async function updateWorkspaceStudioConfig(
     const next: Record<string, unknown> = { ...raw };
 
     if ("model" in patch) {
-      if (typeof patch.model !== "string" || !patch.model.trim() || !patch.model.includes("/")) {
+      const nextModel = typeof patch.model === "string" ? patch.model.trim() : "";
+      const slash = nextModel.indexOf("/");
+      if (slash <= 0 || slash === nextModel.length - 1) {
         throw new Error("model 必须是 provider/model 格式的非空字符串");
       }
-      next.model = patch.model.trim();
+      next.model = nextModel;
     }
     for (const key of ["seconds", "requests"] as const) {
       if (key in patch) {
@@ -1095,6 +1106,34 @@ export async function updateWorkspaceShiori(
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         });
       }
+    } else if (body.kind === "setModel" || (!("kind" in body) && "model" in body)) {
+      const nextModel = typeof body.model === "string" ? body.model.trim() : "";
+      const slash = nextModel.indexOf("/");
+      if (slash <= 0 || slash === nextModel.length - 1) {
+        throw new Error("model 必须是 provider/model 格式的非空字符串");
+      }
+      const configPath = join(canonical, "ludens.json");
+      let raw: Record<string, unknown> = {};
+      try {
+        const parsed = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("ludens.json 必须是 JSON 对象");
+        }
+        raw = parsed;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      const next = { ...raw, model: nextModel };
+      const temporary = `${configPath}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+        await rename(temporary, configPath);
+      } finally {
+        await unlink(temporary).catch(error => {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        });
+      }
+      clearCatalogCache();
     } else {
       throw new Error(`未知的 Shiori 操作：${String(body.kind)}`);
     }

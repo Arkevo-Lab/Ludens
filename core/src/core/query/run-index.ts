@@ -59,6 +59,7 @@ async function initialise(index: LogIndex) {
   index.resetStores(stores);
   index.setMeta("run_projection", stamp);
   index.setMeta("run_position", 0);
+  index.setMeta("run_session_model", "");
 }
 
 /** Disk relationships select a model/span before its event bodies are loaded. */
@@ -310,6 +311,9 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
       if (event.type === "auto_compaction_end") increment("compactions");
       if (event.type === "model_start") {
         index.store("run-starts").index(event.trace.modelCallId, { epoch, position, number: ++state.callCount });
+      }
+      if (event.type === "session" && typeof d.model === "string" && d.model.trim()) {
+        index.setMeta("run_session_model", d.model.trim());
       }
       if (event.type === "perception_status" || event.type === "perception_observe_end" && d.status)
         index.store("run-perception-status").index(positionKey(position), { position });
@@ -626,7 +630,9 @@ export async function readRunProjection(index: LogIndex, epoch: string | null, p
     localPythonRpcCalls: states.reduce((acc, s) => acc + (s.rpcCalls ?? 0), 0),
     autonomyActionRatio: totalActionCalls > 0 ? Number((pythonCalls / totalActionCalls).toFixed(4)) : null,
   };
+  const sessionModel = index.meta("run_session_model") || undefined;
   return {
+    ...(sessionModel ? { sessionModel } : {}),
     calls, selectedCall: selected,
     paging: { totalCalls, beforeCall: hasMore ? firstVisible.number as number : null,
       hasMore, firstIndex: calls[0]?.index ?? 0, lastIndex: calls.at(-1)?.index ?? 0 },

@@ -88,7 +88,8 @@ ludens auto on
 | `ludens auto on [--message '文本'] [--seconds <n>]` | 开启新控制周期（生成新 `epoch`，重置请求预算）并向模型发起推理。省略 `--seconds <n>` 时默认不设时间上限、持续运行直到手动执行 `auto off`；显式传入 `--seconds <n>` 时按指定秒数限时运行。`--message` 仅在该次接管的首轮附加一次，后续续轮不重复注入。 |
 | `ludens auto timer <seconds\|off>` | 在不新开 `epoch`、不释放设备控制权的前提下，就地设置、顺延或清除（`off`）当前活动周期的自动停止倒计时。 |
 | `ludens auto off` | 立即撤销设备操作权并取消 Ludens 管理的在途调用，模拟器保持运行；需等待当前周期清理完毕后方可再次 `auto on`。 |
-| `ludens down --keep-emulator` | 交还控制权并停止 Host 与 Baseware，保留模拟器窗口与游戏现场；适合修改 `ludens.json`（如预算或模型）后重新 `ludens up`。 |
+| `ludens model [<provider/id>]` | 不带参数时打印当前工作区 Host 生效的 OMP `provider/id` 模型（`--device-only` 模式下为 `none`）；传入 `<provider/id>` 时校验已鉴权且具备图像输入能力的 OMP 模型，并**仅在 `manual` 暂停模式下**就地切换当前会话模型（`auto` 自动运行、`consolidate` 记忆整理期间或携带 `BASEWARE_EPOCH` 的智能体周期内均会拒绝）。跨 Host 重启保留模型请同步更新 `ludens.json`（或通过控制台 `ModelPickerDialog` 切换）。 |
+| `ludens down --keep-emulator` | 交还控制权并停止 Host 与 Baseware，保留模拟器窗口与游戏现场；适合修改 `ludens.json`（如预算或传输参数）后重新 `ludens up`。 |
 | `ludens down [--dashboard] [--pet]` | 停止本工作区受管的 Host、Baseware 与模拟器（**执行前请先在游戏内保存进度**）。默认保留共享的 Dashboard 与已运行的 Ludens Pet；附加 `--dashboard`（仅限启动它的工作区）或 `--pet` 可一并关闭对应共享服务。 |
 
 跨目录操作工作区时，可在任意命令前传入 `ludens --workspace /absolute/path/to/workspace <subcommand>` 或设置环境变量 `LUDENS_WORKSPACE`。
@@ -141,7 +142,7 @@ ludens workspace import /absolute/path/to/workspace \
 | `game` | 无 | 支持自动启动的 bridge 驱动可选（`needsGame: true`，路径相对工作区）；省略时连接已手动启动的模拟器。不支持自动启动的驱动与 stdio 驱动不接受此字段。 |
 | `port` | 随驱动 | 显式端口优先，否则取驱动 manifest 的 `defaultPort`；stdio 驱动不使用。 |
 | `cuaCommand` | `"cua-driver"` | 仅 stdio 驱动有效，指定后端可执行文件路径或命令名。 |
-| `model` | `"openai-codex/gpt-6.1-sol"` | 具备图像输入能力的 OMP `provider/model` 标识。 |
+| `model` | `"openai-codex/gpt-6.1-sol"` | 具备图像输入能力的 OMP `provider/model` 标识；也可在暂停状态下通过控制台 `ModelPickerDialog` 或 `ludens model [<provider/id>]` 浏览与切换。 |
 | `seconds` | `1800` | 单次 `auto on` 控制周期的时长预算（秒），每次接管重置。 |
 | `requests` | `1000` | 单次 `auto on` 控制周期的模型请求次数上限，与 `seconds` 先到即交还控制。 |
 | `compactionThreshold` | 不设 | OMP 上下文压缩触发阈值（token 数）；省略时跟随所选模型的 OMP 原生阈值（`contextWindow - reserve`）。 |

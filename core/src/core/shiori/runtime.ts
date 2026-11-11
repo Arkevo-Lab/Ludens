@@ -25,6 +25,8 @@ export interface AgentRunner {
   /** Live mid-run guidance; optional because not every agent supports it. */
   steer?(message: string): Promise<void>;
   queueState?(): { steering: number };
+  model?(): string;
+  setModel?(model: string): Promise<string>;
   abort(): Promise<void>;
   close(): Promise<void>;
 }
@@ -63,6 +65,7 @@ export class Runtime {
   /** Resolves when the active agent run fully settles (including post-abort cleanup); undefined when idle. */
   get runSettled(): Promise<void> | undefined { return this.running; }
   private consolidating = false;
+  private switchingModel = false;
   private timer?: ReturnType<typeof setTimeout>;
   private activeMaxSeconds: number | null = 300;
   private takeoverDeadlineMs: number | null = null;
@@ -122,6 +125,7 @@ export class Runtime {
       connected: this.connected,
       reason: this.reason,
       agent: !!this._agent,
+      model: this._agent?.model?.() ?? null,
       thinking: !!this.running,
       consolidating: this.consolidating,
       queue: this._agent?.queueState?.() ?? { steering: 0 },
@@ -189,7 +193,7 @@ export class Runtime {
   }
 
   async start(message?: string, program?: (context: { epoch: string; signal: AbortSignal }) => Promise<void>, seconds?: number | null) {
-    if (this.mode !== "manual" || this.running || this.calls.size) throw new Error("Previous control cycle has not finished");
+    if (this.mode !== "manual" || this.running || this.calls.size || this.switchingModel) throw new Error("Previous control cycle has not finished");
     if (!this.connected) throw new Error("Baseware disconnected; restart the application");
     this.budget?.signal.throwIfAborted();
     // An explicit duration overrides the configured budget; null runs unbounded.
@@ -271,7 +275,7 @@ export class Runtime {
 
   async consolidate(seconds = 600) {
     if (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647) throw new Error("--seconds must be positive and within the timer range");
-    if (this.mode !== "manual" || this.running) throw new Error("Previous control cycle has not finished");
+    if (this.mode !== "manual" || this.running || this.switchingModel) throw new Error("Previous control cycle has not finished");
     if (!this._agent) throw new Error("Consolidation requires an agent");
     const epoch = this.epoch = crypto.randomUUID();
     const control = this.control = new AbortController();
@@ -295,6 +299,24 @@ export class Runtime {
         this.record("consolidation_end", { outcome, reason: this.reason }, { epoch });
       });
     return { ...this.status(), consolidationId: epoch };
+  }
+
+  /** Switch the active agent session model strictly while paused (manual mode). */
+  async setModel(model: string) {
+    const next = model.trim();
+    if (!next) throw new Error("Model cannot be empty");
+    if (this.mode !== "manual" || this.running || this.consolidating || this.calls.size > 0 || this.switchingModel) {
+      throw new Error("Cannot switch model while Shiori is running; pause auto loop first");
+    }
+    if (!this._agent) throw new Error("Model switching requires an agent");
+    if (!this._agent.setModel) throw new Error("Agent does not support model switching");
+    this.switchingModel = true;
+    try {
+      await this._agent.setModel(next);
+      return this.status();
+    } finally {
+      this.switchingModel = false;
+    }
   }
 
   /** Urgent mid-run interruption from the human. Queued by the agent, not a new cycle. */

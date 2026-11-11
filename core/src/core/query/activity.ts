@@ -508,7 +508,7 @@ export async function createActivityReducer(index: LogIndex, options: {
 } = {}) {
   if (index.meta("activitySemantics") !== "9") {
     index.resetActivity(); index.resetStores(["activity-model-ends", "activity-deliveries"]);
-    index.setMeta("activitySemantics", "9"); activeParsers.delete(index);
+    index.setMeta("activitySemantics", "9"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
   }
   let position = Number(index.meta("activityPosition") ?? 0);
   const current = new Map<string, CurrentState>();
@@ -572,6 +572,9 @@ export async function createActivityReducer(index: LogIndex, options: {
       if (!state) { state = JSON.parse(index.meta(key) ?? "null") ?? emptyCurrent(); current.set(key, state!); }
       state!.updatedAt = event.at;
       if (event.type === "model_start") state!.error = null;
+      if (event.type === "session" && typeof event.data.model === "string" && event.data.model.trim()) {
+        index.setMeta("activitySessionModel", event.data.model.trim());
+      }
       if (event.type === "tool_start" && event.data.intent) state!.intent = event.data.intent;
       for (const observation of eventObservations(event)) {
         if (observation.mediaType?.startsWith("image/") && !index.store("images").meta(observation.id))
@@ -773,7 +776,7 @@ export async function getActivity(project: string, run?: string, epoch?: string,
   if (!runId) return { scope: { project, runId: null, epoch: null }, mode: "snapshot", blocks: [], cursor: null, hasMore: false,
     projection: { source: { component: "dashboard" }, throughSeq: 0, latestEventAt: null, latestSourceAt: null,
       generatedAt: new Date().toISOString(), durationMs: performance.now() - started, blockCount: 0, revision: 0, generation: "empty" },
-    current: { workspace: selected.workspace ?? null, runId: null, epoch: null, activity: "idle", phase: "工作区尚无运行记录",
+    current: { workspace: selected.workspace ?? null, runId: null, epoch: null, model: null, activity: "idle", phase: "工作区尚无运行记录",
       intent: null, observationId: null, updatedAt: null, error: null } };
   const { manifest, index, release } = await openRun(project, runId);
   try {
@@ -799,9 +802,11 @@ export async function getActivity(project: string, run?: string, epoch?: string,
   const selectedCurrent = live?.runId === runId && (live.mode === "manual" || live.epoch === selectedState.effectiveEpoch);
   const connected = selectedCurrent && live?.connected;
   const activity = connected ? (live.mode === "auto" && live.epoch === selectedState.effectiveEpoch ? "running" : "manual") : "offline";
+  const sessionModel = index.meta("activitySessionModel") || undefined;
+  const currentModel = (selectedCurrent && live?.model !== undefined ? live.model : sessionModel) ?? manifest.model ?? null;
   const { state, ...response } = result;
   response.projection.durationMs = performance.now() - started;
-  return { ...response, current: { workspace: selected.workspace ?? manifest.workspace ?? null, runId, epoch: result.scope.epoch,
+  return { ...response, current: { workspace: selected.workspace ?? manifest.workspace ?? null, runId, epoch: result.scope.epoch, model: currentModel,
     activity, phase: activity === "running" ? livePhaseValue(state.phase)?.label ?? "等待下一步"
       : activity === "manual" ? (result.scope.epoch ? "已交还控制权" : "已连接，等待 AI 接管")
       : live?.runId === runId && live.mode === "auto" && live.epoch !== selectedState.effectiveEpoch ? "历史运行，仅供回放"

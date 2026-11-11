@@ -179,6 +179,17 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       throw new Error("Usage: ludens steer --message <text> | ludens steer <text>");
     return runtime.steer(message);
   }
+  if (kind === "model") {
+    if (argv.length === 0) return { model: runtime.status().model };
+    if (epoch !== undefined) throw new Error("Control management belongs to the human, not an agent cycle");
+    const status = runtime.status();
+    if (request.runId && request.runId !== status.runId) throw new Error("STALE_RUN: refresh the host status before changing control");
+    if (request.expectedEpoch !== undefined && request.expectedEpoch !== status.epoch) throw new Error("STALE_EPOCH: the control cycle changed");
+    if (argv.length !== 1 || !argv[0]?.trim() || argv[0].startsWith("--")) {
+      throw new Error("Usage: ludens model [<provider/id>]");
+    }
+    return await runtime.setModel(argv[0].trim());
+  }
   if (kind === "event") {
     const parsed = parseEventCommandArgs(argv);
     if (epoch !== undefined && parsed.subcommand !== "list") {

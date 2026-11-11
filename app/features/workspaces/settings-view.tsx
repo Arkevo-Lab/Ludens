@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { CheckCircle2, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
+import { CheckCircle2, Cpu, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
+import { ModelPickerDialog } from "@/components/model-picker-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -59,7 +60,7 @@ export function SettingsView({ follow, projects }: { follow: PetFollow; projects
   );
 }
 
-function GlobalDefaultsCard() {
+export function GlobalDefaultsCard() {
   const t = useTranslations("settings.globalDefaults");
   const modelId = useId();
   const secondsId = useId();
@@ -71,6 +72,7 @@ function GlobalDefaultsCard() {
   const [readError, setReadError] = useState<string | null>(null);
   const [writeError, setWriteError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
   const [saved, setSaved] = useState<{
     model: string;
@@ -202,18 +204,42 @@ function GlobalDefaultsCard() {
         <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
           <div className="space-y-1.5 sm:col-span-2">
             <Label htmlFor={modelId}>{t("modelLabel")}</Label>
-            <Input
-              id={modelId}
-              disabled={loading || saving}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                id={modelId}
+                disabled={loading || saving}
+                value={draft.model}
+                onChange={event => {
+                  setDraft(current => ({ ...current, model: event.target.value }));
+                  setSavedNotice(false);
+                }}
+                placeholder="openai-codex/gpt-6.1-sol"
+                className="font-mono text-sm sm:flex-1"
+                spellCheck={false}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                disabled={loading || saving}
+                data-browse-models="global-defaults"
+                onClick={() => setModelPickerOpen(true)}
+              >
+                <Cpu className="size-3.5" aria-hidden="true" />
+                {t("browseModels")}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("modelHint")}</p>
+            <ModelPickerDialog
+              open={modelPickerOpen}
+              onOpenChange={setModelPickerOpen}
               value={draft.model}
-              onChange={event => {
-                setDraft(current => ({ ...current, model: event.target.value }));
+              allowUnauthenticated={true}
+              onSelect={nextModel => {
+                setDraft(current => ({ ...current, model: nextModel }));
                 setSavedNotice(false);
               }}
-              placeholder="openai-codex/gpt-6.1-sol"
-              className="font-mono text-sm"
             />
-            <p className="text-xs text-muted-foreground">{t("modelHint")}</p>
           </div>
 
           <div className="space-y-1.5">

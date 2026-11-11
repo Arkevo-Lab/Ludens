@@ -372,7 +372,11 @@ export default function ConsoleShell() {
                           <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
                         )}
                         <i />
-                        <span>{data.manifest.model ?? dt("deviceOnly")}</span>
+                        <span>
+                          {(data.live as { model?: string | null } | null)?.model ??
+                            data.manifest.model ??
+                            dt("deviceOnly")}
+                        </span>
                         <span className="run-time">
                           {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
                           {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>

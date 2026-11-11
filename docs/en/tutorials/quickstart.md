@@ -88,7 +88,8 @@ Quick reference for common workspace and control commands:
 | `ludens auto on [--message 'text'] [--seconds <n>]` | Starts a new control cycle (new `epoch`, resetting request budgets) and issues inference to the model. When `--seconds <n>` is omitted, the cycle runs continuously without a time limit until manually stopped (`auto off`); passing `--seconds <n>` bounds the takeover to `<n>` seconds. `--message` is attached once on the first round of that takeover only, never re-injected in later rounds. |
 | `ludens auto timer <seconds\|off>` | Sets, extends, or clears (`off`) the auto-stop countdown on the active control cycle in place, without minting a new `epoch` or releasing device controllers. |
 | `ludens auto off` | Immediately revokes device operation rights and cancels in-flight Ludens-managed calls; the emulator keeps running. Wait for the current cycle to finish cleaning up before `auto on` again. |
-| `ludens down --keep-emulator` | Hands back control and stops Host and Baseware, keeping the emulator window and game state; suitable for re-running `ludens up` after editing `ludens.json` (e.g. budgets or model). |
+| `ludens model [<provider/id>]` | Without arguments, prints the workspace Host's active OMP `provider/id` model (or `none` in `--device-only` mode); with `<provider/id>`, validates an authenticated image-capable OMP model and switches the live session in place **only while paused in `manual` mode** (rejected while `auto` or `consolidate` is active, or inside agent cycles carrying `BASEWARE_EPOCH`). Update `ludens.json` (or switch via the Console `ModelPickerDialog`) to persist the choice across Host restarts. |
+| `ludens down --keep-emulator` | Hands back control and stops Host and Baseware, keeping the emulator window and game state; suitable for re-running `ludens up` after editing `ludens.json` (e.g. budgets or transport settings). |
 | `ludens down [--dashboard] [--pet]` | Stops this workspace's managed Host, Baseware, and emulator (**save in-game progress first**). The shared Dashboard and a running Ludens Pet are kept by default; append `--dashboard` (only from the workspace that started it) or `--pet` to shut down the corresponding shared service too. |
 
 To operate on a workspace from another directory, prefix any command with `ludens --workspace /absolute/path/to/workspace <subcommand>` or set the `LUDENS_WORKSPACE` environment variable.
@@ -141,7 +142,7 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 | `game` | none | Optional for bridge drivers that support auto-launch (`needsGame: true`, path relative to the workspace); omit to attach to an already manually started emulator. Drivers without auto-launch and stdio drivers reject this field. |
 | `port` | per driver | An explicit port wins; otherwise the driver manifest's `defaultPort` applies; stdio drivers do not use it. |
 | `cuaCommand` | `"cua-driver"` | Only valid for stdio drivers; specifies the backend executable path or command name. |
-| `model` | `"openai-codex/gpt-6.1-sol"` | OMP `provider/model` identifier with image-input support. |
+| `model` | `"openai-codex/gpt-6.1-sol"` | OMP `provider/model` identifier with image-input support; can also be browsed and switched while paused via the Console `ModelPickerDialog` or `ludens model [<provider/id>]`. |
 | `seconds` | `1800` | Time budget (seconds) per `auto on` control cycle, reset on each takeover. |
 | `requests` | `1000` | Model request cap per `auto on` control cycle; whichever of `seconds`/`requests` runs out first hands back control. |
 | `compactionThreshold` | unset | OMP context-compaction trigger threshold (tokens); follows the selected model's native OMP threshold (`contextWindow - reserve`) when omitted. |

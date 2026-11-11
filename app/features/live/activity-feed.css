@@ -394,7 +394,7 @@
   background: var(--background);
 }
 .codex-workbench[data-dock-open] {
-  grid-template-columns: minmax(0, 1.45fr) minmax(350px, 430px);
+  grid-template-columns: minmax(0, 1.45fr) minmax(364px, 436px);
 }
 
 /* ── Left / Center Main Chat Pane ── */
@@ -408,11 +408,12 @@
   background: var(--background);
 }
 
-.codex-thread-header {
+.codex-thread-header,
+.codex-cockpit-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
   height: 46px;
   padding: 0 22px;
   border-bottom: 1px solid var(--border);
@@ -422,7 +423,9 @@
   display: flex;
   align-items: center;
   gap: 9px;
+  flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
 }
 .codex-thread-title > strong {
   font-size: 13.5px;
@@ -453,17 +456,27 @@
 .codex-status-mark {
   color: var(--text);
 }
-.codex-phase-inline {
+.codex-phase-inline,
+.codex-live-phase {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 65%, transparent);
   font: 500 11px/1.3 var(--font-mono);
   color: var(--muted-foreground);
   white-space: nowrap;
-  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  max-width: 220px;
 }
 
 .codex-thread-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
+  margin-left: 8px;
   flex-shrink: 0;
 }
 .codex-header-btn {
@@ -481,6 +494,9 @@
   flex-shrink: 0;
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.codex-expand-all-btn {
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
 }
 .codex-header-btn:hover {
   background: var(--surface-inset, var(--muted));
@@ -1320,10 +1336,38 @@
   color: var(--foreground);
 }
 
-.codex-model-label {
-  font-size: 12px;
-  color: var(--muted-foreground);
+.codex-model-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  max-width: 220px;
+  padding: 0 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 65%, var(--card));
+  color: var(--foreground);
+  font: 500 12px/1 var(--font-mono);
   white-space: nowrap;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+.codex-model-pill-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-model-pill:hover:not([data-locked="true"]) {
+  border-color: color-mix(in srgb, var(--primary) 52%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--card));
+}
+.codex-model-pill[data-locked="true"] {
+  border-style: dashed;
+  color: var(--muted-foreground);
+  background: transparent;
+  cursor: not-allowed;
+  opacity: 0.78;
 }
 
 .codex-send-circle {
@@ -1354,6 +1398,12 @@
 }
 .codex-composer-feedback-err {
   color: var(--destructive);
+}
+.codex-composer-feedback-warn {
+  color: #d97706;
+}
+.dark .codex-composer-feedback-warn {
+  color: #fbbf24;
 }
 
 /* ── RIGHT WORKBENCH DOCK (Matches the right pane in the screenshot) ── */
@@ -1574,6 +1624,8 @@
   font-size: 11.5px;
   font-weight: 600;
   color: var(--muted-foreground);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .codex-tool-err {
   margin: 0;
@@ -1620,11 +1672,12 @@
   cursor: not-allowed;
 }
 
-.codex-runtime-header {
+.codex-runtime-header,
+.shiori-budget-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 6px 10px;
   flex-wrap: wrap;
 }
 .codex-runtime-header-right {
@@ -1980,11 +2033,13 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
-.codex-stat-card {
+.codex-stat-card,
+.shiori-stat-card {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  padding: 8px 10px;
+  min-width: 0;
+  padding: 8px 9px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--card);
@@ -1994,18 +2049,30 @@
   align-items: baseline;
   justify-content: space-between;
   gap: 6px;
+  min-width: 0;
 }
-.codex-stat-card-top > span {
+.codex-stat-card-top > span,
+.shiori-stat-label {
   font-size: 11px;
   color: var(--muted-foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
 .codex-stat-card-top > strong {
   font: 700 14px/1.2 var(--font-mono);
   color: var(--foreground);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
-.codex-stat-card > small {
+.codex-stat-card > small,
+.shiori-stat-card > small {
   font-size: 10.5px;
   color: var(--subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ── External Input Block (`CodexInputCard`) ── */

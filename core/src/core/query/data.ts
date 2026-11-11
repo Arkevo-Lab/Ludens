@@ -226,7 +226,7 @@ export async function getRun(
   const projects = await catalog();
   await prepareRun(index, signal);
   const cycle = await selectIndexedCycle(index, manifest, epoch);
-  const { phase, ...projection } = await readRunProjection(index, cycle.selectedEpoch, page, cycle.wholeRun, Date.now(), signal);
+  const { phase, sessionModel, ...projection } = await readRunProjection(index, cycle.selectedEpoch, page, cycle.wholeRun, Date.now(), signal);
   const latest = latestGameRun(projects.find((p) => p.id === project))?.id;
   let live: LiveStatus | null = null;
   // Only the newest manifest may designate a live socket. Archived runs never contact hosts.
@@ -236,12 +236,13 @@ export async function getRun(
       argv: [],
     }).catch(() => null);
   const matched = live?.runId === run;
+  const effectiveModel = matched && live?.model !== undefined ? live.model : sessionModel ?? manifest.model;
   const controlAllowed =
     !!latest && !!canControl(latest, run, live, cycle.selectedEpoch);
   return {
     project,
     run,
-    manifest,
+    manifest: effectiveModel !== manifest.model ? { ...manifest, model: effectiveModel } : manifest,
     cycles: cycle.cycles,
     selectedEpoch: cycle.selectedEpoch,
     ...projection,

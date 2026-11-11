@@ -1,5 +1,8 @@
 import type { getActivity, ActivityQuery } from "./activity";
+import type { availableModels, AvailableModelItem, AvailableModelsCatalog } from "./available-models";
 import type { HostControlStatus, RuntimeControlCommand } from "./runtime-control";
+
+export type { AvailableModelItem, AvailableModelsCatalog };
 import type {
   EventPoolMutationCommand,
   EventPoolQueryFilter,
@@ -40,6 +43,7 @@ import type {
 
 /** Only existing Dashboard operations cross the worker boundary, never arbitrary code or paths. */
 export interface DashboardMethods {
+  availableModels: { args: [workspaceId?: unknown]; result: AvailableModelsCatalog };
   workspaceSettings: { args: []; result: Awaited<ReturnType<typeof workspaceSettings>> };
   updateWorkspaceRoot: { args: [path: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceRoot>> };
   updateGlobalConnection: { args: [connection: unknown]; result: Awaited<ReturnType<typeof updateGlobalConnection>> };

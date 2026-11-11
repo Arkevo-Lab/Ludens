@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createAgentSession, discoverAuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession } from "@oh-my-pi/pi-coding-agent";
+import { createAgentSession, discoverAuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { mergeConnectionConfig, readGlobalConfig, validateConnectionConfig, type ModelConnectionConfig } from "@ludens/protocol/ludens";
 import type { AgentRunner } from "../shiori/runtime.ts";
@@ -11,9 +11,18 @@ import { createLudensExtension, type Cycle, type ExtensionHost } from "./extensi
 import type { EventLog } from "../storage/events.ts";
 import { installCompactionHttpTrace, ModelTrace } from "./trace.ts";
 import { SHIORI_SOURCE } from "./shiori.ts";
+import {
+  listAvailableOmpModels,
+  ompSettingsOverrides,
+  resolveOmpImageModel,
+  type AvailableModelItem,
+  type AvailableModelsCatalog,
+} from "./models.ts";
 import { listCapabilityEvals } from "../subsystems/capability-evals.ts";
 import continuation from "../../../prompts/continue.md" with { type: "text" };
 import consolidation from "../../../prompts/consolidate.md" with { type: "text" };
+
+export { listAvailableOmpModels, ompSettingsOverrides, resolveOmpImageModel, type AvailableModelItem, type AvailableModelsCatalog };
 
 /** Run one maintenance turn inside the existing session, then restore its tools. */
 export async function consolidateOmpSession(
@@ -55,28 +64,6 @@ export async function createOmpSession(options: Parameters<typeof createAgentSes
   return result;
 }
 
-export function ompSettingsOverrides(options: {
-  compactionThreshold?: number;
-  connection?: ModelConnectionConfig;
-}): Record<string, unknown> {
-  const connection = options.connection;
-  return {
-    // Host invariant: fallback models may lack image input, and device control
-    // plus run attribution require the selected model to stay sticky.
-    "retry.modelFallback": false,
-    // Headless host: title generation is a stray model call outside control cycles.
-    "title.refreshOnReplan": false,
-    // Experiment with the existing OMP compactor; keep its native history,
-    // background preparation and image retention policy intact.
-    ...(options.compactionThreshold === undefined ? {} : { "compaction.thresholdTokens": options.compactionThreshold }),
-    ...(connection?.openaiWebsockets === undefined ? {} : { "providers.openaiWebsockets": connection.openaiWebsockets }),
-    ...(connection?.cacheRetention === undefined ? {} : { "providers.cacheRetention": connection.cacheRetention }),
-    ...(connection?.appendOnlyContext === undefined ? {} : { "provider.appendOnlyContext": connection.appendOnlyContext }),
-    ...(connection?.imageUrls?.enabled === undefined ? {} : { "images.urls.enabled": connection.imageUrls.enabled }),
-    ...(connection?.imageUrls?.backends === undefined ? {} : { "images.urls.backends": [...connection.imageUrls.backends] }),
-  };
-}
-
 export async function createOmpAgent(options: {
   runtime: ExtensionHost; workspace: string; runDir: string; basewareSocket: string; ludensSocket: string;
   state: WorkspaceState;
@@ -84,6 +71,7 @@ export async function createOmpAgent(options: {
   resume?: string;
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
+  authStorage?: AuthStorage;
   log: EventLog;
 }): Promise<AgentRunner> {
   let cycle: Cycle | undefined;
@@ -116,7 +104,8 @@ export async function createOmpAgent(options: {
     compactionThreshold: options.compactionThreshold,
     connection,
   }));
-  const authStorage = await discoverAuthStorage(undefined, { settings, cwd: options.workspace });
+  const ownsAuthStorage = !options.authStorage;
+  const authStorage = options.authStorage ?? await discoverAuthStorage(undefined, { settings, cwd: options.workspace });
   // OMP's remote/background compactor bypasses agent.streamFn. This host-local
   // observer leaves its native requests and response streams untouched.
   const untraceCompaction = installCompactionHttpTrace(options.log, trace.compactionParent);
@@ -124,13 +113,9 @@ export async function createOmpAgent(options: {
   let initializedSession: AgentSession | undefined;
   try {
     const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-    const slash = options.model.indexOf("/");
-    const provider = options.model.slice(0, slash);
-    const id = options.model.slice(slash + 1);
-    const found = modelRegistry.find(provider, id);
-    if (!found || !found.input.includes("image")) throw new Error(`An image-capable model is required: ${options.model}`);
-    // Harness image policy: win over every catalog budget without patching.
-    const model = { ...found, imageCountBudget: Infinity };
+    await modelRegistry.hydrateCredentialScopedModelCaches().catch(() => {});
+    const model = resolveOmpImageModel(modelRegistry, options.model);
+    let activeModel = `${model.provider}/${model.id}`;
     const extensionPath = resolve(import.meta.dir, "extension.ts");
     const instructionsPath = join(options.workspace, "AGENTS.md");
     const instructions = await readFile(instructionsPath, "utf8").catch(error => {
@@ -159,8 +144,9 @@ export async function createOmpAgent(options: {
       if (!cycle || cycle.signal.aborted) return { stop: true, reason: "Ludens control cycle is inactive" };
     });
     const sessionFile = await selectWorkspaceSession(options.state, manager);
+    const recordSession = options.log.recorder(SHIORI_SOURCE);
     const unsubscribe = trace.attach(session);
-    options.log.recorder(SHIORI_SOURCE)("session", { file: sessionFile, model: options.model, tools: session.getActiveToolNames() });
+    recordSession("session", { file: sessionFile, model: activeModel, tools: session.getActiveToolNames() });
     return {
       async run(context) {
         cycle = context;
@@ -180,6 +166,22 @@ export async function createOmpAgent(options: {
         try { await consolidateOmpSession(session, context.signal, options.workspace); }
         finally { cycle = undefined; }
       },
+      model: () => activeModel,
+      async setModel(nextSelector: string) {
+        if (cycle) throw new Error("Cannot switch model while Shiori is running; pause auto loop first");
+        const candidate = resolveOmpImageModel(modelRegistry, nextSelector);
+        await session.setModel(candidate, "default", { persist: false });
+        const selected = session.model ?? candidate;
+        if (!selected.input.includes("image")) {
+          throw new Error(`An image-capable model is required: ${nextSelector}`);
+        }
+        if (selected.imageCountBudget !== Infinity) {
+          session.agent.setModel({ ...selected, imageCountBudget: Infinity });
+        }
+        activeModel = `${selected.provider}/${selected.id}`;
+        recordSession("session", { file: sessionFile, model: activeModel, tools: session.getActiveToolNames() });
+        return activeModel;
+      },
       steer: async (message: string) => { await session.steer(message); },
       queueState: () => {
         const queued = session.getQueuedMessages();
@@ -188,14 +190,22 @@ export async function createOmpAgent(options: {
       abort: () => session.abort(),
       async close() {
         try { await session.dispose(); }
-        finally { removeControlGate(); unsubscribe(); untraceCompaction(); await trace.shiori.close(); authStorage.close(); }
+        finally {
+          removeControlGate(); unsubscribe(); untraceCompaction();
+          await trace.shiori.close();
+          if (ownsAuthStorage) authStorage.close();
+        }
       },
     };
   } catch (error) {
     try {
       if (initializedSession) await initializedSession.dispose();
       else await manager?.close();
-    } finally { untraceCompaction(); await trace.shiori.close(); authStorage.close(); }
+    } finally {
+      untraceCompaction();
+      await trace.shiori.close();
+      if (ownsAuthStorage) authStorage.close();
+    }
     throw error;
   }
 }

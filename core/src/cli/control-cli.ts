@@ -11,6 +11,7 @@ ludens auto off
 ludens steer <message>
 ludens event <list|send|reply|ack>
 ludens consolidate [--seconds <n>]
+ludens model [<provider/id>]
 ludens perception status | state | reload | stop
 ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
 ludens perception inject [on|off]
@@ -144,8 +145,15 @@ export async function cli(argv: string[], socket: string) {
     console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
     return;
   }
-  if (!["status", "auto", "steer", "consolidate", "perception", "machine"].includes(kind)) throw new Error("Unknown command; see ludens --help");
-  const control = kind === "auto" || kind === "steer" || kind === "consolidate" ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null } : undefined;
+  if (kind === "model" && rest.length === 0) {
+    const status = await send(socket, { kind: "status", argv: [] }) as { model?: string | null };
+    console.log(status.model ?? "none");
+    return;
+  }
+  if (!["status", "auto", "steer", "consolidate", "model", "perception", "machine"].includes(kind)) throw new Error("Unknown command; see ludens --help");
+  const control = kind === "auto" || kind === "steer" || kind === "consolidate" || kind === "model"
+    ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null }
+    : undefined;
   const value = await send(socket, {
     kind, argv: rest, epoch: process.env.BASEWARE_EPOCH,
     trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined,
