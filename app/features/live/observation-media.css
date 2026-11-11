@@ -6,9 +6,22 @@
   padding-block: 16px;
 }
 
+.buffered-observation[data-media-kind="audio"] audio {
+  width: calc(100% - 24px);
+  max-width: 100%;
+}
+
+.buffered-observation > small {
+  max-width: calc(100% - 24px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .buffered-observation[data-media-state="error"],
 .buffered-observation[data-media-retrying="true"] {
   height: auto;
   min-height: 112px;
 }
+
 

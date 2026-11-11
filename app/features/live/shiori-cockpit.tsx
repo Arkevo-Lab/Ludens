@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   ChevronRight,
+  ChevronsUpDown,
   Clock,
   CornerUpLeft,
   Cpu,
@@ -703,7 +704,10 @@ function LiveStopTimerControl({
   useEffect(() => {
     if (!open) return;
     const handleKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+      }
     };
     const handlePointer = (event: MouseEvent) => {
       if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
@@ -1832,33 +1836,7 @@ export function ShioriComposer({
   );
 }
 
-export function ShioriWorkbench({
-  project,
-  workspace,
-  workspaceTitle,
-  runs = [],
-  jumpTarget = null,
-  onClearJumpTarget,
-  onActiveSegmentChange,
-  data,
-  feed,
-  isLiveRun,
-  refresh = true,
-  phaseLabel,
-  phaseElapsedMs,
-  requestedCall,
-  selectedImage,
-  selectedBlock,
-  onSelectBlock,
-  onUpdated,
-  onOpenPerf,
-  onOpenCaps,
-  onOpenReplay,
-  onOpenReplayAt,
-  onReturnLatest,
-  renderObservation,
-  observationSlot,
-}: {
+export interface ShioriWorkbenchProps {
   project: string;
   workspace: string | null;
   workspaceTitle?: string;
@@ -1895,7 +1873,41 @@ export function ShioriWorkbench({
     onSelectImage: (id: string) => void;
   }) => ReactNode;
   observationSlot: ReactNode;
-}) {
+  /** Compact RunPicker (quickJump mode) rendered inside .codex-thread-header right actions */
+  runPicker?: ReactNode;
+  /** Mobile <=680px sidebar drawer trigger rendered at the start of .codex-thread-header */
+  mobileNavSlot?: ReactNode;
+}
+
+export function ShioriWorkbench({
+  project,
+  workspace,
+  workspaceTitle,
+  runs = [],
+  jumpTarget = null,
+  onClearJumpTarget,
+  onActiveSegmentChange,
+  data,
+  feed,
+  isLiveRun,
+  refresh = true,
+  phaseLabel,
+  phaseElapsedMs,
+  requestedCall,
+  selectedImage,
+  selectedBlock,
+  onSelectBlock,
+  onUpdated,
+  onOpenPerf,
+  onOpenCaps,
+  onOpenReplay,
+  onOpenReplayAt,
+  onReturnLatest,
+  renderObservation,
+  observationSlot,
+  runPicker,
+  mobileNavSlot,
+}: ShioriWorkbenchProps) {
   const t = useTranslations("shioriCockpit");
   const streamRef = useRef<HTMLDivElement | null>(null);
   const prependScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
@@ -1906,7 +1918,22 @@ export function ShioriWorkbench({
     segments: [],
   });
   const [showAllSteps, setShowAllSteps] = useState(false);
-  const [dockOpen, setDockOpen] = useState(true);
+  const [desktopDockOpen, setDesktopDockOpen] = useState(true);
+  const [drawerDockOpen, setDrawerDockOpen] = useState(false);
+  const [isOverlayDock, setIsOverlayDock] = useState(false);
+  const dockOpen = isOverlayDock ? drawerDockOpen : desktopDockOpen;
+  const openDock = () => {
+    setDesktopDockOpen(true);
+    setDrawerDockOpen(true);
+  };
+  const closeDock = () => {
+    if (isOverlayDock) setDrawerDockOpen(false);
+    else setDesktopDockOpen(false);
+  };
+  const toggleDock = () => {
+    if (isOverlayDock) setDrawerDockOpen(prev => !prev);
+    else setDesktopDockOpen(prev => !prev);
+  };
   const [atBottom, setAtBottom] = useState(true);
   const [modelOverride, setModelOverride] = useState<{
     project: string;
@@ -1991,6 +2018,31 @@ export function ShioriWorkbench({
   }, [isLiveRun, project, workspace, data.updatedAt, refresh]);
 
   useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
+    const mql = window.matchMedia("(max-width: 1099px)");
+    setIsOverlayDock(mql.matches);
+    const handleMediaChange = (event: MediaQueryListEvent) => {
+      setIsOverlayDock(event.matches);
+      if (event.matches) {
+        setDrawerDockOpen(false);
+      }
+    };
+    mql.addEventListener("change", handleMediaChange);
+    return () => mql.removeEventListener("change", handleMediaChange);
+  }, []);
+
+  useEffect(() => {
+    if (!isOverlayDock || !drawerDockOpen) return;
+    const handleKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) {
+        setDrawerDockOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [isOverlayDock, drawerDockOpen]);
+
+  useEffect(() => {
     if (!requestedCall && !selectedImage) return;
     const matchedCall = requestedCall ? data.calls.find(c => c.id === requestedCall) : undefined;
     setInspectedTurn({
@@ -2000,7 +2052,8 @@ export function ShioriWorkbench({
       imageId: selectedImage ?? null,
       at: matchedCall?.at ?? data.updatedAt,
     });
-    setDockOpen(true);
+    setDesktopDockOpen(true);
+    setDrawerDockOpen(true);
   }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt]);
 
   const activeHostOverride =
@@ -2494,7 +2547,7 @@ export function ShioriWorkbench({
           imageId: jumpTarget.image ?? null,
           at: matchedCall?.at ?? ownerData.updatedAt,
         });
-        setDockOpen(true);
+        openDock();
       }
 
       const rawTargetTop = Math.max(
@@ -2610,8 +2663,9 @@ export function ShioriWorkbench({
         ? data.calls
         : (loadedOlderRuns.find(r => r.runId === runId)?.data.calls ?? allCalls);
     const matchedCall = resolveCallForTurn(block, siblingSteps, ownerCalls);
-    setInspectedTurn(prev =>
-      prev?.blockId === block.id
+    const isDeselecting = inspectedTurn?.blockId === block.id;
+    setInspectedTurn(
+      isDeselecting
         ? null
         : {
             runId,
@@ -2621,13 +2675,15 @@ export function ShioriWorkbench({
             at: block.at,
           },
     );
-    setDockOpen(true);
+    if (!isDeselecting) openDock();
     onSelectBlock?.(block);
   };
 
   const handleInspectInput = (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => {
-    setInspectedTurn(prev =>
-      prev?.blockId === segId && prev?.imageId === (imageId ?? null)
+    const isDeselecting =
+      inspectedTurn?.blockId === segId && inspectedTurn?.imageId === (imageId ?? null);
+    setInspectedTurn(
+      isDeselecting
         ? null
         : {
             runId,
@@ -2637,7 +2693,7 @@ export function ShioriWorkbench({
             at: at ?? call?.at ?? data.updatedAt,
           },
     );
-    setDockOpen(true);
+    if (!isDeselecting) openDock();
   };
 
   const inspectedRunData =
@@ -2754,19 +2810,30 @@ export function ShioriWorkbench({
         {/* 1-Line Clean Thread Header (just like ChatGPT/Codex desktop window bar) */}
         <header className="codex-thread-header codex-cockpit-header">
           <div className="codex-thread-title">
-            <FileText className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
-            <strong>Shiori · {workspaceTitle || project}</strong>
-            <span className="codex-status-pill" data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}>
+            {mobileNavSlot}
+            <FileText className="codex-thread-doc-icon size-4 text-muted-foreground shrink-0" aria-hidden="true" />
+            <strong className="codex-thread-heading" title={`Shiori · ${workspaceTitle || project}`}>
+              <span className="codex-thread-brand">Shiori</span>
+              <span className="codex-thread-workspace"> · {workspaceTitle || project}</span>
+            </strong>
+            <span
+              className="codex-status-pill"
+              data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}
+              title={stateTitle}
+            >
               <PixelMark
                 size={14}
                 className="codex-status-mark"
                 state={!isLiveRun ? "idle" : !hostOnline ? "waiting" : consolidating || (isAuto && thinking) ? "reasoning" : "idle"}
                 filled={hostOnline && !isAuto}
               />
-              {stateTitle}
+              <span className="codex-status-text">{stateTitle}</span>
             </span>
             {phaseLabel && (
-              <span className="codex-phase-inline codex-live-phase">
+              <span
+                className="codex-phase-inline codex-live-phase"
+                title={`${phaseLabel}${displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}`}
+              >
                 {phaseLabel}
                 {displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}
               </span>
@@ -2800,34 +2867,43 @@ export function ShioriWorkbench({
           </div>
 
           <div className="codex-thread-actions">
+            {runPicker && <div className="codex-thread-run-picker">{runPicker}</div>}
             <button
               type="button"
               className="codex-header-btn codex-expand-all-btn"
               data-active={showAllSteps || undefined}
+              title={showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
+              aria-label={showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
               onClick={() => setShowAllSteps(prev => !prev)}
             >
-              {showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
+              <ChevronsUpDown className="size-3.5 shrink-0" aria-hidden="true" />
+              <span className="codex-expand-all-label">
+                {showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
+              </span>
             </button>
             <button
               type="button"
-              className="codex-header-btn"
+              className="codex-header-btn codex-dock-toggle-btn"
               data-active={dockOpen || undefined}
+              aria-pressed={dockOpen}
               title={t("toggleDockHint")}
-              onClick={() => setDockOpen(prev => !prev)}
+              aria-label={t("toggleDockHint")}
+              onClick={toggleDock}
             >
               <PanelRight className="size-4" aria-hidden="true" />
             </button>
           </div>
         </header>
 
-        {/* Scrollable Chat Stream */}
-        {jumpTarget && lastJumpedSeqRef.current !== jumpTarget.seq && jumpTarget.value && loadingOlderRun && (
-          <div className="codex-jump-toast" role="status">
-            <span className="codex-thinking-dot" />
-            <span>{t("locatingSegmentBanner")}</span>
-          </div>
-        )}
-        <div ref={streamRef} className="codex-chat-scroll" onScroll={handleScroll}>
+        {/* Scrollable Chat Stream + Safely Anchored Scroll-to-Bottom Button */}
+        <div className="codex-chat-scroll-stage">
+          {jumpTarget && lastJumpedSeqRef.current !== jumpTarget.seq && jumpTarget.value && loadingOlderRun && (
+            <div className="codex-jump-toast" role="status">
+              <span className="codex-thinking-dot" />
+              <span>{t("locatingSegmentBanner")}</span>
+            </div>
+          )}
+          <div ref={streamRef} className="codex-chat-scroll" onScroll={handleScroll}>
           <div className="codex-chat-column">
             {(feed.loadingOlder || loadingOlderRun || olderRunError) ? (
               <div className="codex-load-older">
@@ -3099,17 +3175,18 @@ export function ShioriWorkbench({
           </div>
         </div>
 
-        {/* Floating Scroll-to-Bottom Button (just like ChatGPT/Codex) */}
-        {(!atBottom || feed.historical) && (
-          <button
-            type="button"
-            className="codex-scroll-bottom-btn"
-            aria-label={t("scrollToBottomAria")}
-            onClick={scrollToBottom}
-          >
-            <ArrowDown className="size-4" aria-hidden="true" />
-          </button>
-        )}
+          {/* Floating Scroll-to-Bottom Button (safely anchored inside scroll stage above composer) */}
+          {(!atBottom || feed.historical) && (
+            <button
+              type="button"
+              className="codex-scroll-bottom-btn"
+              aria-label={t("scrollToBottomAria")}
+              onClick={scrollToBottom}
+            >
+              <ArrowDown className="size-4" aria-hidden="true" />
+            </button>
+          )}
+        </div>
 
         {/* Bottom Floating Pill Composer */}
         <ShioriComposer
@@ -3166,8 +3243,32 @@ export function ShioriWorkbench({
       </section>
 
       {/* ── RIGHT WORKBENCH DOCK: LIVE VIEWPORT + COMPACT HOST OPS + TELEMETRY ── */}
+      {dockOpen && isOverlayDock && (
+        <div
+          className="codex-dock-backdrop"
+          data-dock-backdrop
+          aria-hidden="true"
+          onClick={closeDock}
+        />
+      )}
       {dockOpen && (
-        <aside className="codex-right-dock" aria-label={t("stageColumnAria")}>
+        <aside
+          className="codex-right-dock"
+          data-overlay={isOverlayDock ? "true" : undefined}
+          aria-label={t("stageColumnAria")}
+        >
+          <header className="codex-dock-header">
+            <span className="codex-dock-header-title">{t("dockHeaderTitle")}</span>
+            <button
+              type="button"
+              className="codex-header-btn codex-dock-close-btn"
+              title={t("closeDock")}
+              aria-label={t("closeDock")}
+              onClick={closeDock}
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </header>
           <div className="codex-dock-body">
             {/* 1. Primary Live Game / Device Viewport */}
             <div className="codex-dock-viewport">
@@ -3217,7 +3318,9 @@ export function ShioriWorkbench({
             {summary && (
               <div className="codex-dock-section">
                 <div className="codex-runtime-header shiori-budget-header">
-                  <h3 className="codex-dock-heading">{t("telemetryCardTitle")}</h3>
+                  <h3 className="codex-dock-heading" title={t("telemetryCardTitle")}>
+                    {t("telemetryCardTitle")}
+                  </h3>
                   <div className="codex-runtime-header-right">
                     {isAuto && hostOnline ? (
                       <>
@@ -3235,7 +3338,10 @@ export function ShioriWorkbench({
                         />
                       </>
                     ) : (
-                      <span className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">
+                      <span
+                        className="codex-runtime-status-summary"
+                        title={`${formatDurationCompact(elapsedSeconds)} · ${stateTitle}`}
+                      >
                         {formatDurationCompact(elapsedSeconds)} · {stateTitle}
                       </span>
                     )}

@@ -1,7 +1,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { join } from "node:path";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import type { ActivityBlock } from "../features/live/activity-feed-model";
 import { buildCodexSegments, summarizeStepBlock } from "../features/live/shiori-segments";
+import { LocaleProvider } from "../lib/locale";
+import type { ActivityFeedData } from "../features/live/use-activity-feed";
+import type { RunData, SpanStats } from "../lib/types";
+
+const nodeRequire = createRequire(import.meta.url);
+const cjsModule = nodeRequire("node:module") as {
+  _extensions: Record<string, (mod: unknown, filename: string) => void>;
+};
+cjsModule._extensions[".css"] ??= () => {};
 
 function block(
   overrides: Pick<ActivityBlock, "id" | "kind" | "at" | "title"> & Partial<ActivityBlock>,
@@ -201,4 +215,193 @@ test("empty runs anchor prior runIds with a fallback divider while an empty late
     fallbackStartedAt,
   });
   assert.deepEqual(latest, []);
+});
+
+function emptySpanStats(): SpanStats {
+  return {
+    started: 0,
+    outcomes: { success: 0, error: 0, cancelled: 0, pending: 0, unknown: 0 },
+    durationMs: { median: null, p95: null },
+  };
+}
+
+function sampleWorkbenchRunData(): RunData {
+  const stats = emptySpanStats();
+  return {
+    project: "demo-ws",
+    run: RUN_ID,
+    manifest: {
+      shiori: { implementation: "omp", implementationVersion: "1.0.0" },
+      runId: RUN_ID,
+      workspace: "/tmp/demo-ws",
+      workspaceId: "demo-ws",
+      socket: "/tmp/demo-ws/.ludens/host.sock",
+      drivers: [{ id: "cua", version: "1.0.0" }],
+      model: "anthropic/claude-opus-4-6",
+      seconds: 1800,
+      maxRequests: 500,
+      compactionThreshold: 120_000,
+    },
+    cycles: [{ epoch: "epoch-1", startedAt: "2026-01-01T00:00:00.000Z", maxSeconds: 1800 }],
+    selectedEpoch: "epoch-1",
+    calls: [],
+    paging: { totalCalls: 2, beforeCall: null, hasMore: false, firstIndex: 1, lastIndex: 2 },
+    observations: [],
+    perception: null,
+    notices: [],
+    skills: [],
+    telemetry: {
+      sources: [],
+      spans: [],
+      shiori: { stats, nativeLoops: [] },
+      capabilities: { stats, python: stats, localPython: stats, discovery: stats },
+      devices: stats,
+      perception: stats,
+    },
+    lastControl: null,
+    activeCompaction: null,
+    live: {
+      runId: RUN_ID,
+      mode: "auto",
+      epoch: "epoch-1",
+      connected: true,
+      reason: "running",
+      agent: true,
+      thinking: true,
+      maxSeconds: null,
+      remainingSeconds: null,
+    },
+    livePhase: null,
+    controlAllowed: true,
+    controlReason: "",
+    updatedAt: "2026-01-01T00:05:00.000Z",
+    summary: {
+      completed: 2,
+      actions: 5,
+      explicitObserves: 1,
+      errors: 0,
+      compactions: 0,
+      medianMs: 1200,
+      p95Ms: 2100,
+      medianHeadersMs: null,
+      medianHttpHeadersMs: null,
+      medianWsWaitMs: null,
+      cacheHit: 0.85,
+      warmCacheHit: 0.9,
+      elapsedSeconds: 300,
+    },
+  };
+}
+
+function sampleWorkbenchFeed(historical = true): ActivityFeedData {
+  return {
+    resetRevision: 0,
+    loadedRevision: 0,
+    scope: { project: "demo-ws", runId: RUN_ID, epoch: null },
+    generation: "gen-1",
+    snapshot: 1,
+    blocks: [],
+    selected: undefined,
+    selectionReady: true,
+    before: null,
+    hasMore: false,
+    total: 0,
+    historical,
+    loading: false,
+    loadingOlder: false,
+    error: "",
+    filter: "all",
+    query: "",
+    setFilter() {},
+    setQuery() {},
+    async earlier() {},
+    latest() {},
+  };
+}
+
+test("ShioriWorkbench renders 46px header slots, scroll-stage anchor above composer, and aligned Right Dock header", async () => {
+  const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
+
+  const html = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-ws",
+        workspace: "/tmp/demo-ws",
+        workspaceTitle: "Demo Workspace",
+        data: sampleWorkbenchRunData(),
+        feed: sampleWorkbenchFeed(true),
+        isLiveRun: true,
+        phaseLabel: "接收模型流",
+        phaseElapsedMs: 2000,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", { "data-test-viewport": "true" }, "viewport"),
+        mobileNavSlot: createElement("button", { type: "button", "data-test-mobile-nav": "true" }, "nav"),
+        runPicker: createElement("div", { "data-test-run-picker": "true" }, "run-picker"),
+      }),
+    ),
+  );
+
+  const mobileNavPos = html.indexOf("data-test-mobile-nav");
+  const brandPos = html.indexOf("codex-thread-brand");
+  assert.ok(mobileNavPos > -1 && brandPos > mobileNavPos, "mobileNavSlot renders at the start of .codex-thread-header");
+  assert.match(html, /class="codex-thread-brand">Shiori<\/span>/);
+  assert.match(html, /class="codex-thread-workspace"> · Demo Workspace<\/span>/);
+
+  const runPickerPos = html.indexOf("data-test-run-picker");
+  const expandBtnPos = html.indexOf("codex-expand-all-btn");
+  const dockTogglePos = html.indexOf("codex-dock-toggle-btn");
+  assert.ok(
+    runPickerPos > -1 && expandBtnPos > runPickerPos && dockTogglePos > expandBtnPos,
+    "runPicker renders inside .codex-thread-actions before expand-steps and right-dock toggle",
+  );
+
+  const scrollStagePos = html.indexOf("codex-chat-scroll-stage");
+  const scrollBtnPos = html.indexOf("codex-scroll-bottom-btn");
+  const composerPos = html.indexOf("codex-composer-wrap");
+  assert.ok(
+    scrollStagePos > -1 && scrollBtnPos > scrollStagePos && composerPos > scrollBtnPos,
+    "scroll-to-bottom button is anchored inside .codex-chat-scroll-stage strictly above .codex-composer-wrap",
+  );
+
+  assert.match(html, /class="codex-dock-header"/);
+  assert.match(html, /class="codex-dock-header-title"/);
+  assert.match(html, /codex-dock-close-btn/);
+});
+
+test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100px overlay drawer, and anti-wrap telemetry badges", () => {
+  const activityCss = readFileSync(
+    join(import.meta.dirname, "../features/live/activity-feed.css"),
+    "utf8",
+  );
+  const observationCss = readFileSync(
+    join(import.meta.dirname, "../features/live/observation-panel.css"),
+    "utf8",
+  );
+
+  assert.match(
+    activityCss,
+    /\.console-main:has\(\.live-page\)\s+\.page-content\.live-page[\s\S]*?\{[^}]*width:\s*100%;[^}]*margin:\s*0;[^}]*max-width:\s*none;/,
+  );
+  assert.match(activityCss, /\.codex-thread-header,\s*\.codex-cockpit-header\s*\{[^}]*height:\s*46px;/);
+  assert.match(activityCss, /\.codex-dock-header\s*\{[^}]*height:\s*46px;/);
+  assert.match(activityCss, /\.codex-live-phase\s*\{[^}]*display:\s*block;[^}]*min-width:\s*68px;/);
+  assert.match(activityCss, /\.codex-workbench\[data-dock-open\]\s*\{[^}]*clamp\(380px,\s*26vw,\s*410px\)/);
+  assert.match(activityCss, /@media\s*\(max-width:\s*1439px\)[\s\S]*?clamp\(330px,\s*26\.5vw,\s*350px\)/);
+  assert.match(activityCss, /@media\s*\(max-width:\s*1279px\)[\s\S]*?\.codex-thread-workspace\s*\{\s*display:\s*none;/);
+  assert.match(
+    activityCss,
+    /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(370px,\s*calc\(100vw\s*-\s*48px\)\);/,
+  );
+  assert.match(activityCss, /\.codex-runtime-header,\s*\.shiori-budget-header\s*\{[^}]*flex-wrap:\s*nowrap;/);
+  assert.match(activityCss, /\.codex-scroll-bottom-btn\s*\{[^}]*bottom:\s*8px;/);
+
+  assert.match(
+    observationCss,
+    /\.observation-priority\s+\.surface-heading\s*>\s*span\s*\{[^}]*max-width:\s*none;[^}]*white-space:\s*nowrap;/,
+  );
 });
