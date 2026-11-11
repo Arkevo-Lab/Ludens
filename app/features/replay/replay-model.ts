@@ -83,6 +83,45 @@ export function replayDuration(ms: number) {
     String(seconds % 60).padStart(2, "0")].filter(value => value !== null).join(":");
 }
 
+export interface CoalescedReplayFrameTick {
+  frame: ReplayFrame;
+  startAt: number;
+  endAt: number;
+  count: number;
+}
+
+/**
+ * Coalesce dense sub-pixel perception samples into at most `maxTicks` visual buckets
+ * so 30–60 fps windows render cleanly without mounting 900–1,800 `<button>` nodes.
+ */
+export function coalesceReplayFrameTicks(
+  frames: ReplayFrame[],
+  rangeStart: number,
+  rangeEnd: number,
+  maxTicks = 120,
+): CoalescedReplayFrameTick[] {
+  const inRange = frames.filter(frame => frame.at >= rangeStart && frame.at <= rangeEnd);
+  if (inRange.length <= maxTicks || maxTicks <= 0 || rangeEnd <= rangeStart) {
+    return inRange.map(frame => ({ frame, startAt: frame.at, endAt: frame.at, count: 1 }));
+  }
+  const bucketSpan = (rangeEnd - rangeStart) / maxTicks;
+  const buckets = new Map<number, ReplayFrame[]>();
+  for (const frame of inRange) {
+    const idx = Math.min(maxTicks - 1, Math.max(0, Math.floor((frame.at - rangeStart) / bucketSpan)));
+    const group = buckets.get(idx);
+    if (group) group.push(frame);
+    else buckets.set(idx, [frame]);
+  }
+  return [...buckets.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, group]) => ({
+      frame: group[0],
+      startAt: group[0].at,
+      endAt: group[group.length - 1].at,
+      count: group.length,
+    }));
+}
+
 export function retainReplayWindows(windows: ReplayWindow[], currentStart: number) {
   return [...new Map(windows.map(window => [window.startAt, window])).values()]
     .sort((a, b) => Math.abs(a.startAt - currentStart) - Math.abs(b.startAt - currentStart) || b.startAt - a.startAt)

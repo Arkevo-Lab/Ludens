@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import {
   ArrowDown,
   Bot,
@@ -25,8 +25,10 @@ import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
 import { clockTime } from "@/features/live/run-visuals";
+import { readArchiveJson } from "@/lib/archive-client";
 import { runWindowSummary } from "@/lib/run-identity";
 import type { Call, Observation, RunData, RunInfo } from "@/lib/types";
+import { requestActivity } from "@ludens/protocol/activity";
 import "@/features/live/activity-feed.css";
 
 export type RuntimeControlAction =
@@ -58,9 +60,46 @@ async function sendRuntimeControl(
 function formatDurationCompact(secondsTotal: number | null | undefined): string {
   if (secondsTotal == null || !Number.isFinite(secondsTotal)) return "—";
   const clamped = Math.max(0, Math.round(secondsTotal));
+  if (clamped >= 3600) {
+    const h = Math.floor(clamped / 3600);
+    const m = Math.floor((clamped % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
   const m = Math.floor(clamped / 60);
   const s = clamped % 60;
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+function cleanErrorMessage(raw: string): string {
+  return raw.replace(/(?:LudensError:\s*|Error:\s*)+/gi, "").trim() || raw;
+}
+
+function cleanInlinePreview(raw: string | undefined | null): string {
+  if (!raw) return "";
+  const firstLine =
+    raw
+      .split("\n")
+      .map(line => line.trim())
+      .find(
+        line =>
+          Boolean(line) &&
+          line !== "{" &&
+          line !== "[" &&
+          line !== "参数：" &&
+          line !== "Arguments:" &&
+          line !== "结果：" &&
+          line !== "Result:" &&
+          !line.startsWith('{"') &&
+          !line.startsWith("{ "),
+      ) ?? "";
+  if (!firstLine) return "";
+  return cleanErrorMessage(
+    firstLine
+      .replace(/\*\*([^*]+)\*\*/g, "$1")
+      .replace(/^\*\*+|\*\*+$/g, "")
+      .replace(/`([^`]+)`/g, "$1")
+      .trim(),
+  ).slice(0, 96);
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -95,30 +134,96 @@ function extractReadableText(block: ActivityBlock): string {
 function summarizeStepBlock(block: ActivityBlock): { badge: string; detail: string } {
   const args = asRecord(block.tool?.args) ?? asRecord(block.data);
   const titleLower = block.title.toLowerCase();
-  const fallbackText = block.text?.trim().split("\n")[0]?.slice(0, 96) || block.title;
+  const previewText = cleanInlinePreview(block.text);
+  const intent = cleanInlinePreview(block.tool?.intent);
+
   if (block.kind === "tool") {
     if (titleLower === "bash" || titleLower.endsWith(":bash")) {
-      const cmd = typeof args?.command === "string" ? args.command.trim() : fallbackText;
-      return { badge: "$ bash", detail: cmd || "bash" };
+      const cmd = typeof args?.command === "string" ? args.command.trim().split("\n")[0]?.slice(0, 96) : "";
+      return {
+        badge: "$ bash",
+        detail: cmd || intent || previewText || (block.status === "running" ? "Running command…" : "bash"),
+      };
     }
     if (titleLower === "observe" || titleLower.includes("observe")) {
-      return { badge: "👁 observe", detail: block.tool?.intent || fallbackText || "Capture frame" };
+      return { badge: "👁 observe", detail: intent || previewText || "Capture frame" };
     }
     if (titleLower.includes("capability") || typeof args?.capability === "string") {
       return {
         badge: "⚡ capability",
-        detail: (typeof args?.capability === "string" ? args.capability : fallbackText) || block.title,
+        detail: (typeof args?.capability === "string" ? args.capability : intent || previewText) || block.title,
       };
     }
-    return { badge: `⚙ ${block.title}`, detail: block.tool?.intent || fallbackText };
+    const patchText =
+      typeof args?.input === "string"
+        ? args.input
+        : typeof args?.patch === "string"
+          ? args.patch
+          : typeof args?.patchText === "string"
+            ? args.patchText
+            : "";
+    const patchedFile = patchText.includes("*** Begin Patch")
+      ? patchText.match(/^\*\*\*\s+(?:Update|Add|Delete)\s+File:\s*(.+)$/m)?.[1]?.trim()
+      : undefined;
+    const targetArg = [
+      patchedFile,
+      args?.path,
+      args?.file_path,
+      args?.file,
+      args?.pattern,
+      args?.query,
+      args?.url,
+      args?.action,
+      args?.name,
+    ].find((v): v is string => typeof v === "string" && v.trim().length > 0);
+    const compactArgs = !targetArg && args
+      ? Object.entries(args)
+          .filter(
+            ([k, v]) =>
+              k !== "intent" &&
+              (typeof v === "string" || typeof v === "number" || typeof v === "boolean") &&
+              !String(v).startsWith("*** Begin Patch"),
+          )
+          .slice(0, 2)
+          .map(([k, v]) => `${k}=${String(v).slice(0, 36)}`)
+          .join(" ")
+      : "";
+    return {
+      badge: `⚙ ${block.title}`,
+      detail: intent || targetArg || compactArgs || previewText || block.title,
+    };
   }
+
   if (block.kind === "thinking") {
-    return { badge: "🧠 thinking", detail: fallbackText };
+    return { badge: "🧠 thinking", detail: previewText || "Reasoning…" };
   }
+
   if (block.kind === "system") {
-    return { badge: "● system", detail: fallbackText };
+    const rec = asRecord(block.data);
+    const sysDetail = [
+      rec?.summary,
+      rec?.message,
+      rec?.error,
+      rec?.reason,
+      rec?.state,
+      rec?.status,
+      rec?.outcome,
+      rec?.capability,
+    ]
+      .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+      .map(v => cleanErrorMessage(v.trim()))
+      .join(" · ");
+    const tokenSummary =
+      typeof rec?.tokensBefore === "number" && typeof rec?.tokensAfter === "number"
+        ? `${rec.tokensBefore.toLocaleString()} → ${rec.tokensAfter.toLocaleString()} tokens`
+        : "";
+    return {
+      badge: `● ${block.title}`,
+      detail: sysDetail || tokenSummary || previewText || block.title,
+    };
   }
-  return { badge: block.source?.component ?? "step", detail: fallbackText };
+
+  return { badge: block.source?.component ?? "step", detail: previewText || block.title };
 }
 
 function isBackgroundResultBlock(block: ActivityBlock): boolean {
@@ -202,6 +307,7 @@ function buildCodexSegments(
   let pendingSteps: ActivityBlock[] = [];
   let currentEpoch: string | null = null;
   let lastSegmentEndedAt: string | null = options.prevEndedAt ?? null;
+  let lastPostBlockMs = 0;
   let autoCycleCounter = 0;
 
   // Pre-scan control(manual) blocks so we know end times and stop reasons even before cycle index updates
@@ -334,10 +440,12 @@ function buildCodexSegments(
   };
 
   const flushTurn = (explicitResponse?: ActivityBlock) => {
+    const anchorId = pendingSteps[0]?.id ?? explicitResponse?.id ?? "turn";
+    const stableId = `turn:${options.runId ?? ""}:${anchorId}`;
     if (explicitResponse) {
       segments.push({
         kind: "turn",
-        id: explicitResponse.id,
+        id: stableId,
         runId: options.runId,
         steps: pendingSteps,
         responseBlock: explicitResponse,
@@ -353,7 +461,7 @@ function buildCodexSegments(
       const otherSteps = pendingSteps.filter(item => item.id !== synthesized.block.id);
       segments.push({
         kind: "turn",
-        id: synthesized.block.id,
+        id: stableId,
         runId: options.runId,
         steps: otherSteps,
         responseBlock: synthesized.block,
@@ -362,7 +470,7 @@ function buildCodexSegments(
     } else {
       segments.push({
         kind: "turn",
-        id: pendingSteps[pendingSteps.length - 1].id,
+        id: stableId,
         runId: options.runId,
         steps: pendingSteps,
         responseBlock: null,
@@ -372,19 +480,64 @@ function buildCodexSegments(
     pendingSteps = [];
   };
 
+  const referencedCallIds = new Set(
+    blocks.map(b => b.trace?.modelCallId).filter((id): id is string => Boolean(id)),
+  );
+  const windowStartMs = blocks.length > 0 ? (Date.parse(blocks[0].at) || 0) - 5_000 : 0;
+  const orphanInputCalls = calls
+    .filter(
+      call =>
+        callHasExternalInput(call) &&
+        !referencedCallIds.has(call.id) &&
+        (blocks.length === 0 || (call.atMs || Date.parse(call.at) || 0) >= windowStartMs),
+    )
+    .sort((a, b) => (a.atMs || Date.parse(a.at) || 0) - (b.atMs || Date.parse(b.at) || 0));
+  let orphanIdx = 0;
+
+  const emitCallInputCard = (call: Call) => {
+    if (emittedCallInputIds.has(call.id)) return;
+    flushTurn();
+    emittedCallInputIds.add(call.id);
+    const resolvedObs = call.inputObservations
+      .map(obsId => obsById.get(obsId))
+      .filter((item): item is Observation => Boolean(item));
+    segments.push({
+      kind: "input",
+      id: `input-call:${call.id}`,
+      runId: options.runId,
+      call,
+      observations: resolvedObs,
+      at: call.perception?.snapshot?.recordedAt ?? resolvedObs[0]?.at ?? call.at,
+    });
+  };
+
   for (const block of blocks) {
+    const blockMs = Date.parse(block.at) || 0;
+    while (
+      orphanIdx < orphanInputCalls.length &&
+      (orphanInputCalls[orphanIdx].atMs || Date.parse(orphanInputCalls[orphanIdx].at) || 0) <= blockMs
+    ) {
+      if (segments.length === 0 && options.runId) {
+        emitDividerForEpoch(options.cycles?.[0]?.epoch ?? null, orphanInputCalls[orphanIdx].at);
+      }
+      emitCallInputCard(orphanInputCalls[orphanIdx]);
+      orphanIdx++;
+    }
+
     if (isControlBlock(block)) {
       flushTurn();
       const rec = asRecord(block.data);
       const ep = block.trace?.epoch ?? (typeof rec?.epoch === "string" ? rec.epoch : null);
       if (rec?.mode === "auto") {
         currentEpoch = ep;
+        lastPostBlockMs = 0;
         emitDividerForEpoch(ep, block.at, rec);
       } else if (rec?.mode === "manual") {
         if (ep || currentEpoch) {
           lastSegmentEndedAt = block.at;
         }
         currentEpoch = null;
+        lastPostBlockMs = 0;
       }
       continue;
     }
@@ -393,9 +546,46 @@ function buildCodexSegments(
     if (blockEpoch && blockEpoch !== currentEpoch) {
       flushTurn();
       currentEpoch = blockEpoch;
+      lastPostBlockMs = 0;
       emitDividerForEpoch(blockEpoch, block.at);
+    } else if (!blockEpoch && currentEpoch) {
+      const closedEnd =
+        cyclesByEpoch.get(currentEpoch)?.endedAt ?? manualEndByEpoch.get(currentEpoch)?.endedAt ?? null;
+      const closedMs = closedEnd ? Date.parse(closedEnd) : NaN;
+      if (Number.isFinite(closedMs) && blockMs > closedMs + 30_000) {
+        flushTurn();
+        lastSegmentEndedAt = closedEnd;
+        currentEpoch = null;
+        lastPostBlockMs = blockMs;
+        emitDividerForEpoch(`post:${block.id}`, block.at);
+      }
+    } else if (!blockEpoch && !currentEpoch && segments.length > 0 && blockMs > 0) {
+      if (lastPostBlockMs === 0) {
+        const prevEndMs = lastSegmentEndedAt ? Date.parse(lastSegmentEndedAt) : NaN;
+        if (Number.isFinite(prevEndMs) && blockMs > prevEndMs + 30_000) {
+          flushTurn();
+          lastPostBlockMs = blockMs;
+          emitDividerForEpoch(`post:${block.id}`, block.at);
+        }
+      } else if (blockMs - lastPostBlockMs > 5 * 60_000) {
+        flushTurn();
+        lastSegmentEndedAt = new Date(lastPostBlockMs).toISOString();
+        lastPostBlockMs = blockMs;
+        emitDividerForEpoch(`post:${block.id}`, block.at);
+      } else {
+        lastPostBlockMs = Math.max(lastPostBlockMs, blockMs);
+      }
     } else if (!blockEpoch && segments.length === 0 && pendingSteps.length === 0 && options.runId) {
-      emitDividerForEpoch(options.cycles?.[0]?.epoch ?? null, block.at);
+      const fallbackCycle = options.cycles?.[0];
+      const fallbackClosedEnd = fallbackCycle?.endedAt ?? (fallbackCycle ? manualEndByEpoch.get(fallbackCycle.epoch)?.endedAt : null) ?? null;
+      const fallbackClosedMs = fallbackClosedEnd ? Date.parse(fallbackClosedEnd) : NaN;
+      if (fallbackCycle && Number.isFinite(fallbackClosedMs) && blockMs > fallbackClosedMs + 30_000) {
+        emitDividerForEpoch(fallbackCycle.epoch, fallbackCycle.startedAt);
+        lastPostBlockMs = blockMs;
+        emitDividerForEpoch(`post:${block.id}`, block.at);
+      } else {
+        emitDividerForEpoch(fallbackCycle?.epoch ?? null, block.at);
+      }
     }
 
     if (isUserMessageBlock(block)) {
@@ -428,19 +618,7 @@ function buildCodexSegments(
     if (callId && !emittedCallInputIds.has(callId)) {
       const call = callsById.get(callId);
       if (call && callHasExternalInput(call)) {
-        flushTurn();
-        emittedCallInputIds.add(call.id);
-        const resolvedObs = call.inputObservations
-          .map(obsId => obsById.get(obsId))
-          .filter((item): item is Observation => Boolean(item));
-        segments.push({
-          kind: "input",
-          id: `input-call:${call.id}`,
-          runId: options.runId,
-          call,
-          observations: resolvedObs,
-          at: call.perception?.snapshot?.recordedAt ?? resolvedObs[0]?.at ?? call.at,
-        });
+        emitCallInputCard(call);
       }
     }
 
@@ -462,6 +640,13 @@ function buildCodexSegments(
   }
 
   flushTurn();
+  while (orphanIdx < orphanInputCalls.length) {
+    if (segments.length === 0 && options.runId) {
+      emitDividerForEpoch(options.cycles?.[0]?.epoch ?? null, orphanInputCalls[orphanIdx].at);
+    }
+    emitCallInputCard(orphanInputCalls[orphanIdx]);
+    orphanIdx++;
+  }
   return segments;
 }
 
@@ -501,8 +686,9 @@ function CodexSessionDivider({
   highlighted?: boolean;
 }) {
   const t = useTranslations("shioriCockpit");
+  const isPostCycle = Boolean(segment.epoch?.startsWith("post:"));
   const windowInfo = runWindowSummary({
-    id: segment.epoch || segment.id,
+    id: isPostCycle ? segment.id : segment.epoch || segment.id,
     startedAt: segment.startedAt,
     endedAt: segment.endedAt ?? undefined,
   });
@@ -515,8 +701,8 @@ function CodexSessionDivider({
       className="codex-session-divider"
       data-session-divider
       data-run-id={segment.runId}
-      data-epoch={segment.epoch ?? undefined}
-      data-segment-anchor={segment.epoch ? `${segment.runId}#${segment.epoch}` : segment.runId}
+      data-epoch={isPostCycle ? undefined : (segment.epoch ?? undefined)}
+      data-segment-anchor={!isPostCycle && segment.epoch ? `${segment.runId}#${segment.epoch}` : segment.runId}
       data-active={segment.isActive || undefined}
       data-highlighted={highlighted || undefined}
     >
@@ -535,10 +721,10 @@ function CodexSessionDivider({
             data-active={segment.isActive || undefined}
           />
           <strong className="codex-session-divider-status">
-            {segment.isActive ? t("segmentActive") : t("segmentCompleted")}
+            {isPostCycle ? t("postCycleMaintenance") : segment.isActive ? t("segmentActive") : t("segmentCompleted")}
           </strong>
           <span className="codex-session-divider-time">{timeSummary}</span>
-          <span className="codex-session-divider-tag">#{segment.cycleIndex}</span>
+          {!isPostCycle && <span className="codex-session-divider-tag">#{segment.cycleIndex}</span>}
           {segment.durationSeconds != null && !segment.isActive && (
             <span className="codex-session-divider-meta">
               {t("segmentRanFor").replace("{duration}", formatDurationCompact(segment.durationSeconds))}
@@ -564,16 +750,18 @@ function CodexSessionDivider({
 function CodexStepGroup({
   steps,
   forceExpanded,
+  defaultOpen = false,
   selectedBlock,
   onSelect,
 }: {
   steps: ActivityBlock[];
   forceExpanded: boolean;
+  defaultOpen?: boolean;
   selectedBlock?: string;
   onSelect?: (block: ActivityBlock) => void;
 }) {
   const t = useTranslations("shioriCockpit");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(() => defaultOpen);
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
   const isExpanded = forceExpanded || open;
 
@@ -681,7 +869,7 @@ function CodexInputCard({
   at: string;
   isSelected: boolean;
   onSelect: (imageId?: string) => void;
-  onOpenReplayAt?: (frame: { record: string; sequence: number }) => void;
+  onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
 }) {
   const t = useTranslations("shioriCockpit");
   const [expandedPayload, setExpandedPayload] = useState(false);
@@ -697,28 +885,46 @@ function CodexInputCard({
 
   const bgData = asRecord(bgBlock?.data);
   const bgJobId = typeof bgData?.jobId === "string" ? bgData.jobId : null;
-  const bgLabel = typeof bgData?.label === "string" ? bgData.label : bgBlock?.text ?? null;
-  const bgResult = typeof bgData?.result === "string" ? bgData.result : null;
+  const bgLabel =
+    typeof bgData?.label === "string"
+      ? bgData.label
+      : typeof bgData?.command === "string"
+        ? bgData.command
+        : null;
+  const bgResultRec = asRecord(bgData?.result);
+  const bgResult =
+    typeof bgData?.result === "string"
+      ? bgData.result.trim().slice(0, 240)
+      : bgResultRec && (bgResultRec.encoding === "ludens-json-v1" || typeof bgResultRec.path === "string")
+        ? `Archived output${typeof bgResultRec.bytes === "number" ? ` (${bgResultRec.bytes.toLocaleString()} B)` : ""}`
+        : null;
+  const bgExitCode = typeof bgData?.exitCode === "number" ? bgData.exitCode : null;
+  const bgStatus = typeof bgData?.status === "string" ? bgData.status : null;
   const bgDurationMs = typeof bgData?.durationMs === "number" ? bgData.durationMs : null;
 
   const textSnippets: string[] = [];
   if (call?.inputText && call.inputText.trim()) {
-    textSnippets.push(call.inputText.trim());
+    textSnippets.push(cleanErrorMessage(call.inputText.trim()));
   }
   for (const obs of observations) {
-    if (obs.text && obs.text.trim() && !textSnippets.includes(obs.text.trim())) {
-      textSnippets.push(obs.text.trim());
+    if (obs.text && obs.text.trim()) {
+      const cleaned = cleanErrorMessage(obs.text.trim());
+      if (!textSnippets.includes(cleaned)) textSnippets.push(cleaned);
     }
   }
   if (perception?.records) {
     for (const rec of perception.records) {
-      if (rec.text && rec.text.trim() && !textSnippets.includes(rec.text.trim())) {
-        textSnippets.push(rec.text.trim());
+      if (rec.text && rec.text.trim()) {
+        const cleaned = cleanErrorMessage(rec.text.trim());
+        if (!textSnippets.includes(cleaned)) textSnippets.push(cleaned);
       }
     }
   }
   if (perception?.deliveryError && perception.deliveryError.trim()) {
-    textSnippets.push(`⚠ ${perception.deliveryError.trim()}`);
+    const cleanedErr = cleanErrorMessage(perception.deliveryError);
+    if (!textSnippets.some(s => s.includes(cleanedErr))) {
+      textSnippets.push(`⚠ ${cleanedErr}`);
+    }
   }
   if (bgLabel && bgLabel.trim()) {
     textSnippets.push(bgLabel.trim());
@@ -727,15 +933,9 @@ function CodexInputCard({
     textSnippets.push(bgResult.trim());
   }
 
-  const payloadObject = call
-    ? {
-        callIndex: call.index,
-        callId: call.id,
-        ...(call.inputText ? { inputText: call.inputText } : {}),
-        ...(call.inputObservations.length > 0 ? { inputObservations: call.inputObservations } : {}),
-        ...(call.perception ? { perception: call.perception } : {}),
-      }
-    : bgBlock?.data ?? bgBlock;
+  const recordedObservations = observations.filter(obs => obs.mediaStorage !== "unrecorded");
+  const visibleObservations = recordedObservations.slice(0, 4);
+  const extraObservationCount = Math.max(0, recordedObservations.length - visibleObservations.length);
 
   return (
     <article
@@ -766,7 +966,13 @@ function CodexInputCard({
               title={t("jumpToReplayAt").replace("{time}", clockTime(at))}
               onClick={event => {
                 event.stopPropagation();
-                onOpenReplayAt({ record: replayRecordId, sequence: replaySequence });
+                const parsedAt = Date.parse(at);
+                onOpenReplayAt({
+                  run,
+                  at: Number.isFinite(parsedAt) ? parsedAt : undefined,
+                  record: replayRecordId,
+                  sequence: replaySequence,
+                });
               }}
             >
               ⏱ {t("jumpToReplayAt").replace("{time}", clockTime(at))}
@@ -778,9 +984,9 @@ function CodexInputCard({
       </header>
 
       <div className="codex-input-body">
-        {observations.length > 0 && (
+        {visibleObservations.length > 0 && (
           <div className="codex-input-thumbs">
-            {observations.map(obs => (
+            {visibleObservations.map((obs, idx) => (
               <button
                 key={obs.id}
                 type="button"
@@ -794,8 +1000,14 @@ function CodexInputCard({
                 <img
                   src={`/api/media?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run)}&id=${encodeURIComponent(obs.id)}`}
                   alt={obs.origin || obs.id}
+                  width={96}
+                  height={54}
                   loading="lazy"
+                  decoding="async"
                 />
+                {idx === visibleObservations.length - 1 && extraObservationCount > 0 && (
+                  <span className="codex-input-thumb-more">+{extraObservationCount}</span>
+                )}
               </button>
             ))}
           </div>
@@ -831,6 +1043,11 @@ function CodexInputCard({
                 {(bgDurationMs / 1000).toFixed(1)}s
               </span>
             )}
+            {(bgExitCode != null || bgStatus) && (
+              <span className="codex-input-chip">
+                {bgExitCode != null ? `exit ${bgExitCode}` : bgStatus}
+              </span>
+            )}
             <button
               type="button"
               className="codex-input-payload-toggle"
@@ -853,7 +1070,17 @@ function CodexInputCard({
               className="codex-input-payload-pre"
               onClick={event => event.stopPropagation()}
             >
-              {printable(payloadObject)}
+              {printable(
+                call
+                  ? {
+                      callIndex: call.index,
+                      callId: call.id,
+                      ...(call.inputText ? { inputText: call.inputText } : {}),
+                      ...(call.inputObservations.length > 0 ? { inputObservations: call.inputObservations } : {}),
+                      ...(call.perception ? { perception: call.perception } : {}),
+                    }
+                  : (bgBlock?.data ?? bgBlock),
+              )}
             </pre>
           )}
         </div>
@@ -964,9 +1191,18 @@ export function ShioriComposer({
   const [error, setError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(null);
   const [localPerceptionInject, setLocalPerceptionInject] = useState<boolean | null>(null);
-  const [localHostStatus, setLocalHostStatus] = useState<Record<string, unknown> | null>(null);
+  const [localHostOverride, setLocalHostOverride] = useState<{
+    project: string;
+    run: string;
+    baseUpdatedAt: string;
+    status: Record<string, unknown>;
+  } | null>(null);
 
   useEffect(() => {
+    setLocalPerceptionInject(null);
+    setLocalHostOverride(null);
+    setError(null);
+    setLastSent(null);
     try {
       if (typeof window !== "undefined" && project) {
         const stored = window.localStorage.getItem(`ludens:takeover-duration:${project}`);
@@ -997,7 +1233,15 @@ export function ShioriComposer({
     }
   };
 
-  const effectiveHost = (hostStatusOverride ?? localHostStatus ?? data.live) as (NonNullable<RunData["live"]> & {
+  const activeLocalStatus =
+    localHostOverride &&
+    localHostOverride.project === project &&
+    localHostOverride.run === data.run &&
+    localHostOverride.baseUpdatedAt === data.updatedAt
+      ? localHostOverride.status
+      : null;
+
+  const effectiveHost = (hostStatusOverride ?? activeLocalStatus ?? data.live) as (NonNullable<RunData["live"]> & {
     consolidating?: boolean;
     context?: { perceptionInjection?: boolean };
   }) | null;
@@ -1011,12 +1255,14 @@ export function ShioriComposer({
     perceptionInjectOverride ?? localPerceptionInject ?? serverPerceptionInject;
   const isAuto = runtimeMode === "auto";
 
-  if (externalDraft != null || externalMode != null) {
-    if (externalDraft != null && externalDraft !== draft) setDraft(externalDraft);
-    if (externalMode != null && externalMode !== selectedTab) setSelectedTab(externalMode);
+  useEffect(() => {
+    if (externalDraft == null && externalMode == null) return;
+    if (externalDraft != null) setDraft(externalDraft);
+    if (externalMode != null) setSelectedTab(externalMode);
     onExternalConsumed?.();
-    setTimeout(() => textareaRef.current?.focus(), 0);
-  }
+    const timer = setTimeout(() => textareaRef.current?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [externalDraft, externalMode, onExternalConsumed]);
 
   const effectiveTab: "start" | "steer" | "follow_up" =
     selectedTab ?? (isAuto ? "steer" : "start");
@@ -1030,7 +1276,7 @@ export function ShioriComposer({
   const applyReturnedStatus = (res: unknown) => {
     const status = asRecord(asRecord(res)?.status);
     if (status) {
-      setLocalHostStatus(status);
+      setLocalHostOverride({ project, run: data.run, baseUpdatedAt: data.updatedAt, status });
       onHostStatusChange?.(status);
       const contextRec = asRecord(status.context);
       if (typeof contextRec?.perceptionInjection === "boolean") {
@@ -1171,6 +1417,23 @@ export function ShioriComposer({
           : `${durationSeconds}s`;
 
   const modelShort = (data.manifest.model ?? t("deviceOnly")).replace(/^[^/]+\//, "");
+
+  if (!isLiveRun) {
+    return (
+      <div ref={composerDockRef} className="codex-composer-wrap" data-shiori-composer="readonly">
+        <div className="codex-pill-composer">
+          <div className="codex-composer-notice codex-composer-notice-standalone">
+            <span>{t("readonlyHint")}</span>
+            {onReturnLatest && (
+              <button type="button" className="codex-notice-link" onClick={onReturnLatest}>
+                {t("returnToLiveBtn")} →
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div ref={composerDockRef} className="codex-composer-wrap" data-shiori-composer={effectiveTab}>
@@ -1449,11 +1712,15 @@ export function ShioriWorkbench({
   workspaceTitle,
   runs = [],
   jumpTarget = null,
+  onClearJumpTarget,
   data,
   feed,
   isLiveRun,
+  refresh = true,
   phaseLabel,
   phaseElapsedMs,
+  requestedCall,
+  selectedImage,
   selectedBlock,
   onSelectBlock,
   onUpdated,
@@ -1470,20 +1737,25 @@ export function ShioriWorkbench({
   workspaceTitle?: string;
   runs?: RunInfo[];
   jumpTarget?: { value: string; seq: number } | null;
+  onClearJumpTarget?: () => void;
   data: RunData;
   feed: ActivityFeedData;
   isLiveRun: boolean;
+  refresh?: boolean;
   phaseLabel?: string | null;
   phaseElapsedMs?: number | null;
+  requestedCall?: string;
+  selectedImage?: string;
   selectedBlock?: string;
   onSelectBlock?: (block: ActivityBlock) => void;
   onUpdated(): void;
   onOpenPerf(): void;
   onOpenCaps(): void;
   onOpenReplay?(): void;
-  onOpenReplayAt?: (frame: { record: string; sequence: number }) => void;
+  onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
   onReturnLatest(): void;
   renderObservation?: (options: {
+    data: RunData;
     call: Call | undefined;
     selectedImage: string | undefined;
     onSelectImage: (id: string) => void;
@@ -1492,6 +1764,7 @@ export function ShioriWorkbench({
 }) {
   const t = useTranslations("shioriCockpit");
   const streamRef = useRef<HTMLDivElement | null>(null);
+  const prependScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
   const cachedSegmentsRef = useRef<{ run: string; segments: StreamSegment[] }>({
     run: "",
     segments: [],
@@ -1500,13 +1773,20 @@ export function ShioriWorkbench({
   const [dockOpen, setDockOpen] = useState(true);
   const [atBottom, setAtBottom] = useState(true);
   const [perceptionOverride, setPerceptionOverride] = useState<boolean | null>(null);
-  const [hostStatusOverride, setHostStatusOverride] = useState<Record<string, unknown> | null>(null);
+  const [hostStatusOverride, setHostStatusOverride] = useState<{
+    project: string;
+    run: string;
+    baseUpdatedAt: string;
+    status: Record<string, unknown>;
+  } | null>(null);
   const [loadedOlderRuns, setLoadedOlderRuns] = useState<
     Array<{ runId: string; data: RunData; blocks: ActivityBlock[] }>
   >([]);
   const [loadingOlderRun, setLoadingOlderRun] = useState(false);
+  const [olderRunError, setOlderRunError] = useState<string | null>(null);
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [inspectedTurn, setInspectedTurn] = useState<{
+    runId: string;
     blockId: string;
     callId: string | null;
     imageId: string | null;
@@ -1516,10 +1796,15 @@ export function ShioriWorkbench({
     mode: "start" | "steer" | "follow_up";
     prompt: string;
   } | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     setLoadedOlderRuns([]);
+    setOlderRunError(null);
     setHighlightedSegmentId(null);
+    setInspectedTurn(null);
+    setPerceptionOverride(null);
+    setHostStatusOverride(null);
     try {
       if (typeof window !== "undefined" && project) {
         const stored = window.localStorage.getItem(`ludens:perception-inject:${project}`);
@@ -1531,7 +1816,28 @@ export function ShioriWorkbench({
     }
   }, [project]);
 
-  const live = (hostStatusOverride ?? data.live) as (NonNullable<RunData["live"]> & {
+  useEffect(() => {
+    if (!requestedCall && !selectedImage) return;
+    const matchedCall = requestedCall ? data.calls.find(c => c.id === requestedCall) : undefined;
+    setInspectedTurn({
+      runId: data.run,
+      blockId: requestedCall ? `input-call:${requestedCall}` : "url-image",
+      callId: matchedCall?.id ?? requestedCall ?? null,
+      imageId: selectedImage ?? null,
+      at: matchedCall?.at ?? data.updatedAt,
+    });
+    setDockOpen(true);
+  }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt]);
+
+  const activeHostOverride =
+    hostStatusOverride &&
+    hostStatusOverride.project === project &&
+    hostStatusOverride.run === data.run &&
+    hostStatusOverride.baseUpdatedAt === data.updatedAt
+      ? hostStatusOverride.status
+      : null;
+
+  const live = (activeHostOverride ?? data.live) as (NonNullable<RunData["live"]> & {
     maxSeconds?: number | null;
     remainingSeconds?: number | null;
     consolidating?: boolean;
@@ -1545,8 +1851,18 @@ export function ShioriWorkbench({
   const thinking = Boolean(live?.thinking ?? control?.thinking);
   const serverPerceptionInject =
     live?.context?.perceptionInjection ?? control?.context?.perceptionInjection ?? true;
-  const perceptionInject = perceptionOverride ?? serverPerceptionInject;
+  const perceptionInject =
+    live?.connected && typeof live?.context?.perceptionInjection === "boolean" && !activeHostOverride
+      ? live.context.perceptionInjection
+      : (perceptionOverride ?? serverPerceptionInject);
   const isAuto = mode === "auto";
+
+  useEffect(() => {
+    if (!isLiveRun || !isAuto || !refresh) return;
+    setNowMs(Date.now());
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [isLiveRun, isAuto, refresh]);
 
   const earliestLoadedRunId = loadedOlderRuns[0]?.runId ?? data.run;
   const earliestIdxInCatalog = runs.findIndex(r => r.id === earliestLoadedRunId);
@@ -1555,19 +1871,24 @@ export function ShioriWorkbench({
       ? runs[earliestIdxInCatalog + 1]
       : null;
 
-  const fetchHistoricalRun = async (targetRunId: string) => {
+  const olderRunAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    return () => olderRunAbortRef.current?.abort();
+  }, [project, data.run]);
+
+  const fetchHistoricalRun = async (targetRunId: string, signal: AbortSignal) => {
     const runParams = new URLSearchParams({ project, run: targetRunId, epoch: "all" });
-    const actParams = new URLSearchParams({ project, run: targetRunId, epoch: "all", limit: "400" });
-    const [runRes, actRes] = await Promise.all([
-      fetch(`/api/run?${runParams}`),
-      fetch(`/api/activity?${actParams}`),
-    ]);
-    if (!runRes.ok || !actRes.ok) {
-      throw new Error("Failed to load earlier run segment");
-    }
+    const actParams = new URLSearchParams({
+      project,
+      run: targetRunId,
+      epoch: "all",
+      mode: "history",
+      kind: "all",
+      limit: "150",
+    });
     const [runPayload, actPayload] = await Promise.all([
-      runRes.json() as Promise<RunData>,
-      actRes.json() as Promise<{ blocks?: ActivityBlock[] }>,
+      readArchiveJson<RunData>(`/api/run?${runParams}`, signal),
+      requestActivity(actParams, signal),
     ]);
     return {
       runId: targetRunId,
@@ -1576,9 +1897,21 @@ export function ShioriWorkbench({
     };
   };
 
+  const capturePrependAnchor = () => {
+    const el = streamRef.current;
+    if (el && !atBottom) {
+      prependScrollAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
+    }
+  };
+
   const loadOlderRunSegment = async (upToRunId?: string) => {
     if (loadingOlderRun || !project) return;
+    olderRunAbortRef.current?.abort();
+    const controller = new AbortController();
+    olderRunAbortRef.current = controller;
     setLoadingOlderRun(true);
+    setOlderRunError(null);
+    capturePrependAnchor();
     try {
       const existingIds = new Set([data.run, ...loadedOlderRuns.map(r => r.runId)]);
       const toFetch: string[] = [];
@@ -1597,7 +1930,8 @@ export function ShioriWorkbench({
       }
 
       if (toFetch.length === 0) return;
-      const fetched = await Promise.all(toFetch.map(id => fetchHistoricalRun(id)));
+      const fetched = await Promise.all(toFetch.map(id => fetchHistoricalRun(id, controller.signal)));
+      if (controller.signal.aborted) return;
       // fetched is newest-to-oldest; reverse so loadedOlderRuns stays chronological (oldest first)
       const chronologicalFetched = [...fetched].reverse();
       setLoadedOlderRuns(prev => {
@@ -1609,10 +1943,14 @@ export function ShioriWorkbench({
           return true;
         });
       });
-    } catch {
-      // Ignore transient historical load errors
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      prependScrollAnchorRef.current = null;
+      setOlderRunError(cause instanceof Error ? cleanErrorMessage(cause.message) : t("olderRunLoadFailed"));
     } finally {
-      setLoadingOlderRun(false);
+      if (olderRunAbortRef.current === controller) {
+        setLoadingOlderRun(false);
+      }
     }
   };
 
@@ -1666,6 +2004,31 @@ export function ShioriWorkbench({
   const programmaticScrollUntilRef = useRef(0);
   const lastJumpedSeqRef = useRef<number | null>(null);
 
+  // Preserve scroll position when prepending earlier history or older run segments
+  useLayoutEffect(() => {
+    const anchor = prependScrollAnchorRef.current;
+    const el = streamRef.current;
+    if (!anchor || !el) return;
+    const delta = el.scrollHeight - anchor.scrollHeight;
+    if (delta !== 0) {
+      programmaticScrollUntilRef.current = Date.now() + 300;
+      el.scrollTop = Math.max(0, anchor.scrollTop + delta);
+    }
+    prependScrollAnchorRef.current = null;
+  }, [segments.length, feed.blocks.length, loadedOlderRuns.length]);
+
+  const scrollToBottom = () => {
+    if (feed.historical) {
+      feed.latest();
+    }
+    onClearJumpTarget?.();
+    const el = streamRef.current;
+    if (!el) return;
+    programmaticScrollUntilRef.current = Date.now() + 600;
+    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    setAtBottom(true);
+  };
+
   // Handle Quick-Jump Segment selection from top-right RunPicker without page reload
   useEffect(() => {
     if (!jumpTarget || lastJumpedSeqRef.current === jumpTarget.seq) return;
@@ -1684,8 +2047,12 @@ export function ShioriWorkbench({
       lastJumpedSeqRef.current = jumpTarget.seq;
       programmaticScrollUntilRef.current = Date.now() + 1000;
       setAtBottom(false);
+      const relativeTop =
+        container.scrollTop +
+        (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) -
+        12;
       container.scrollTo({
-        top: Math.max(0, targetEl.offsetTop - container.offsetTop - 12),
+        top: Math.max(0, relativeTop),
         behavior: "smooth",
       });
       setHighlightedSegmentId(targetEl.id);
@@ -1707,9 +2074,9 @@ export function ShioriWorkbench({
   // Keep scrolled to bottom when new blocks arrive while following
   useEffect(() => {
     const el = streamRef.current;
-    if (!el || !atBottom) return;
+    if (!el || !atBottom || feed.historical) return;
     el.scrollTop = el.scrollHeight;
-  }, [segments.length, feed.blocks.length, atBottom]);
+  }, [segments.length, feed.blocks.length, atBottom, feed.historical]);
 
   const handleScroll = () => {
     const el = streamRef.current;
@@ -1719,19 +2086,17 @@ export function ShioriWorkbench({
     setAtBottom(distance < 48);
   };
 
-  const scrollToBottom = () => {
-    const el = streamRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-    setAtBottom(true);
-  };
-
-  const handleInspectBlock = (block: ActivityBlock, siblingSteps: ActivityBlock[] = []) => {
-    const matchedCall = resolveCallForTurn(block, siblingSteps, allCalls);
+  const handleInspectBlock = (runId: string, block: ActivityBlock, siblingSteps: ActivityBlock[] = []) => {
+    const ownerCalls =
+      runId === data.run
+        ? data.calls
+        : (loadedOlderRuns.find(r => r.runId === runId)?.data.calls ?? allCalls);
+    const matchedCall = resolveCallForTurn(block, siblingSteps, ownerCalls);
     setInspectedTurn(prev =>
       prev?.blockId === block.id
         ? null
         : {
+            runId,
             blockId: block.id,
             callId: matchedCall?.id ?? null,
             imageId: null,
@@ -1742,11 +2107,12 @@ export function ShioriWorkbench({
     onSelectBlock?.(block);
   };
 
-  const handleInspectInput = (segId: string, call?: Call, imageId?: string, at?: string) => {
+  const handleInspectInput = (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => {
     setInspectedTurn(prev =>
       prev?.blockId === segId && prev?.imageId === (imageId ?? null)
         ? null
         : {
+            runId,
             blockId: segId,
             callId: call?.id ?? null,
             imageId: imageId ?? null,
@@ -1756,8 +2122,13 @@ export function ShioriWorkbench({
     setDockOpen(true);
   };
 
+  const inspectedRunData =
+    inspectedTurn && inspectedTurn.runId !== data.run
+      ? (loadedOlderRuns.find(r => r.runId === inspectedTurn.runId)?.data ?? data)
+      : data;
   const inspectedCall = inspectedTurn?.callId
-    ? allCalls.find(c => c.id === inspectedTurn.callId)
+    ? inspectedRunData.calls.find(c => c.id === inspectedTurn.callId) ??
+      allCalls.find(c => c.id === inspectedTurn.callId)
     : undefined;
   const activeBlockId = inspectedTurn?.blockId ?? selectedBlock;
 
@@ -1774,10 +2145,22 @@ export function ShioriWorkbench({
     latestCycle?.startedAt && latestCycle?.endedAt
       ? Math.max(0, Math.round((Date.parse(latestCycle.endedAt) - Date.parse(latestCycle.startedAt)) / 1000))
       : null;
-  const cycleElapsedSeconds =
+  const updatedDeltaSec =
+    isLiveRun && isAuto && refresh && Number.isFinite(Date.parse(data.updatedAt))
+      ? Math.max(0, Math.min(10, Math.floor((nowMs - Date.parse(data.updatedAt)) / 1000)))
+      : 0;
+  const baseCycleElapsed =
     isAuto && activeMaxSeconds != null && typeof live?.remainingSeconds === "number"
       ? Math.max(0, activeMaxSeconds - live.remainingSeconds)
-      : (latestCycleDurationSeconds ?? elapsedSeconds);
+      : isAuto && latestCycle?.startedAt && Number.isFinite(Date.parse(latestCycle.startedAt))
+        ? Math.max(0, Math.floor((Date.parse(data.updatedAt) - Date.parse(latestCycle.startedAt)) / 1000))
+        : (latestCycleDurationSeconds ?? elapsedSeconds);
+  const cycleElapsedSeconds =
+    activeMaxSeconds != null
+      ? Math.min(activeMaxSeconds, baseCycleElapsed + updatedDeltaSec)
+      : baseCycleElapsed + updatedDeltaSec;
+  const displayPhaseElapsedMs =
+    phaseElapsedMs != null ? phaseElapsedMs + updatedDeltaSec * 1000 : null;
   const budgetRatio =
     activeMaxSeconds != null && activeMaxSeconds > 0
       ? Math.min(100, Math.round((cycleElapsedSeconds / activeMaxSeconds) * 100))
@@ -1811,7 +2194,7 @@ export function ShioriWorkbench({
             {phaseLabel && (
               <span className="codex-phase-inline">
                 {phaseLabel}
-                {phaseElapsedMs != null ? ` ${Math.max(0, Math.round(phaseElapsedMs / 1000))}s` : ""}
+                {displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}
               </span>
             )}
           </div>
@@ -1840,7 +2223,7 @@ export function ShioriWorkbench({
         {/* Scrollable Chat Stream */}
         <div ref={streamRef} className="codex-chat-scroll" onScroll={handleScroll}>
           <div className="codex-chat-column">
-            {(feed.hasMore || nextOlderRun) && (
+            {(feed.hasMore || nextOlderRun || olderRunError) && (
               <div className="codex-load-older">
                 <button
                   type="button"
@@ -1848,6 +2231,7 @@ export function ShioriWorkbench({
                   disabled={feed.loadingOlder || loadingOlderRun}
                   onClick={() => {
                     if (feed.hasMore) {
+                      capturePrependAnchor();
                       void feed.earlier();
                     } else if (nextOlderRun) {
                       void loadOlderRunSegment();
@@ -1857,9 +2241,11 @@ export function ShioriWorkbench({
                   <span>
                     {feed.loadingOlder || loadingOlderRun
                       ? t("loadingOlder")
-                      : feed.hasMore
-                        ? t("loadOlderMessages")
-                        : t("loadPreviousRunSegment")}
+                      : olderRunError
+                        ? `${t("olderRunLoadFailed")}: ${olderRunError} · ${t("retryOlderRun")}`
+                        : feed.hasMore
+                          ? t("loadOlderMessages")
+                          : t("loadPreviousRunSegment")}
                   </span>
                   <ChevronRight className="size-3.5" aria-hidden="true" />
                 </button>
@@ -1896,7 +2282,7 @@ export function ShioriWorkbench({
                 </div>
               </div>
             ) : (
-              segments.map(seg => {
+              segments.map((seg, segIdx) => {
                 if (seg.kind === "session_divider") {
                   return (
                     <CodexSessionDivider
@@ -1923,6 +2309,7 @@ export function ShioriWorkbench({
                 }
 
                 if (seg.kind === "input") {
+                  const segRunId = seg.runId || data.run;
                   const isInputSelected = Boolean(
                     activeBlockId === seg.id ||
                       (seg.call && inspectedTurn?.callId === seg.call.id),
@@ -1931,13 +2318,13 @@ export function ShioriWorkbench({
                     <CodexInputCard
                       key={seg.id}
                       project={project}
-                      run={seg.runId || data.run}
+                      run={segRunId}
                       call={seg.call}
                       observations={seg.observations}
                       bgBlock={seg.bgBlock}
                       at={seg.at}
                       isSelected={isInputSelected}
-                      onSelect={imageId => handleInspectInput(seg.id, seg.call, imageId, seg.at)}
+                      onSelect={imageId => handleInspectInput(segRunId, seg.id, seg.call, imageId, seg.at)}
                       onOpenReplayAt={onOpenReplayAt}
                     />
                   );
@@ -1946,14 +2333,16 @@ export function ShioriWorkbench({
                 const paragraphs = seg.responseText
                   ? seg.responseText.split(/\n{2,}/).filter(Boolean)
                   : [];
+                const isLastSegment = segIdx === segments.length - 1;
 
                 return (
                   <article key={seg.id} className="codex-turn-assistant">
                     <CodexStepGroup
                       steps={seg.steps}
                       forceExpanded={showAllSteps}
+                      defaultOpen={paragraphs.length === 0 && isLastSegment}
                       selectedBlock={activeBlockId}
-                      onSelect={step => handleInspectBlock(step, seg.steps)}
+                      onSelect={step => handleInspectBlock(seg.runId || data.run, step, seg.steps)}
                     />
 
                     {paragraphs.length > 0 && (
@@ -1979,7 +2368,7 @@ export function ShioriWorkbench({
         </div>
 
         {/* Floating Scroll-to-Bottom Button (just like ChatGPT/Codex) */}
-        {!atBottom && (
+        {(!atBottom || feed.historical) && (
           <button
             type="button"
             className="codex-scroll-bottom-btn"
@@ -1996,8 +2385,10 @@ export function ShioriWorkbench({
           workspace={workspace}
           data={data}
           isLiveRun={isLiveRun}
-          hostStatusOverride={hostStatusOverride}
-          onHostStatusChange={setHostStatusOverride}
+          hostStatusOverride={activeHostOverride}
+          onHostStatusChange={status =>
+            setHostStatusOverride({ project, run: data.run, baseUpdatedAt: data.updatedAt, status })
+          }
           perceptionInjectOverride={perceptionInject}
           onPerceptionChange={setPerceptionOverride}
           externalMode={workflowCommand?.mode ?? null}
@@ -2035,18 +2426,22 @@ export function ShioriWorkbench({
               )}
               {renderObservation
                 ? renderObservation({
+                    data: inspectedRunData,
                     call: inspectedCall,
                     selectedImage: inspectedTurn?.imageId ?? undefined,
                     onSelectImage: id =>
                       setInspectedTurn(prev =>
                         prev
-                          ? { ...prev, imageId: id }
-                          : {
-                              blockId: "manual-image",
-                              callId: null,
-                              imageId: id,
-                              at: data.updatedAt,
-                            },
+                          ? { ...prev, imageId: id || null }
+                          : id
+                            ? {
+                                runId: data.run,
+                                blockId: "manual-image",
+                                callId: null,
+                                imageId: id,
+                                at: data.updatedAt,
+                              }
+                            : null,
                       ),
                   })
                 : observationSlot}

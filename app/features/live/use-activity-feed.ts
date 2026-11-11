@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ACTIVITY_LIVE_SIZE, ACTIVITY_PAGE_SIZE, ACTIVITY_WINDOW_SIZE,
-  acceptsScope, mergeActivity, newerBlock, sameScope,
+  acceptsScope, activityScopeParams, mergeActivity, newerBlock, sameScope,
   type ActivityBlock, type ActivityFilter, type ActivityScope,
 } from "@/features/live/activity-feed-model";
 
@@ -33,8 +33,7 @@ const emptyState = (resetRevision = 0): FeedState => ({ resetRevision, loadedRev
   blocks: [], selectionReady: false, before: null, hasMore: false, total: 0,
   historical: false, loading: true, loadingOlder: false, error: "" });
 
-const scopeParams = (scope: ActivityScope) => new URLSearchParams({ project: scope.project, run: scope.runId ?? "",
-  ...(scope.epoch ? { epoch: scope.epoch } : {}) });
+const scopeParams = activityScopeParams;
 
 export function useActivityFeed(options: {
   project: string; run: string; epoch?: string; enabled: boolean; refresh: boolean; selectedBlock?: string; archiveRevision?: number;

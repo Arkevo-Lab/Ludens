@@ -25,7 +25,21 @@ import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clo
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
 export default function ConsoleShell() {
-  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, jumpToLiveSegment} = useDashboardController();
+  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, jumpToLiveSegment, clearLiveJumpTarget} = useDashboardController();
+  const openReplayAtFrame = (frame: { run?: string; at?: number; record: string; sequence: number }) => {
+    navigate({
+      view: "replay",
+      project: selection.project,
+      run: frame.run || run,
+      epoch: selection.epoch || null,
+      at: frame.at != null && Number.isFinite(frame.at) ? String(Math.round(frame.at)) : null,
+      call: null,
+      beforeCall: null,
+      block: null,
+      image: null,
+      ...replayEvidencePatch({ kind: "frame", record: frame.record, sequence: frame.sequence }),
+    });
+  };
   const waitSummary = [
     s?.medianHttpHeadersMs != null ? dt("waitHttp") + " " + seconds(s.medianHttpHeadersMs) : "",
     s?.medianWsWaitMs != null ? dt("waitWs") + " " + seconds(s.medianWsWaitMs) : "",
@@ -229,8 +243,21 @@ export default function ConsoleShell() {
             <TimelinePlayer key={scopeKey} project={selection.project} run={run} epoch={selection.epoch || "all"}
               onOverview={onReplayOverview} archiveRevision={archiveRevision}
               position={query.get("at")} evidence={replayEvidenceFromSearch(search)}
-              onPosition={(at, evidence = null) => navigate({ project: selection.project, run, at: String(at), ...replayEvidencePatch(evidence) })}
-              onEvidence={evidence => navigate(replayEvidencePatch(evidence))} />
+              onPosition={(at, nextEvidence = null, options) => {
+                const prevEvidence = replayEvidenceFromSearch(search);
+                const sameEvidence = JSON.stringify(prevEvidence) === JSON.stringify(nextEvidence);
+                navigate(
+                  {
+                    project: selection.project,
+                    ...(selection.run ? { run: selection.run } : {}),
+                    ...(selection.epoch ? { epoch: selection.epoch } : {}),
+                    at: String(at),
+                    ...replayEvidencePatch(nextEvidence),
+                  },
+                  { replace: options?.replace ?? sameEvidence },
+                );
+              }}
+              onEvidence={nextEvidence => navigate(replayEvidencePatch(nextEvidence))} />
           ) : !data ? (
             <section className="surface empty-state main-empty">
               <span className="empty-symbol">◫</span>
@@ -254,8 +281,10 @@ export default function ConsoleShell() {
                   workspaceTitle={workspaceName(project)}
                   runs={project?.runs ?? []}
                   jumpTarget={liveJumpTarget}
+                  onClearJumpTarget={clearLiveJumpTarget}
                   data={data}
                   feed={activity}
+                  refresh={refresh}
                   isLiveRun={
                     Boolean(!selection.run || selection.run === latest?.id) &&
                     (!selection.epoch || selection.epoch === cycles.at(-1)?.epoch)
@@ -263,44 +292,52 @@ export default function ConsoleShell() {
                   phaseLabel={!staleStatus ? phase?.label : null}
                   phaseElapsedMs={!staleStatus ? phase?.elapsedMs : null}
                   selectedBlock={query.get("block") ?? undefined}
+                  requestedCall={requestedCall || undefined}
+                  selectedImage={selectedImage}
                   onUpdated={() => {
                     refreshRun();
                   }}
                   onOpenPerf={() => navigate({ view: "perf" })}
                   onOpenCaps={() => navigate({ view: "caps" })}
                   onOpenReplay={() => navigate({ view: "replay" })}
-                  onOpenReplayAt={(frame) =>
-                    navigate({
-                      ...pinned,
-                      view: "replay",
-                      ...replayEvidencePatch({ kind: "frame", record: frame.record, sequence: frame.sequence }),
-                    })
-                  }
+                  onOpenReplayAt={openReplayAtFrame}
                   onReturnLatest={returnToLatest}
-                  renderObservation={({ call: overrideCall, selectedImage: overrideImage, onSelectImage }) => {
-                    const effectiveCall =
-                      overrideCall ??
-                      (call?.inputObservations.length
-                        ? call
-                        : [...data.calls].reverse().find(c => c.inputObservations.length > 0) ?? call);
+                  renderObservation={({ data: overrideData, call: overrideCall, selectedImage: overrideImage, onSelectImage }) => {
+                    const targetData = overrideData ?? data;
+                    const obsById = new Map(targetData.observations.map(o => [o.id, o]));
+                    const hasRecordedVisual = (candidate?: typeof call) =>
+                      Boolean(
+                        candidate?.inputObservations.some(id => {
+                          const item = obsById.get(id);
+                          return item && item.mediaStorage !== "unrecorded";
+                        }),
+                      );
+                    const latestRunCall = targetData.calls.at(-1);
+                    const defaultCall = targetData === data ? call : latestRunCall;
+                    const explicitSelection = Boolean(overrideCall || (targetData === data && requestedCall));
+                    const effectiveCall = explicitSelection
+                      ? (overrideCall ?? defaultCall)
+                      : hasRecordedVisual(defaultCall)
+                        ? defaultCall
+                        : [...targetData.calls].reverse().find(hasRecordedVisual) ??
+                          [...targetData.calls].reverse().find(c => c.inputObservations.length > 0) ??
+                          defaultCall;
                     const effectiveImage =
                       overrideImage ??
-                      selectedImage ??
-                      (!effectiveCall?.inputObservations.length ? data.observations.at(-1)?.id : undefined);
+                      (targetData === data ? selectedImage : undefined) ??
+                      (!effectiveCall?.inputObservations.length
+                        ? [...targetData.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
+                          targetData.observations.at(-1)?.id
+                        : undefined);
                     return (
                       <ObservationPanel
                         priority
-                        data={data}
+                        data={targetData}
                         call={effectiveCall}
+                        latestCall={!explicitSelection ? latestRunCall : undefined}
                         selectedImage={effectiveImage}
                         onImage={onSelectImage}
-                        onOpenReplayAt={(frame) =>
-                          navigate({
-                            ...pinned,
-                            view: "replay",
-                            ...replayEvidencePatch({ kind: "frame", record: frame.record, sequence: frame.sequence }),
-                          })
-                        }
+                        onOpenReplayAt={openReplayAtFrame}
                       />
                     );
                   }}
@@ -308,16 +345,33 @@ export default function ConsoleShell() {
                     <ObservationPanel
                       priority
                       data={data}
-                      call={
-                        call?.inputObservations.length
-                          ? call
-                          : [...data.calls].reverse().find(c => c.inputObservations.length > 0) ?? call
-                      }
+                      call={(() => {
+                        const obsById = new Map(data.observations.map(o => [o.id, o]));
+                        const hasRecordedVisual = (candidate?: typeof call) =>
+                          Boolean(
+                            candidate?.inputObservations.some(id => {
+                              const item = obsById.get(id);
+                              return item && item.mediaStorage !== "unrecorded";
+                            }),
+                          );
+                        if (requestedCall) return call;
+                        if (hasRecordedVisual(call)) return call;
+                        return (
+                          [...data.calls].reverse().find(hasRecordedVisual) ??
+                          [...data.calls].reverse().find(c => c.inputObservations.length > 0) ??
+                          call
+                        );
+                      })()}
+                      latestCall={!requestedCall ? data.calls.at(-1) : undefined}
                       selectedImage={
                         selectedImage ??
-                        (!call?.inputObservations.length ? data.observations.at(-1)?.id : undefined)
+                        (!call?.inputObservations.length
+                          ? [...data.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
+                            data.observations.at(-1)?.id
+                          : undefined)
                       }
                       onImage={(id) => navigate({ ...pinned, image: id })}
+                      onOpenReplayAt={openReplayAtFrame}
                     />
                   }
                 />
@@ -355,7 +409,18 @@ export default function ConsoleShell() {
                     panel={panel}
                     onPanel={setPanel}
                     onSelect={selectCall}
-                    onInspect={() => navigate({ ...pinned, view: "live", call: call?.id ?? null })}
+                    onInspect={() =>
+                      navigate({
+                        view: "live",
+                        project: selection.project,
+                        ...(selection.run ? { run: selection.run } : {}),
+                        ...(selection.epoch ? { epoch: selection.epoch } : {}),
+                        call: call?.id ?? null,
+                        beforeCall: null,
+                        block: null,
+                        image: null,
+                      })
+                    }
                     onRetry={retryRun}
                     onFollowLatest={() => navigate({ beforeCall: null, call: null, image: null, block: null })}
                     onLoadMore={() => navigate({ ...pinned, beforeCall: String(data.paging.beforeCall), call: null, image: null, block: null })}

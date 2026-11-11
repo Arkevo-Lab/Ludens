@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { hasSelectedEvidence, latestLiveUrl, liveContext, resolveLiveSelection } from "../lib/live-follow";
+import { cleanViewSearchParams, hasSelectedEvidence, latestLiveUrl, liveContext, resolveLiveSelection } from "../lib/live-follow";
 import type { LiveStatus } from "../lib/types";
 
 const paused = { location: "?view=live&project=a", project: "a", run: "run-1", requestedRun: "", epoch: "", archiveRevision: 1 };
@@ -77,4 +77,18 @@ test("manual hosts without an epoch are current, while missing or disconnected h
   assert.deepEqual(liveContext({ ...context, live: null }), { kind: "latest", host: "unavailable" });
   assert.deepEqual(liveContext({ ...context, live: { ...live, connected: false } }), { kind: "latest", host: "disconnected" });
   assert.equal(liveContext({ ...context, live: { ...live, epoch: "other" } }).host, "unavailable");
+});
+
+test("view navigation strips cross-view params and redundant latest run pins", () => {
+  const fromReplay = "?view=replay&project=switch2&run=run-2&epoch=all&at=159000&replayRecord=rec-1&replaySequence=12";
+  const toLive = cleanViewSearchParams(fromReplay, "live", { project: "switch2", latestRunId: "run-2" });
+  assert.deepEqual([...toLive], [["view", "live"], ["project", "switch2"]]);
+
+  const fromOlderReplay = "?view=replay&project=switch2&run=run-1&epoch=all&at=45000";
+  const toOlderLive = cleanViewSearchParams(fromOlderReplay, "live", { project: "switch2", latestRunId: "run-2" });
+  assert.deepEqual([...toOlderLive], [["view", "live"], ["project", "switch2"], ["run", "run-1"]]);
+
+  const fromPerf = "?view=perf&project=switch2&call=c-9&perfTab=requests&image=obs-4";
+  const toReplay = cleanViewSearchParams(fromPerf, "replay", { project: "switch2", latestRunId: "run-2" });
+  assert.deepEqual([...toReplay], [["view", "replay"], ["project", "switch2"]]);
 });

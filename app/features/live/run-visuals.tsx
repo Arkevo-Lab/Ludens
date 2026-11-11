@@ -247,9 +247,29 @@ function observationMachineId(o?: Observation): string | null {
   return null;
 }
 
+function cleanErrorPrefix(message: string): string {
+  return message.replace(/(?:LudensError:\s*|Error:\s*)+/gi, "").trim() || message;
+}
+
+function formatAgeSpan(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  if (totalSec >= 3600) {
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
+  if (totalSec >= 60) {
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return s > 0 ? `${m}m ${s}s` : `${m}m`;
+  }
+  return `${totalSec}s`;
+}
+
 export function ObservationPanel({
   data,
   call,
+  latestCall,
   selectedImage,
   onImage,
   onOpenReplayAt,
@@ -258,9 +278,10 @@ export function ObservationPanel({
 }: {
   data: RunData;
   call?: Call;
+  latestCall?: Call;
   selectedImage?: string;
   onImage(id: string): void;
-  onOpenReplayAt?: (frame: { record: string; sequence: number }) => void;
+  onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
   compact?: boolean;
   priority?: boolean;
 }) {
@@ -310,7 +331,7 @@ export function ObservationPanel({
             {observationMachineId(o) ? `[${observationMachineId(o)}] ` : ""}
             {o.mediaStorage === "unrecorded" ? t("panel.unrecorded") : label}
           </small>
-          <small>{observationTime(timestamp(o), t)}</small>
+          <small>{observationTime(timestamp(o), rootT)}</small>
         </button>
       ))}
     </div>
@@ -368,14 +389,38 @@ export function ObservationPanel({
       <div className="surface-heading">
         <h2>{showingInput ? t("panel.inputTitle") : t("panel.samplesTitle")}</h2>
         <span>
-          {call ? t("panel.request") + " #" + String(call.index).padStart(3, "0") : t("panel.waitingRequest")}
+          {call
+            ? t("panel.request") +
+              " #" +
+              String(call.index).padStart(3, "0") +
+              (latestCall && latestCall.id !== call.id
+                ? t("panel.latestRequestSuffix").replace("{number}", String(latestCall.index).padStart(3, "0"))
+                : "")
+            : t("panel.waitingRequest")}
         </span>
       </div>
+      {priority &&
+        latestCall &&
+        call &&
+        latestCall.id !== call.id &&
+        (latestCall.perception?.ok === false || Boolean(latestCall.perception?.deliveryError)) && (
+          <p className="observation-query-warning" role="status">
+            {t("panel.newerFailurePrefix").replace("{number}", String(latestCall.index).padStart(3, "0"))}
+            {cleanErrorPrefix(
+              latestCall.perception?.deliveryError ||
+                latestCall.perception?.error ||
+                t("panel.queryFailed"),
+            )}
+            {t("panel.keepingLastVisual").replace("{number}", String(call.index).padStart(3, "0"))}
+          </p>
+        )}
       {priority && (perception?.ok === false || perception?.deliveryError || data.perception?.state === "error") && (
         <p className="observation-query-warning" role="status">
-          {perception?.deliveryError ? t("panel.deliveryFailed") : perception?.ok === false
-            ? t("panel.thisQuery") + " · " + t("panel.queryFailed")
-            : t("panel.perceptionProcess") + " · " + perceptionStateLabel("error", rootT)}
+          {perception?.deliveryError
+            ? cleanErrorPrefix(perception.deliveryError)
+            : perception?.ok === false
+              ? t("panel.thisQuery") + " · " + t("panel.queryFailed")
+              : t("panel.perceptionProcess") + " · " + perceptionStateLabel("error", rootT)}
           {" · " + t("panel.detailsBelow")}
         </p>
       )}
@@ -411,7 +456,7 @@ export function ObservationPanel({
       <div className={"screen" + (priority && (!observation || !observation.mediaType.startsWith("image/") || observation.mediaStorage === "unrecorded") ? " screen-content" : "")}>
         {observation ? (
           <ObservationMedia key={data.project + ":" + data.run} observation={observation} url={media(observation)}
-            alt={(showingInput ? t("panel.altInput") : t("panel.altSaved")) + " · " + observation.controller + " · " + observationTime(timestamp(observation), t)} />
+            alt={(showingInput ? t("panel.altInput") : t("panel.altSaved")) + " · " + observation.controller + " · " + observationTime(timestamp(observation), rootT)} />
         ) : text ? (
           <pre className="observation-text">{text}</pre>
         ) : records.length ? (
@@ -434,9 +479,25 @@ export function ObservationPanel({
         )}
         <span>
           {observation
-            ? (observationOrigin(observation.origin, t) +
-              " · " +
-              (observation.perception ? t("meta.recordedAt") : "") + observationTime(timestamp(observation), t))
+            ? (() => {
+                const ts = timestamp(observation);
+                const obsMs = ts ? Date.parse(ts) : NaN;
+                const refMs = Date.parse(data.updatedAt);
+                const hasValidTime = Number.isFinite(obsMs);
+                const ageDelta =
+                  priority && hasValidTime && Number.isFinite(refMs) && refMs - obsMs >= 15_000
+                    ? ` · ${formatAgeSpan(refMs - obsMs)}${t("meta.agoSuffix")}`
+                    : "";
+                return (
+                  observationOrigin(observation.origin, t) +
+                  (hasValidTime
+                    ? " · " +
+                      (observation.perception ? t("meta.recordedAt") : "") +
+                      observationTime(ts, rootT) +
+                      ageDelta
+                    : "")
+                );
+              })()
             : text ? t("meta.textObservation") : records.length ? t("meta.records") : t("meta.noMedia")}
         </span>
         {onOpenReplayAt &&
@@ -445,14 +506,18 @@ export function ObservationPanel({
             <button
               type="button"
               className="codex-replay-jump-link"
-              onClick={() =>
+              onClick={() => {
+                const rawTs = (observation ? timestamp(observation) : undefined) ?? snapshot?.recordedAt;
+                const parsedAt = rawTs ? Date.parse(rawTs) : NaN;
                 onOpenReplayAt({
+                  run: data.run,
+                  at: Number.isFinite(parsedAt) ? parsedAt : undefined,
                   record: (snapshot?.timeline?.recordId ?? observation?.timeline?.recordId)!,
                   sequence: Number(snapshot?.timeline?.sequence ?? observation?.timeline?.sequence),
-                })
-              }
+                });
+              }}
             >
-              ⏱ {observationTime(timestamp(observation!) ?? snapshot?.recordedAt, t)} ↗
+              ⏱ {observationTime(timestamp(observation!) ?? snapshot?.recordedAt, rootT)} ↗
             </button>
           )}
         {observation?.sourceSequence != null && (
