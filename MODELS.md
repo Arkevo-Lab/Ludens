@@ -12,7 +12,8 @@
   - **GLM 5.3**（`zhipu-coding-plan/glm-5.3`）：中等尺寸里综合性能最强，速度比 Muse Spark 慢，适合稍复杂的后端实现。
 - **小而快**
   - **Muse Spark 1.3**（`opencode-go/muse-spark-1.3-contributor`）：体积虽大但上限不如 `glm-5.3`、速度又比 `glm-5.3` 快，实际按小而快模型用。
-  - **DeepSeek v4.1 Flash**（`opencode-go/deepseek-v4.1-flash`）、**GLM 5.3 Flash**（`zhipu-coding-plan/glm-5.3-flash`）：响应快，适合跑腿与高吞吐杂活。
+  - **DeepSeek v4.1 Flash**（`opencode-go/deepseek-v4.1-flash`）：吐字极快、输出上限高，适合高吞吐搬砖与跑腿。
+  - **GLM 5.3 Flash**（`zhipu-coding-plan/glm-5.3-flash`）：速度不错、响应稳，适合日常后端杂活与快速检索。
 
 ## 分工思路
 
