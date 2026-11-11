@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { CheckIcon, ChevronRightIcon, FolderIcon, LoaderCircleIcon, MonitorIcon, PlugIcon } from "lucide-react";
+import { CheckIcon, ChevronRightIcon, FolderIcon, MonitorIcon, PlugIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PixelMark } from "@/components/ui/pixel-mark";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useTranslations } from "@/lib/locale";
 import type { DiscoveredDriver } from "@/lib/drivers";
@@ -134,7 +135,7 @@ export function WorkspaceCreateForm({ defaultRoot, initialIntent, pending, error
               resetDiscovery(); setDraft(previous => ({ ...previous, driverPackage, game: "", cuaCommand: "" }));
             }} />
           <Button type="button" variant="outline" aria-disabled={pending || discovering || !draft.driverPackage.trim()} className="aria-disabled:opacity-50" onClick={() => void discover()}>
-            {discovering ? <LoaderCircleIcon className="animate-spin" aria-hidden="true" /> : null}
+            {discovering ? <PixelMark loading size={16} /> : null}
             {t(discovering ? "verifying" : "verifyPackage")}
           </Button>
         </div>
@@ -198,7 +199,7 @@ export function WorkspaceCreateForm({ defaultRoot, initialIntent, pending, error
           active?.abort(); onCancel();
         }}>{t("cancel")}</Button>
         <Button type="submit" disabled={pending || discovering || (community && (!verified || capabilities.missingPort))}>
-          {pending ? <LoaderCircleIcon className="animate-spin" aria-hidden="true" /> : null}{t(pending ? "creating" : "create")}
+          {pending ? <PixelMark loading size={16} /> : null}{t(pending ? "creating" : "create")}
         </Button>
       </div>
     </div>

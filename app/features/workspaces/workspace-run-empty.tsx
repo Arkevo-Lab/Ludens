@@ -1,7 +1,8 @@
 "use client";
 
 import { useId } from "react";
-import { Folder, LoaderCircle, RefreshCw } from "lucide-react";
+import { Folder, RefreshCw } from "lucide-react";
+import { PixelMark } from "@/components/ui/pixel-mark";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,7 +39,7 @@ export function WorkspaceRunEmpty({ state, project, workspaceName, workspacePath
   return <Card aria-labelledby={headingId}>
     <CardContent className="flex flex-col gap-4 sm:flex-row sm:items-start sm:gap-4">
       <span className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-[var(--surface-inset)] text-[var(--gold)]" aria-hidden="true">
-        {loading ? <LoaderCircle className="size-4 animate-spin" /> : <Folder className="size-4" />}
+        {loading ? <PixelMark loading size={16} className="text-foreground" /> : <Folder className="size-4" />}
       </span>
       <div className="min-w-0 flex-1 space-y-2.5">
         {workspaceName && <p className="break-words font-mono text-xs text-muted-foreground">{workspaceName}</p>}
