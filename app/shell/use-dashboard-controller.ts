@@ -1,7 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "@/lib/locale";
-import type { Project, RunData } from "@/lib/types";
+import type { LiveStatus, Project, RunData } from "@/lib/types";
 import type { ReplayOverviewResult } from "@/lib/replay-types";
 import { initialSelection, latestGameRun } from "@/lib/initial-selection";
 import { workspaceRunEntry } from "@/lib/workspace-run-entry";
@@ -16,6 +16,44 @@ import type { DiscoveredDriver } from "@/lib/drivers";
 import { driverCreationHref } from "@/lib/driver-onboarding";
 
 import { readArchiveJson as json, type ArchiveProgress } from "@/lib/archive-client";
+
+const VIEW_ALIASES: Record<string, View> = {
+  capabilities: "caps",
+  studio: "perception",
+};
+
+/** Normalize canonical console view IDs and supported URL aliases (`capabilities` -> `caps`, `studio` -> `perception`). */
+export function parseViewParam(rawView: string | null | undefined): View {
+  if (!rawView) return "live";
+  const mapped = VIEW_ALIASES[rawView] ?? rawView;
+  return (viewIds as readonly string[]).includes(mapped) ? (mapped as View) : "live";
+}
+
+/** Check whether a loaded run snapshot still has an active/connected live host attached to it. */
+export function isLiveRunActive(data: Pick<RunData, "run" | "live"> | null | undefined): boolean {
+  if (!data?.live) return false;
+  const live = data.live as LiveStatus & { active?: boolean };
+  if (typeof live.active === "boolean") return live.active;
+  return Boolean(live.connected && live.runId === data.run);
+}
+
+/**
+ * Natural live polling contract:
+ * - Pause background timers when the document tab is hidden (`visibilityState === "hidden"`).
+ * - Always poll while following the workspace's implicit latest run (`requestedRun === ""`).
+ * - When an explicit `selection.run` is pinned, stop background polling once its snapshot confirms
+ *   the run is a completed historical run with no active live host.
+ */
+export function shouldPollRunState(options: {
+  visible: boolean;
+  requestedRun: string;
+  data?: Pick<RunData, "run" | "live"> | null;
+}): boolean {
+  if (!options.visible) return false;
+  if (!options.requestedRun) return true;
+  if (!options.data || options.data.run !== options.requestedRun) return true;
+  return isLiveRunActive(options.data);
+}
 
 const subscribeLocation = (listener: () => void) => {
   window.addEventListener("popstate", listener);
@@ -35,8 +73,20 @@ export function useDashboardController() {
   );
   const query = new URLSearchParams(search);
   const requestedView = query.get("view");
-  const view: View = requestedView && (viewIds as readonly string[]).includes(requestedView) ? requestedView as View : "live";
+  const view: View = parseViewParam(requestedView);
   const runControls = view === "live" || view === "replay" || view === "perf";
+  const [pageVisible, setPageVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState !== "hidden",
+  );
+  useEffect(() => {
+    const syncVisibility = () => {
+      const visible = document.visibilityState !== "hidden";
+      setPageVisible(visible);
+    };
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    return () => document.removeEventListener("visibilitychange", syncVisibility);
+  }, []);
   const [catalogRevision, setCatalogRevision] = useState(0);
   const refreshCatalog = useCallback(() => setCatalogRevision(value => value + 1), []);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -126,11 +176,17 @@ export function useDashboardController() {
   const analysis = runAnalysisSnapshot(loaded, key, readScope);
   const analysingRun = view === "perf";
   const data = analysingRun ? analysis.overview : loaded?.key === key ? loaded.data : null;
+  const pollingEnabled = shouldPollRunState({
+    visible: pageVisible && refresh,
+    requestedRun: selection.run,
+    data,
+  });
+  automatic.current = pollingEnabled;
   const cycles = view === "replay"
     ? replayCycles?.key === JSON.stringify([selection.project, run]) ? replayCycles.cycles : []
     : data?.cycles ?? [];
   const activity = useActivityFeed({ project: selection.project, run, epoch: effectiveEpoch || undefined,
-    enabled: view === "live", refresh, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined,
+    enabled: view === "live", refresh: pollingEnabled, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined,
     continuousStream: view === "live" });
   const call = analysingRun ? analysisRequest(analysis.detail, requestedCall)
     : data?.selectedCall ?? data?.calls.find((c) => c.id === requestedCall) ?? data?.calls.at(-1);
@@ -148,13 +204,14 @@ export function useDashboardController() {
   }, []);
   const navigate = (patch: Record<string, string | null>, options?: { replace?: boolean }) => {
     const rawParams = new URLSearchParams(window.location.search);
-    const nextView = patch.view ?? rawParams.get("view") ?? "live";
+    const nextView = parseViewParam(patch.view ?? rawParams.get("view"));
     const params =
-      patch.view && patch.view !== view
+      patch.view && nextView !== view
         ? cleanViewSearchParams(rawParams, nextView, { project: selection.project, latestRunId: latest?.id })
         : rawParams;
     for (const [name, value] of Object.entries(patch))
       value ? params.set(name, value) : params.delete(name);
+    if (patch.view) params.set("view", nextView);
     navigateUrl("/?" + params.toString(), options);
   };
   const createWithDriver = (driver: DiscoveredDriver) => {
@@ -198,6 +255,17 @@ export function useDashboardController() {
   };
   const selectCall = (id: string) =>
     navigate({ ...pinned, call: id, image: null, block: null });
+  const wasHidden = useRef(false);
+  useEffect(() => {
+    if (!pageVisible) {
+      wasHidden.current = true;
+      return;
+    }
+    if (wasHidden.current) {
+      wasHidden.current = false;
+      setCatalogRevision(value => value + 1);
+    }
+  }, [pageVisible]);
   useEffect(() => {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout>;
@@ -215,7 +283,9 @@ export function useDashboardController() {
           catalogRetryPending.current = false;
           setCatalogReady(true);
           setCatalogLoading(false);
-          timer = setTimeout(load, 10000);
+          if (typeof document === "undefined" || document.visibilityState !== "hidden") {
+            timer = setTimeout(load, 10000);
+          }
         }
       }
     };
@@ -272,7 +342,7 @@ export function useDashboardController() {
     followed.archiveRevision,
     snapshotRevision,
   ]);
-  useEffect(() => { runPoller.current?.reader.setEnabled(refresh); }, [refresh]);
+  useEffect(() => { runPoller.current?.reader.setEnabled(pollingEnabled); }, [pollingEnabled]);
   const retryingRun = runReading?.key === key && runReading.reader === runPoller.current?.reader;
   const refreshRun = useCallback(() => {
     void runPoller.current?.reader.readOnce();
@@ -486,7 +556,7 @@ export function useDashboardController() {
     activity,
     call,
     pet,
-    refresh,
+    refresh: pollingEnabled,
     panel,
     setPanel,
     stopping,

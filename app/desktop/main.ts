@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Tray } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, Tray } from 'electron'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +8,7 @@ import { createCompanion } from './companion.js'
 import type { LudensPetSnapshot } from './ludens-source.js'
 import { PetSessionCoordinator } from './pet-session.js'
 import { dashboardSender, isDashboardUrl } from './dashboard-window.js'
+import { createLudensTrayIcon } from './tray-icon.js'
 
 const { values } = parseArgs({ args: process.argv.slice(2), options: {
   workspace: { type: 'string' }, dashboard: { type: 'string' }, profile: { type: 'string' },
@@ -115,10 +116,15 @@ if (values.help) {
       } })
       pet.configureActivity(source)
       void source.start(workspace)
-      const companionAssets = resolve(publicAssets, 'companion')
-      const icon = nativeImage.createFromPath(resolve(companionAssets, 'ludens/icons/icon-tray.png')).resize({ width: 20, height: 20 })
-      tray = new Tray(icon)
-      tray.setToolTip('Ludens Pet · Ludens')
+      tray = new Tray(createLudensTrayIcon(publicAssets, nativeTheme.shouldUseDarkColors))
+      tray.setToolTip('Ludens')
+      const syncTrayTheme = () => {
+        if (!quitting && tray && !tray.isDestroyed()) {
+          tray.setImage(createLudensTrayIcon(publicAssets, nativeTheme.shouldUseDarkColors))
+        }
+      }
+      nativeTheme.on('updated', syncTrayTheme)
+      app.on('before-quit', () => nativeTheme.off('updated', syncTrayTheme))
       tray.on('click', showOwner)
       tray.on('right-click', () => Menu.buildFromTemplate([
         { label: pet.copy().open, click: showOwner },

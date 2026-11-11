@@ -112,12 +112,12 @@ export function ReplayEvidencePanel({ scope, selection, refreshRevision = 0, onC
   return <section ref={focusRef} tabIndex={-1} aria-labelledby={headingId} aria-busy={loading}
     className="replay-evidence-panel min-w-0 bg-card outline-none">
     <header className="replay-evidence-header">
-      <h2 id={headingId} className="min-w-0 text-sm font-semibold">{t("panelTitle")}</h2>
-      <Button type="button" variant="outline" size="sm" className="shrink-0" aria-label={timeline("closeDetails")} onClick={onClose}>
-        <X aria-hidden="true" />{t("close")}
+      <h2 id={headingId} className="min-w-0 truncate text-xs font-semibold">{t("panelTitle")}</h2>
+      <Button type="button" variant="ghost" size="xs" className="shrink-0" aria-label={timeline("closeDetails")} onClick={onClose}>
+        <X className="size-3.5" aria-hidden="true" />{t("close")}
       </Button>
     </header>
-    <div className="replay-evidence-body space-y-5" role="region" aria-label={t("contentLabel")} tabIndex={0}>
+    <div className="replay-evidence-body space-y-4" role="region" aria-label={t("contentLabel")} tabIndex={0}>
       <div className="min-w-0 space-y-3">
         <h3 className="break-words text-base font-semibold leading-relaxed">{detail?.title || (selection.kind === "frame" ? selection.record : selection.id) || timeline("detailsTitle")}</h3>
         {summary && <div className="flex flex-wrap gap-2">

@@ -285,16 +285,16 @@ export function WorkspaceStudioView({
       )}
 
       <Tabs value={tab} onValueChange={onTabChange} className="w-full space-y-5">
-        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-1.5 bg-[var(--surface-inset)] p-1.5">
-          <TabsTrigger value="model" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
+        <TabsList className="flex h-auto min-h-9 w-full flex-wrap justify-start gap-1 bg-[var(--surface-inset)] p-1">
+          <TabsTrigger value="model" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
             <Bot className="size-4" aria-hidden="true" />
             {t("tabs.model")}
           </TabsTrigger>
-          <TabsTrigger value="connection" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
+          <TabsTrigger value="connection" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
             <Cable className="size-4" aria-hidden="true" />
             {t("tabs.connection")}
           </TabsTrigger>
-          <TabsTrigger value="services" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
+          <TabsTrigger value="services" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
             <Server className="size-4" aria-hidden="true" />
             {t("tabs.services")}
             {studio?.shiori.sessions.length ? (
@@ -303,11 +303,11 @@ export function WorkspaceStudioView({
               </Badge>
             ) : null}
           </TabsTrigger>
-          <TabsTrigger value="perception" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
+          <TabsTrigger value="perception" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
             <Eye className="size-4" aria-hidden="true" />
             {t("tabs.perception")}
           </TabsTrigger>
-          <TabsTrigger value="simulator" className="gap-1.5 px-3 py-2 text-xs sm:text-sm">
+          <TabsTrigger value="simulator" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
             <FlaskConical className="size-4" aria-hidden="true" />
             {t("tabs.simulator")}
           </TabsTrigger>

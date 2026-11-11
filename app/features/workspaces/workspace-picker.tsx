@@ -1,7 +1,7 @@
 "use client";
 
 import { FolderIcon } from "lucide-react";
-import { ContextPicker } from "@/features/workspaces/context-picker";
+import { ContextPicker, type ContextPickerVariant } from "@/features/workspaces/context-picker";
 import { useTranslations } from "@/lib/locale";
 import type { Project } from "@/lib/types";
 
@@ -16,12 +16,22 @@ export function workspaceName(project?: Project, fallback = "") {
 }
 
 /** A context selector only; the parent owns URL updates and run selection. */
-export function WorkspacePicker({ projects, value, onChange, loading = false, error = "" }: {
+export function WorkspacePicker({
+  projects,
+  value,
+  onChange,
+  loading = false,
+  error = "",
+  variant = "default",
+  muted = false,
+}: {
   projects: Project[];
   value: string;
   onChange(project: string): void;
   loading?: boolean;
   error?: string;
+  variant?: ContextPickerVariant;
+  muted?: boolean;
 }) {
   const t = useTranslations("workspacePicker");
   const dt = useTranslations("dashboard");
@@ -29,14 +39,22 @@ export function WorkspacePicker({ projects, value, onChange, loading = false, er
   const empty = !projects.length;
   const emptyMessage = loading ? t("loading") : error ? t("unavailable") : t("empty");
   const emptyHint = loading ? t("loading") : error ? t("errorHint") : t("emptyHint");
-  return <ContextPicker kind="workspace" value={value} onChange={onChange}
+  const statusTone: "active" | "muted" | "danger" =
+    error || selected?.available === false
+      ? "danger"
+      : muted || empty || loading || !selected
+        ? "muted"
+        : "active";
+  const defaultTitle = selected?.workspace ?? (empty ? emptyMessage : t("choose"));
+  const defaultHint = empty ? emptyHint : selected?.workspace || selected?.id || t("description");
+  return <ContextPicker kind="workspace" variant={variant} muted={muted} statusTone={statusTone} value={value} onChange={onChange}
     label={<><FolderIcon className="size-4" aria-hidden="true" />{dt("picker.workspace")}</>}
     options={projects.map(project => ({ value: project.id, label: workspaceName(project),
       identity: project.workspace || project.id, identityKind: project.workspace ? "path" : "id",
       badge: project.available === false ? t("directoryUnavailable") : undefined }))}
     trigger={{ text: (empty ? emptyMessage : workspaceName(selected, t("choose"))) + (selected?.available === false ? dt("picker.unavailable") : ""),
-      title: selected?.workspace ?? (empty ? emptyMessage : t("choose")),
-      hint: empty ? emptyHint : selected?.workspace || selected?.id || t("description") }}
+      title: muted ? t("globalScopeHint") : defaultTitle,
+      hint: muted ? `${t("globalScopeHint")}${selected?.workspace ? ` · ${selected.workspace}` : ""}` : defaultHint }}
     copy={{ title: t("choose"), description: t("description"), close: t("close"), current: t("current"),
       empty: emptyMessage, emptyHint: loading ? undefined : emptyHint }} />;
 }

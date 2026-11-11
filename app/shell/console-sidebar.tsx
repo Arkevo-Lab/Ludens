@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { MenuIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PixelMark } from "@/components/ui/pixel-mark";
@@ -67,10 +67,22 @@ function NavIcon({ kind }: { kind: ConsoleView }) {
 
 let assembleUntil = 0;
 
-export function ConsoleSidebar({ view, viewLink, onNavigate }: {
+export function ConsoleSidebar({
+  view,
+  viewLink,
+  onNavigate,
+  workspaceSlot,
+  mobileOpen,
+  onMobileOpenChange,
+  mobileTriggerRef,
+}: {
   view: ConsoleView;
   viewLink(view: ConsoleView): string;
   onNavigate(url: string): void;
+  workspaceSlot?: ReactNode;
+  mobileOpen?: boolean;
+  onMobileOpenChange?(open: boolean): void;
+  mobileTriggerRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const { t } = useLocale();
   const dt = useTranslations("dashboard");
@@ -83,7 +95,13 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
   const cursor = useRef<HTMLElement>(null);
   const [assemble, setAssemble] = useState(false);
   const lastSidebarFocus = useRef<HTMLElement | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
+  const expanded = mobileOpen ?? uncontrolledExpanded;
+  const setExpanded = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    const resolved = typeof next === "function" ? next(expanded) : next;
+    if (mobileOpen === undefined) setUncontrolledExpanded(resolved);
+    onMobileOpenChange?.(resolved);
+  }, [expanded, mobileOpen, onMobileOpenChange]);
   useEffect(() => {
     const narrow = window.matchMedia("(max-width: 680px)");
     let animation = 0;
@@ -103,6 +121,7 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
       else if (item.bottom > bounds.bottom - 6) middle.scrollTop += item.bottom - bounds.bottom + 6;
     };
     const restoreVisibleFocus = () => {
+      if (!narrow.matches && expanded) setExpanded(false);
       cancelAnimationFrame(animation);
       animation = requestAnimationFrame(() => {
         const active = document.activeElement;
@@ -113,8 +132,12 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
           : previous?.isConnected && !previous.getClientRects().length ? previous : null;
         if (!target || !sidebar.current?.contains(target)) return;
         if (narrow.matches) {
-          if (!expanded && (scrollArea.current?.contains(target) || footer.current?.contains(target))) menuButton.current?.focus();
-          else if (expanded) {
+          if (!expanded && (scrollArea.current?.contains(target) || footer.current?.contains(target))) {
+            const fallbackTrigger = mobileTriggerRef?.current?.getClientRects().length
+              ? mobileTriggerRef.current
+              : menuButton.current;
+            fallbackTrigger?.focus();
+          } else if (expanded) {
             const bounds = target.getBoundingClientRect();
             if (bounds.top < 0 || bounds.bottom > window.innerHeight)
               target.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -136,7 +159,7 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
       document.removeEventListener("pointerdown", forgetOutsidePointer, true);
       window.removeEventListener("resize", restoreVisibleFocus);
     };
-  }, [expanded]);
+  }, [expanded, mobileTriggerRef, setExpanded]);
   // The orange cursor pixel steps to the active link. Scrolling and resizing reposition it without the stepped travel.
   useLayoutEffect(() => {
     const root = sidebar.current, pixel = cursor.current;
@@ -154,8 +177,10 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
     const follow = () => place(false);
     const observer = new ResizeObserver(follow);
     observer.observe(root);
-    if (scrollArea.current) { observer.observe(scrollArea.current); scrollArea.current.addEventListener("scroll", follow, { passive: true }); }
     const area = scrollArea.current;
+    const foot = footer.current;
+    if (area) { observer.observe(area); area.addEventListener("scroll", follow, { passive: true }); }
+    if (foot) { observer.observe(foot); }
     return () => { observer.disconnect(); area?.removeEventListener("scroll", follow); };
   }, [view, expanded]);
   // The brand assembles itself once per browser session. The deadline lives outside the component so a remount
@@ -173,11 +198,28 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
     const done = window.setTimeout(() => setAssemble(false), left);
     return () => window.clearTimeout(done);
   }, []);
-  const closeMenu = () => {
+  const closeMenu = useCallback(() => {
     if (!expanded) return;
     setExpanded(false);
-    if (menuButton.current?.getClientRects().length) menuButton.current.focus();
-  };
+    requestAnimationFrame(() => {
+      if (mobileTriggerRef?.current?.getClientRects().length) {
+        mobileTriggerRef.current.focus();
+      } else if (menuButton.current?.getClientRects().length) {
+        menuButton.current.focus();
+      }
+    });
+  }, [expanded, mobileTriggerRef, setExpanded]);
+  useEffect(() => {
+    if (!expanded) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      if (document.querySelector('[role="dialog"]')) return;
+      event.preventDefault();
+      closeMenu();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [expanded, closeMenu]);
   const renderLink = (id: ConsoleView) => <a key={id} href={viewLink(id)}
     className={view === id ? "active" : undefined} aria-current={view === id ? "page" : undefined}
     onClick={event => {
@@ -186,29 +228,36 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
     }}>
     <NavIcon kind={id} /><span>{t(`nav.${id}`)}</span>
   </a>;
-  return <aside ref={sidebar} className="sidebar" data-expanded={expanded}>
-    <a className="brand" href={viewLink("live")} onClick={event => {
-      if (!isPlainNavigationClick(event)) return;
-      event.preventDefault(); closeMenu(); onNavigate(viewLink("live"));
-    }}><PixelMark assemble={assemble} /><span>Ludens</span></a>
-    <i ref={cursor} className="nav-cursor" aria-hidden="true" />
-    <div className="sidebar-menu-control">
-      <Button ref={menuButton} type="button" variant="ghost" size="sm" className="sidebar-menu-toggle"
-        aria-expanded={expanded} aria-controls={`${id}-content ${id}-footer`}
-        onClick={() => setExpanded(value => !value)}>
-        {expanded ? <XIcon aria-hidden="true" /> : <MenuIcon aria-hidden="true" />}
-        {st(expanded ? "menuClose" : "menuOpen")}
-      </Button>
-    </div>
-    <div ref={scrollArea} id={`${id}-content`} className="sidebar-scroll-area">
-      <nav className="sidebar-navigation" aria-label={dt("consoleNav")}>
-        {navSections.map(section => <div key={section.label} className="nav-section">
-          <small>{t(section.label)}</small>{section.ids.map(renderLink)}
-        </div>)}
-      </nav>
-    </div>
-    <footer ref={footer} id={`${id}-footer`} className="sidebar-footer">
-      <nav className="sidebar-settings" aria-label={t("nav.settings")}>{renderLink("settings")}</nav>
-    </footer>
-  </aside>;
+  return <>
+    {expanded && <div className="sidebar-backdrop" aria-hidden="true" onClick={closeMenu} />}
+    <aside ref={sidebar} className="sidebar" data-expanded={expanded}>
+      <div className="sidebar-brand-row">
+        <a className="brand" href={viewLink("live")} onClick={event => {
+          if (!isPlainNavigationClick(event)) return;
+          event.preventDefault(); closeMenu(); onNavigate(viewLink("live"));
+        }}><PixelMark assemble={assemble} /><span>Ludens</span></a>
+        <div className="sidebar-menu-control">
+          <Button ref={menuButton} type="button" variant="ghost" size="icon-sm" className="sidebar-menu-toggle"
+            aria-expanded={expanded} aria-controls={`${id}-content ${id}-footer`}
+            aria-label={st(expanded ? "menuClose" : "menuOpen")}
+            title={st(expanded ? "menuClose" : "menuOpen")}
+            onClick={() => (expanded ? closeMenu() : setExpanded(true))}>
+            {expanded ? <XIcon aria-hidden="true" /> : <MenuIcon aria-hidden="true" />}
+          </Button>
+        </div>
+      </div>
+      <i ref={cursor} className="nav-cursor" aria-hidden="true" />
+      <div ref={scrollArea} id={`${id}-content`} className="sidebar-scroll-area">
+        <nav className="sidebar-navigation" aria-label={dt("consoleNav")}>
+          {navSections.map(section => <div key={section.label} className="nav-section">
+            <small>{t(section.label)}</small>{section.ids.map(renderLink)}
+          </div>)}
+        </nav>
+      </div>
+      <footer ref={footer} id={`${id}-footer`} className="sidebar-footer">
+        {workspaceSlot && <div className="sidebar-workspace-slot">{workspaceSlot}</div>}
+        <nav className="sidebar-settings" aria-label={t("nav.settings")}>{renderLink("settings")}</nav>
+      </footer>
+    </aside>
+  </>;
 }
