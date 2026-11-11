@@ -24,7 +24,7 @@ transform and opacity only. No blur, no easing curves. Reduced motion turns all 
 
 ## Phases (one PR each)
 
-### 1 · Foundation (done in this PR)
+### 1 · Foundation (done, #56)
 - `app/components/ui/pixel-mark.tsx`: `PixelMark` renders the ring as one outline at rest and as 13 separate
   cells while loading or assembling (separate cells show faint seams at small sizes), plus 5 hollow-L cells
   and the loose pixel. Props: `size`, `state` (`idle | reasoning | recording | passed | failed | waiting`),
@@ -34,7 +34,7 @@ transform and opacity only. No blur, no easing curves. Reduced motion turns all 
 - Tests: server-render `PixelMark` for each state and assert cell count and state attributes.
 - Docs: add a Motion subsection under Brand Mark in `docs/en/reference/dashboard-ui.md` and the `zh` mirror.
 
-### 2 · Shell
+### 2 · Shell (done)
 - Sidebar cursor: replace the left border with an 8px pixel that steps to the active item. Nav has two
   sections and collapses to a menu at 680px, so position comes from the active link's measured offset, not
   an index. Below 680px it falls back to the static pixel.

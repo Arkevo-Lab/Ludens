@@ -136,3 +136,9 @@ The mark's parts carry the console's motion. Everything moves on the pixel grid,
 | `label` | Accessible name; without it the mark is decorative |
 
 At rest the ring is one outline. It splits into thirteen separate cells only while `loading` or `assemble` is set. Hovering or focusing the sidebar brand makes the loose pixel hop once.
+
+In the console shell:
+
+- **Sidebar cursor.** Above 680px an orange pixel marks the active navigation link and steps to a newly selected one in four jumps. Its position is measured from the active link, so it follows scrolling and resizing without the stepped travel. At 680px and below the menu keeps its static underline.
+- **Loader.** Waiting states that are not a refresh action use `<PixelMark loading />` instead of a circular spinner. Refresh buttons keep their rotating arrow.
+- **Assemble.** The sidebar brand assembles once per browser session, tracked by the `ludens:brand-assembled` session key.

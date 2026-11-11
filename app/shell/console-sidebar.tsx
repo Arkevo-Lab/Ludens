@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { MenuIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PixelMark } from "@/components/ui/pixel-mark";
@@ -65,6 +65,8 @@ function NavIcon({ kind }: { kind: ConsoleView }) {
 }
 
 
+let assembleUntil = 0;
+
 export function ConsoleSidebar({ view, viewLink, onNavigate }: {
   view: ConsoleView;
   viewLink(view: ConsoleView): string;
@@ -78,6 +80,8 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
   const menuButton = useRef<HTMLButtonElement>(null);
   const scrollArea = useRef<HTMLDivElement>(null);
   const footer = useRef<HTMLElement>(null);
+  const cursor = useRef<HTMLElement>(null);
+  const [assemble, setAssemble] = useState(false);
   const lastSidebarFocus = useRef<HTMLElement | null>(null);
   const [expanded, setExpanded] = useState(false);
   useEffect(() => {
@@ -133,6 +137,42 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
       window.removeEventListener("resize", restoreVisibleFocus);
     };
   }, [expanded]);
+  // The orange cursor pixel steps to the active link. Scrolling and resizing reposition it without the stepped travel.
+  useLayoutEffect(() => {
+    const root = sidebar.current, pixel = cursor.current;
+    if (!root || !pixel) return;
+    const place = (travel: boolean) => {
+      const link = root.querySelector<HTMLElement>("nav a.active");
+      const box = link?.getBoundingClientRect();
+      if (!box?.height) { delete root.dataset.cursor; return; }
+      const origin = root.getBoundingClientRect();
+      pixel.dataset.travel = String(travel && root.dataset.cursor !== undefined);
+      pixel.style.transform = `translate(${Math.round(box.left - origin.left + 2)}px, ${Math.round(box.top - origin.top + (box.height - 6) / 2)}px)`;
+      root.dataset.cursor = "";
+    };
+    place(true);
+    const follow = () => place(false);
+    const observer = new ResizeObserver(follow);
+    observer.observe(root);
+    if (scrollArea.current) { observer.observe(scrollArea.current); scrollArea.current.addEventListener("scroll", follow, { passive: true }); }
+    const area = scrollArea.current;
+    return () => { observer.disconnect(); area?.removeEventListener("scroll", follow); };
+  }, [view, expanded]);
+  // The brand assembles itself once per browser session. The deadline lives outside the component so a remount
+  // or a development double-run of the effect picks the animation up instead of skipping or repeating it.
+  useEffect(() => {
+    try {
+      if (!window.sessionStorage.getItem("ludens:brand-assembled")) {
+        window.sessionStorage.setItem("ludens:brand-assembled", "1");
+        assembleUntil = Date.now() + 1200;
+      }
+    } catch { /* Without session storage the brand simply stays still. */ }
+    const left = assembleUntil - Date.now();
+    if (left <= 0) return;
+    setAssemble(true);
+    const done = window.setTimeout(() => setAssemble(false), left);
+    return () => window.clearTimeout(done);
+  }, []);
   const closeMenu = () => {
     if (!expanded) return;
     setExpanded(false);
@@ -150,7 +190,8 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
     <a className="brand" href={viewLink("live")} onClick={event => {
       if (!isPlainNavigationClick(event)) return;
       event.preventDefault(); closeMenu(); onNavigate(viewLink("live"));
-    }}><PixelMark /><span>Ludens</span></a>
+    }}><PixelMark assemble={assemble} /><span>Ludens</span></a>
+    <i ref={cursor} className="nav-cursor" aria-hidden="true" />
     <div className="sidebar-menu-control">
       <Button ref={menuButton} type="button" variant="ghost" size="sm" className="sidebar-menu-toggle"
         aria-expanded={expanded} aria-controls={`${id}-content ${id}-footer`}
