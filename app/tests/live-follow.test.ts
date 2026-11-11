@@ -1,7 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { cleanViewSearchParams, hasSelectedEvidence, latestLiveUrl, liveContext, resolveLiveSelection } from "../lib/live-follow";
+import { ConsoleSidebar } from "../shell/console-sidebar";
+import { WorkspacePicker } from "../features/workspaces/workspace-picker";
+import { RunPicker } from "../features/workspaces/run-picker";
 import type { LiveStatus } from "../lib/types";
+
+const nodeRequire = createRequire(import.meta.url);
+const cjsModule = nodeRequire("node:module") as {
+  _extensions: Record<string, (mod: unknown, filename: string) => void>;
+};
+cjsModule._extensions[".css"] ??= () => {};
 
 const paused = { location: "?view=live&project=a", project: "a", run: "run-1", requestedRun: "", epoch: "", archiveRevision: 1 };
 const selection = {
@@ -91,4 +103,72 @@ test("view navigation strips cross-view params and redundant latest run pins", (
   const fromPerf = "?view=perf&project=switch2&call=c-9&perfTab=requests&image=obs-4";
   const toReplay = cleanViewSearchParams(fromPerf, "replay", { project: "switch2", latestRunId: "run-2" });
   assert.deepEqual([...toReplay], [["view", "replay"], ["project", "switch2"]]);
+});
+
+test("parseViewParam normalizes capabilities and studio URL aliases alongside canonical view IDs", async () => {
+  const { parseViewParam } = await import("../shell/use-dashboard-controller");
+  assert.equal(parseViewParam("capabilities"), "caps");
+  assert.equal(parseViewParam("studio"), "perception");
+  assert.equal(parseViewParam("caps"), "caps");
+  assert.equal(parseViewParam("perception"), "perception");
+  assert.equal(parseViewParam("replay"), "replay");
+  assert.equal(parseViewParam("perf"), "perf");
+  assert.equal(parseViewParam("unknown-view"), "live");
+  assert.equal(parseViewParam(null), "live");
+  assert.equal(parseViewParam(""), "live");
+});
+
+test("natural live polling pauses on hidden tabs and skips completed historical runs", async () => {
+  const { isLiveRunActive, shouldPollRunState } = await import("../shell/use-dashboard-controller");
+  assert.equal(isLiveRunActive({ run: "run-2", live }), true);
+  assert.equal(isLiveRunActive({ run: "run-1", live }), false);
+  assert.equal(isLiveRunActive({ run: "run-2", live: { ...live, connected: false } }), false);
+  assert.equal(isLiveRunActive({ run: "run-2", live: null }), false);
+
+  // Hidden tab always pauses polling
+  assert.equal(shouldPollRunState({ visible: false, requestedRun: "", data: { run: "run-2", live } }), false);
+  // Implicit latest run always polls when visible (even if current run ended, to detect a newly started run)
+  assert.equal(shouldPollRunState({ visible: true, requestedRun: "", data: { run: "run-1", live: null } }), true);
+  // Explicit historical run polls until initial snapshot loads, then stops once confirmed inactive
+  assert.equal(shouldPollRunState({ visible: true, requestedRun: "run-1", data: null }), true);
+  assert.equal(shouldPollRunState({ visible: true, requestedRun: "run-1", data: { run: "run-2", live } }), true);
+  assert.equal(shouldPollRunState({ visible: true, requestedRun: "run-1", data: { run: "run-1", live } }), false);
+  assert.equal(shouldPollRunState({ visible: true, requestedRun: "run-1", data: { run: "run-1", live: null } }), false);
+  // Explicit active live run continues polling while visible
+  assert.equal(shouldPollRunState({ visible: true, requestedRun: "run-2", data: { run: "run-2", live } }), true);
+});
+
+test("sidebar WorkspacePicker and compact RunPicker render clean contextual triggers", () => {
+  const projects = [
+    { id: "ws-1", name: "switch2-diablo3", workspace: "/tmp/switch2-diablo3", available: true, runs: [] },
+  ];
+  const sidebarHtml = renderToStaticMarkup(
+    createElement(ConsoleSidebar, {
+      view: "settings",
+      viewLink: id => `?view=${id}`,
+      onNavigate() {},
+      workspaceSlot: createElement(WorkspacePicker, {
+        variant: "sidebar",
+        muted: true,
+        projects,
+        value: "ws-1",
+        onChange() {},
+      }),
+    }),
+  );
+  assert.match(sidebarHtml, /sidebar-workspace-slot/);
+  assert.match(sidebarHtml, /context-picker-trigger-sidebar/);
+  assert.match(sidebarHtml, /data-muted="true"/);
+  assert.match(sidebarHtml, /switch2-diablo3/);
+
+  const compactRunHtml = renderToStaticMarkup(
+    createElement(RunPicker, {
+      runs: [{ id: "run-2", model: "gpt-5", seconds: 0, drivers: [], startedAt: "2026-04-11T12:00:00Z" }],
+      latest: { id: "run-2", model: "gpt-5", seconds: 0, drivers: [], startedAt: "2026-04-11T12:00:00Z" },
+      value: "",
+      onChange() {},
+    }),
+  );
+  assert.match(compactRunHtml, /context-picker-trigger-compact/);
+  assert.doesNotMatch(compactRunHtml, /context-picker-label/);
 });
