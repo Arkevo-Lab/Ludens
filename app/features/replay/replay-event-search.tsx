@@ -25,14 +25,15 @@ const TRACK_OPTIONS: readonly Track[] = ["all", "action", "model", "tool", "log"
 const wallClockShort = (at: number) =>
   new Date(at).toLocaleTimeString("zh-CN", {
     hour12: false,
+    timeZone: "Asia/Shanghai",
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
   });
 
 /** Automatically scan bounded server pages, stopping at one readable result batch. */
-export function ReplayEventSearch({ scope, startAt, at, itemUrl, onSelect, selectedId, inputId, inputRef }: {
-  scope: string; startAt: number; at?: number; itemUrl(item: ReplayItem): string;
+export function ReplayEventSearch({ scope, startAt, at, refreshRevision = 0, itemUrl, onSelect, selectedId, inputId, inputRef }: {
+  scope: string; startAt: number; at?: number; refreshRevision?: number; itemUrl(item: ReplayItem): string;
   onSelect(item: ReplayItem, trigger: HTMLElement): void; selectedId?: string;
   inputId: string; inputRef: Ref<HTMLInputElement>;
 }) {
@@ -44,9 +45,27 @@ export function ReplayEventSearch({ scope, startAt, at, itemUrl, onSelect, selec
   const current = useRef<SearchState | null>(null);
   const request = useRef<AbortController | null>(null);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const listRef = useRef<HTMLOListElement | null>(null);
   const update = useCallback((next: SearchState) => { current.current = next; setState(next); }, []);
 
-  const scan = useCallback(async (initial: SearchState) => {
+  const scrollClosestItemIntoView = useCallback((targetAt: number, items: ReplayItem[]) => {
+    if (!items.length) return;
+    let best = items[0];
+    let bestDist = Math.abs(best.startAt - targetAt);
+    for (const item of items) {
+      const dist = replayItemActive(item, targetAt) ? 0 : Math.abs(item.startAt - targetAt);
+      if (dist < bestDist) {
+        best = item;
+        bestDist = dist;
+      }
+    }
+    requestAnimationFrame(() => {
+      const el = listRef.current?.querySelector<HTMLElement>(`[data-replay-item="${CSS.escape(best.id)}"]`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    });
+  }, []);
+
+  const scan = useCallback(async (initial: SearchState, targetAt?: number) => {
     if (debounceTimer.current) {
       clearTimeout(debounceTimer.current);
       debounceTimer.current = null;
@@ -56,6 +75,7 @@ export function ReplayEventSearch({ scope, startAt, at, itemUrl, onSelect, selec
     let next = { ...initial, loading: true, stopped: false, error: "" };
     update(next);
     const cursors = new Set<string>();
+    let pagesScanned = 0;
     try {
       for (;;) {
         const params = new URLSearchParams(scope);
@@ -66,20 +86,28 @@ export function ReplayEventSearch({ scope, startAt, at, itemUrl, onSelect, selec
         }
         const page = await readArchiveJson<ReplaySearchResult>(`/api/replay?${params}`, controller.signal);
         if (controller.signal.aborted || request.current !== controller) return;
-        const items = [...new Map([...next.items, ...page.items].map(item => [item.id, item])).values()];
+        pagesScanned += 1;
+        const mergedItems = [...new Map([...next.items, ...page.items].map(item => [item.id, item])).values()];
+        const items = targetAt !== undefined && mergedItems.length > 200 ? mergedItems.slice(-200) : mergedItems;
         next = { ...next, items, cursor: page.nextCursor, scan: page.scan, coverage: page.coverage };
-        // Each response holds <=100 hits. A display batch holds at most 199, independent of run length.
-        const finished = !next.cursor || items.length >= 100;
+        const reachedTarget =
+          targetAt !== undefined
+            ? (items.some(item => item.startAt >= targetAt) || pagesScanned >= 25)
+            : items.length >= 100;
+        const finished = !next.cursor || reachedTarget;
         update({ ...next, loading: !finished });
-        if (finished) return;
+        if (finished) {
+          if (targetAt !== undefined) scrollClosestItemIntoView(targetAt, items);
+          return;
+        }
       }
     } catch (error) {
       if (!controller.signal.aborted && request.current === controller) update({ ...next, loading: false,
         error: error instanceof Error ? error.message : String(error) });
     } finally { if (request.current === controller) request.current = null; }
-  }, [scope, timeline, update]);
+  }, [scope, timeline, update, scrollClosestItemIntoView]);
 
-  // Auto-load event stream on mount and when scope or track filter changes; debounce text input.
+  // Auto-load event stream on mount and when scope, refresh, or track filter changes; debounce text input.
   useEffect(() => {
     const trimmed = query.trim();
     const immediate = !current.current || current.current.track !== track || trimmed === "";
@@ -98,7 +126,7 @@ export function ReplayEventSearch({ scope, startAt, at, itemUrl, onSelect, selec
         debounceTimer.current = null;
       }
     };
-  }, [scope, track, query, scan]);
+  }, [scope, refreshRevision, track, query, scan]);
 
   useEffect(() => () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
@@ -181,6 +209,26 @@ export function ReplayEventSearch({ scope, startAt, at, itemUrl, onSelect, selec
           {state.loading && (
             <Button type="button" size="xs" variant="ghost" onClick={stop}>{t("stopSearch")}</Button>
           )}
+          {!state.loading && at !== undefined && (state.items.length > 0 || Boolean(state.cursor)) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => {
+                const lastStart = state.items.at(-1)?.startAt ?? -Infinity;
+                const firstStart = state.items[0]?.startAt ?? Infinity;
+                if (at >= firstStart - 1500 && (at <= lastStart + 1500 || !state.cursor)) {
+                  scrollClosestItemIntoView(at, state.items);
+                } else if (at < firstStart) {
+                  void scan({ query: query.trim(), track, items: [], loading: true, error: "", stopped: false, page: 1 }, at);
+                } else if (state.cursor) {
+                  void scan({ ...state, page: state.page + 1 }, at);
+                }
+              }}
+            >
+              {t("locatePlayhead")}
+            </Button>
+          )}
           {!changed && !state.loading && !state.stopped && !state.error && state.cursor && (
             <Button type="button" variant="outline" size="xs"
               onClick={event => { focus.remember(event.currentTarget); void scan({ ...state, items: [], page: state.page + 1 }); }}>
@@ -209,7 +257,7 @@ export function ReplayEventSearch({ scope, startAt, at, itemUrl, onSelect, selec
         <p className="replay-search-empty">{t(complete ? "noResults" : "noResultsYet")}</p>
       )}
 
-      <ol className="replay-search-results">
+      <ol ref={listRef} className="replay-search-results">
         {state.items.map(item => {
           const activeNow = isItemAtPlayhead(item);
           const mappedStatus = item.status && ["completed","failed","cancelled","running","success","error","pending"].includes(item.status)

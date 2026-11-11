@@ -1297,6 +1297,11 @@
     "noFramesFiltered": "此时还没有此来源的感知记录",
     "noFramesAll": "此时还没有感知记录",
     "playbackContinues": "播放会按记录时间继续。",
+    "jumpNextFrame": "跳至下一采样帧 ›",
+    "showAllCapabilities": "显示全部感知",
+    "jumpToSample": "跳至 {time} ›",
+    "inspectRecordDetails": "查看节点详情 ↗",
+    "sampledWindowHint": "已加载 30 秒采样帧窗口",
     "segmentFailed": "此段读取失败",
     "buffering": "正在缓冲…",
     "retrySegment": "重试此段",
@@ -1440,7 +1445,10 @@
       "frameDelta": "帧变化",
       "afterExecution": "动作后采样请求",
       "perceptionDetails": "感知与记录详情",
-      "detailsBelow": "详见下方详情"
+      "detailsBelow": "详见下方详情",
+      "latestRequestSuffix": "（最新 #{number}）",
+      "newerFailurePrefix": "最新请求 #{number} 感知失败：",
+      "keepingLastVisual": " · 保留 #{number} 最近画面"
     },
     "fact": {
       "readMs": "读取耗时",
@@ -1459,6 +1467,7 @@
     },
     "meta": {
       "recordedAt": "记录于 ",
+      "agoSuffix": "前",
       "textObservation": "文字观测",
       "records": "时空记录",
       "noMedia": "暂无输入媒体",
@@ -1742,6 +1751,7 @@
     "continueSearch": "继续扫描",
     "restartSearch": "重新读取",
     "nextResults": "下一批",
+    "locatePlayhead": "定位当前时刻",
     "backTen": "后退 10 秒",
     "forwardTen": "前进 10 秒",
     "minutes": "分钟",
@@ -1928,7 +1938,7 @@
     "presetVerifyStartPrompt": "先运行 `ludens eval` 确认所有能力验证通过，再继续自动推进当前游戏目标。",
     "presetExploreStart": "🚀 读取记忆继续推进",
     "presetExploreStartPrompt": "先读取 `memory/` 确认当前主线目标，观察当前画面后继续推进。",
-    "inspectingCallBanner": "正在查看试跑请求 #{number}",
+    "inspectingCallBanner": "正在查看请求 #{number}",
     "clearInspectedBtn": "返回最新画面",
     "perceptionPolicyTitle": "感知与上下文策略",
     "perceptionToggleRow": "自动感知上下文注入",
@@ -1965,7 +1975,10 @@
     "segmentLimitLabel": "限时",
     "stopReasonManual": "手动停止",
     "stopReasonBudget": "达到设定时长",
-    "loadPreviousRunSegment": "加载更早的运行时段"
+    "loadPreviousRunSegment": "加载更早的运行时段",
+    "olderRunLoadFailed": "加载较早运行时段失败",
+    "retryOlderRun": "重试",
+    "postCycleMaintenance": "周期后记录"
   },
   "workspaceStudio": {
     "title": "工作区配置与运行工作台",

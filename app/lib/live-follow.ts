@@ -42,6 +42,71 @@ export function hasSelectedEvidence(search: string) {
   return ["call", "beforeCall", "block", "image", "at"].some(key => query.has(key));
 }
 
+const WORKSPACE_SCOPED_VIEWS = new Set(["live", "replay", "perf", "caps", "perception", "baseware"]);
+const RUN_SCOPED_VIEWS = new Set(["live", "replay", "perf"]);
+
+/**
+ * Scrub view-local URL parameters when switching console views so Replay timestamps/evidence
+ * never leak into Live/Perf (or vice versa) and workspace context stays explicit.
+ */
+export function cleanViewSearchParams(
+  search: string | URLSearchParams,
+  targetView: string,
+  options?: { project?: string; latestRunId?: string },
+): URLSearchParams {
+  const params = new URLSearchParams(search);
+  params.set("view", targetView);
+
+  if (WORKSPACE_SCOPED_VIEWS.has(targetView) && options?.project && !params.get("project")) {
+    params.set("project", options.project);
+  }
+
+  if (!RUN_SCOPED_VIEWS.has(targetView)) {
+    params.delete("run");
+    params.delete("epoch");
+  }
+
+  if (targetView !== "replay") {
+    params.delete("at");
+    params.delete("replayItem");
+    params.delete("replayRecord");
+    params.delete("replaySequence");
+    if (params.get("epoch") === "all") {
+      params.delete("epoch");
+    }
+  }
+
+  if (
+    targetView === "live" &&
+    options?.latestRunId &&
+    params.get("run") === options.latestRunId &&
+    !params.get("epoch")
+  ) {
+    params.delete("run");
+  }
+
+  if (targetView !== "live" && targetView !== "perf") {
+    params.delete("call");
+    params.delete("beforeCall");
+    params.delete("block");
+    params.delete("image");
+  }
+
+  if (targetView !== "perf") params.delete("perfTab");
+  if (targetView !== "perception") params.delete("studioTab");
+  if (targetView !== "workspaces") {
+    params.delete("create");
+    params.delete("driverPackage");
+  }
+  if (targetView !== "docs") {
+    params.delete("doc");
+    params.delete("docLang");
+    params.delete("docAnchor");
+  }
+
+  return params;
+}
+
 export type LiveContextKind = "latest" | "run" | "epoch" | "evidence" | "log";
 export type ObservedHost = "auto" | "manual" | "disconnected" | "unavailable" | "historical";
 

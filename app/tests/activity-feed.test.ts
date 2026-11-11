@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTIVITY_WINDOW_SIZE, acceptsScope, activityContentView, activityProvenance, activitySearchText, matchesActivity,
+  ACTIVITY_WINDOW_SIZE, acceptsScope, activityContentView, activityProvenance, activityScopeParams, activitySearchText, matchesActivity,
   mergeActivity, sameScope, type ActivityBlock,
 } from "../features/live/activity-feed-model";
 
@@ -60,6 +60,14 @@ test("run and epoch identities reject stale responses while latest selection may
   assert.equal(acceptsScope(scope, "other", "run"), false);
   assert.equal(sameScope(scope, { ...scope, epoch: "epoch-1" }), false);
   assert.equal(sameScope(scope, { ...scope }), true);
+  assert.deepEqual(
+    Object.fromEntries(activityScopeParams({ project: "workspace", runId: "run", epoch: null })),
+    { project: "workspace", run: "run", epoch: "all" },
+  );
+  assert.deepEqual(
+    Object.fromEntries(activityScopeParams({ project: "workspace", runId: "run", epoch: "epoch-2" })),
+    { project: "workspace", run: "run", epoch: "epoch-2" },
+  );
 });
 
 test("expanded activity remains visible when a streamed replacement becomes short", () => {
