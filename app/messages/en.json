@@ -1657,6 +1657,10 @@
   },
   "runPicker": {
     "description": "Choose a recorded run by its full ID. Timestamp summaries use the Asia/Shanghai time zone.",
+    "quickJumpLabel": "Quick Jump",
+    "quickJumpHint": "Jump directly to any run or cycle segment in the continuous session stream",
+    "quickJumpDescription": "All runs and control cycles in this workspace form a single continuous session. Select any segment to scroll to it.",
+    "latestSegment": "Latest live stream",
     "close": "Close",
     "current": "Current",
     "empty": "No recorded runs"
@@ -1947,7 +1951,21 @@
     "inputSamplingMs": "Sampled {ms}ms",
     "inputExpandPayload": "View model input payload",
     "inputPreviewInStage": "Click to inspect in viewport",
-    "jumpToReplayAt": "Replay {time} ↗"
+    "jumpToReplayAt": "Replay {time} ↗",
+    "durationUnbounded": "Continuous",
+    "durationUnboundedDesc": "Run indefinitely until manually stopped",
+    "durationMenuTitle": "Takeover Duration (Optional)",
+    "durationCustomLabel": "Custom duration (minutes)",
+    "durationCustomApply": "Apply",
+    "durationPillHint": "Optional takeover duration for auto mode (defaults to continuous until stopped)",
+    "sessionGapLabel": "Paused {gap}",
+    "segmentActive": "Active Cycle",
+    "segmentCompleted": "Session Segment",
+    "segmentRanFor": "Ran {duration}",
+    "segmentLimitLabel": "Limit",
+    "stopReasonManual": "Stopped manually",
+    "stopReasonBudget": "Duration reached",
+    "loadPreviousRunSegment": "Load earlier run segment"
   },
   "workspaceStudio": {
     "title": "Workspace Config & Runtime Studio",

@@ -20,7 +20,7 @@ async function until(check: () => boolean) {
   }
 }
 
-async function fixture(seconds = 60, acquisition?: Promise<void>, releaseFailure = false, controllerCount = 1, controlTimeoutMs?: number) {
+async function fixture(seconds: number | null = 60, acquisition?: Promise<void>, releaseFailure = false, controllerCount = 1, controlTimeoutMs?: number) {
   const directory = await mkdtemp(join(tmpdir(), "ludens-baseware-"));
   const socket = join(directory, "baseware.sock");
   const runDir = join(directory, "logs/run-1");
@@ -143,6 +143,20 @@ test("remote lease matches the configured budget and human revoke cancels a sepa
     await until(() => f.runtime.status().mode === "manual");
     expect(f.cancellations()).toBe(1);
     expect(f.owner()).toBeUndefined();
+  } finally { await f.close(); }
+});
+
+test("an unbounded session default keeps the lease until explicit handback", async () => {
+  const f = await fixture(null);
+  try {
+    const state = await f.runtime.start();
+    expect(state).toMatchObject({ mode: "auto", maxSeconds: null, remainingSeconds: null });
+    expect(await f.external.request({ kind: "status" })).toMatchObject({ mode: "auto", epoch: state.epoch, remainingSeconds: null });
+    await Bun.sleep(30); // No expiry timer: the remote lease survives.
+    expect(f.core.status()).toMatchObject({ mode: "auto", remainingSeconds: null });
+    await f.runtime.stop("human");
+    expect(f.core.status()).toMatchObject({ mode: "manual", remainingSeconds: null });
+    expect(f.runtime.status()).toMatchObject({ mode: "manual", maxSeconds: null, remainingSeconds: null });
   } finally { await f.close(); }
 });
 

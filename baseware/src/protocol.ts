@@ -37,7 +37,7 @@ export interface Request {
   ids?: string[];
   arguments?: ToolArguments;
   epoch?: string;
-  seconds?: number;
+  seconds?: number | null;
   generation?: string | null;
   trace?: Trace;
   origin?: string;

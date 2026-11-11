@@ -25,7 +25,7 @@ import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clo
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
 export default function ConsoleShell() {
-  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog} = useDashboardController();
+  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, jumpToLiveSegment} = useDashboardController();
   const waitSummary = [
     s?.medianHttpHeadersMs != null ? dt("waitHttp") + " " + seconds(s.medianHttpHeadersMs) : "",
     s?.medianWsWaitMs != null ? dt("waitWs") + " " + seconds(s.medianWsWaitMs) : "",
@@ -102,17 +102,23 @@ export default function ConsoleShell() {
             )}
             {runControls && (
               <RunPicker runs={project?.runs ?? []} latest={latest}
-                value={!refresh && !selection.run ? run : selection.run}
+                cycles={view === "live" ? cycles : undefined}
+                quickJump={view === "live"}
+                value={view === "live" ? (liveJumpTarget?.value || selection.run || "") : (!refresh && !selection.run ? run : selection.run)}
                 onChange={value =>
-                  !value && view === "live" ? returnToLatest() : navigate({
-                    run: value,
-                    epoch: null,
-                    beforeCall: null,
-                    call: null,
-                    block: null,
-                    image: null,
-                    at: null, ...replayEvidencePatch(null),
-                  })
+                  view === "live"
+                    ? jumpToLiveSegment(value)
+                    : !value
+                      ? returnToLatest()
+                      : navigate({
+                          run: value,
+                          epoch: null,
+                          beforeCall: null,
+                          call: null,
+                          block: null,
+                          image: null,
+                          at: null, ...replayEvidencePatch(null),
+                        })
                 }
               />
             )}
@@ -246,6 +252,8 @@ export default function ConsoleShell() {
                   project={selection.project}
                   workspace={project?.workspace ?? data.manifest.workspace ?? null}
                   workspaceTitle={workspaceName(project)}
+                  runs={project?.runs ?? []}
+                  jumpTarget={liveJumpTarget}
                   data={data}
                   feed={activity}
                   isLiveRun={

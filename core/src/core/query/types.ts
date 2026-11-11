@@ -180,7 +180,8 @@ export interface LiveStatus {
   reason: string;
   agent: boolean;
   thinking: boolean;
-  maxSeconds?: number;
+  maxSeconds?: number | null;
+  remainingSeconds?: number | null;
 }
 export interface LivePhase {
   kind:
@@ -283,7 +284,7 @@ export interface RunData {
   project: string;
   run: string;
   manifest: Manifest;
-  cycles: { epoch: string; startedAt: string }[];
+  cycles: { epoch: string; startedAt: string; endedAt?: string; reason?: string; maxSeconds?: number | null }[];
   selectedEpoch: string | null;
   calls: Call[];
   selectedCall?: Call;

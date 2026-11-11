@@ -24,7 +24,7 @@ export interface DeviceSession {
   readonly catalog: Catalog;
   readonly diagnostics?: DiagnosticsMode;
   /** Cancellation must revoke a pending acquisition as well as an active lease. */
-  acquire(epoch: string, signal?: AbortSignal): Promise<void>;
+  acquire(epoch: string, signal?: AbortSignal, seconds?: number | null): Promise<void>;
   /** Must also accept an epoch whose acquisition has not completed yet. */
   release(epoch: string): Promise<void>;
   setInputGeneration?(epoch: string, generation: string | null): Promise<void>;
@@ -51,7 +51,8 @@ export class Runtime {
   get runSettled(): Promise<void> | undefined { return this.running; }
   private consolidating = false;
   private timer?: ReturnType<typeof setTimeout>;
-  private takeoverDeadlineMs = 0;
+  private activeMaxSeconds: number | null = 300;
+  private takeoverDeadlineMs: number | null = null;
   private takeoverStartedAtMs: number | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private readonly budgetEnded = () => { void this.stop("time budget").catch(error => this.record("error", String(error))); };
@@ -75,16 +76,17 @@ export class Runtime {
     if ("perception" in subsystems) this._perception = subsystems.perception;
   }
 
-  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0) {
-    if (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647) throw new Error("Invalid Shiori time budget");
+  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds: number | null = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0) {
+    if (maxSeconds !== null && (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori time budget");
     if (budget && !Number.isFinite(budget.deadlineMs)) throw new Error("Invalid shared Shiori deadline");
+    this.activeMaxSeconds = this.maxSeconds;
     devices?.onReconnect?.(() => { void this.reconnected(); });
   }
 
   status() {
     // The host can outlive many takeovers; its log clock is not this cycle's budget.
-    const remainingSeconds = this.mode === "auto" ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null;
-    return { runId: this.runId, maxSeconds: this.maxSeconds, remainingSeconds, mode: this.mode, epoch: this.mode === "auto" ? this.epoch : null, connected: this.connected, reason: this.reason, agent: !!this._agent, thinking: !!this.running, consolidating: this.consolidating, queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 }, perception: this._perception?.status(), context: { perceptionInjection: this.perceptionInjection }, logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" } };
+    const remainingSeconds = this.mode === "auto" && this.takeoverDeadlineMs !== null ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null;
+    return { runId: this.runId, maxSeconds: this.mode === "auto" ? this.activeMaxSeconds : this.maxSeconds, remainingSeconds, mode: this.mode, epoch: this.mode === "auto" ? this.epoch : null, connected: this.connected, reason: this.reason, agent: !!this._agent, thinking: !!this.running, consolidating: this.consolidating, queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 }, perception: this._perception?.status(), context: { perceptionInjection: this.perceptionInjection }, logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" } };
   }
 
   perceptionInjectionEnabled(): boolean { return this.perceptionInjection; }
@@ -143,17 +145,20 @@ export class Runtime {
     return result;
   }
 
-  async start(message?: string, program?: (context: { epoch: string; signal: AbortSignal }) => Promise<void>) {
+  async start(message?: string, program?: (context: { epoch: string; signal: AbortSignal }) => Promise<void>, seconds?: number | null) {
     if (this.mode !== "manual" || this.running || this.calls.size) throw new Error("Previous control cycle has not finished");
     if (!this.connected) throw new Error("Baseware disconnected; restart the application");
     this.budget?.signal.throwIfAborted();
+    // An explicit duration overrides the configured budget; null runs unbounded.
+    const cycleSeconds = seconds !== undefined ? seconds : this.maxSeconds;
+    if (cycleSeconds !== null && (!Number.isFinite(cycleSeconds) || cycleSeconds <= 0 || cycleSeconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori time budget");
     const epoch = this.epoch = crypto.randomUUID();
     const control = this.control = new AbortController();
     this.ownsDevice = !program;
     if (this.ownsDevice && !this.devices) throw new Error("Agent control requires a device session");
     this.mode = "acquiring";
     this.opening = this.ownsDevice ? this.withControlTimeout(
-      this.devices!.acquire(epoch, control.signal).then(async () => {
+      this.devices!.acquire(epoch, control.signal, cycleSeconds).then(async () => {
         // A non-cooperative session may complete after stop or its timeout.
         // Compensate using the captured epoch; never revive a stopped cycle.
         if (control.signal.aborted) {
@@ -172,14 +177,15 @@ export class Runtime {
     try { await this.opening; }
     catch (error) { if (this.control === control) await this.stop(String(error)); throw error; }
     if (control.signal.aborted || this.control !== control) return this.status();
-    this.takeoverDeadlineMs = performance.now() + (this.budget ? this.budget.deadlineMs - Date.now() : this.maxSeconds * 1000);
+    this.activeMaxSeconds = this.budget ? Math.max(1, Math.ceil((this.budget.deadlineMs - Date.now()) / 1000)) : cycleSeconds;
+    this.takeoverDeadlineMs = this.budget ? performance.now() + (this.budget.deadlineMs - Date.now()) : cycleSeconds !== null ? performance.now() + cycleSeconds * 1000 : null;
     this.mode = "auto";
     this.reason = "enabled";
     this.takeoverStartedAtMs = Date.now();
     this.startStatsTimer();
     this.record("control", this.status(), { epoch });
     if (message) this.record("user_message", { text: message, mode: "start" }, { epoch });
-    if (!this.budget) this.timer = setTimeout(this.budgetEnded, this.maxSeconds * 1000);
+    if (!this.budget && cycleSeconds !== null) this.timer = setTimeout(this.budgetEnded, cycleSeconds * 1000);
     if (control.signal.aborted) return this.status();
     try {
       if (this.ownsDevice) {
@@ -209,7 +215,7 @@ export class Runtime {
     signal?.addEventListener("abort", cancel, { once: true });
     try {
       await this.start(undefined, async ({ signal: controlSignal }) => {
-        const deadlineMs = Date.now() + this.takeoverDeadlineMs - performance.now();
+        const deadlineMs = this.takeoverDeadlineMs !== null ? Date.now() + this.takeoverDeadlineMs - performance.now() : Infinity;
         try { await executeProgram(program, controlSignal, this.record, deadlineMs, signal); }
         catch (error) { failure = error; throw error; }
       });
@@ -357,7 +363,7 @@ export class Runtime {
     const memory = process.memoryUsage();
     this.record("runtime_stats", { reason, mode: this.mode, epoch: this.epoch,
       elapsedMs: this.takeoverStartedAtMs !== null ? Math.max(0, Date.now() - this.takeoverStartedAtMs) : 0,
-      remainingSeconds: this.mode === "auto" ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null,
+      remainingSeconds: this.mode === "auto" && this.takeoverDeadlineMs !== null ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null,
       queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 },
       memory: { rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal, external: memory.external },
     }, this.epoch ? { epoch: this.epoch } : {});

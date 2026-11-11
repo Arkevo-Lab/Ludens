@@ -6,10 +6,12 @@ import {
   Bot,
   ChevronDown,
   ChevronRight,
+  Clock,
   CornerDownLeft,
   Eye,
   EyeOff,
   FileText,
+  Infinity as InfinityIcon,
   PanelRight,
   Play,
   Plus,
@@ -23,12 +25,13 @@ import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
 import { clockTime } from "@/features/live/run-visuals";
-import type { Call, Observation, RunData } from "@/lib/types";
+import { runWindowSummary } from "@/lib/run-identity";
+import type { Call, Observation, RunData, RunInfo } from "@/lib/types";
 import "@/features/live/activity-feed.css";
 
 export type RuntimeControlAction =
   | { action: "status" }
-  | { action: "auto_on"; message?: string; runId?: string; expectedEpoch?: string | null }
+  | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; delivery?: "steer" | "follow_up"; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
@@ -130,11 +133,30 @@ function callHasExternalInput(call: Call): boolean {
   );
 }
 
+function isControlBlock(block: ActivityBlock): boolean {
+  return block.kind === "system" && block.title === "control";
+}
+
 type StreamSegment =
+  | {
+      kind: "session_divider";
+      id: string;
+      runId: string;
+      epoch: string | null;
+      cycleIndex: number;
+      startedAt: string;
+      endedAt: string | null;
+      durationSeconds: number | null;
+      maxSeconds: number | null;
+      stopReason: string | null;
+      gapSeconds: number | null;
+      isActive: boolean;
+    }
   | { kind: "user"; id: string; block: ActivityBlock; text: string; mode: string }
   | {
       kind: "input";
       id: string;
+      runId?: string;
       call?: Call;
       observations: Observation[];
       bgBlock?: ActivityBlock;
@@ -143,13 +165,23 @@ type StreamSegment =
   | {
       kind: "turn";
       id: string;
+      runId?: string;
       steps: ActivityBlock[];
       responseBlock: ActivityBlock | null;
       responseText: string | null;
     };
 
+interface BuildSegmentsOptions {
+  runId?: string;
+  cycles?: RunData["cycles"];
+  prevEndedAt?: string | null;
+  isLatestRun?: boolean;
+  isAuto?: boolean;
+}
+
 /**
  * Groups raw ActivityBlocks and external Call inputs into Codex-style conversational segments:
+ * - Explicit Session Segment & Time-Gap Dividers (`session_divider`) across control cycles (`epoch`) and runs
  * - User bubbles (`user_message`)
  * - External Agent Loop Input blocks (`CodexInputCard` from `call.inputObservations` / `call.inputText` / `call.perception` / `background_result`)
  * - Collapsed intermediate step groups (`上 N 条消息 / 执行步骤 >`) paired with Shiori's readable prose response
@@ -158,13 +190,106 @@ function buildCodexSegments(
   rawBlocks: ActivityBlock[],
   calls: Call[] = [],
   observations: Observation[] = [],
+  options: BuildSegmentsOptions = {},
 ): StreamSegment[] {
   const blocks = rawBlocks.filter(block => block.kind !== "diagnostic");
   const callsById = new Map(calls.map(c => [c.id, c]));
   const obsById = new Map(observations.map(o => [o.id, o]));
+  const cyclesByEpoch = new Map((options.cycles ?? []).map((c, idx) => [c.epoch, { ...c, index: idx + 1 }]));
   const emittedCallInputIds = new Set<string>();
+  const emittedDividerEpochs = new Set<string>();
   const segments: StreamSegment[] = [];
   let pendingSteps: ActivityBlock[] = [];
+  let currentEpoch: string | null = null;
+  let lastSegmentEndedAt: string | null = options.prevEndedAt ?? null;
+  let autoCycleCounter = 0;
+
+  // Pre-scan control(manual) blocks so we know end times and stop reasons even before cycle index updates
+  const manualEndByEpoch = new Map<string, { endedAt: string; reason: string | null; elapsedMs: number | null }>();
+  for (const block of blocks) {
+    if (!isControlBlock(block)) continue;
+    const rec = asRecord(block.data);
+    if (rec?.mode === "manual") {
+      const ep = block.trace?.epoch ?? (typeof rec?.epoch === "string" ? rec.epoch : "");
+      if (ep) {
+        manualEndByEpoch.set(ep, {
+          endedAt: block.at,
+          reason: typeof rec?.reason === "string" ? rec.reason : null,
+          elapsedMs: typeof rec?.elapsedMs === "number" ? rec.elapsedMs : null,
+        });
+      }
+    }
+  }
+
+  const emitDividerForEpoch = (epoch: string | null, fallbackStartAt: string, autoBlockData?: Record<string, unknown> | null) => {
+    const key = `${options.runId ?? ""}:${epoch ?? "default"}`;
+    if (emittedDividerEpochs.has(key)) return;
+
+    const indexed = epoch ? cyclesByEpoch.get(epoch) : undefined;
+    if (indexed && indexed.index > 1 && options.cycles) {
+      for (let i = 0; i < indexed.index - 1; i++) {
+        const earlier = options.cycles[i];
+        if (earlier) {
+          emitDividerForEpoch(earlier.epoch, earlier.startedAt);
+        }
+      }
+    }
+
+    emittedDividerEpochs.add(key);
+    const manualEnd = epoch ? manualEndByEpoch.get(epoch) : undefined;
+    const cycleIndex = indexed?.index ?? ++autoCycleCounter;
+    const startedAt = indexed?.startedAt ?? fallbackStartAt;
+    const isLatestCycleInRun = Boolean(
+      options.isLatestRun &&
+        epoch &&
+        (options.cycles?.length ? options.cycles.at(-1)?.epoch === epoch : true),
+    );
+    const isActive = Boolean(isLatestCycleInRun && options.isAuto && !manualEnd && !indexed?.endedAt);
+    const endedAt = isActive ? null : (indexed?.endedAt ?? manualEnd?.endedAt ?? null);
+    const stopReason = isActive ? null : (indexed?.reason ?? manualEnd?.reason ?? null);
+    const maxSeconds =
+      indexed && "maxSeconds" in indexed
+        ? (indexed.maxSeconds ?? null)
+        : typeof autoBlockData?.maxSeconds === "number"
+          ? autoBlockData.maxSeconds
+          : null;
+
+    const startMs = Date.parse(startedAt);
+    const endMs = endedAt ? Date.parse(endedAt) : NaN;
+    const prevCycleEndedAt =
+      indexed && indexed.index > 1 ? (options.cycles?.[indexed.index - 2]?.endedAt ?? null) : null;
+    const effectivePrevEndedAt = prevCycleEndedAt ?? lastSegmentEndedAt;
+    const prevEndMs = effectivePrevEndedAt ? Date.parse(effectivePrevEndedAt) : NaN;
+    const gapSeconds =
+      Number.isFinite(startMs) && Number.isFinite(prevEndMs) && startMs > prevEndMs
+        ? Math.max(0, Math.round((startMs - prevEndMs) / 1000))
+        : null;
+    const durationSeconds =
+      manualEnd?.elapsedMs != null
+        ? Math.max(0, Math.round(manualEnd.elapsedMs / 1000))
+        : Number.isFinite(startMs) && Number.isFinite(endMs) && endMs >= startMs
+          ? Math.max(0, Math.round((endMs - startMs) / 1000))
+          : null;
+
+    segments.push({
+      kind: "session_divider",
+      id: `divider:${options.runId ?? "run"}:${epoch ?? cycleIndex}`,
+      runId: options.runId ?? "",
+      epoch,
+      cycleIndex,
+      startedAt,
+      endedAt,
+      durationSeconds,
+      maxSeconds,
+      stopReason,
+      gapSeconds,
+      isActive,
+    });
+
+    if (endedAt) {
+      lastSegmentEndedAt = endedAt;
+    }
+  };
 
   const synthesizeAutonomousNarrative = (steps: ActivityBlock[]): { block: ActivityBlock; text: string } | null => {
     // 1. Prefer a substantial thinking block (>= 60 chars beyond a short **heading**)
@@ -213,6 +338,7 @@ function buildCodexSegments(
       segments.push({
         kind: "turn",
         id: explicitResponse.id,
+        runId: options.runId,
         steps: pendingSteps,
         responseBlock: explicitResponse,
         responseText: extractReadableText(explicitResponse),
@@ -228,6 +354,7 @@ function buildCodexSegments(
       segments.push({
         kind: "turn",
         id: synthesized.block.id,
+        runId: options.runId,
         steps: otherSteps,
         responseBlock: synthesized.block,
         responseText: synthesized.text,
@@ -236,6 +363,7 @@ function buildCodexSegments(
       segments.push({
         kind: "turn",
         id: pendingSteps[pendingSteps.length - 1].id,
+        runId: options.runId,
         steps: pendingSteps,
         responseBlock: null,
         responseText: null,
@@ -245,6 +373,31 @@ function buildCodexSegments(
   };
 
   for (const block of blocks) {
+    if (isControlBlock(block)) {
+      flushTurn();
+      const rec = asRecord(block.data);
+      const ep = block.trace?.epoch ?? (typeof rec?.epoch === "string" ? rec.epoch : null);
+      if (rec?.mode === "auto") {
+        currentEpoch = ep;
+        emitDividerForEpoch(ep, block.at, rec);
+      } else if (rec?.mode === "manual") {
+        if (ep || currentEpoch) {
+          lastSegmentEndedAt = block.at;
+        }
+        currentEpoch = null;
+      }
+      continue;
+    }
+
+    const blockEpoch = block.trace?.epoch ?? null;
+    if (blockEpoch && blockEpoch !== currentEpoch) {
+      flushTurn();
+      currentEpoch = blockEpoch;
+      emitDividerForEpoch(blockEpoch, block.at);
+    } else if (!blockEpoch && segments.length === 0 && pendingSteps.length === 0 && options.runId) {
+      emitDividerForEpoch(options.cycles?.[0]?.epoch ?? null, block.at);
+    }
+
     if (isUserMessageBlock(block)) {
       flushTurn();
       const record = asRecord(block.data);
@@ -263,6 +416,7 @@ function buildCodexSegments(
       segments.push({
         kind: "input",
         id: `input-bg:${block.id}`,
+        runId: options.runId,
         observations: [],
         bgBlock: block,
         at: block.at,
@@ -282,6 +436,7 @@ function buildCodexSegments(
         segments.push({
           kind: "input",
           id: `input-call:${call.id}`,
+          runId: options.runId,
           call,
           observations: resolvedObs,
           at: call.perception?.snapshot?.recordedAt ?? resolvedObs[0]?.at ?? call.at,
@@ -329,6 +484,81 @@ function renderInlineFormatting(text: string): ReactNode[] {
     }
     return token;
   });
+}
+
+function formatStopReason(reason: string | null, t: (key: string) => string): string | null {
+  if (!reason || reason === "enabled") return null;
+  if (reason === "manual") return t("stopReasonManual");
+  if (reason.toLowerCase().includes("budget exhausted")) return t("stopReasonBudget");
+  return reason;
+}
+
+function CodexSessionDivider({
+  segment,
+  highlighted,
+}: {
+  segment: Extract<StreamSegment, { kind: "session_divider" }>;
+  highlighted?: boolean;
+}) {
+  const t = useTranslations("shioriCockpit");
+  const windowInfo = runWindowSummary({
+    id: segment.epoch || segment.id,
+    startedAt: segment.startedAt,
+    endedAt: segment.endedAt ?? undefined,
+  });
+  const timeSummary = windowInfo.summary ?? clockTime(segment.startedAt);
+  const stopLabel = formatStopReason(segment.stopReason, t);
+
+  return (
+    <div
+      id={segment.id}
+      className="codex-session-divider"
+      data-session-divider
+      data-run-id={segment.runId}
+      data-epoch={segment.epoch ?? undefined}
+      data-segment-anchor={segment.epoch ? `${segment.runId}#${segment.epoch}` : segment.runId}
+      data-active={segment.isActive || undefined}
+      data-highlighted={highlighted || undefined}
+    >
+      {segment.gapSeconds != null && segment.gapSeconds >= 5 && (
+        <div className="codex-session-gap" data-session-gap>
+          <span>
+            ⏸ {t("sessionGapLabel").replace("{gap}", formatDurationCompact(segment.gapSeconds))}
+          </span>
+        </div>
+      )}
+      <div className="codex-session-divider-bar">
+        <span className="codex-session-divider-line" />
+        <div className="codex-session-divider-pill">
+          <span
+            className="codex-session-divider-dot"
+            data-active={segment.isActive || undefined}
+          />
+          <strong className="codex-session-divider-status">
+            {segment.isActive ? t("segmentActive") : t("segmentCompleted")}
+          </strong>
+          <span className="codex-session-divider-time">{timeSummary}</span>
+          <span className="codex-session-divider-tag">#{segment.cycleIndex}</span>
+          {segment.durationSeconds != null && !segment.isActive && (
+            <span className="codex-session-divider-meta">
+              {t("segmentRanFor").replace("{duration}", formatDurationCompact(segment.durationSeconds))}
+            </span>
+          )}
+          {segment.isActive && (
+            <span className="codex-session-divider-meta">
+              {segment.maxSeconds != null
+                ? `${t("segmentLimitLabel")} ${formatDurationCompact(segment.maxSeconds)}`
+                : `∞ ${t("durationUnbounded")}`}
+            </span>
+          )}
+          {stopLabel && (
+            <span className="codex-session-divider-reason">· {stopLabel}</span>
+          )}
+        </div>
+        <span className="codex-session-divider-line" />
+      </div>
+    </div>
+  );
 }
 
 function CodexStepGroup({
@@ -700,15 +930,72 @@ export function ShioriComposer({
   onUpdated(): void;
 }) {
   const t = useTranslations("shioriCockpit");
+  const composerDockRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [draft, setDraft] = useState("");
   const [selectedTab, setSelectedTab] = useState<"start" | "steer" | "follow_up" | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [durationMenuOpen, setDurationMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!menuOpen && !durationMenuOpen) return;
+    const handleKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMenuOpen(false);
+        setDurationMenuOpen(false);
+      }
+    };
+    const handlePointer = (event: MouseEvent) => {
+      if (composerDockRef.current && !composerDockRef.current.contains(event.target as Node)) {
+        setMenuOpen(false);
+        setDurationMenuOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("mousedown", handlePointer);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("mousedown", handlePointer);
+    };
+  }, [menuOpen, durationMenuOpen]);
+  const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
+  const [customMinutes, setCustomMinutes] = useState("45");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(null);
   const [localPerceptionInject, setLocalPerceptionInject] = useState<boolean | null>(null);
   const [localHostStatus, setLocalHostStatus] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined" && project) {
+        const stored = window.localStorage.getItem(`ludens:takeover-duration:${project}`);
+        if (!stored || stored === "unbounded") {
+          setDurationSeconds(null);
+        } else {
+          const parsed = Number(stored);
+          if (Number.isFinite(parsed) && parsed > 0) setDurationSeconds(parsed);
+        }
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [project]);
+
+  const updateDurationSeconds = (next: number | null) => {
+    setDurationSeconds(next);
+    setDurationMenuOpen(false);
+    try {
+      if (typeof window !== "undefined" && project) {
+        window.localStorage.setItem(
+          `ludens:takeover-duration:${project}`,
+          next == null ? "unbounded" : String(next),
+        );
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  };
 
   const effectiveHost = (hostStatusOverride ?? localHostStatus ?? data.live) as (NonNullable<RunData["live"]> & {
     consolidating?: boolean;
@@ -787,6 +1074,7 @@ export function ShioriComposer({
     if (effectiveTab !== "start" && !text) return;
     setSubmitting(true);
     setError(null);
+    setDurationMenuOpen(false);
     try {
       let res: unknown;
       if (effectiveTab === "steer" || effectiveTab === "follow_up") {
@@ -804,6 +1092,7 @@ export function ShioriComposer({
             res = await sendRuntimeControl(project, workspace, {
               action: "auto_on",
               ...(text ? { message: text } : {}),
+              seconds: durationSeconds,
               runId: data.run,
               expectedEpoch: effectiveHost?.epoch ?? null,
             });
@@ -816,6 +1105,7 @@ export function ShioriComposer({
         res = await sendRuntimeControl(project, workspace, {
           action: "auto_on",
           ...(text ? { message: text } : {}),
+          seconds: durationSeconds,
           runId: data.run,
           expectedEpoch: effectiveHost?.epoch ?? null,
         });
@@ -836,6 +1126,7 @@ export function ShioriComposer({
     setSubmitting(true);
     setError(null);
     setMenuOpen(false);
+    setDurationMenuOpen(false);
     try {
       const res = await sendRuntimeControl(project, workspace, command);
       applyReturnedStatus(res);
@@ -862,10 +1153,27 @@ export function ShioriComposer({
     { label: t("presetMemory"), prompt: t("presetMemoryPrompt"), tab: "follow_up" as const },
   ];
 
+  const durationPresets: Array<{ label: string; seconds: number | null; desc: string }> = [
+    { label: `∞ ${t("durationUnbounded")}`, seconds: null, desc: t("durationUnboundedDesc") },
+    { label: "15m", seconds: 900, desc: "900s" },
+    { label: "30m", seconds: 1800, desc: "1800s" },
+    { label: "60m", seconds: 3600, desc: "3600s" },
+    { label: "2h", seconds: 7200, desc: "7200s" },
+  ];
+
+  const durationPillLabel =
+    durationSeconds == null
+      ? t("durationUnbounded")
+      : durationSeconds % 3600 === 0
+        ? `${durationSeconds / 3600}h`
+        : durationSeconds % 60 === 0
+          ? `${durationSeconds / 60}m`
+          : `${durationSeconds}s`;
+
   const modelShort = (data.manifest.model ?? t("deviceOnly")).replace(/^[^/]+\//, "");
 
   return (
-    <div className="codex-composer-wrap" data-shiori-composer={effectiveTab}>
+    <div ref={composerDockRef} className="codex-composer-wrap" data-shiori-composer={effectiveTab}>
       {menuOpen && (
         <div className="codex-preset-popover" role="menu">
           <div className="codex-preset-popover-title">{t("quickPromptsTitle")}</div>
@@ -911,6 +1219,60 @@ export function ShioriComposer({
         </div>
       )}
 
+      {durationMenuOpen && (
+        <div className="codex-preset-popover codex-duration-popover" role="menu">
+          <div className="codex-preset-popover-title">{t("durationMenuTitle")}</div>
+          {durationPresets.map(opt => {
+            const active = durationSeconds === opt.seconds;
+            return (
+              <button
+                key={opt.label}
+                type="button"
+                role="menuitemradio"
+                aria-checked={active}
+                className="codex-preset-item"
+                data-active={active || undefined}
+                onClick={() => updateDurationSeconds(opt.seconds)}
+              >
+                <span>
+                  {opt.label}
+                  {active ? " ✓" : ""}
+                </span>
+                <small>{opt.desc}</small>
+              </button>
+            );
+          })}
+          <div className="codex-duration-custom">
+            <label className="codex-duration-custom-label" htmlFor="shiori-custom-minutes">
+              {t("durationCustomLabel")}
+            </label>
+            <div className="codex-duration-custom-row">
+              <input
+                id="shiori-custom-minutes"
+                type="number"
+                min={1}
+                max={1440}
+                value={customMinutes}
+                onChange={event => setCustomMinutes(event.target.value)}
+                className="codex-duration-custom-input"
+              />
+              <button
+                type="button"
+                className="codex-duration-custom-btn"
+                onClick={() => {
+                  const mins = Number(customMinutes);
+                  if (Number.isFinite(mins) && mins > 0) {
+                    updateDurationSeconds(Math.round(mins * 60));
+                  }
+                }}
+              >
+                {t("durationCustomApply")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="codex-pill-composer">
         {!isLiveRun && (
           <div className="codex-composer-notice">
@@ -947,7 +1309,10 @@ export function ShioriComposer({
               className="codex-icon-btn"
               title={t("quickPromptsTitle")}
               aria-expanded={menuOpen}
-              onClick={() => setMenuOpen(prev => !prev)}
+              onClick={() => {
+                setDurationMenuOpen(false);
+                setMenuOpen(prev => !prev);
+              }}
             >
               <Plus className="size-4" aria-hidden="true" />
             </button>
@@ -976,6 +1341,27 @@ export function ShioriComposer({
                   <span>{t("deliveryFollowUp")}</span>
                 </>
               )}
+              <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
+            </button>
+
+            {/* Optional Takeover Duration Pill */}
+            <button
+              type="button"
+              className="codex-subtle-pill codex-duration-pill"
+              aria-expanded={durationMenuOpen}
+              data-active={durationSeconds != null || undefined}
+              title={t("durationPillHint")}
+              onClick={() => {
+                setMenuOpen(false);
+                setDurationMenuOpen(prev => !prev);
+              }}
+            >
+              {durationSeconds == null ? (
+                <InfinityIcon className="size-3.5" aria-hidden="true" />
+              ) : (
+                <Clock className="size-3.5" aria-hidden="true" />
+              )}
+              <span>{durationPillLabel}</span>
               <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
             </button>
 
@@ -1061,6 +1447,8 @@ export function ShioriWorkbench({
   project,
   workspace,
   workspaceTitle,
+  runs = [],
+  jumpTarget = null,
   data,
   feed,
   isLiveRun,
@@ -1080,6 +1468,8 @@ export function ShioriWorkbench({
   project: string;
   workspace: string | null;
   workspaceTitle?: string;
+  runs?: RunInfo[];
+  jumpTarget?: { value: string; seq: number } | null;
   data: RunData;
   feed: ActivityFeedData;
   isLiveRun: boolean;
@@ -1111,6 +1501,11 @@ export function ShioriWorkbench({
   const [atBottom, setAtBottom] = useState(true);
   const [perceptionOverride, setPerceptionOverride] = useState<boolean | null>(null);
   const [hostStatusOverride, setHostStatusOverride] = useState<Record<string, unknown> | null>(null);
+  const [loadedOlderRuns, setLoadedOlderRuns] = useState<
+    Array<{ runId: string; data: RunData; blocks: ActivityBlock[] }>
+  >([]);
+  const [loadingOlderRun, setLoadingOlderRun] = useState(false);
+  const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [inspectedTurn, setInspectedTurn] = useState<{
     blockId: string;
     callId: string | null;
@@ -1123,6 +1518,8 @@ export function ShioriWorkbench({
   } | null>(null);
 
   useEffect(() => {
+    setLoadedOlderRuns([]);
+    setHighlightedSegmentId(null);
     try {
       if (typeof window !== "undefined" && project) {
         const stored = window.localStorage.getItem(`ludens:perception-inject:${project}`);
@@ -1135,6 +1532,7 @@ export function ShioriWorkbench({
   }, [project]);
 
   const live = (hostStatusOverride ?? data.live) as (NonNullable<RunData["live"]> & {
+    maxSeconds?: number | null;
     remainingSeconds?: number | null;
     consolidating?: boolean;
     context?: { perceptionInjection?: boolean };
@@ -1150,10 +1548,113 @@ export function ShioriWorkbench({
   const perceptionInject = perceptionOverride ?? serverPerceptionInject;
   const isAuto = mode === "auto";
 
-  const computedSegments = useMemo(
-    () => buildCodexSegments(feed.blocks, data.calls, data.observations),
-    [feed.blocks, data.calls, data.observations],
+  const earliestLoadedRunId = loadedOlderRuns[0]?.runId ?? data.run;
+  const earliestIdxInCatalog = runs.findIndex(r => r.id === earliestLoadedRunId);
+  const nextOlderRun =
+    earliestIdxInCatalog >= 0 && earliestIdxInCatalog + 1 < runs.length
+      ? runs[earliestIdxInCatalog + 1]
+      : null;
+
+  const fetchHistoricalRun = async (targetRunId: string) => {
+    const runParams = new URLSearchParams({ project, run: targetRunId, epoch: "all" });
+    const actParams = new URLSearchParams({ project, run: targetRunId, epoch: "all", limit: "400" });
+    const [runRes, actRes] = await Promise.all([
+      fetch(`/api/run?${runParams}`),
+      fetch(`/api/activity?${actParams}`),
+    ]);
+    if (!runRes.ok || !actRes.ok) {
+      throw new Error("Failed to load earlier run segment");
+    }
+    const [runPayload, actPayload] = await Promise.all([
+      runRes.json() as Promise<RunData>,
+      actRes.json() as Promise<{ blocks?: ActivityBlock[] }>,
+    ]);
+    return {
+      runId: targetRunId,
+      data: runPayload,
+      blocks: Array.isArray(actPayload.blocks) ? actPayload.blocks : [],
+    };
+  };
+
+  const loadOlderRunSegment = async (upToRunId?: string) => {
+    if (loadingOlderRun || !project) return;
+    setLoadingOlderRun(true);
+    try {
+      const existingIds = new Set([data.run, ...loadedOlderRuns.map(r => r.runId)]);
+      const toFetch: string[] = [];
+      if (upToRunId) {
+        const startIdx = runs.findIndex(r => r.id === earliestLoadedRunId);
+        const endIdx = runs.findIndex(r => r.id === upToRunId);
+        if (startIdx >= 0 && endIdx > startIdx) {
+          for (let i = startIdx + 1; i <= endIdx; i++) {
+            if (!existingIds.has(runs[i].id)) toFetch.push(runs[i].id);
+          }
+        } else if (!existingIds.has(upToRunId)) {
+          toFetch.push(upToRunId);
+        }
+      } else if (nextOlderRun && !existingIds.has(nextOlderRun.id)) {
+        toFetch.push(nextOlderRun.id);
+      }
+
+      if (toFetch.length === 0) return;
+      const fetched = await Promise.all(toFetch.map(id => fetchHistoricalRun(id)));
+      // fetched is newest-to-oldest; reverse so loadedOlderRuns stays chronological (oldest first)
+      const chronologicalFetched = [...fetched].reverse();
+      setLoadedOlderRuns(prev => {
+        const merged = [...chronologicalFetched, ...prev];
+        const seen = new Set<string>();
+        return merged.filter(item => {
+          if (seen.has(item.runId)) return false;
+          seen.add(item.runId);
+          return true;
+        });
+      });
+    } catch {
+      // Ignore transient historical load errors
+    } finally {
+      setLoadingOlderRun(false);
+    }
+  };
+
+  const allCalls = useMemo(
+    () => [...loadedOlderRuns.flatMap(r => r.data.calls), ...data.calls],
+    [loadedOlderRuns, data.calls],
   );
+
+  const computedSegments = useMemo(() => {
+    const allSegments: StreamSegment[] = [];
+    // Determine the run immediately preceding the earliest loaded run in `runs` (if any) so we can show inter-run gap
+    let prevEndedAt: string | null = nextOlderRun?.endedAt ?? nextOlderRun?.startedAt ?? null;
+
+    for (const older of loadedOlderRuns) {
+      const olderInfo = runs.find(r => r.id === older.runId);
+      const segs = buildCodexSegments(older.blocks, older.data.calls, older.data.observations, {
+        runId: older.runId,
+        cycles: older.data.cycles,
+        prevEndedAt,
+        isLatestRun: false,
+        isAuto: false,
+      });
+      allSegments.push(...segs);
+      prevEndedAt =
+        older.data.cycles.at(-1)?.endedAt ??
+        olderInfo?.endedAt ??
+        older.blocks.at(-1)?.at ??
+        older.data.updatedAt ??
+        prevEndedAt;
+    }
+
+    const currentSegs = buildCodexSegments(feed.blocks, data.calls, data.observations, {
+      runId: data.run,
+      cycles: data.cycles,
+      prevEndedAt,
+      isLatestRun: isLiveRun,
+      isAuto,
+    });
+    allSegments.push(...currentSegs);
+    return allSegments;
+  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, data.calls, data.observations, data.run, data.cycles, isLiveRun, isAuto]);
+
   if (computedSegments.length > 0) {
     cachedSegmentsRef.current = { run: data.run, segments: computedSegments };
   }
@@ -1161,6 +1662,47 @@ export function ShioriWorkbench({
     computedSegments.length === 0 && feed.loading && cachedSegmentsRef.current.run === data.run
       ? cachedSegmentsRef.current.segments
       : computedSegments;
+
+  const programmaticScrollUntilRef = useRef(0);
+  const lastJumpedSeqRef = useRef<number | null>(null);
+
+  // Handle Quick-Jump Segment selection from top-right RunPicker without page reload
+  useEffect(() => {
+    if (!jumpTarget || lastJumpedSeqRef.current === jumpTarget.seq) return;
+    if (!jumpTarget.value) {
+      lastJumpedSeqRef.current = jumpTarget.seq;
+      scrollToBottom();
+      return;
+    }
+    const [targetRunId, targetEpoch] = jumpTarget.value.split("#");
+    const container = streamRef.current;
+    const selector = targetEpoch
+      ? `[data-segment-anchor="${CSS.escape(`${targetRunId}#${targetEpoch}`)}"]`
+      : `[data-run-id="${CSS.escape(targetRunId)}"]`;
+    const targetEl = container?.querySelector<HTMLElement>(selector);
+    if (targetEl && container) {
+      lastJumpedSeqRef.current = jumpTarget.seq;
+      programmaticScrollUntilRef.current = Date.now() + 1000;
+      setAtBottom(false);
+      container.scrollTo({
+        top: Math.max(0, targetEl.offsetTop - container.offsetTop - 12),
+        behavior: "smooth",
+      });
+      setHighlightedSegmentId(targetEl.id);
+      setTimeout(() => {
+        setHighlightedSegmentId(prev => (prev === targetEl.id ? null : prev));
+      }, 2200);
+      return;
+    }
+    if (
+      targetRunId &&
+      targetRunId !== data.run &&
+      !loadedOlderRuns.some(r => r.runId === targetRunId) &&
+      !loadingOlderRun
+    ) {
+      void loadOlderRunSegment(targetRunId);
+    }
+  }, [jumpTarget?.seq, jumpTarget?.value, segments.length, data.run, loadedOlderRuns, loadingOlderRun]);
 
   // Keep scrolled to bottom when new blocks arrive while following
   useEffect(() => {
@@ -1172,6 +1714,7 @@ export function ShioriWorkbench({
   const handleScroll = () => {
     const el = streamRef.current;
     if (!el) return;
+    if (Date.now() < programmaticScrollUntilRef.current) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
     setAtBottom(distance < 48);
   };
@@ -1184,7 +1727,7 @@ export function ShioriWorkbench({
   };
 
   const handleInspectBlock = (block: ActivityBlock, siblingSteps: ActivityBlock[] = []) => {
-    const matchedCall = resolveCallForTurn(block, siblingSteps, data.calls);
+    const matchedCall = resolveCallForTurn(block, siblingSteps, allCalls);
     setInspectedTurn(prev =>
       prev?.blockId === block.id
         ? null
@@ -1214,14 +1757,31 @@ export function ShioriWorkbench({
   };
 
   const inspectedCall = inspectedTurn?.callId
-    ? data.calls.find(c => c.id === inspectedTurn.callId)
+    ? allCalls.find(c => c.id === inspectedTurn.callId)
     : undefined;
   const activeBlockId = inspectedTurn?.blockId ?? selectedBlock;
 
   const summary = data.summary;
-  const budgetSeconds = Math.max(1, data.manifest.seconds || 1800);
+  const latestCycle = data.cycles.at(-1);
+  const activeMaxSeconds =
+    isAuto && live && "maxSeconds" in live
+      ? (live.maxSeconds ?? null)
+      : latestCycle && "maxSeconds" in latestCycle
+        ? (latestCycle.maxSeconds ?? null)
+        : (data.manifest.seconds ?? null);
   const elapsedSeconds = summary?.elapsedSeconds ?? 0;
-  const budgetRatio = Math.min(100, Math.round((elapsedSeconds / budgetSeconds) * 100));
+  const latestCycleDurationSeconds =
+    latestCycle?.startedAt && latestCycle?.endedAt
+      ? Math.max(0, Math.round((Date.parse(latestCycle.endedAt) - Date.parse(latestCycle.startedAt)) / 1000))
+      : null;
+  const cycleElapsedSeconds =
+    isAuto && activeMaxSeconds != null && typeof live?.remainingSeconds === "number"
+      ? Math.max(0, activeMaxSeconds - live.remainingSeconds)
+      : (latestCycleDurationSeconds ?? elapsedSeconds);
+  const budgetRatio =
+    activeMaxSeconds != null && activeMaxSeconds > 0
+      ? Math.min(100, Math.round((cycleElapsedSeconds / activeMaxSeconds) * 100))
+      : 100;
 
   const stateTitle = !isLiveRun
     ? t("stateSnapshot")
@@ -1280,15 +1840,27 @@ export function ShioriWorkbench({
         {/* Scrollable Chat Stream */}
         <div ref={streamRef} className="codex-chat-scroll" onScroll={handleScroll}>
           <div className="codex-chat-column">
-            {feed.hasMore && (
+            {(feed.hasMore || nextOlderRun) && (
               <div className="codex-load-older">
                 <button
                   type="button"
                   className="codex-step-group-toggle"
-                  disabled={feed.loadingOlder}
-                  onClick={() => void feed.earlier()}
+                  disabled={feed.loadingOlder || loadingOlderRun}
+                  onClick={() => {
+                    if (feed.hasMore) {
+                      void feed.earlier();
+                    } else if (nextOlderRun) {
+                      void loadOlderRunSegment();
+                    }
+                  }}
                 >
-                  <span>{feed.loadingOlder ? t("loadingOlder") : t("loadOlderMessages")}</span>
+                  <span>
+                    {feed.loadingOlder || loadingOlderRun
+                      ? t("loadingOlder")
+                      : feed.hasMore
+                        ? t("loadOlderMessages")
+                        : t("loadPreviousRunSegment")}
+                  </span>
                   <ChevronRight className="size-3.5" aria-hidden="true" />
                 </button>
               </div>
@@ -1325,6 +1897,16 @@ export function ShioriWorkbench({
               </div>
             ) : (
               segments.map(seg => {
+                if (seg.kind === "session_divider") {
+                  return (
+                    <CodexSessionDivider
+                      key={seg.id}
+                      segment={seg}
+                      highlighted={highlightedSegmentId === seg.id}
+                    />
+                  );
+                }
+
                 if (seg.kind === "user") {
                   return (
                     <article key={seg.id} className="codex-turn-user">
@@ -1349,7 +1931,7 @@ export function ShioriWorkbench({
                     <CodexInputCard
                       key={seg.id}
                       project={project}
-                      run={data.run}
+                      run={seg.runId || data.run}
                       call={seg.call}
                       observations={seg.observations}
                       bgBlock={seg.bgBlock}
@@ -1476,12 +2058,15 @@ export function ShioriWorkbench({
                 <div className="flex items-center justify-between">
                   <h3 className="codex-dock-heading">{t("telemetryCardTitle")}</h3>
                   <span className="font-mono text-[11px] text-muted-foreground">
-                    {formatDurationCompact(elapsedSeconds)} / {formatDurationCompact(budgetSeconds)}
+                    {activeMaxSeconds != null
+                      ? `${formatDurationCompact(cycleElapsedSeconds)} / ${formatDurationCompact(activeMaxSeconds)}`
+                      : `${formatDurationCompact(elapsedSeconds)} · ∞ ${t("durationUnbounded")}`}
                   </span>
                 </div>
 
                 <div
                   className="shiori-budget-bar"
+                  data-unbounded={activeMaxSeconds == null || undefined}
                   role="progressbar"
                   aria-valuenow={budgetRatio}
                   aria-valuemin={0}

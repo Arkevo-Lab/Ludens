@@ -1657,6 +1657,10 @@
   },
   "runPicker": {
     "description": "根据完整 ID 选择已记录的运行。时间摘要使用 Asia/Shanghai 时区。",
+    "quickJumpLabel": "快速跳转",
+    "quickJumpHint": "在连续会话流中快速定位到指定运行时段（无需刷新页面）",
+    "quickJumpDescription": "此工作区的全部运行时段已拼合为单一连续 Session。选择任意时段可直接平滑滚动定位。",
+    "latestSegment": "最新实时流",
     "close": "关闭",
     "current": "当前",
     "empty": "暂无运行记录"
@@ -1947,7 +1951,21 @@
     "inputSamplingMs": "采样 {ms}ms",
     "inputExpandPayload": "查看传入模型的 Input 详情",
     "inputPreviewInStage": "点击在右侧放大画面",
-    "jumpToReplayAt": "跳转回放 {time} ↗"
+    "jumpToReplayAt": "跳转回放 {time} ↗",
+    "durationUnbounded": "持续运行",
+    "durationUnboundedDesc": "不设时间上限，直到手动点击停止",
+    "durationMenuTitle": "单次接管持续时间（可选）",
+    "durationCustomLabel": "自定义时长（分钟）",
+    "durationCustomApply": "设定",
+    "durationPillHint": "选择本次启动/续跑的持续时间（默认持续运行直到手动停止）",
+    "sessionGapLabel": "距上一段间隔 {gap}",
+    "segmentActive": "当前运行中",
+    "segmentCompleted": "运行时段",
+    "segmentRanFor": "持续 {duration}",
+    "segmentLimitLabel": "限时",
+    "stopReasonManual": "手动停止",
+    "stopReasonBudget": "达到设定时长",
+    "loadPreviousRunSegment": "加载更早的运行时段"
   },
   "workspaceStudio": {
     "title": "工作区配置与运行工作台",

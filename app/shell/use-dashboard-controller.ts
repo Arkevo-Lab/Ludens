@@ -81,6 +81,7 @@ export function useDashboardController() {
   const pet = usePetFollow();
   const [stopping, setStopping] = useState(false);
   const [panel, setPanel] = useState("trace");
+  const [liveJumpTarget, setLiveJumpTarget] = useState<{ value: string; seq: number } | null>(null);
   const requested = initialSelection(search, projects);
   const requestedLatest = latestGameRun(projects.find(p => p.id === requested.project));
   const followed = resolveLiveSelection({ location: search, project: requested.project, requestedRun: requested.run,
@@ -89,17 +90,21 @@ export function useDashboardController() {
   const project = projects.find((p) => p.id === selection.project);
   const latest = latestGameRun(project);
   const run = followed.run;
+  const effectiveEpoch = view === "live" && !selection.epoch ? "all" : selection.epoch;
+  useEffect(() => {
+    setLiveJumpTarget(null);
+  }, [selection.project]);
   // A URL change is intentional navigation even while paused. Latch its new default
   // before the next catalog poll can replace it; an empty workspace stays empty too.
   if (!refresh && catalogReady && !followed.frozen) {
     setPausedSelection({ location: search, project: selection.project, run, requestedRun: selection.run, epoch: selection.epoch, archiveRevision });
   }
   const entry = workspaceRunEntry({ catalogReady, catalogError, project, run });
-  const scopeKey = selection.project + "/" + run + "/" + selection.epoch;
+  const scopeKey = selection.project + "/" + run + "/" + effectiveEpoch;
   const beforeCall = query.get("beforeCall") ?? "";
   const requestedCall = query.get("call") ?? "";
   const selectedImage = query.get("image") ?? undefined;
-  const readScope = { project: selection.project, workspace: project?.workspace ?? "", run, epoch: selection.epoch, beforeCall };
+  const readScope = { project: selection.project, workspace: project?.workspace ?? "", run, epoch: effectiveEpoch, beforeCall };
   const key = JSON.stringify([scopeKey, readScope.workspace, beforeCall, requestedCall, selectedImage]);
   const error = runFailure?.key === key ? runFailure.message : "";
   const analysis = runAnalysisSnapshot(loaded, key, readScope);
@@ -108,7 +113,7 @@ export function useDashboardController() {
   const cycles = view === "replay"
     ? replayCycles?.key === JSON.stringify([selection.project, run]) ? replayCycles.cycles : []
     : data?.cycles ?? [];
-  const activity = useActivityFeed({ project: selection.project, run, epoch: selection.epoch || undefined,
+  const activity = useActivityFeed({ project: selection.project, run, epoch: effectiveEpoch || undefined,
     enabled: view === "live", refresh, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined });
   const call = analysingRun ? analysisRequest(analysis.detail, requestedCall)
     : data?.selectedCall ?? data?.calls.find((c) => c.id === requestedCall) ?? data?.calls.at(-1);
@@ -198,7 +203,7 @@ export function useDashboardController() {
     const params = new URLSearchParams({
       project: selection.project,
       run,
-      ...(selection.epoch ? { epoch: selection.epoch } : {}),
+      ...(effectiveEpoch ? { epoch: effectiveEpoch } : {}),
       ...(beforeCall ? { beforeCall } : {}),
       ...(requestedCall ? { call: requestedCall } : {}),
       ...(selectedImage ? { image: selectedImage } : {}),
@@ -231,7 +236,7 @@ export function useDashboardController() {
   }, [
     selection.project,
     run,
-    selection.epoch,
+    effectiveEpoch,
     beforeCall,
     requestedCall,
     selectedImage,
@@ -300,8 +305,14 @@ export function useDashboardController() {
   const latestReadsDone = loaded?.key === key && loaded.revision === snapshotRevision
     && activity.loadedRevision === snapshotRevision && !activity.loading;
   const latestScopeMatches = activity.scope?.project === selection.project && activity.scope?.runId === run
-    && activity.scope?.epoch === data?.selectedEpoch;
+    && (effectiveEpoch === "all" ? activity.scope?.epoch === null : activity.scope?.epoch === data?.selectedEpoch);
   const latestReady = latestReadsDone && latestScopeMatches;
+  const jumpToLiveSegment = useCallback((value: string) => {
+    setLiveJumpTarget({ value, seq: Date.now() });
+    if (!value && selection.run) {
+      navigate({ run: null, epoch: null, beforeCall: null, call: null, block: null, image: null, at: null });
+    }
+  }, [selection.run]);
   const latestRequested = latestRequest?.revision === snapshotRevision && latestRequest.location === search;
   const latestScopeChanged = latestRequested && latestReadsDone && !latestScopeMatches
     && !error && !activity.error;
@@ -451,5 +462,7 @@ export function useDashboardController() {
     runContent,
     catalogFocus,
     returnButton,
+    liveJumpTarget,
+    jumpToLiveSegment,
   };
 }

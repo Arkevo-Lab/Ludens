@@ -55,6 +55,40 @@ test("takeover time remaining ignores host age and resets on each epoch", async 
   } finally { now.mockRestore(); await runtime.close(); }
 });
 
+test("auto on without --seconds runs unbounded while --seconds bounds the cycle", async () => {
+  const { runtime } = fixture();
+  const run = (argv: string[]) => dispatch(runtime, { kind: "auto", argv, runId: runtime.status().runId });
+  try {
+    const unbounded = await run(["on"]);
+    expect(unbounded).toMatchObject({ mode: "auto", maxSeconds: null, remainingSeconds: null });
+    await run(["off"]);
+    // Explicit duration, flags in any order after "on".
+    const bounded = await run(["on", "--seconds", "15", "--message", "bounded"]);
+    expect(bounded).toMatchObject({ mode: "auto", maxSeconds: 15, remainingSeconds: 15 });
+    await run(["off"]);
+    await expect(run(["on", "--seconds", "0"])).rejects.toThrow("--seconds must be positive");
+    await expect(run(["on", "--bogus"])).rejects.toThrow("Usage: ludens auto on");
+  } finally { await runtime.close(); }
+});
+
+test("a null time budget never expires on a timer and explicit seconds still bound one cycle", async () => {
+  const { core, devices } = createTestDeviceSession({ controllers: [] });
+  await core.acquire("unbounded-lease", null, { id: "test" });
+  expect(core.status()).toMatchObject({ mode: "auto", remainingSeconds: null });
+  await Bun.sleep(50); // Any expiry timer below this window would release.
+  expect(core.status()).toMatchObject({ mode: "auto", remainingSeconds: null });
+  await core.release("unbounded-lease");
+  const runtime = new Runtime(devices, () => {}, null);
+  try {
+    expect(await runtime.start(undefined, undefined, null)).toMatchObject({ mode: "auto", maxSeconds: null, remainingSeconds: null });
+    await runtime.stop();
+    expect(await runtime.start(undefined, undefined, 5)).toMatchObject({ mode: "auto", maxSeconds: 5, remainingSeconds: 5 });
+    await runtime.stop();
+    await expect(runtime.start(undefined, undefined, 0)).rejects.toThrow("Invalid Shiori time budget");
+    expect(() => new Runtime(devices, () => {}, -1)).toThrow("Invalid Shiori time budget");
+  } finally { await runtime.close(); }
+});
+
 test("a nested Runtime retains the enclosing deadline across takeovers and releases on its stop signal", async () => {
   const { devices } = createTestDeviceSession({ controllers: [] });
   const budgetEnd = new AbortController();

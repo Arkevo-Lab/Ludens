@@ -7,7 +7,7 @@ import { eventObservations, modelInputEvents, type ArchivedObservation } from ".
 import { advanceLivePhase, emptyLivePhase, livePhaseValue, type LivePhaseState } from "./live-phase";
 import type { Call, Event, Manifest, NativeLoop, Observation, PerceptionSamplerSummary, RunData, RunEfficiencySummary, SpanStats, TraceSpan } from "./types";
 
-const VERSION = "reducers-7";
+const VERSION = "reducers-8";
 const PAGE_SIZE = 100;
 type Meta = RecordPointer;
 type CycleState = { phase: LivePhaseState; lastControl: Record<string, any> | null; autoStarted?: number;
@@ -321,10 +321,22 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
           const nextAutoEpoch = typeof d.epoch === "string" && d.epoch ? d.epoch : epoch;
           if (nextAutoEpoch) activeEpoch = nextAutoEpoch;
           state.autoStarted = Date.parse(event.at);
-          if (event.trace.epoch) await index.store("run-cycles").put(epoch, { epoch, startedAt: event.at }, { position, epoch });
+          if (event.trace.epoch) await index.store("run-cycles").put(epoch,
+            { epoch, startedAt: event.at, maxSeconds: typeof d.maxSeconds === "number" ? d.maxSeconds : null }, { position, epoch });
         } else if (state.autoStarted !== undefined) {
           state.elapsedMs += Date.parse(event.at) - state.autoStarted;
           delete state.autoStarted;
+        }
+        if (d.mode === "manual" && (event.trace.epoch || activeEpoch)) {
+          // Close the cycle record with its stop reason, keeping its start position.
+          const targetEpoch = event.trace.epoch || activeEpoch;
+          const cycleStore = index.store("run-cycles");
+          const existing = await cycleStore.get<{ epoch: string; startedAt: string; maxSeconds?: number | null }>(targetEpoch);
+          if (existing) {
+            await cycleStore.put(targetEpoch, { ...existing, endedAt: event.at,
+              ...(typeof d.reason === "string" ? { reason: d.reason } : {}) },
+              { position: cycleStore.meta(targetEpoch)?.position ?? position, epoch: targetEpoch });
+          }
         }
         if (d.mode === "manual") activeEpoch = "";
       }
@@ -414,8 +426,10 @@ export function refreshRunProjection(index: LogIndex, options: ProjectionBatch =
 export interface RunPage { beforeCall?: number; call?: string; image?: string }
 export async function selectIndexedCycle(index: LogIndex, manifest: Manifest, epoch?: string) {
   const cycles = await Promise.all([...rows(index, "run-cycles")].sort((a, b) => a.position - b.position)
-    .map(entry => index.store("run-cycles").get<{ epoch: string; startedAt: string }>(entry.id)));
+    .map(entry => index.store("run-cycles").get<{ epoch: string; startedAt: string; maxSeconds?: number | null }>(entry.id)));
   const complete = cycles.filter((cycle): cycle is NonNullable<typeof cycle> => !!cycle);
+  // epoch="all" selects the whole run; the latest cycle still anchors live state.
+  if (epoch === "all") return { cycles: complete, selectedEpoch: complete.at(-1)?.epoch ?? null, wholeRun: true };
   if (epoch !== undefined && !complete.some(cycle => cycle.epoch === epoch)) throw new Error("所选周期不属于当前运行");
   return { cycles: complete, selectedEpoch: epoch ?? complete.at(-1)?.epoch ?? null,
     wholeRun: false };
@@ -539,7 +553,8 @@ export async function readRunProjection(index: LogIndex, epoch: string | null, p
     const value = await index.store("run-states").get<CycleState>(item.id);
     if (value) states.push(value);
   }
-  const state = states.at(-1) ?? blankState();
+  // Whole-run views still anchor lastControl/phase on the selected (latest) cycle.
+  const state = (wholeRun && epoch !== null ? await index.store("run-states").get<CycleState>(epoch) : undefined) ?? states.at(-1) ?? blankState();
   const counts: Record<string, number> = {};
   for (const value of states) for (const [name, count] of Object.entries(value.counts)) counts[name] = (counts[name] ?? 0) + count;
   const recent = async <T>(name: string) => {
