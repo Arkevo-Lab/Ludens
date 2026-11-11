@@ -4,6 +4,7 @@ import { diagnosticEvents } from "./diagnostic-events";
 import { getActivity } from "./activity";
 import { getReplay } from "./replay";
 import { controlWorkspaceRuntime } from "./runtime-control";
+import { mutateWorkspaceEventPool, readWorkspaceEventPool } from "./event-pool";
 import { capabilities, capabilityRuntime, runWorkspaceCapabilityEval } from "./capabilities";
 import { discoverDriver } from "./drivers";
 import { docGroups, readDoc } from "./docs";
@@ -67,6 +68,8 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   runWorkspaceCapabilityEval: ([project, workspace, options], signal) => runWorkspaceCapabilityEval(project, workspace, options, undefined, signal),
   capabilityRuntime: ([project, workspace]) => capabilityRuntime(project, workspace),
   runtimeControl: ([project, workspace, command]) => controlWorkspaceRuntime(project, workspace, command),
+  eventPoolRead: ([project, workspace, filter]) => readWorkspaceEventPool(project, workspace, filter),
+  eventPoolMutate: ([project, workspace, command]) => mutateWorkspaceEventPool(project, workspace, command),
   discoverDriver: ([spec], signal) => discoverDriver(spec, signal),
   docGroups: ([root, lang]) => docGroups(root, lang),
   readDoc: ([id, root, lang]) => readDoc(id, root, lang),

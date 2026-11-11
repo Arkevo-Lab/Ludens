@@ -100,6 +100,19 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 - **后台预测压缩**：复用 OMP 原生两段式压缩，触发阈值默认跟随模型目录（可通过 `ludens.json` 或 `--compaction-threshold` 覆盖）。针对 30Hz 实时控制循环的补丁改造见 [OMP 后台压缩改造](../insights/omp-compaction.md)。
 - **WebSocket 增量传输与恢复**：OpenAI Codex 默认使用 WebSocket `auto` 模式，断连分类、冷却退避与未完成工具调用的 SSE 恢复策略见 [WS 恢复测试依据](../insights/ws-recovery.md)。
 
+## 工作区事件池
+
+人类与 Shiori 通过双向、工作区作用域的**事件池（Event Pool）**异步交换消息与请求：事件在智能体周期之外也能留存，且从不与设备租约绑定。
+
+- **存储与并发**：`.ludens/event-pool.json` 是带单调 `seq` 的版本化文档。每次读-改-写都会获取跨进程锁目录（`event-pool.json.lock`，获取上限 5 秒、15 秒后回收陈旧锁），并通过临时文件 + `rename` 原子发布，因此 CLI、Host、Query Worker 与 Web 控制台都不会读到半写文件。待处理事件永不裁剪；仅保留最近 200 条已处理事件。
+- **契约**：方向为 `inbound`（`message`、`reply`）与 `outbound`（`help_request`、`notice`）；状态为 `pending` / `handled`；执行者为 `shiori` / `human`。每条事件携带 `id`、`seq`、`text`、可选 `title`、`replyTo`、`pauseRequested`、`runId` / `epoch`，以及 `createdAt` / `handledAt` / `handledBy`。人类回复一条待处理的出站事件时，会在同一次加锁写入中把该请求标记为已处理（`handledBy: "human"`）。
+- **CLI**：`ludens event list [--direction inbound|outbound] [--status pending|handled] [--limit <n>]`、`ludens event send [--title <text>] [--message <text> | <text>]`、`ludens event reply <event-id> [...]`、`ludens event ack <event-id>...`。Host 在线时命令经宿主 Socket 路由，否则直接写入 `.ludens/event-pool.json`，因此在 `manual` 待机或 Host 已停止时留下的消息会在下一个周期被拾取。变更类命令仅限人类：在智能体周期内（存在 `BASEWARE_EPOCH`）会被拒绝，并引导智能体改用 `event_pool` 工具。
+- **Shiori 工具**：`event_pool({ action: "read" | "ack" | "emit" })`。`read` 返回待处理的入站消息/回复（全部或指定 `ids`；`includeHandled` 可读历史），默认将其标记已读，`ack: false` 则在忙碌时暂缓；`ack` 显式将入站事件标记为已处理；`emit` 发布出站 `help_request`（默认）或 `notice`。`pause` 默认为 `false`，保持游戏异步进行；只有 `pause: true`——仅用于彻底受阻的智能体——会以 `awaiting human` 停止自动循环并交还设备控制权，直到人类恢复。
+- **轮首摘要**：`before_agent_start` 仅在 `pendingInbound > 0` 时追加紧凑的入站摘要：每条包含 `id`、`seq`、`kind`、可选 `title` 与 72 字符单行预览。事件池空闲时不追加任何字节，从而保留 provider 前缀 KV 缓存；完整正文通过 `event_pool({ action: "read" })` 按需拉取。
+- **界面**：Web 控制台通过 `GET/POST /api/event-pool` 读写同一存储，驱动出站托盘、会话流卡片、标题栏待处理徽章与回复输入框。CLI 与控制台是对同一加锁文件的对等写入方。
+
+紧急的轮内打断仍然使用 `ludens steer <message>`，它直接排队进入正在运行的智能体，而不进入事件池。
+
 ## 可核查的运行事实
 
 - **多源事实解耦**：Baseware 独立持久化设备控制与执行事实（`logs/baseware/`），Ludens 记录模型调用、工具执行、能力调用与感知交付（`logs/<run-id>/`），Shiori 挂载局部 OpenTelemetry provider 记录 `agentLoop` 遥测。
@@ -128,6 +141,7 @@ Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python
 | `.ludens/archive/` | **模型与工具结构化文本归档**：跨请求、跨 run 按内容哈希去重存储 `objects/<sha256>.json.gz` 与流式载荷，内含媒体一律通过引用指向 `.ludens/timeline/`。 |
 | `logs/<run-id>/` | **单次运行事件流**：存放 `manifest.json`、`events.jsonl` 与 `streams/`，通过 `eventSources` 与内容引用关联 Baseware、Archive 与 Timeline。 |
 | `.ludens/shiori/` | **OMP 原生会话存储**：存放 `sessions/*.jsonl` 与当前续接指针，由 OMP SessionManager 管理。 |
+| `.ludens/event-pool.json` | **双向人机事件池**：跨运行与离线待机持久化待处理与近期已处理的入站消息／回复及出站求助／通知。 |
 | `.ludens/skill-versions/` | **技能与记忆快照**：运行中记录的内容版本留在工作区内，随目录一起移动。 |
 
 ## 统一时空轴与回放

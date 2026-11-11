@@ -19,6 +19,7 @@ import { LOG_HELP, logCommand } from "./log-archive.ts";
 import { ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
 import { GLOBAL_HELP, globalCommand } from "./global.ts";
 import { evalCommand } from "./eval-cli.ts";
+import { eventCommand } from "./event-cli.ts";
 const globalHome = ludensHome();
 let exit: (code: number) => void | Promise<void> = code => process.exit(code);
 const RUN_HELP = `ludens [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--seconds <n>] [--requests <n>] [--compaction-threshold <tokens>]
@@ -47,6 +48,10 @@ async function main() {
   }
   if (args[0] === "config" || args[0] === "workspace") return globalCommand(args[0], args.slice(1), globalHome);
   if (args[0] === "eval") return evalCommand(args.slice(1), selectedWorkspace);
+  if (args[0] === "event") {
+    const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(selectedWorkspace)).socket;
+    return eventCommand(args.slice(1), selectedWorkspace, socket, globalHome);
+  }
   if (args[0] === "logs") return logCommand(args.slice(1));
   if (["init", "up", "services", "down"].includes(args[0]!)) return workspaceCommand(args[0]!, args.slice(1), selectedWorkspace, explicitWorkspace);
   if (args[0] !== "run") {

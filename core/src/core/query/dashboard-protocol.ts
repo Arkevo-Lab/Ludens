@@ -1,5 +1,11 @@
 import type { getActivity, ActivityQuery } from "./activity";
 import type { HostControlStatus, RuntimeControlCommand } from "./runtime-control";
+import type {
+  EventPoolMutationCommand,
+  EventPoolQueryFilter,
+  mutateWorkspaceEventPool,
+  readWorkspaceEventPool,
+} from "./event-pool";
 import type { petState, recordPetConsumer, setPetTarget } from "./pet-state";
 import type { discoverDriver } from "./drivers";
 import type { capabilities, capabilityRuntime, runWorkspaceCapabilityEval } from "./capabilities";
@@ -65,6 +71,8 @@ export interface DashboardMethods {
   capabilities: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilities>> };
   capabilityRuntime: { args: [project: string, workspace: string]; result: Awaited<ReturnType<typeof capabilityRuntime>> };
   runtimeControl: { args: [project: string, workspace: string, command: RuntimeControlCommand]; result: HostControlStatus };
+  eventPoolRead: { args: [project: string, workspace: string, filter?: EventPoolQueryFilter]; result: Awaited<ReturnType<typeof readWorkspaceEventPool>> };
+  eventPoolMutate: { args: [project: string, workspace: string, command: EventPoolMutationCommand]; result: Awaited<ReturnType<typeof mutateWorkspaceEventPool>> };
   runWorkspaceCapabilityEval: { args: [project: string, workspace: string, options?: { capabilityId?: string; all?: boolean }]; result: Awaited<ReturnType<typeof runWorkspaceCapabilityEval>> };
   discoverDriver: { args: [spec: string]; result: Awaited<ReturnType<typeof discoverDriver>> };
   docGroups: { args: [root?: string, lang?: "en" | "zh"]; result: Awaited<ReturnType<typeof docGroups>> };

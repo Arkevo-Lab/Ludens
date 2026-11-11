@@ -1,6 +1,18 @@
 import type { ExecutionResult, ToolArguments } from "@ludens/baseware/contracts";
 import type { Catalog } from "@ludens/baseware/protocol";
+import {
+   buildInboundEventDigest,
+  EMPTY_EVENT_POOL_SUMMARY,
+  type EventDirection,
+  type EventPoolDigest,
+  type EventPoolSnapshot,
+  type EventPoolSummary,
+  type OutboundEventKind,
+  type PoolEventActor,
+  type PoolEventStatus,
+} from "@ludens/protocol/event-pool";
 import type { DiagnosticsMode, EventTrace, RecordEvent } from "../storage/events.ts";
+import type { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
 import type { WorkspaceController } from "../subsystems/controller.ts";
 import { executeProgram, type Program } from "./program.ts";
@@ -12,8 +24,7 @@ export interface AgentRunner {
   consolidate(context: { epoch: string; signal: AbortSignal }): Promise<void>;
   /** Live mid-run guidance; optional because not every agent supports it. */
   steer?(message: string): Promise<void>;
-  followUp?(message: string): Promise<void>;
-  queueState?(): { steering: number; followUp: number };
+  queueState?(): { steering: number };
   abort(): Promise<void>;
   close(): Promise<void>;
 }
@@ -64,16 +75,30 @@ export class Runtime {
   private _agent?: AgentRunner;
   private _controller?: WorkspaceController;
   private _perception?: PerceptionRuntime;
+  private _eventPool?: WorkspaceEventPool;
+  private eventPoolSummary: EventPoolSummary = { ...EMPTY_EVENT_POOL_SUMMARY };
   /** Subsystems are injected through attach(); direct external assignment is not allowed. */
   get agent() { return this._agent; }
   get controller() { return this._controller; }
   get perception() { return this._perception; }
+  get eventPool() { return this._eventPool; }
 
   /** Attach workspace subsystems. Later calls replace only the given parts; an explicit undefined clears one. */
-  attach(subsystems: { agent?: AgentRunner; controller?: WorkspaceController; perception?: PerceptionRuntime }) {
+  attach(subsystems: {
+    agent?: AgentRunner;
+    controller?: WorkspaceController;
+    perception?: PerceptionRuntime;
+    eventPool?: WorkspaceEventPool;
+    eventPoolSummary?: EventPoolSummary;
+  }) {
     if ("agent" in subsystems) this._agent = subsystems.agent;
     if ("controller" in subsystems) this._controller = subsystems.controller;
     if ("perception" in subsystems) this._perception = subsystems.perception;
+    if ("eventPool" in subsystems) {
+      this._eventPool = subsystems.eventPool;
+      if (!subsystems.eventPool) this.eventPoolSummary = { ...EMPTY_EVENT_POOL_SUMMARY };
+    }
+    if (subsystems.eventPoolSummary) this.eventPoolSummary = { ...subsystems.eventPoolSummary };
   }
 
   constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds: number | null = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0) {
@@ -86,7 +111,23 @@ export class Runtime {
   status() {
     // The host can outlive many takeovers; its log clock is not this cycle's budget.
     const remainingSeconds = this.mode === "auto" && this.takeoverDeadlineMs !== null ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null;
-    return { runId: this.runId, maxSeconds: this.mode === "auto" ? this.activeMaxSeconds : this.maxSeconds, remainingSeconds, mode: this.mode, epoch: this.mode === "auto" ? this.epoch : null, connected: this.connected, reason: this.reason, agent: !!this._agent, thinking: !!this.running, consolidating: this.consolidating, queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 }, perception: this._perception?.status(), context: { perceptionInjection: this.perceptionInjection }, logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" } };
+    return {
+      runId: this.runId,
+      maxSeconds: this.mode === "auto" ? this.activeMaxSeconds : this.maxSeconds,
+      remainingSeconds,
+      mode: this.mode,
+      epoch: this.mode === "auto" ? this.epoch : null,
+      connected: this.connected,
+      reason: this.reason,
+      agent: !!this._agent,
+      thinking: !!this.running,
+      consolidating: this.consolidating,
+      queue: this._agent?.queueState?.() ?? { steering: 0 },
+      eventPool: { ...this.eventPoolSummary },
+      perception: this._perception?.status(),
+      context: { perceptionInjection: this.perceptionInjection },
+      logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" },
+    };
   }
 
   perceptionInjectionEnabled(): boolean { return this.perceptionInjection; }
@@ -254,16 +295,134 @@ export class Runtime {
     return { ...this.status(), consolidationId: epoch };
   }
 
-  /** Live mid-run guidance from the human. Queued by the agent, not a new cycle. */
-  async steer(message: string, delivery: "steer" | "follow_up" = "steer") {
+  /** Urgent mid-run interruption from the human. Queued by the agent, not a new cycle. */
+  async steer(message: string) {
     const text = message.trim();
     if (!text) throw new Error("Message cannot be empty");
     if (this.mode !== "auto" || !this.running || !this._agent) throw new Error("Auto loop is not active");
-    this.record("user_message", { text, mode: delivery }, { epoch: this.epoch });
-    if (delivery === "follow_up" && this._agent.followUp) await this._agent.followUp(text);
-    else if (this._agent.steer) await this._agent.steer(text);
+    this.record("user_message", { text, mode: "steer" }, { epoch: this.epoch });
+    if (this._agent.steer) await this._agent.steer(text);
     else throw new Error("Agent does not support live steering");
     return this.status();
+  }
+
+  private requireEventPool(): WorkspaceEventPool {
+    if (!this._eventPool) throw new Error("Workspace Event Pool is unavailable");
+    return this._eventPool;
+  }
+
+  private currentCycleTrace(trace?: EventTrace): EventTrace {
+    const activeEpoch = (this.mode === "auto" || this.consolidating) && this.epoch ? { epoch: this.epoch } : {};
+    return { ...activeEpoch, ...trace };
+  }
+
+  async refreshEventPool(): Promise<EventPoolSummary> {
+    if (!this._eventPool) return { ...EMPTY_EVENT_POOL_SUMMARY };
+    this.eventPoolSummary = await this._eventPool.summary();
+    return { ...this.eventPoolSummary };
+  }
+
+  async eventPoolDigest(): Promise<EventPoolDigest> {
+    if (!this._eventPool) return { pendingInbound: 0, items: [] };
+    const snap = await this._eventPool.snapshot();
+    this.eventPoolSummary = snap.summary;
+    return buildInboundEventDigest(snap.events);
+  }
+
+  async eventPoolSnapshot(filter?: {
+    direction?: EventDirection;
+    status?: PoolEventStatus;
+    ids?: string[];
+    limit?: number;
+  }): Promise<EventPoolSnapshot> {
+    const snap = await this.requireEventPool().snapshot(filter);
+    this.eventPoolSummary = snap.summary;
+    return snap;
+  }
+
+  async postInboundEvent(input: { text: string; title?: string; replyTo?: string }) {
+    const result = await this.requireEventPool().postInbound({
+      text: input.text,
+      title: input.title,
+      replyTo: input.replyTo,
+      runId: this.runId,
+      epoch: this.mode === "auto" ? this.epoch : null,
+    });
+    this.eventPoolSummary = result.summary;
+    this.record(
+      "pool_event",
+      {
+        action: "created",
+        event: result.event,
+        ...(result.resolvedOutbound ? { resolvedOutbound: result.resolvedOutbound } : {}),
+      },
+      this.currentCycleTrace(),
+    );
+    return { ...result, status: this.status() };
+  }
+
+  async emitOutboundEvent(
+    input: { kind?: OutboundEventKind; text: string; title?: string; pause?: boolean },
+    trace?: EventTrace,
+  ) {
+    const pauseRequested = Boolean(input.pause);
+    const result = await this.requireEventPool().emitOutbound({
+      kind: input.kind,
+      text: input.text,
+      title: input.title,
+      pauseRequested,
+      runId: this.runId,
+      epoch: this.mode === "auto" ? this.epoch : null,
+    });
+    this.eventPoolSummary = result.summary;
+    this.record("pool_event", { action: "created", event: result.event }, this.currentCycleTrace(trace));
+    const shouldPause = pauseRequested && (this.mode === "auto" || this.mode === "acquiring");
+    if (shouldPause) await this.stop("awaiting human");
+    return { event: result.event, paused: shouldPause, summary: result.summary, status: this.status() };
+  }
+
+  async readInboundEvents(
+    options?: { ids?: string[]; includeHandled?: boolean; ack?: boolean },
+    trace?: EventTrace,
+  ) {
+    const result = await this.requireEventPool().readInbound(options);
+    this.eventPoolSummary = result.summary;
+    if (result.acknowledged.length > 0) {
+      this.record(
+        "pool_event",
+        {
+          action: "handled",
+          actor: "shiori",
+          ids: result.acknowledged.map(item => item.id),
+          events: result.acknowledged,
+        },
+        this.currentCycleTrace(trace),
+      );
+    }
+    return result;
+  }
+
+  async ackPoolEvents(
+    ids: readonly string[],
+    actor: PoolEventActor,
+    direction?: EventDirection,
+    trace?: EventTrace,
+  ) {
+    const result = await this.requireEventPool().ack(ids, actor, direction);
+    this.eventPoolSummary = result.summary;
+    if (result.updated.length > 0) {
+      this.record(
+        "pool_event",
+        {
+          action: "handled",
+          actor,
+          ids: result.updated.map(item => item.id),
+          events: result.updated,
+        },
+        this.currentCycleTrace(trace),
+      );
+    }
+    return { ...result, status: this.status() };
   }
 
   private abortAgent() {
@@ -364,7 +523,8 @@ export class Runtime {
     this.record("runtime_stats", { reason, mode: this.mode, epoch: this.epoch,
       elapsedMs: this.takeoverStartedAtMs !== null ? Math.max(0, Date.now() - this.takeoverStartedAtMs) : 0,
       remainingSeconds: this.mode === "auto" && this.takeoverDeadlineMs !== null ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null,
-      queue: this._agent?.queueState?.() ?? { steering: 0, followUp: 0 },
+      queue: this._agent?.queueState?.() ?? { steering: 0 },
+      eventPool: { ...this.eventPoolSummary },
       memory: { rss: memory.rss, heapUsed: memory.heapUsed, heapTotal: memory.heapTotal, external: memory.external },
     }, this.epoch ? { epoch: this.epoch } : {});
   }

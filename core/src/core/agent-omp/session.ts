@@ -50,7 +50,7 @@ export async function createOmpSession(options: Parameters<typeof createAgentSes
   // The CustomTool adapter does not expose concurrency. Set it on the actual
   // AgentTools: an observation must wait for preceding environment actions.
   for (const tool of result.session.agent.state.tools) {
-    if (tool.name === "observe") tool.concurrency = "exclusive";
+    if (tool.name === "observe" || tool.name === "event_pool") tool.concurrency = "exclusive";
   }
   return result;
 }
@@ -148,7 +148,7 @@ export async function createOmpAgent(options: {
       promptTemplates: [], slashCommands: [],
       enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
       disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,
-      toolNames: ["read", "write", "edit", "observe", "bash", "wait"], customTools: extension.tools,
+      toolNames: ["read", "write", "edit", "observe", "event_pool", "bash", "wait"], customTools: extension.tools,
       // Restricted sessions accept explicit prepared hooks and caller-supplied tools only.
       preloadedPreparedExtensions: [{ path: extensionPath, resolvedPath: extensionPath, factory: extension.factory, error: null }],
     });
@@ -181,10 +181,9 @@ export async function createOmpAgent(options: {
         finally { cycle = undefined; }
       },
       steer: async (message: string) => { await session.steer(message); },
-      followUp: async (message: string) => { await session.followUp(message); },
       queueState: () => {
         const queued = session.getQueuedMessages();
-        return { steering: queued.steering.length + queued.liveSteered, followUp: queued.followUp.length };
+        return { steering: queued.steering.length + queued.liveSteered };
       },
       abort: () => session.abort(),
       async close() {

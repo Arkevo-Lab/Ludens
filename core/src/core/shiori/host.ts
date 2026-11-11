@@ -2,6 +2,7 @@ import { delimiter, resolve } from "node:path";
 import { Runtime, type DeviceSession, type SharedBudget } from "./runtime.ts";
 import { WorkspaceController } from "../subsystems/controller.ts";
 import { PerceptionRuntime } from "../subsystems/perception.ts";
+import { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { EventLog, RecordEvent } from "../storage/events.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
 import type { ModelConnectionConfig } from "@ludens/protocol/ludens";
@@ -17,6 +18,8 @@ export async function createHostRuntime(options: {
   const { devices, workspace, runDir, state, log, ludensSocket, basewareSocket } = options;
   const record = options.record ?? log.record;
   const runtime = new Runtime(devices, record, options.seconds, log.clock.id, log.diagnostics, options.budget);
+  const eventPool = new WorkspaceEventPool(state.dir);
+  runtime.attach({ eventPool, eventPoolSummary: await eventPool.summary() });
   const binDir = resolve(import.meta.dir, "../../../bin");
   const env = {
     LUDENS_SOCKET: ludensSocket, BASEWARE_SOCKET: basewareSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: log.clock.id,

@@ -158,7 +158,8 @@ ludens auto on
 | `ludens up` / `ludens down` | 启动或停止工作区托管的后台服务（`emulator`、`baseware`、`host`、`dashboard`、`pet`）。 |
 | `ludens down --keep-emulator && ludens up` | 在保留模拟器进程不断开的前提下，热重载 Host 与 Baseware 服务。 |
 | `ludens auto on [goal]` / `ludens auto off` | 授予智能体设备控制权租约并启动自主循环，或立即收回控制权。 |
-| `ludens steer "<message>"` | 在自主循环运行期间实时插话纠偏，不中断当前设备租约。 |
+| `ludens steer "<message>"` | 在自主循环运行中紧急打断当前轮次进行插话纠偏，不中断当前设备租约。 |
+| `ludens event <list\|send\|reply\|ack>` | 读写工作区双向事件池（`--direction`、`--status`、`--limit`、`--title`、`--message`）；在线经宿主 Socket、离线直接读写 `.ludens/event-pool.json`。 |
 | `ludens machine list \| use \| connect \| disconnect` | 查看受控节点池、切换主控设备（`use`），或并发挂载/断开多台辅助设备（`connect` / `disconnect`）。 |
 | `ludens perception reload` | 热重载常驻 Python 进程中的 `perception.py` 及工作区模块。 |
 | `ludens eval [<capability_id> \| --all]` | 运行 `@eval_capability` 离线评测套件并将评分写入 `.ludens/evals/runs/`。 |
@@ -171,7 +172,7 @@ ludens auto on
 
 | 视图 | 路由 | 核心功能 |
 | --- | --- | --- |
-| **运行（Live）** | `?view=live` | 顶部 **Shiori 循环驾驶舱**（一键 `auto on`、实时 `steer` / `follow_up`、`auto off`、记忆整理）、多设备画面流切换器（`[machineId]`）与实时活动证据流。 |
+| **运行（Live）** | `?view=live` | 顶部 **Shiori 循环驾驶舱**（一键 `auto on`、紧急轮内插话 `steer`、`auto off`、记忆整理）、工作区双向**事件池（Event Pool）**输入框与出站求助／通知托盘（`event_pool` / `ludens event`）、多设备画面流切换器（`[machineId]`）与实时活动证据流。 |
 | **回放（Replay）** | `?view=replay` | 30 秒分片 fMP4 视频流精准拖拽、毫秒级时间跳转、全归档事件搜索与模型输入原始证据检查器。 |
 | **性能（Performance）** | `?view=perf` | 单次请求延迟拆解（`fetchToHeadersMs`、流式输出、工具执行）、Token 与缓存命中遥测、上下文压缩时间线分析。 |
 | **能力（Capabilities）** | `?view=caps` | **Capability – Eval – Env** 三元拓扑图、源码短 `codeSHA` 三向过期归因、自演化评分轨迹曲线，以及一键**运行全部评测** / **运行评测**。 |

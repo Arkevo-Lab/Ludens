@@ -4,7 +4,7 @@ The Ludens recursive self-adaptation harness: connects **Shiori** (powered by **
 
 ## Key Subsystems
 
-- **Host Daemon & Transport (`src/daemon/`)**: Manages the workspace unix socket (`ludens.sock`), Shiori autonomous loop (`auto on` / `steer` / `follow_up` / `auto off`), and dynamic multi-machine mounts (`ludens machine list | use | connect | disconnect`).
+- **Host Daemon & Transport (`src/daemon/`)**: Manages the workspace unix socket (`ludens.sock`), Shiori autonomous loop (`auto on` / urgent mid-turn `steer` / `auto off`), the duplex workspace **Event Pool** (`event_pool` tool and `ludens event list | send | reply | ack`), and dynamic multi-machine mounts (`ludens machine list | use | connect | disconnect`).
 - **Shiori Agent Runtime (`src/core/agent-omp/`)**: Integrates `@oh-my-pi/pi-coding-agent@18.18.8` with single-channel per-turn perception injection, background speculative compaction (`:spec:` session isolation + `parentSessionId` cache affinity), and stateful WebSocket delta recovery.
 - **Resident Python SDK (`python/ludens_tools/`)**: Provides `ludens_tools.Client`, multi-machine `call(..., machine=...)`, `@capability` / `@eval_capability` / `@eval_env` decorators, and high-frequency fMP4/H.264 timeline media recording.
 - **Dashboard Query Worker (`src/core/query/`)**: Serves workspace catalogs, live/replay projections, capability telemetry, 1-click service lifecycle RPCs (`controlWorkspaceService`), and capability eval runs (`runWorkspaceCapabilityEval`).

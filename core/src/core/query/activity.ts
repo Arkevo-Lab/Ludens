@@ -247,8 +247,16 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
     || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
     || event.type.startsWith("background_") || event.type.includes("compaction") || event.type === "run_end";
   if (event.type === "user_message" && typeof data?.text === "string") return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`,
-    kind: "text" as const, at: event.at, title: data.mode === "steer" ? "Steer" : data.mode === "follow_up" ? "Follow-up" : "User",
+    kind: "text" as const, at: event.at, title: data.mode === "steer" ? "Steer" : "User",
     ...provenance(event), status: "complete" as const };
+  if (event.type === "pool_event" && data?.action === "created" && data?.event && typeof data.event.text === "string") {
+    const blockId = `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`;
+    const poolItem = data.event as { direction?: string; kind?: string };
+    const title = poolItem.direction === "inbound"
+      ? (poolItem.kind === "reply" ? "Reply" : "Event")
+      : (poolItem.kind === "help_request" ? "Help Request" : "Notice");
+    return { id: blockId, kind: "text" as const, at: event.at, title, ...provenance(event), status: "complete" as const };
+  }
   return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`, kind: system ? "system" : "diagnostic",
     at: event.at, title: event.type, ...provenance(event), status: failed ? "error" : "complete",
     ...(raised ? { outcome: "raised" as const } : {}) };
@@ -297,6 +305,36 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
     if (event.type === "user_message" && typeof data?.text === "string") {
       blocks.set(header.id, { ...header, text: data.text as string, data: { role: "user", mode: (data.mode as string) ?? "start", text: data.text } });
       continue;
+    }
+    if (event.type === "pool_event" && data?.action === "created" && data?.event && typeof data.event.text === "string") {
+      const poolItem = data.event as Record<string, unknown>;
+      if (poolItem.direction === "inbound") {
+        blocks.set(header.id, {
+          ...header,
+          text: poolItem.text as string,
+          data: {
+            role: "user",
+            mode: "event",
+            text: poolItem.text,
+            event: poolItem,
+            ...(data.resolvedOutbound ? { resolvedOutbound: data.resolvedOutbound } : {}),
+          },
+        });
+        continue;
+      }
+      if (poolItem.direction === "outbound") {
+        blocks.set(header.id, {
+          ...header,
+          text: poolItem.text as string,
+          data: {
+            role: "shiori_event",
+            mode: (poolItem.kind as string) ?? "help_request",
+            text: poolItem.text,
+            event: poolItem,
+          },
+        });
+        continue;
+      }
     }
     const text = readable(data);
     blocks.set(header.id, { ...header, text, data: structuredText(text) as Record<string, unknown> });
@@ -462,9 +500,9 @@ export function activityProgress(index: LogIndex) {
 export async function createActivityReducer(index: LogIndex, options: {
   cold?: boolean; signal?: AbortSignal; streamLimits?: ReadonlyMap<string, number>;
 } = {}) {
-  if (index.meta("activitySemantics") !== "8") {
+  if (index.meta("activitySemantics") !== "9") {
     index.resetActivity(); index.resetStores(["activity-model-ends", "activity-deliveries"]);
-    index.setMeta("activitySemantics", "8"); activeParsers.delete(index);
+    index.setMeta("activitySemantics", "9"); activeParsers.delete(index);
   }
   let position = Number(index.meta("activityPosition") ?? 0);
   const current = new Map<string, CurrentState>();

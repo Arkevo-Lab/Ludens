@@ -158,7 +158,8 @@ Or register and mount the `gba-mgba` node visually from the Web Console at [`htt
 | `ludens up` / `ludens down` | Start or stop workspace-managed background services (`emulator`, `baseware`, `host`, `dashboard`, `pet`). |
 | `ludens down --keep-emulator && ludens up` | Hot-reload the Host and Baseware while keeping the emulator process alive. |
 | `ludens auto on [goal]` / `ludens auto off` | Grant the agent a device control lease and start autonomous execution, or revoke control immediately. |
-| `ludens steer "<message>"` | Steer an active autonomous loop in real time without dropping the device lease. |
+| `ludens steer "<message>"` | Urgently interrupt an active autonomous loop mid-turn without dropping the device lease. |
+| `ludens event <list\|send\|reply\|ack>` | Read or write the workspace duplex Event Pool (`--direction`, `--status`, `--limit`, `--title`, `--message`); works online through the host socket or offline against `.ludens/event-pool.json`. |
 | `ludens machine list \| use \| connect \| disconnect` | Inspect the machine pool, switch the primary machine (`use`), or concurrently mount/unmount secondary machines (`connect` / `disconnect`). |
 | `ludens perception reload` | Hot-reload `perception.py` and loaded workspace modules in the resident Python worker. |
 | `ludens eval [<capability_id> \| --all]` | Execute `@eval_capability` suites against `@eval_env` fixtures and record reward trajectories. |
@@ -171,7 +172,7 @@ Open [`http://127.0.0.1:3015`](http://127.0.0.1:3015) during or after any run (n
 
 | View | Route | Key Capabilities |
 | --- | --- | --- |
-| **Live** | `?view=live` | Real-time **Shiori Loop Cockpit** (`auto on`, `steer`, `follow_up`, `auto off`, `consolidate`), multi-machine observation stream switcher (`[machineId]`), and live activity trace. |
+| **Live** | `?view=live` | Real-time **Shiori Loop Cockpit** (`auto on`, urgent mid-turn `steer`, `auto off`, `consolidate`), duplex workspace **Event Pool** composer and outbound Help Request / Notice tray (`event_pool` / `ludens event`), multi-machine observation stream switcher (`[machineId]`), and live activity trace. |
 | **Replay** | `?view=replay` | Bounded 30s fMP4 frame scrubber, millisecond timestamp jump, full-archive event search, and recorded model-input evidence inspector. |
 | **Performance** | `?view=perf` | Per-request latency breakdown (`fetchToHeadersMs`, streaming, tool execution), token/cache telemetry, and compaction timeline analysis. |
 | **Capabilities** | `?view=caps` | Visual **Capability – Eval – Env** triad topology, 3-way stale code SHA drift attribution, reward evolution trajectories, and 1-click **Run All Evals** / **Run Eval**. |

@@ -4,7 +4,7 @@ Browser-first Next.js 16 observability and control console for Ludens workspaces
 
 ## Console Views
 
-- **Live (`?view=live`)**: Real-time **Shiori Loop Cockpit** (`auto on`, `steer`, `follow_up`, `auto off`, `consolidate`), multi-machine observation stream switcher (`[machineId]`), and live activity trace.
+- **Live (`?view=live`)**: Real-time **Shiori Loop Cockpit** (`auto on`, urgent mid-turn `steer`, `auto off`, `consolidate`), a duplex **Event Pool** composer mode (`ludens event`) with an outbound Help Request / Notice tray (Reply, Reply & Resume, Mark Handled), header pending badges, and stream cards/bubbles, plus a multi-machine observation stream switcher (`[machineId]`) and live activity trace.
 - **Replay (`?view=replay`)**: Bounded 30-second fMP4 frame window scrubber, millisecond timestamp jump, full-archive event search, and recorded model-input evidence inspector.
 - **Performance (`?view=perf`)**: Per-request latency breakdown, token/cache telemetry, and compaction timeline analysis.
 - **Capabilities (`?view=caps`)**: Visual **Capability – Eval – Env** triad topology, 3-way stale drift attribution, reward evolution charts, and 1-click **Run All Evals** / **Run Eval**.
