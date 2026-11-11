@@ -23,6 +23,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
+import { PixelMark } from "@/components/ui/pixel-mark";
 import { useTranslations } from "@/lib/locale";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
@@ -33,6 +34,9 @@ import { runWindowSummary } from "@/lib/run-identity";
 import type { Call, Observation, RunData, RunInfo } from "@/lib/types";
 import { requestActivity } from "@ludens/protocol/activity";
 import "@/features/live/activity-feed.css";
+
+// The run budget is drawn as this many pixel blocks.
+const BUDGET_BLOCKS = 24;
 
 export type RuntimeControlAction =
   | { action: "status" }
@@ -2597,7 +2601,12 @@ export function ShioriWorkbench({
             <FileText className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
             <strong>Shiori · {workspaceTitle || project}</strong>
             <span className="codex-status-pill" data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}>
-              <i className="codex-status-dot" />
+              <PixelMark
+                size={14}
+                className="codex-status-mark"
+                state={!isLiveRun ? "idle" : !hostOnline ? "waiting" : consolidating || (isAuto && thinking) ? "reasoning" : "idle"}
+                filled={hostOnline && !isAuto}
+              />
               {stateTitle}
             </span>
             {phaseLabel && (
@@ -3079,7 +3088,10 @@ export function ShioriWorkbench({
                     aria-valuemin={0}
                     aria-valuemax={100}
                   >
-                    <div className="shiori-budget-bar-fill" style={{ width: `${budgetRatio}%` }} />
+                    {Array.from({ length: BUDGET_BLOCKS }, (_, index) => {
+                      const lit = Math.round((budgetRatio / 100) * BUDGET_BLOCKS);
+                      return <i key={index} data-on={index < lit || undefined} data-head={(index === lit - 1 && lit < BUDGET_BLOCKS) || undefined} />;
+                    })}
                   </div>
                 )}
 
