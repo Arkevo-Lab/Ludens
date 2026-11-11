@@ -16,7 +16,6 @@ import {
   History,
   Monitor,
   Play,
-  RefreshCw,
   Sparkles,
   Timer,
   TrendingUp,
@@ -35,6 +34,7 @@ import { useReadResource } from "@/components/use-read-resource";
 import { useRetryFocus } from "@/components/use-retry-focus";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { PixelMark } from "@/components/ui/pixel-mark";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -809,7 +809,7 @@ function WorkspaceTriadDeclarations({
                       data-capability-run-eval={item.id}
                     >
                       {isRunningThis ? (
-                        <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
+                        <PixelMark loading size={12} />
                       ) : (
                         <Play className="size-3" aria-hidden="true" />
                       )}
@@ -1145,7 +1145,7 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
                   data-capability-run-all-evals
                 >
                   {runningEvalTarget === "__all__" ? (
-                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                    <PixelMark loading size={14} />
                   ) : (
                     <FlaskConical className="size-3.5" aria-hidden="true" />
                   )}

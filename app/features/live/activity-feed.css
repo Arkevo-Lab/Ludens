@@ -887,9 +887,8 @@
 .codex-thinking-dot {
   width: 8px;
   height: 8px;
-  border-radius: 999px;
-  background: var(--primary);
-  animation: pulse 1.4s infinite ease-in-out;
+  background: var(--gold);
+  animation: pm-pulse 900ms steps(4, end) infinite alternate;
 }
 
 .codex-empty-thread {
@@ -1946,7 +1945,6 @@
 .codex-session-divider-dot {
   width: 6px;
   height: 6px;
-  border-radius: 999px;
   background: var(--muted-foreground);
 }
 .codex-session-divider-dot[data-active] {

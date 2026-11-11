@@ -148,3 +148,8 @@ On Live:
 - **Status pixel.** The status pill carries a `PixelMark` in place of a round dot. It pulses while Shiori is reasoning or consolidating, blinks grey on standby, and holds steady otherwise.
 - **Control handoff.** While a human holds control (host online, manual mode) the mark is `filled`: the hollow L and the loose pixel turn blue, filling cell by cell on takeover and draining on release.
 - **Budget blocks.** The run budget bar is 24 blocks. Elapsed blocks are lit and the leading one is orange. It keeps `role="progressbar"` with the same 0–100 values.
+
+Elsewhere:
+
+- **Eval runs.** The run-eval and run-all buttons on Capabilities show `<PixelMark loading />` while an eval runs.
+- **Status pixels.** Status indicators are square, matching the mark's loose pixel: the shell and capability status dots, eval status badges, notices, session dividers, replay track markers and source markers. The Live thinking indicator is an orange pixel with the stepped pulse. Chart series markers stay round.

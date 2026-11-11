@@ -633,7 +633,6 @@
 .replay-track-dot {
   width: 6px;
   height: 6px;
-  border-radius: 50%;
   flex-shrink: 0;
 }
 .replay-track-dot.perception { background: var(--sage); }
@@ -800,7 +799,6 @@
   width: 6px;
   height: 6px;
   margin-left: 5px;
-  border-radius: 50%;
   background: var(--gold);
 }
 
