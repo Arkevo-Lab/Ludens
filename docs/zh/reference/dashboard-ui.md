@@ -106,3 +106,17 @@ Loop 实验室是本地数学模拟，与工作区设置和实际运行无关。
 - 业务请求、等待态、错误反馈与桌面能力检测由页面维护，UI 原语只负责展示和交互。
 
 验收使用 `npm run typecheck`、`npm test`、`npm run build`，并在隔离的 `LUDENS_HOME` 下检查页面与表单操作。详见[控制台调试与验证](../tutorials/debugging-and-verification.md)。
+
+## 品牌标识
+
+Ludens 标识是一个 5 × 5 像素环，环内留出镂空的 L，右上角有一颗独立像素。像素环使用所在表面的文字颜色；独立像素始终为强调橙色（`#ff4f1f`，`--gold`）。像素保持方正：不加圆角、阴影、描边或旋转。
+
+| 用途 | 文件 |
+| --- | --- |
+| 深色背景 | `app/public/brand/ludens-mark-dark.svg` |
+| 浅色背景 | `app/public/brand/ludens-mark-light.svg` |
+| 应用图标底板（桌面窗口与程序坞） | `app/public/brand/ludens-app-icon.svg` · `ludens-app-icon.png` |
+| 浏览器标签页与触控图标 | `app/app/icon.svg` · `app/app/apple-icon.png` |
+| 控制台侧栏 | `app/shell/console-sidebar.tsx` 中的 `BrandMark` |
+
+托盘图标仍为 Ludens 桌宠蜘蛛，归属 `app/public/companion/ludens/` 下的桌宠资源目录。

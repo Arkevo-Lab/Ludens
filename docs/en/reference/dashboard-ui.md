@@ -106,3 +106,17 @@ Replay evidence uses a compact **Recorded evidence** header with a persistent **
 - Feature requests, pending states, error feedback, and desktop-capability detection are owned by the page; UI primitives handle only presentation and interaction.
 
 Acceptance uses `npm run typecheck`, `npm test`, and `npm run build`, plus checking pages and form actions under an isolated `LUDENS_HOME`. See [Console Debugging and Verification](../tutorials/debugging-and-verification.md).
+
+## Brand Mark
+
+The Ludens mark is a 5 × 5 pixel ring around a hollow L, with one loose pixel at the top right. The ring takes the surface's text color; the loose pixel is always the accent orange (`#ff4f1f`, `--gold`). Keep the pixels square: no rounding, shadow, outline or rotation.
+
+| Use | File |
+| --- | --- |
+| Dark backgrounds | `app/public/brand/ludens-mark-dark.svg` |
+| Light backgrounds | `app/public/brand/ludens-mark-light.svg` |
+| App icon tile (desktop window and dock) | `app/public/brand/ludens-app-icon.svg` · `ludens-app-icon.png` |
+| Browser tab and touch icon | `app/app/icon.svg` · `app/app/apple-icon.png` |
+| Console sidebar | `BrandMark` in `app/shell/console-sidebar.tsx` |
+
+The tray icon stays the Ludens Pet spider; it belongs to the pet catalog under `app/public/companion/ludens/`.

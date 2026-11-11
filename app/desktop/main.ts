@@ -51,9 +51,12 @@ if (values.help) {
     app.on('before-quit', () => { quitting = true; clearInterval(dashboardTimer); source?.stop() })
     app.on('window-all-closed', () => app.quit())
     void app.whenReady().then(async () => {
+      const publicAssets = existsSync(resolve(here, '../public/companion')) ? resolve(here, '../public') : resolve(here, '../../public')
+      const appIcon = nativeImage.createFromPath(resolve(publicAssets, 'brand/ludens-app-icon.png'))
+      if (!appIcon.isEmpty()) app.dock?.setIcon(appIcon)
       owner = new BrowserWindow({
         title: 'Ludens · Console', width: 1440, height: 940, minWidth: 960, minHeight: 640,
-        show: false, backgroundColor: '#202321',
+        show: false, backgroundColor: '#202321', ...(appIcon.isEmpty() ? {} : { icon: appIcon }),
         webPreferences: { preload: join(here, 'preload.cjs'), contextIsolation: true, nodeIntegration: false, sandbox: false },
       })
       owner.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -112,9 +115,7 @@ if (values.help) {
       } })
       pet.configureActivity(source)
       void source.start(workspace)
-      const companionAssets = existsSync(resolve(here, '../public/companion'))
-        ? resolve(here, '../public/companion')
-        : resolve(here, '../../public/companion')
+      const companionAssets = resolve(publicAssets, 'companion')
       const icon = nativeImage.createFromPath(resolve(companionAssets, 'ludens/icons/icon-tray.png')).resize({ width: 20, height: 20 })
       tray = new Tray(icon)
       tray.setToolTip('Ludens Pet · Ludens')
