@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { MenuIcon, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PixelMark } from "@/components/ui/pixel-mark";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 
@@ -12,15 +13,6 @@ const navSections: Array<{ label: string; ids: ConsoleView[] }> = [
   { label: "navSectionWorkspace", ids: ["live", "replay", "perf", "caps", "perception"] },
   { label: "navSectionGlobal", ids: ["workspaces", "baseware", "docs"] },
 ];
-
-function BrandMark() {
-  return (
-    <svg viewBox="0 0 64 64" width="22" height="22" aria-hidden="true">
-      <path fill="currentColor" d="M14 2h24v12H14zM2 14h12v36H2zM26 14h12v24H26zM38 26h24v12H38zM50 38h12v12H50zM14 50h36v12H14z" />
-      <path fill="var(--gold)" d="M50 2h12v12H50z" />
-    </svg>
-  );
-}
 
 function NavIcon({ kind }: { kind: ConsoleView }) {
   return (
@@ -158,7 +150,7 @@ export function ConsoleSidebar({ view, viewLink, onNavigate }: {
     <a className="brand" href={viewLink("live")} onClick={event => {
       if (!isPlainNavigationClick(event)) return;
       event.preventDefault(); closeMenu(); onNavigate(viewLink("live"));
-    }}><BrandMark /><span>Ludens</span></a>
+    }}><PixelMark /><span>Ludens</span></a>
     <div className="sidebar-menu-control">
       <Button ref={menuButton} type="button" variant="ghost" size="sm" className="sidebar-menu-toggle"
         aria-expanded={expanded} aria-controls={`${id}-content ${id}-footer`}
