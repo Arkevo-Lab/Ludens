@@ -152,6 +152,16 @@ export function summarizeStepBlock(block: ActivityBlock): { badge: string; detai
 
   if (block.kind === "system") {
     const rec = asRecord(block.data);
+    if (block.title === "control_budget") {
+      const reqSec = rec?.requestedSeconds;
+      const detail =
+        reqSec == null
+          ? "∞ Continuous (timer cleared)"
+          : typeof reqSec === "number"
+            ? `Stop in ${Math.round(reqSec / 60) || 1}m (${reqSec}s)`
+            : cleanInlinePreview(block.text) || "Timer updated";
+      return { badge: "⏱ timer", detail };
+    }
     const sysDetail = [
       rec?.summary,
       rec?.message,
@@ -244,6 +254,7 @@ export type StreamSegment =
 export interface BuildSegmentsOptions {
   runId?: string;
   cycles?: RunData["cycles"];
+  fallbackStartedAt?: string;
   prevEndedAt?: string | null;
   isLatestRun?: boolean;
   isAuto?: boolean;
@@ -491,19 +502,32 @@ export function buildCodexSegments(
     }
 
     if (isControlBlock(block)) {
-      flushTurn();
       const rec = asRecord(block.data);
       const ep = block.trace?.epoch ?? (typeof rec?.epoch === "string" ? rec.epoch : null);
       if (rec?.mode === "auto") {
+        // If only brief startup system steps (< 60s) preceded the first cycle in this run,
+        // emit the cycle header first so the run opens cleanly with its divider.
+        const onlyBootSystemSteps =
+          segments.length === 0 &&
+          pendingSteps.length > 0 &&
+          pendingSteps.every(step => step.kind === "system") &&
+          blockMs > 0 &&
+          blockMs - (Date.parse(pendingSteps[0].at) || blockMs) <= 60_000;
+        if (!onlyBootSystemSteps) {
+          flushTurn();
+        }
         currentEpoch = ep;
         lastPostBlockMs = 0;
         emitDividerForEpoch(ep, block.at, rec);
       } else if (rec?.mode === "manual") {
+        flushTurn();
         if (ep || currentEpoch) {
           lastSegmentEndedAt = block.at;
         }
         currentEpoch = null;
         lastPostBlockMs = 0;
+      } else {
+        flushTurn();
       }
       continue;
     }
@@ -543,14 +567,21 @@ export function buildCodexSegments(
       }
     } else if (!blockEpoch && segments.length === 0 && pendingSteps.length === 0 && options.runId) {
       const fallbackCycle = options.cycles?.[0];
+      const fallbackStartMs = fallbackCycle ? Date.parse(fallbackCycle.startedAt) : NaN;
       const fallbackClosedEnd = fallbackCycle?.endedAt ?? (fallbackCycle ? manualEndByEpoch.get(fallbackCycle.epoch)?.endedAt : null) ?? null;
       const fallbackClosedMs = fallbackClosedEnd ? Date.parse(fallbackClosedEnd) : NaN;
-      if (fallbackCycle && Number.isFinite(fallbackClosedMs) && blockMs > fallbackClosedMs + 30_000) {
+      if (fallbackCycle && Number.isFinite(fallbackStartMs) && blockMs > 0 && blockMs < fallbackStartMs - 250) {
+        // Pre-cycle block arrived before cycles[0] started: never emit cycles[0] prematurely out of chronological order.
+        if (fallbackStartMs - blockMs > 60_000 || block.kind !== "system") {
+          lastPostBlockMs = blockMs;
+          emitDividerForEpoch(`post:pre:${options.runId}`, block.at);
+        }
+      } else if (fallbackCycle && Number.isFinite(fallbackClosedMs) && blockMs > fallbackClosedMs + 30_000) {
         emitDividerForEpoch(fallbackCycle.epoch, fallbackCycle.startedAt);
         lastPostBlockMs = blockMs;
         emitDividerForEpoch(`post:${block.id}`, block.at);
       } else {
-        emitDividerForEpoch(fallbackCycle?.epoch ?? null, block.at);
+        emitDividerForEpoch(fallbackCycle?.epoch ?? `post:standby:${options.runId}`, block.at);
       }
     }
 
@@ -631,6 +662,13 @@ export function buildCodexSegments(
     }
     emitCallInputCard(orphanInputCalls[orphanIdx]);
     orphanIdx++;
+  }
+  if (segments.length === 0 && options.runId && ((options.cycles?.length ?? 0) > 0 || !options.isLatestRun)) {
+    const firstCycle = options.cycles?.[0];
+    emitDividerForEpoch(
+      firstCycle?.epoch ?? `post:standby:${options.runId}`,
+      firstCycle?.startedAt ?? options.fallbackStartedAt ?? new Date(0).toISOString(),
+    );
   }
   return segments;
 }

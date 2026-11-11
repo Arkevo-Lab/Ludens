@@ -273,6 +273,26 @@ export class BasewareCore {
     return this.status();
   }
 
+  /** Live stop-timer update on an active auto lease, without releasing controllers. */
+  setLeaseDuration(epoch: string, seconds: number | null | undefined, trace: Trace = {}) {
+    if (!epoch?.trim()) throw new Error("lease_duration requires an epoch");
+    // Null or undefined clears the timer back to an unbounded lease.
+    if (seconds !== undefined && seconds !== null
+      && (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647)) throw new Error("seconds must be positive and within the timer range");
+    if (this.mode !== "auto" || !this.epoch || epoch !== this.epoch) throw new Error("STALE_EPOCH");
+    if (!this.connected) throw new Error("Driver disconnected; restart Baseware");
+    clearTimeout(this.timer);
+    if (seconds !== undefined && seconds !== null) {
+      this.deadline = performance.now() + seconds * 1000;
+      this.timer = setTimeout(() => { void this.release(epoch, "lease expired"); }, seconds * 1000);
+    } else {
+      this.deadline = null;
+      this.timer = undefined;
+    }
+    this.record("baseware_control", this.status(), { ...this.controlTrace, ...trace, epoch });
+    return this.status();
+  }
+
   async release(epoch?: string, reason = "released") {
     if (epoch !== undefined && this.epoch !== undefined && epoch !== this.epoch) throw new Error("STALE_EPOCH");
     if (this.stopping) return this.stopping;
@@ -547,6 +567,7 @@ export class BasewareCore {
         case "help": if (!request.id) throw new Error("Missing capability ID"); return this.help(request.id);
         case "acquire": return await this.acquire(request.epoch!, request.seconds, client, signal, request.trace);
         case "release": if (!request.epoch) throw new Error("release requires an epoch"); return await this.release(request.epoch);
+        case "lease_duration": return this.setLeaseDuration(request.epoch!, request.seconds, request.trace);
         case "input_generation":
           if (!request.epoch) throw new Error("input_generation requires an epoch");
           if (request.generation === undefined) throw new Error("input_generation requires generation or null");

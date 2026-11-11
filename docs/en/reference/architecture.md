@@ -58,6 +58,7 @@ The repository is organized as a Bun workspace with `@ludens/protocol` as the ze
 ### 1. Control Leases (`epoch`) and Permission Checks
 
 - Each `ludens auto on [--seconds <n>]` opens a new control cycle, minting a unique **`epoch`** and resetting the cycle's model-request (`requests`) budget. Takeover duration (`seconds`) is optional: when omitted (`null`), the lease and runtime loop run continuously without a timer until explicit handover (`ludens auto off`); when provided, both Baseware and Shiori enforce that per-cycle deadline.
+- `ludens auto timer <seconds|off>` updates Baseware's `lease_duration` and Shiori's active stop timer in place, recording `control_budget` without minting a new `epoch`.
 - The Ludens Host holds that `epoch` against Baseware over a persistent connection and injects `BASEWARE_EPOCH` into the workspace process environment.
 - Capability-catalog queries and `--help` need no control rights; whether a concrete capability requires control is declared by its `requiresControl` property (some read-only state queries also require a valid `epoch`). Invoking workspace `python/...` capabilities via CLI likewise requires an active control cycle.
 - On human handover (`ludens auto off`), budget exhaustion, host disconnect, or device disconnect, Baseware immediately revokes the old `epoch`, aborts in-flight actions, and performs device release (zeroing keys and touch contacts); once cleanup completes it returns to the `manual` state.

@@ -81,11 +81,26 @@ export function useDashboardController() {
   const pet = usePetFollow();
   const [stopping, setStopping] = useState(false);
   const [panel, setPanel] = useState("trace");
-  const [liveJumpTarget, setLiveJumpTarget] = useState<{ value: string; seq: number } | null>(null);
+  const [liveJumpTarget, setLiveJumpTarget] = useState<{
+    value: string;
+    call?: string;
+    block?: string;
+    image?: string;
+    seq: number;
+  } | null>(null);
+  const [activeLiveSegment, setActiveLiveSegment] = useState("");
   const requested = initialSelection(search, projects);
   const requestedLatest = latestGameRun(projects.find(p => p.id === requested.project));
-  const followed = resolveLiveSelection({ location: search, project: requested.project, requestedRun: requested.run,
-    requestedEpoch: requested.epoch, latestRun: requestedLatest?.id ?? "", refresh, archiveRevision, paused: pausedSelection });
+  const followed = resolveLiveSelection({
+    location: search,
+    project: requested.project,
+    requestedRun: view === "live" ? "" : requested.run,
+    requestedEpoch: view === "live" ? "" : requested.epoch,
+    latestRun: requestedLatest?.id ?? "",
+    refresh,
+    archiveRevision,
+    paused: view === "live" ? null : pausedSelection,
+  });
   const selection = { project: followed.project, run: followed.requestedRun, epoch: followed.epoch };
   const project = projects.find((p) => p.id === selection.project);
   const latest = latestGameRun(project);
@@ -93,10 +108,11 @@ export function useDashboardController() {
   const effectiveEpoch = view === "live" && !selection.epoch ? "all" : selection.epoch;
   useEffect(() => {
     setLiveJumpTarget(null);
+    setActiveLiveSegment("");
   }, [selection.project]);
   // A URL change is intentional navigation even while paused. Latch its new default
   // before the next catalog poll can replace it; an empty workspace stays empty too.
-  if (!refresh && catalogReady && !followed.frozen) {
+  if (view !== "live" && !refresh && catalogReady && !followed.frozen) {
     setPausedSelection({ location: search, project: selection.project, run, requestedRun: selection.run, epoch: selection.epoch, archiveRevision });
   }
   const entry = workspaceRunEntry({ catalogReady, catalogError, project, run });
@@ -114,7 +130,8 @@ export function useDashboardController() {
     ? replayCycles?.key === JSON.stringify([selection.project, run]) ? replayCycles.cycles : []
     : data?.cycles ?? [];
   const activity = useActivityFeed({ project: selection.project, run, epoch: effectiveEpoch || undefined,
-    enabled: view === "live", refresh, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined });
+    enabled: view === "live", refresh, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined,
+    continuousStream: view === "live" });
   const call = analysingRun ? analysisRequest(analysis.detail, requestedCall)
     : data?.selectedCall ?? data?.calls.find((c) => c.id === requestedCall) ?? data?.calls.at(-1);
   const navigateUrl = useCallback((target: string, options?: { replace?: boolean }) => {
@@ -319,8 +336,10 @@ export function useDashboardController() {
   const latestReady = latestReadsDone && latestScopeMatches;
   const clearLiveJumpTarget = useCallback(() => {
     setLiveJumpTarget(null);
+    setActiveLiveSegment("");
   }, []);
   const jumpToLiveSegment = useCallback((value: string) => {
+    setActiveLiveSegment(value);
     setLiveJumpTarget({ value, seq: Date.now() });
     if (selection.run || selection.epoch || hasSelectedEvidence(search)) {
       navigate({
@@ -334,9 +353,33 @@ export function useDashboardController() {
         replayItem: null,
         replayRecord: null,
         replaySequence: null,
-      });
+      }, { replace: true });
     }
   }, [selection.run, selection.epoch, search]);
+  // Convert any explicit ?run= / ?epoch= deep-link on Live view into an in-stream smooth jump
+  // so Live view always remains a single continuous workspace session stream.
+  useEffect(() => {
+    if (view !== "live" || !catalogReady || !latest) return;
+    const rawRun = query.get("run") ?? "";
+    const rawEpoch = query.get("epoch") ?? "";
+    if (!rawRun && (!rawEpoch || rawEpoch === "all")) return;
+    const targetRun = rawRun || latest.id;
+    const jumpValue =
+      rawEpoch && rawEpoch !== "all"
+        ? `${targetRun}#${rawEpoch}`
+        : targetRun !== latest.id
+          ? targetRun
+          : "";
+    setActiveLiveSegment(jumpValue);
+    setLiveJumpTarget({
+      value: jumpValue,
+      call: requestedCall || undefined,
+      block: query.get("block") || undefined,
+      image: selectedImage,
+      seq: Date.now(),
+    });
+    navigate({ run: null, epoch: null, call: null, block: null, image: null }, { replace: true });
+  }, [view, catalogReady, latest?.id, search]);
   const latestRequested = latestRequest?.revision === snapshotRevision && latestRequest.location === search;
   const latestScopeChanged = latestRequested && latestReadsDone && !latestScopeMatches
     && !error && !activity.error;
@@ -487,6 +530,8 @@ export function useDashboardController() {
     catalogFocus,
     returnButton,
     liveJumpTarget,
+    activeLiveSegment,
+    setActiveLiveSegment,
     clearLiveJumpTarget,
     jumpToLiveSegment,
   };

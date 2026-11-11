@@ -35,12 +35,16 @@ const emptyState = (resetRevision = 0): FeedState => ({ resetRevision, loadedRev
 
 const scopeParams = activityScopeParams;
 
+const CONTINUOUS_STREAM_MAX_BLOCKS = 6000;
+
 export function useActivityFeed(options: {
   project: string; run: string; epoch?: string; enabled: boolean; refresh: boolean; selectedBlock?: string; archiveRevision?: number;
   /** A global return-to-current action clears every log filter and obtains a fresh snapshot. */
   resetRevision?: number;
+  /** Keep live tail active while prepending older history in a unified continuous session stream. */
+  continuousStream?: boolean;
 }) {
-  const { project, run, epoch, enabled, refresh, selectedBlock, archiveRevision, resetRevision = 0 } = options;
+  const { project, run, epoch, enabled, refresh, selectedBlock, archiveRevision, resetRevision = 0, continuousStream = false } = options;
   const t = useTranslations("activityFeed");
   const scopeChangedError = useRef(t("scopeChangedError"));
   scopeChangedError.current = t("scopeChangedError");
@@ -96,9 +100,12 @@ export function useActivityFeed(options: {
         const previous = current.current;
         const reset = result.mode === "snapshot" || !sameScope(previous.scope, result.scope)
           || previous.generation !== result.projection.generation;
+        const mergeLimit = continuousStream
+          ? Math.min(CONTINUOUS_STREAM_MAX_BLOCKS, Math.max(ACTIVITY_WINDOW_SIZE, previous.blocks.length + result.blocks.length + 64))
+          : ACTIVITY_WINDOW_SIZE;
         const merged = mergeActivity(reset ? [] : previous.blocks, result.blocks, {
-          ...criteria.current, append: reset || !previous.historical,
-          keep: previous.historical && !reset ? "oldest" : "latest", limit: ACTIVITY_WINDOW_SIZE,
+          ...criteria.current, append: reset || continuousStream || !previous.historical,
+          keep: !continuousStream && previous.historical && !reset ? "oldest" : "latest", limit: mergeLimit,
         });
         update(value => ({ ...(reset ? emptyState(resetRevision) : value), scope: reset ? result.scope : value.scope,
           generation: result.projection.generation, snapshot: value.snapshot + (reset ? 1 : 0),
@@ -109,8 +116,9 @@ export function useActivityFeed(options: {
           } : {}),
         }));
         result.acknowledge();
-        // Refresh the bounded latest page before its opaque history cursor becomes detached.
-        if (!reset && !previous.historical && merged.length > ACTIVITY_LIVE_SIZE && !historyLoading.current)
+        // Refresh the bounded latest page before its opaque history cursor becomes detached,
+        // unless continuousStream has already expanded earlier history in memory.
+        if (!reset && !previous.historical && !continuousStream && merged.length > ACTIVITY_LIVE_SIZE && !historyLoading.current)
           setReload(value => value + 1);
       } catch (error) {
         if (!signal.aborted) update(value => ({ ...value, loading: false, error: String(error) }));
@@ -198,6 +206,10 @@ export function useActivityFeed(options: {
   const earlier = useCallback(async () => {
     const previous = current.current;
     if (!previous.scope || !previous.before || historyLoading.current) return;
+    if (continuousStream && previous.blocks.length >= CONTINUOUS_STREAM_MAX_BLOCKS) {
+      update(value => ({ ...value, hasMore: false, before: null }));
+      return;
+    }
     const controller = new AbortController();
     historyRequest.current?.abort(); historyRequest.current = controller; historyLoading.current = true;
     const isCurrentRequest = () => !controller.signal.aborted && historyRequest.current === controller
@@ -213,16 +225,21 @@ export function useActivityFeed(options: {
         update(value => ({ ...value, loadingOlder: false, error: scopeChangedError.current }));
         return;
       }
-      update(value => ({ ...value, blocks: mergeActivity(value.blocks, result.blocks, {
-        filter, query: search, append: true, keep: "oldest", limit: ACTIVITY_WINDOW_SIZE,
-      }), before: result.before ?? null, hasMore: result.hasMore, total: result.total ?? value.total,
-        historical: true, loadingOlder: false }));
+      update(value => {
+        const nextLimit = continuousStream
+          ? Math.min(CONTINUOUS_STREAM_MAX_BLOCKS, Math.max(ACTIVITY_WINDOW_SIZE, value.blocks.length + result.blocks.length + 64))
+          : ACTIVITY_WINDOW_SIZE;
+        return { ...value, blocks: mergeActivity(value.blocks, result.blocks, {
+          filter, query: search, append: true, keep: continuousStream ? "latest" : "oldest", limit: nextLimit,
+        }), before: result.before ?? null, hasMore: result.hasMore, total: result.total ?? value.total,
+          historical: continuousStream ? false : true, loadingOlder: false };
+      });
     } catch (error) {
       if (isCurrentRequest()) update(value => ({ ...value, loadingOlder: false, error: String(error) }));
     } finally {
       if (historyRequest.current === controller) historyLoading.current = false;
     }
-  }, [filter, search, update]);
+  }, [continuousStream, filter, search, update]);
 
   const currentRevision = state.resetRevision === resetRevision;
   const valid = currentRevision && scope && acceptsScope(scope, project, run, epoch);

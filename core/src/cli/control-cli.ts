@@ -6,6 +6,7 @@ import type { ExecutionResult } from "@ludens/baseware/contracts";
 
 export const HELP = `ludens status
 ludens auto on [--message <text>] [--seconds <n>]
+ludens auto timer <seconds|off>
 ludens auto off
 ludens steer <message>
 ludens event <list|send|reply|ack>

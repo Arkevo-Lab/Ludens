@@ -39,6 +39,8 @@ export interface DeviceSession {
   /** Must also accept an epoch whose acquisition has not completed yet. */
   release(epoch: string): Promise<void>;
   setInputGeneration?(epoch: string, generation: string | null): Promise<void>;
+  /** Live stop-timer update on the active lease; null clears back to unbounded. */
+  setLeaseDuration?(epoch: string, seconds: number | null): Promise<void>;
   onReconnect?(handler: () => void): void;
   machines?(action: "list" | "use" | "connect" | "disconnect", payload?: { id?: string; ids?: string[] }): Promise<unknown>;
   execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, trace: EventTrace, origin?: ObservationOrigin, machine?: string): Promise<ExecutionResult>;
@@ -304,6 +306,32 @@ export class Runtime {
     if (this._agent.steer) await this._agent.steer(text);
     else throw new Error("Agent does not support live steering");
     return this.status();
+  }
+
+  /** Live stop-timer update on the running cycle; no new epoch, no new cycle. */
+  async setBudget(seconds: number | null) {
+    if (seconds !== null && (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori time budget");
+    if (this.mode !== "auto" || !this.epoch) throw new Error("Auto loop is not active");
+    if (this.budget) throw new Error("Shared evaluation budget cannot be modified interactively");
+    const epoch = this.epoch;
+    const control = this.control;
+    if (this.ownsDevice && this.devices?.setLeaseDuration) await this.withControlTimeout(this.devices.setLeaseDuration(epoch, seconds), "Control lease update");
+    if (this.mode !== "auto" || this.epoch !== epoch || control?.signal.aborted) return this.status();
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    const elapsedSec = this.takeoverStartedAtMs !== null ? Math.max(0, Math.floor((Date.now() - this.takeoverStartedAtMs) / 1000)) : 0;
+    if (seconds !== null) {
+      this.activeMaxSeconds = elapsedSec + Math.ceil(seconds);
+      this.takeoverDeadlineMs = performance.now() + seconds * 1000;
+      this.timer = setTimeout(this.budgetEnded, seconds * 1000);
+    } else {
+      this.activeMaxSeconds = null;
+      this.takeoverDeadlineMs = null;
+    }
+    // control_budget, never control: cycle indexing and autoStarted must stay untouched.
+    const nextStatus = this.status();
+    this.record("control_budget", { maxSeconds: nextStatus.maxSeconds, remainingSeconds: nextStatus.remainingSeconds, requestedSeconds: seconds }, { epoch });
+    return nextStatus;
   }
 
   private requireEventPool(): WorkspaceEventPool {

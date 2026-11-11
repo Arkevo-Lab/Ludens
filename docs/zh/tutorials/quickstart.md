@@ -86,6 +86,7 @@ ludens auto on
 | `ludens up [--pet / --no-pet]` | 按需启动或复用模拟器、Baseware、Host 与 Dashboard；按 `pet` 设置启用桌宠，也可用互斥的 `--pet` / `--no-pet` 仅覆盖本次启动，不写回配置。新启动的 Host 处于 `manual` 模式；若复用已在 `auto` 运行的 Host 则继续原控制周期。重复 `up` 不会热加载修改后的 `ludens.json`，复用现有 Dashboard 也不会热更新其构建。 |
 | `ludens services` | 查询当前工作区关联的后台受管任务 PID、状态与最近退出码。 |
 | `ludens auto on [--message '文本'] [--seconds <n>]` | 开启新控制周期（生成新 `epoch`，重置请求预算）并向模型发起推理。省略 `--seconds <n>` 时默认不设时间上限、持续运行直到手动执行 `auto off`；显式传入 `--seconds <n>` 时按指定秒数限时运行。`--message` 仅在该次接管的首轮附加一次，后续续轮不重复注入。 |
+| `ludens auto timer <seconds\|off>` | 在不新开 `epoch`、不释放设备控制权的前提下，就地设置、顺延或清除（`off`）当前活动周期的自动停止倒计时。 |
 | `ludens auto off` | 立即撤销设备操作权并取消 Ludens 管理的在途调用，模拟器保持运行；需等待当前周期清理完毕后方可再次 `auto on`。 |
 | `ludens down --keep-emulator` | 交还控制权并停止 Host 与 Baseware，保留模拟器窗口与游戏现场；适合修改 `ludens.json`（如预算或模型）后重新 `ludens up`。 |
 | `ludens down [--dashboard] [--pet]` | 停止本工作区受管的 Host、Baseware 与模拟器（**执行前请先在游戏内保存进度**）。默认保留共享的 Dashboard 与已运行的 Ludens Pet；附加 `--dashboard`（仅限启动它的工作区）或 `--pet` 可一并关闭对应共享服务。 |

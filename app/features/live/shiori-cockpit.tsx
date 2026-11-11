@@ -38,6 +38,7 @@ export type RuntimeControlAction =
   | { action: "status" }
   | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
+  | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
   | { action: "perception_inject"; enabled: boolean; runId?: string }
@@ -247,7 +248,8 @@ function CodexStepGroup({
   const t = useTranslations("shioriCockpit");
   const [open, setOpen] = useState(() => defaultOpen);
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
-  const isExpanded = forceExpanded || open;
+  const containsSelected = Boolean(selectedBlock && steps.some(s => s.id === selectedBlock));
+  const isExpanded = forceExpanded || open || containsSelected;
 
   if (steps.length === 0) return null;
 
@@ -297,6 +299,7 @@ function CodexStepGroup({
             return (
               <div
                 key={step.id}
+                id={step.id}
                 className="codex-step-item"
                 data-selected={selectedBlock === step.id || undefined}
                 data-status={step.status}
@@ -424,6 +427,8 @@ function CodexInputCard({
   return (
     <article
       className="codex-input-card"
+      data-call-id={call?.id}
+      data-run-segment={run}
       data-selected={isSelected || undefined}
       onClick={() => onSelect(observations[0]?.id)}
     >
@@ -613,6 +618,219 @@ function resolveCallForTurn(
 
 export type ComposerMode = "event" | "start" | "steer";
 
+function LiveStopTimerControl({
+  remainingSeconds,
+  disabled = false,
+  placement = "down",
+  compact = false,
+  onApplyTimer,
+  onExtendTimer,
+}: {
+  remainingSeconds: number | null;
+  disabled?: boolean;
+  placement?: "up" | "down";
+  compact?: boolean;
+  onApplyTimer: (seconds: number | null) => Promise<void>;
+  onExtendTimer?: (deltaSeconds: number) => Promise<void>;
+}) {
+  const t = useTranslations("shioriCockpit");
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [customMinutes, setCustomMinutes] = useState("30");
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKey = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    const handlePointer = (event: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    window.addEventListener("mousedown", handlePointer);
+    return () => {
+      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("mousedown", handlePointer);
+    };
+  }, [open]);
+
+  const apply = async (seconds: number | null) => {
+    if (busy || disabled) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await onApplyTimer(seconds);
+      setOpen(false);
+    } catch (cause) {
+      setErr(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const isTimed = remainingSeconds != null;
+  const formattedRemaining = formatDurationCompact(remainingSeconds);
+  const pillLabel = isTimed
+    ? compact
+      ? formattedRemaining
+      : t("timerCountdownBadge").replace("{remaining}", formattedRemaining)
+    : t("timerUnboundedBadge");
+
+  const quickPresets: Array<{ short: string; label: string; seconds: number }> = [
+    { short: "15m", label: t("timerStopIn15m"), seconds: 900 },
+    { short: "30m", label: t("timerStopIn30m"), seconds: 1800 },
+    { short: "1h", label: t("timerStopIn60m"), seconds: 3600 },
+    { short: "2h", label: t("timerStopIn2h"), seconds: 7200 },
+  ];
+
+  return (
+    <div ref={wrapRef} className="codex-live-timer-wrap">
+      <button
+        type="button"
+        className="codex-runtime-timer-pill"
+        data-timed={isTimed ? "true" : undefined}
+        data-compact={compact ? "true" : undefined}
+        aria-expanded={open}
+        disabled={disabled || busy}
+        title={t("timerSetBtnHint")}
+        onClick={() => {
+          setErr(null);
+          setOpen(prev => !prev);
+        }}
+      >
+        {isTimed ? (
+          <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+        ) : (
+          <InfinityIcon className="size-3.5 shrink-0" aria-hidden="true" />
+        )}
+        <span>{pillLabel}</span>
+        <ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden="true" />
+      </button>
+
+      {open && (
+        <div
+          className="codex-runtime-timer-popover"
+          data-placement={placement}
+          role="dialog"
+          aria-label={t("timerLiveMenuTitle")}
+        >
+          <div className="codex-runtime-timer-head">
+            <strong>{t("timerLiveMenuTitle")}</strong>
+            <p>{t("timerLiveMenuDesc")}</p>
+          </div>
+
+          <div className="codex-runtime-timer-grid">
+            {quickPresets.map(opt => (
+              <button
+                key={opt.seconds}
+                type="button"
+                className="codex-runtime-preset-btn"
+                disabled={busy}
+                onClick={() => void apply(opt.seconds)}
+              >
+                <strong>{opt.short}</strong>
+                <span>{opt.label}</span>
+              </button>
+            ))}
+          </div>
+
+          {isTimed ? (
+            <div className="codex-runtime-timer-actions">
+              <button
+                type="button"
+                className="codex-runtime-extend-btn"
+                disabled={busy}
+                onClick={() => {
+                  if (onExtendTimer) {
+                    setBusy(true);
+                    setErr(null);
+                    void onExtendTimer(900)
+                      .then(() => setOpen(false))
+                      .catch(cause => setErr(cause instanceof Error ? cause.message : String(cause)))
+                      .finally(() => setBusy(false));
+                  } else {
+                    void apply(Math.max(60, Math.round((remainingSeconds ?? 0) + 900)));
+                  }
+                }}
+              >
+                <Clock className="size-3.5 shrink-0" aria-hidden="true" />
+                <span>{t("timerExtend15m")}</span>
+              </button>
+              <button
+                type="button"
+                className="codex-runtime-unbounded-btn"
+                disabled={busy}
+                onClick={() => void apply(null)}
+              >
+                <InfinityIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                <div className="codex-runtime-unbounded-copy">
+                  <strong>{t("timerSwitchUnbounded")}</strong>
+                  <small>{t("timerSwitchUnboundedDesc")}</small>
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="codex-runtime-unbounded-active">
+              <InfinityIcon className="size-3.5 shrink-0 text-primary" aria-hidden="true" />
+              <span>{t("durationUnbounded")} ✓</span>
+              <small>{t("durationUnboundedDesc")}</small>
+            </div>
+          )}
+
+          <div className="codex-duration-custom">
+            <label className="codex-duration-custom-label" htmlFor={`live-stop-mins-${placement}`}>
+              {t("timerCustomStopLabel")}
+            </label>
+            <div className="codex-duration-custom-row">
+              <input
+                id={`live-stop-mins-${placement}`}
+                type="number"
+                min={1}
+                max={1440}
+                value={customMinutes}
+                onChange={event => setCustomMinutes(event.target.value)}
+                onKeyDown={event => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    const mins = Number(customMinutes);
+                    if (Number.isFinite(mins) && mins > 0) {
+                      void apply(Math.round(mins * 60));
+                    }
+                  }
+                }}
+                className="codex-duration-custom-input"
+              />
+              <button
+                type="button"
+                className="codex-duration-custom-btn"
+                disabled={busy}
+                onClick={() => {
+                  const mins = Number(customMinutes);
+                  if (Number.isFinite(mins) && mins > 0) {
+                    void apply(Math.round(mins * 60));
+                  }
+                }}
+              >
+                {t("durationCustomApply")}
+              </button>
+            </div>
+          </div>
+
+          {err && (
+            <p className="codex-composer-feedback codex-composer-feedback-err !m-0" role="alert">
+              {err}
+            </p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ShioriComposer({
   project,
   workspace,
@@ -620,6 +838,9 @@ export function ShioriComposer({
   isLiveRun,
   hostStatusOverride,
   onHostStatusChange,
+  liveRemainingSeconds,
+  onApplyLiveTimer,
+  onExtendLiveTimer,
   perceptionInjectOverride,
   onPerceptionChange,
   poolSnapshot,
@@ -639,6 +860,9 @@ export function ShioriComposer({
   isLiveRun: boolean;
   hostStatusOverride?: Record<string, unknown> | null;
   onHostStatusChange?: (status: Record<string, unknown>) => void;
+  liveRemainingSeconds?: number | null;
+  onApplyLiveTimer?: (seconds: number | null) => Promise<void>;
+  onExtendLiveTimer?: (deltaSeconds: number) => Promise<void>;
   perceptionInjectOverride?: boolean | null;
   onPerceptionChange?: (enabled: boolean) => void;
   poolSnapshot?: EventPoolSnapshot | null;
@@ -778,17 +1002,32 @@ export function ShioriComposer({
     return () => clearTimeout(timer);
   }, [externalDraft, externalMode, onExternalConsumed]);
 
+  const validModes: ComposerMode[] = isAuto
+    ? ["event", "steer"]
+    : hostOnline && !consolidating
+      ? ["start", "event"]
+      : ["event", "start"];
+
   const effectiveTab: ComposerMode = replyTarget
     ? "event"
-    : selectedTab ?? (hostOnline && !isAuto && !consolidating ? "start" : "event");
+    : selectedTab && validModes.includes(selectedTab)
+      ? selectedTab
+      : isAuto
+        ? "event"
+        : hostOnline && !consolidating
+          ? "start"
+          : "event";
+
+  const showPreStartDurationPill =
+    !isAuto && (effectiveTab === "start" || Boolean(replyTarget && resumeOnReply));
 
   const cycleModeTab = () => {
     if (replyTarget) {
       onSelectReplyTarget?.(null);
     }
-    const order: ComposerMode[] = hostOnline ? ["event", "start", "steer"] : ["event", "start"];
-    const idx = order.indexOf(effectiveTab);
-    const next = order[(idx >= 0 ? idx + 1 : 0) % order.length];
+    setDurationMenuOpen(false);
+    const idx = validModes.indexOf(effectiveTab);
+    const next = validModes[(idx >= 0 ? idx + 1 : 0) % validModes.length];
     setSelectedTab(next);
   };
 
@@ -955,7 +1194,9 @@ export function ShioriComposer({
   };
 
   const presets: Array<{ label: string; prompt: string; tab: ComposerMode }> = [
-    { label: t("presetExploreStart"), prompt: t("presetExploreStartPrompt"), tab: "start" },
+    ...(isAuto
+      ? []
+      : [{ label: t("presetExploreStart"), prompt: t("presetExploreStartPrompt"), tab: "start" as ComposerMode }]),
     { label: t("presetEval"), prompt: t("presetEvalPrompt"), tab: isAuto ? "event" : "start" },
     { label: t("presetAdapt"), prompt: t("presetAdaptPrompt"), tab: isAuto ? "steer" : "event" },
     { label: t("presetMemory"), prompt: t("presetMemoryPrompt"), tab: "event" },
@@ -1280,7 +1521,7 @@ export function ShioriComposer({
               type="button"
               className="codex-access-pill"
               data-mode={effectiveTab}
-              title={t("clickToSwitchMode")}
+              title={isAuto ? t("clickToSwitchModeAuto") : t("clickToSwitchModeManual")}
               onClick={cycleModeTab}
             >
               {effectiveTab === "start" ? (
@@ -1302,26 +1543,28 @@ export function ShioriComposer({
               <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
             </button>
 
-            {/* Optional Takeover Duration Pill */}
-            <button
-              type="button"
-              className="codex-subtle-pill codex-duration-pill"
-              aria-expanded={durationMenuOpen}
-              data-active={durationSeconds != null || undefined}
-              title={t("durationPillHint")}
-              onClick={() => {
-                setMenuOpen(false);
-                setDurationMenuOpen(prev => !prev);
-              }}
-            >
-              {durationSeconds == null ? (
-                <InfinityIcon className="size-3.5" aria-hidden="true" />
-              ) : (
-                <Clock className="size-3.5" aria-hidden="true" />
-              )}
-              <span>{durationPillLabel}</span>
-              <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
-            </button>
+            {/* Optional Pre-Start Takeover Duration Pill (only shown before launching/resuming loop) */}
+            {showPreStartDurationPill && (
+              <button
+                type="button"
+                className="codex-subtle-pill codex-duration-pill"
+                aria-expanded={durationMenuOpen}
+                data-active={durationSeconds != null || undefined}
+                title={t("durationPillHint")}
+                onClick={() => {
+                  setMenuOpen(false);
+                  setDurationMenuOpen(prev => !prev);
+                }}
+              >
+                {durationSeconds == null ? (
+                  <InfinityIcon className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <Clock className="size-3.5" aria-hidden="true" />
+                )}
+                <span>{durationPillLabel}</span>
+                <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
+              </button>
+            )}
 
             <button
               type="button"
@@ -1344,6 +1587,34 @@ export function ShioriComposer({
             <span className="codex-model-label" title={data.manifest.model ?? undefined}>
               {modelShort}
             </span>
+
+            {isAuto && hostOnline && onApplyLiveTimer && (
+              <LiveStopTimerControl
+                remainingSeconds={liveRemainingSeconds ?? null}
+                disabled={submitting}
+                placement="up"
+                compact
+                onExtendTimer={
+                  onExtendLiveTimer
+                    ? async delta => {
+                        await onExtendLiveTimer(delta);
+                        setLastSent(t("timerExtend15m"));
+                      }
+                    : undefined
+                }
+                onApplyTimer={async seconds => {
+                  await onApplyLiveTimer(seconds);
+                  setLastSent(
+                    seconds == null
+                      ? t("timerUpdatedUnboundedFeedback")
+                      : t("timerUpdatedCountdownFeedback").replace(
+                          "{duration}",
+                          formatDurationCompact(seconds),
+                        ),
+                  );
+                }}
+              />
+            )}
 
             {isAuto && (
               <button
@@ -1416,6 +1687,7 @@ export function ShioriWorkbench({
   runs = [],
   jumpTarget = null,
   onClearJumpTarget,
+  onActiveSegmentChange,
   data,
   feed,
   isLiveRun,
@@ -1439,8 +1711,15 @@ export function ShioriWorkbench({
   workspace: string | null;
   workspaceTitle?: string;
   runs?: RunInfo[];
-  jumpTarget?: { value: string; seq: number } | null;
+  jumpTarget?: {
+    value: string;
+    call?: string;
+    block?: string;
+    image?: string;
+    seq: number;
+  } | null;
   onClearJumpTarget?: () => void;
+  onActiveSegmentChange?: (segment: string) => void;
   data: RunData;
   feed: ActivityFeedData;
   isLiveRun: boolean;
@@ -1468,6 +1747,8 @@ export function ShioriWorkbench({
   const t = useTranslations("shioriCockpit");
   const streamRef = useRef<HTMLDivElement | null>(null);
   const prependScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
+  const isJumpingRef = useRef(false);
+  const prevRunRef = useRef(data.run);
   const cachedSegmentsRef = useRef<{ run: string; segments: StreamSegment[] }>({
     run: "",
     segments: [],
@@ -1480,10 +1761,17 @@ export function ShioriWorkbench({
     project: string;
     run: string;
     baseUpdatedAt: string;
+    appliedAtMs: number;
     status: Record<string, unknown>;
   } | null>(null);
   const [loadedOlderRuns, setLoadedOlderRuns] = useState<
-    Array<{ runId: string; data: RunData; blocks: ActivityBlock[] }>
+    Array<{
+      runId: string;
+      data: RunData;
+      blocks: ActivityBlock[];
+      before: string | null;
+      hasMore: boolean;
+    }>
   >([]);
   const [loadingOlderRun, setLoadingOlderRun] = useState(false);
   const [olderRunError, setOlderRunError] = useState<string | null>(null);
@@ -1598,33 +1886,56 @@ export function ShioriWorkbench({
   const isAuto = mode === "auto";
 
   useEffect(() => {
+    if (prevRunRef.current !== data.run) {
+      prevRunRef.current = data.run;
+      setLoadedOlderRuns([]);
+      setOlderRunError(null);
+    }
+  }, [data.run]);
+
+  useEffect(() => {
     if (!isLiveRun || !isAuto || !refresh) return;
     setNowMs(Date.now());
     const timer = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(timer);
   }, [isLiveRun, isAuto, refresh]);
 
-  const earliestLoadedRunId = loadedOlderRuns[0]?.runId ?? data.run;
+  const earliestOlderRun = loadedOlderRuns[0] ?? null;
+  const earliestLoadedRunId = earliestOlderRun?.runId ?? data.run;
   const earliestIdxInCatalog = runs.findIndex(r => r.id === earliestLoadedRunId);
   const nextOlderRun =
     earliestIdxInCatalog >= 0 && earliestIdxInCatalog + 1 < runs.length
       ? runs[earliestIdxInCatalog + 1]
       : null;
 
+  const hasMoreUpwardHistory = Boolean(
+    loadedOlderRuns.length === 0
+      ? feed.hasMore || nextOlderRun
+      : earliestOlderRun?.hasMore || nextOlderRun || feed.hasMore,
+  );
+
   const olderRunAbortRef = useRef<AbortController | null>(null);
   useEffect(() => {
     return () => olderRunAbortRef.current?.abort();
   }, [project, data.run]);
 
-  const fetchHistoricalRun = async (targetRunId: string, signal: AbortSignal) => {
+  const fetchHistoricalRun = async (
+    targetRunId: string,
+    signal: AbortSignal,
+    evidence?: { targetRunId: string; call?: string; image?: string },
+  ) => {
     const runParams = new URLSearchParams({ project, run: targetRunId, epoch: "all" });
+    if (evidence && evidence.targetRunId === targetRunId) {
+      if (evidence.call) runParams.set("call", evidence.call);
+      if (evidence.image) runParams.set("image", evidence.image);
+    }
     const actParams = new URLSearchParams({
       project,
       run: targetRunId,
       epoch: "all",
       mode: "history",
       kind: "all",
-      limit: "150",
+      limit: "300",
     });
     const [runPayload, actPayload] = await Promise.all([
       readArchiveJson<RunData>(`/api/run?${runParams}`, signal),
@@ -1634,17 +1945,19 @@ export function ShioriWorkbench({
       runId: targetRunId,
       data: runPayload,
       blocks: Array.isArray(actPayload.blocks) ? actPayload.blocks : [],
+      before: typeof actPayload.before === "string" ? actPayload.before : null,
+      hasMore: Boolean(actPayload.hasMore && actPayload.before),
     };
   };
 
   const capturePrependAnchor = () => {
     const el = streamRef.current;
-    if (el && !atBottom) {
+    if (el && !atBottom && !isJumpingRef.current) {
       prependScrollAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
     }
   };
 
-  const loadOlderRunSegment = async (upToRunId?: string) => {
+  const loadEarlierBlocksOfOlderRun = async (targetRunId: string, beforeCursor: string) => {
     if (loadingOlderRun || !project) return;
     olderRunAbortRef.current?.abort();
     const controller = new AbortController();
@@ -1652,6 +1965,61 @@ export function ShioriWorkbench({
     setLoadingOlderRun(true);
     setOlderRunError(null);
     capturePrependAnchor();
+    try {
+      const actParams = new URLSearchParams({
+        project,
+        run: targetRunId,
+        epoch: "all",
+        mode: "history",
+        kind: "all",
+        before: beforeCursor,
+        limit: "250",
+      });
+      const actPayload = await requestActivity(actParams, controller.signal);
+      if (controller.signal.aborted) return;
+      const earlierBlocks = Array.isArray(actPayload.blocks) ? actPayload.blocks : [];
+      setLoadedOlderRuns(prev =>
+        prev.map(entry => {
+          if (entry.runId !== targetRunId) return entry;
+          const seenIds = new Set(entry.blocks.map(b => b.id));
+          const dedupedEarlier = earlierBlocks.filter(b => !seenIds.has(b.id));
+          return {
+            ...entry,
+            blocks: [...dedupedEarlier, ...entry.blocks],
+            before: typeof actPayload.before === "string" ? actPayload.before : null,
+            hasMore: Boolean(actPayload.hasMore && actPayload.before && dedupedEarlier.length > 0),
+          };
+        }),
+      );
+    } catch (cause) {
+      if (controller.signal.aborted) return;
+      prependScrollAnchorRef.current = null;
+      setOlderRunError(cause instanceof Error ? cleanErrorMessage(cause.message) : t("olderRunLoadFailed"));
+    } finally {
+      if (olderRunAbortRef.current === controller) {
+        setLoadingOlderRun(false);
+      }
+    }
+  };
+
+  const loadOlderRunSegment = async (
+    upToRunId?: string,
+    options?: {
+      preserveScroll?: boolean;
+      evidence?: { targetRunId: string; call?: string; image?: string };
+    },
+  ) => {
+    if (loadingOlderRun || !project) return;
+    olderRunAbortRef.current?.abort();
+    const controller = new AbortController();
+    olderRunAbortRef.current = controller;
+    setLoadingOlderRun(true);
+    setOlderRunError(null);
+    if (options?.preserveScroll !== false) {
+      capturePrependAnchor();
+    } else {
+      prependScrollAnchorRef.current = null;
+    }
     try {
       const existingIds = new Set([data.run, ...loadedOlderRuns.map(r => r.runId)]);
       const toFetch: string[] = [];
@@ -1670,7 +2038,9 @@ export function ShioriWorkbench({
       }
 
       if (toFetch.length === 0) return;
-      const fetched = await Promise.all(toFetch.map(id => fetchHistoricalRun(id, controller.signal)));
+      const fetched = await Promise.all(
+        toFetch.map(id => fetchHistoricalRun(id, controller.signal, options?.evidence)),
+      );
       if (controller.signal.aborted) return;
       // fetched is newest-to-oldest; reverse so loadedOlderRuns stays chronological (oldest first)
       const chronologicalFetched = [...fetched].reverse();
@@ -1691,6 +2061,27 @@ export function ShioriWorkbench({
       if (olderRunAbortRef.current === controller) {
         setLoadingOlderRun(false);
       }
+    }
+  };
+
+  const loadNextUpwardHistory = () => {
+    if (feed.loading || feed.loadingOlder || loadingOlderRun || isJumpingRef.current) return;
+    if (loadedOlderRuns.length === 0 && feed.hasMore) {
+      capturePrependAnchor();
+      void feed.earlier();
+      return;
+    }
+    if (earliestOlderRun?.hasMore && earliestOlderRun.before) {
+      void loadEarlierBlocksOfOlderRun(earliestOlderRun.runId, earliestOlderRun.before);
+      return;
+    }
+    if (nextOlderRun) {
+      void loadOlderRunSegment();
+      return;
+    }
+    if (feed.hasMore) {
+      capturePrependAnchor();
+      void feed.earlier();
     }
   };
 
@@ -1718,6 +2109,7 @@ export function ShioriWorkbench({
       const segs = buildCodexSegments(older.blocks, older.data.calls, older.data.observations, {
         runId: older.runId,
         cycles: older.data.cycles,
+        fallbackStartedAt: olderInfo?.startedAt ?? older.data.updatedAt,
         prevEndedAt,
         isLatestRun: false,
         isAuto: false,
@@ -1731,9 +2123,16 @@ export function ShioriWorkbench({
         prevEndedAt;
     }
 
+    const liveSyncedCycles =
+      isAuto && live && "maxSeconds" in live && data.cycles.length > 0
+        ? data.cycles.map((cycle, idx) =>
+            idx === data.cycles.length - 1 ? { ...cycle, maxSeconds: live.maxSeconds ?? null } : cycle,
+          )
+        : data.cycles;
+
     const currentSegs = buildCodexSegments(feed.blocks, data.calls, data.observations, {
       runId: data.run,
-      cycles: data.cycles,
+      cycles: liveSyncedCycles,
       prevEndedAt,
       isLatestRun: isLiveRun,
       isAuto,
@@ -1786,7 +2185,7 @@ export function ShioriWorkbench({
     }
 
     return allSegments;
-  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, feed.historical, data.calls, data.observations, data.run, data.cycles, data.updatedAt, isLiveRun, isAuto, poolSnapshot]);
+  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, feed.historical, data.calls, data.observations, data.run, data.cycles, data.updatedAt, isLiveRun, isAuto, live, poolSnapshot]);
 
   if (computedSegments.length > 0) {
     cachedSegmentsRef.current = { run: data.run, segments: computedSegments };
@@ -1816,15 +2215,45 @@ export function ShioriWorkbench({
     if (feed.historical) {
       feed.latest();
     }
+    isJumpingRef.current = false;
     onClearJumpTarget?.();
+    onActiveSegmentChange?.("");
     const el = streamRef.current;
     if (!el) return;
-    programmaticScrollUntilRef.current = Date.now() + 600;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    programmaticScrollUntilRef.current = Date.now() + 700;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distance > 2200) {
+      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 520);
+      requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      });
+    } else {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
     setAtBottom(true);
   };
 
-  // Handle Quick-Jump Segment selection from top-right RunPicker without page reload
+  // Auto-fill preceding run history when viewport has spare room so sessions form one continuous stream
+  useEffect(() => {
+    if (feed.loading || feed.loadingOlder || loadingOlderRun || olderRunError || isJumpingRef.current) {
+      return;
+    }
+    if (!hasMoreUpwardHistory) return;
+    const el = streamRef.current;
+    if (!el) return;
+    if (el.scrollHeight <= el.clientHeight + 140) {
+      loadNextUpwardHistory();
+    }
+  }, [
+    segments.length,
+    feed.loading,
+    feed.loadingOlder,
+    loadingOlderRun,
+    olderRunError,
+    hasMoreUpwardHistory,
+  ]);
+
+  // Handle Quick-Jump Segment selection from top-right RunPicker or deep-link without page reload
   useEffect(() => {
     if (!jumpTarget || lastJumpedSeqRef.current === jumpTarget.seq) return;
     if (!jumpTarget.value) {
@@ -1832,53 +2261,187 @@ export function ShioriWorkbench({
       scrollToBottom();
       return;
     }
+    isJumpingRef.current = true;
+    programmaticScrollUntilRef.current = Date.now() + 1800;
+    setAtBottom(false);
+
     const [targetRunId, targetEpoch] = jumpTarget.value.split("#");
-    const container = streamRef.current;
-    const selector = targetEpoch
-      ? `[data-segment-anchor="${CSS.escape(`${targetRunId}#${targetEpoch}`)}"]`
-      : `[data-run-id="${CSS.escape(targetRunId)}"]`;
-    const targetEl = container?.querySelector<HTMLElement>(selector);
-    if (targetEl && container) {
-      lastJumpedSeqRef.current = jumpTarget.seq;
-      programmaticScrollUntilRef.current = Date.now() + 1000;
-      setAtBottom(false);
-      const relativeTop =
-        container.scrollTop +
-        (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) -
-        12;
-      container.scrollTo({
-        top: Math.max(0, relativeTop),
-        behavior: "smooth",
-      });
-      setHighlightedSegmentId(targetEl.id);
-      setTimeout(() => {
-        setHighlightedSegmentId(prev => (prev === targetEl.id ? null : prev));
-      }, 2200);
+    const runAlreadyLoaded =
+      !targetRunId ||
+      targetRunId === data.run ||
+      loadedOlderRuns.some(r => r.runId === targetRunId);
+
+    if (!runAlreadyLoaded) {
+      if (!loadingOlderRun) {
+        void loadOlderRunSegment(targetRunId, {
+          preserveScroll: false,
+          evidence:
+            jumpTarget.call || jumpTarget.image
+              ? { targetRunId, call: jumpTarget.call, image: jumpTarget.image }
+              : undefined,
+        });
+      }
       return;
     }
+
     if (
-      targetRunId &&
-      targetRunId !== data.run &&
-      !loadedOlderRuns.some(r => r.runId === targetRunId) &&
-      !loadingOlderRun
+      targetRunId === data.run &&
+      targetEpoch &&
+      feed.hasMore &&
+      !feed.blocks.some(b => b.trace?.epoch === targetEpoch)
     ) {
-      void loadOlderRunSegment(targetRunId);
+      if (!feed.loadingOlder) {
+        void feed.earlier();
+      }
+      return;
     }
-  }, [jumpTarget?.seq, jumpTarget?.value, segments.length, data.run, loadedOlderRuns, loadingOlderRun]);
+
+    const container = streamRef.current;
+    if (!container) return;
+
+    let targetEl: HTMLElement | null = null;
+    if (jumpTarget.call) {
+      targetEl = container.querySelector<HTMLElement>(`[data-call-id="${CSS.escape(jumpTarget.call)}"]`);
+    }
+    if (!targetEl && jumpTarget.block) {
+      targetEl = container.querySelector<HTMLElement>(`#${CSS.escape(jumpTarget.block)}`);
+    }
+    if (!targetEl && targetEpoch) {
+      targetEl = container.querySelector<HTMLElement>(
+        `[data-segment-anchor="${CSS.escape(`${targetRunId}#${targetEpoch}`)}"]`,
+      );
+    }
+    if (!targetEl && targetRunId) {
+      targetEl = container.querySelector<HTMLElement>(`[data-run-id="${CSS.escape(targetRunId)}"]`);
+    }
+
+    if (targetEl) {
+      lastJumpedSeqRef.current = jumpTarget.seq;
+      onActiveSegmentChange?.(jumpTarget.value);
+      if (jumpTarget.call || jumpTarget.image) {
+        const ownerData =
+          targetRunId === data.run
+            ? data
+            : (loadedOlderRuns.find(r => r.runId === targetRunId)?.data ?? data);
+        const matchedCall = jumpTarget.call
+          ? (ownerData.selectedCall?.id === jumpTarget.call ? ownerData.selectedCall : undefined) ??
+            ownerData.calls.find(c => c.id === jumpTarget.call)
+          : undefined;
+        setInspectedTurn({
+          runId: targetRunId || data.run,
+          blockId: jumpTarget.call ? `input-call:${jumpTarget.call}` : "jump-image",
+          callId: matchedCall?.id ?? jumpTarget.call ?? null,
+          imageId: jumpTarget.image ?? null,
+          at: matchedCall?.at ?? ownerData.updatedAt,
+        });
+        setDockOpen(true);
+      }
+
+      const rawTargetTop = Math.max(
+        0,
+        container.scrollTop +
+          (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) -
+          16,
+      );
+      const distance = Math.abs(rawTargetTop - container.scrollTop);
+      if (distance > 2200) {
+        const approachOffset = rawTargetTop < container.scrollTop ? 540 : -540;
+        container.scrollTop = Math.max(0, rawTargetTop + approachOffset);
+        requestAnimationFrame(() => {
+          const refinedTop = Math.max(
+            0,
+            container.scrollTop +
+              (targetEl!.getBoundingClientRect().top - container.getBoundingClientRect().top) -
+              16,
+          );
+          container.scrollTo({ top: refinedTop, behavior: "smooth" });
+        });
+      } else {
+        container.scrollTo({ top: rawTargetTop, behavior: "smooth" });
+      }
+
+      const highlightId =
+        targetEl.dataset.sessionDivider !== undefined
+          ? targetEl.id
+          : container.querySelector<HTMLElement>(
+              targetEpoch
+                ? `[data-segment-anchor="${CSS.escape(`${targetRunId}#${targetEpoch}`)}"]`
+                : `[data-run-id="${CSS.escape(targetRunId)}"]`,
+            )?.id ?? null;
+      if (highlightId) {
+        setHighlightedSegmentId(highlightId);
+        setTimeout(() => {
+          setHighlightedSegmentId(prev => (prev === highlightId ? null : prev));
+        }, 2400);
+      }
+      setTimeout(() => {
+        isJumpingRef.current = false;
+      }, 650);
+    } else if (!olderRunError) {
+      lastJumpedSeqRef.current = jumpTarget.seq;
+      isJumpingRef.current = false;
+    }
+  }, [
+    jumpTarget?.seq,
+    jumpTarget?.value,
+    jumpTarget?.call,
+    jumpTarget?.block,
+    jumpTarget?.image,
+    segments.length,
+    data,
+    loadedOlderRuns,
+    loadingOlderRun,
+    olderRunError,
+  ]);
 
   // Keep scrolled to bottom when new blocks arrive while following
-  useEffect(() => {
+  useLayoutEffect(() => {
     const el = streamRef.current;
-    if (!el || !atBottom || feed.historical) return;
+    if (!el || !atBottom || feed.historical || isJumpingRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [segments.length, feed.blocks.length, atBottom, feed.historical]);
+  }, [segments.length, feed.blocks.length, loadedOlderRuns.length, atBottom, feed.historical]);
 
   const handleScroll = () => {
     const el = streamRef.current;
     if (!el) return;
     if (Date.now() < programmaticScrollUntilRef.current) return;
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setAtBottom(distance < 48);
+    const nextAtBottom = distance < 48;
+    setAtBottom(nextAtBottom);
+
+    if (nextAtBottom) {
+      onActiveSegmentChange?.("");
+    } else if (onActiveSegmentChange) {
+      const containerTop = el.getBoundingClientRect().top;
+      const dividers = el.querySelectorAll<HTMLElement>("[data-session-divider]");
+      let currentAnchor: HTMLElement | null = null;
+      for (const div of dividers) {
+        if (div.getBoundingClientRect().top <= containerTop + 96) {
+          currentAnchor = div;
+        } else {
+          break;
+        }
+      }
+      if (!currentAnchor && dividers.length > 0) {
+        currentAnchor = dividers[0];
+      }
+      if (currentAnchor) {
+        const divRunId = currentAnchor.dataset.runId ?? "";
+        const divEpoch = currentAnchor.dataset.epoch ?? "";
+        if (divRunId && divRunId !== data.run) {
+          onActiveSegmentChange(divRunId);
+        } else if (divRunId === data.run && data.cycles.length > 1 && divEpoch) {
+          const isLatestCycle = data.cycles.at(-1)?.epoch === divEpoch;
+          onActiveSegmentChange(isLatestCycle ? "" : `${divRunId}#${divEpoch}`);
+        } else {
+          onActiveSegmentChange("");
+        }
+      }
+    }
+
+    if (el.scrollTop < 280 && !olderRunError && hasMoreUpwardHistory) {
+      loadNextUpwardHistory();
+    }
   };
 
   const handleInspectBlock = (runId: string, block: ActivityBlock, siblingSteps: ActivityBlock[] = []) => {
@@ -1922,10 +2485,13 @@ export function ShioriWorkbench({
       ? (loadedOlderRuns.find(r => r.runId === inspectedTurn.runId)?.data ?? data)
       : data;
   const inspectedCall = inspectedTurn?.callId
-    ? inspectedRunData.calls.find(c => c.id === inspectedTurn.callId) ??
+    ? (inspectedRunData.selectedCall?.id === inspectedTurn.callId
+        ? inspectedRunData.selectedCall
+        : undefined) ??
+      inspectedRunData.calls.find(c => c.id === inspectedTurn.callId) ??
       allCalls.find(c => c.id === inspectedTurn.callId)
     : undefined;
-  const activeBlockId = inspectedTurn?.blockId ?? selectedBlock;
+  const activeBlockId = inspectedTurn?.blockId ?? selectedBlock ?? jumpTarget?.block;
 
   const summary = data.summary;
   const latestCycle = data.cycles.at(-1);
@@ -1940,26 +2506,74 @@ export function ShioriWorkbench({
     latestCycle?.startedAt && latestCycle?.endedAt
       ? Math.max(0, Math.round((Date.parse(latestCycle.endedAt) - Date.parse(latestCycle.startedAt)) / 1000))
       : null;
+  const statusAnchorMs = activeHostOverride
+    ? hostStatusOverride!.appliedAtMs
+    : Date.parse(data.updatedAt);
   const updatedDeltaSec =
-    isLiveRun && isAuto && refresh && Number.isFinite(Date.parse(data.updatedAt))
-      ? Math.max(0, Math.min(10, Math.floor((nowMs - Date.parse(data.updatedAt)) / 1000)))
+    isLiveRun && isAuto && refresh && Number.isFinite(statusAnchorMs)
+      ? Math.max(0, Math.min(15, Math.floor((nowMs - statusAnchorMs) / 1000)))
       : 0;
   const baseCycleElapsed =
     isAuto && activeMaxSeconds != null && typeof live?.remainingSeconds === "number"
       ? Math.max(0, activeMaxSeconds - live.remainingSeconds)
       : isAuto && latestCycle?.startedAt && Number.isFinite(Date.parse(latestCycle.startedAt))
-        ? Math.max(0, Math.floor((Date.parse(data.updatedAt) - Date.parse(latestCycle.startedAt)) / 1000))
+        ? Math.max(0, Math.floor((statusAnchorMs - Date.parse(latestCycle.startedAt)) / 1000))
         : (latestCycleDurationSeconds ?? elapsedSeconds);
   const cycleElapsedSeconds =
     activeMaxSeconds != null
       ? Math.min(activeMaxSeconds, baseCycleElapsed + updatedDeltaSec)
       : baseCycleElapsed + updatedDeltaSec;
+  const liveRemainingSeconds =
+    isAuto && typeof live?.remainingSeconds === "number"
+      ? Math.max(0, Math.round(live.remainingSeconds) - updatedDeltaSec)
+      : isAuto && activeMaxSeconds != null
+        ? Math.max(0, Math.round(activeMaxSeconds - cycleElapsedSeconds))
+        : null;
   const displayPhaseElapsedMs =
     phaseElapsedMs != null ? phaseElapsedMs + updatedDeltaSec * 1000 : null;
   const budgetRatio =
     activeMaxSeconds != null && activeMaxSeconds > 0
       ? Math.min(100, Math.round((cycleElapsedSeconds / activeMaxSeconds) * 100))
-      : 100;
+      : 0;
+
+  const applyLiveStopTimer = async (seconds: number | null) => {
+    if (!project || !workspace) return;
+    const res = await sendRuntimeControl(project, workspace, {
+      action: "auto_budget",
+      seconds,
+      runId: data.run,
+      expectedEpoch: live?.epoch ?? undefined,
+    });
+    const record = asRecord(res);
+    const status = asRecord(record?.status) ?? (typeof record?.mode === "string" ? record : null);
+    if (status) {
+      setHostStatusOverride({
+        project,
+        run: data.run,
+        baseUpdatedAt: data.updatedAt,
+        appliedAtMs: Date.now(),
+        status,
+      });
+    }
+    onUpdated();
+  };
+
+  const extendLiveStopTimer = async (deltaSeconds: number) => {
+    if (!project || !workspace) return;
+    let baseRemaining = liveRemainingSeconds ?? 0;
+    try {
+      const fresh = await sendRuntimeControl(project, workspace, { action: "status" });
+      const freshRec = asRecord(fresh);
+      const freshStatus =
+        asRecord(freshRec?.status) ?? (typeof freshRec?.mode === "string" ? freshRec : null);
+      if (typeof freshStatus?.remainingSeconds === "number") {
+        baseRemaining = Math.max(0, freshStatus.remainingSeconds);
+      }
+    } catch {
+      // Fall back to local remaining estimate if status read fails transiently
+    }
+    await applyLiveStopTimer(Math.max(60, Math.round(baseRemaining + deltaSeconds)));
+  };
 
   const stateTitle = !isLiveRun
     ? t("stateSnapshot")
@@ -2042,35 +2656,44 @@ export function ShioriWorkbench({
         </header>
 
         {/* Scrollable Chat Stream */}
+        {jumpTarget && lastJumpedSeqRef.current !== jumpTarget.seq && jumpTarget.value && loadingOlderRun && (
+          <div className="codex-jump-toast" role="status">
+            <span className="codex-thinking-dot" />
+            <span>{t("locatingSegmentBanner")}</span>
+          </div>
+        )}
         <div ref={streamRef} className="codex-chat-scroll" onScroll={handleScroll}>
           <div className="codex-chat-column">
-            {(feed.hasMore || nextOlderRun || olderRunError) && (
+            {(feed.loadingOlder || loadingOlderRun || olderRunError) ? (
               <div className="codex-load-older">
-                <button
-                  type="button"
-                  className="codex-step-group-toggle"
-                  disabled={feed.loadingOlder || loadingOlderRun}
-                  onClick={() => {
-                    if (feed.hasMore) {
-                      capturePrependAnchor();
-                      void feed.earlier();
-                    } else if (nextOlderRun) {
-                      void loadOlderRunSegment();
-                    }
-                  }}
-                >
-                  <span>
-                    {feed.loadingOlder || loadingOlderRun
-                      ? t("loadingOlder")
-                      : olderRunError
-                        ? `${t("olderRunLoadFailed")}: ${olderRunError} · ${t("retryOlderRun")}`
-                        : feed.hasMore
-                          ? t("loadOlderMessages")
-                          : t("loadPreviousRunSegment")}
-                  </span>
-                  <ChevronRight className="size-3.5" aria-hidden="true" />
-                </button>
+                {olderRunError && !feed.loadingOlder && !loadingOlderRun ? (
+                  <button
+                    type="button"
+                    className="codex-step-group-toggle"
+                    onClick={() => {
+                      setOlderRunError(null);
+                      loadNextUpwardHistory();
+                    }}
+                  >
+                    <span>
+                      {t("olderRunLoadFailed")}: {olderRunError} · {t("retryOlderRun")}
+                    </span>
+                    <ChevronRight className="size-3.5" aria-hidden="true" />
+                  </button>
+                ) : (
+                  <div className="codex-history-status" role="status">
+                    <span className="codex-thinking-dot" />
+                    <span>{t("loadingOlder")}</span>
+                  </div>
+                )}
               </div>
+            ) : (
+              !hasMoreUpwardHistory &&
+              (loadedOlderRuns.length > 0 || segments.length > 6) && (
+                <div className="codex-history-origin">
+                  <span>{t("sessionBeginningReached")}</span>
+                </div>
+              )
             )}
 
             {segments.length === 0 ? (
@@ -2119,7 +2742,7 @@ export function ShioriWorkbench({
                   const isReply = livePoolItem?.kind === "reply";
                   const isRead = livePoolItem?.status === "handled";
                   return (
-                    <article key={seg.id} className="codex-turn-user">
+                    <article key={seg.id} id={seg.block.id} className="codex-turn-user">
                       <div className="codex-user-bubble" data-mode={seg.mode}>
                         {seg.mode !== "start" && (
                           <span className="codex-user-mode-tag">
@@ -2157,6 +2780,7 @@ export function ShioriWorkbench({
                   return (
                     <article
                       key={seg.id}
+                      id={seg.block.id}
                       className="codex-outbound-card"
                       data-kind={liveEvent.kind}
                       data-handled={!isPending ? "true" : undefined}
@@ -2229,6 +2853,7 @@ export function ShioriWorkbench({
                                         project,
                                         run: data.run,
                                         baseUpdatedAt: data.updatedAt,
+                                        appliedAtMs: Date.now(),
                                         status: res.hostStatus,
                                       });
                                     }
@@ -2278,7 +2903,7 @@ export function ShioriWorkbench({
                 const isLastSegment = segIdx === segments.length - 1;
 
                 return (
-                  <article key={seg.id} className="codex-turn-assistant">
+                  <article key={seg.id} id={seg.responseBlock?.id} className="codex-turn-assistant">
                     <CodexStepGroup
                       steps={seg.steps}
                       forceExpanded={showAllSteps}
@@ -2329,8 +2954,17 @@ export function ShioriWorkbench({
           isLiveRun={isLiveRun}
           hostStatusOverride={activeHostOverride}
           onHostStatusChange={status =>
-            setHostStatusOverride({ project, run: data.run, baseUpdatedAt: data.updatedAt, status })
+            setHostStatusOverride({
+              project,
+              run: data.run,
+              baseUpdatedAt: data.updatedAt,
+              appliedAtMs: Date.now(),
+              status,
+            })
           }
+          liveRemainingSeconds={liveRemainingSeconds}
+          onApplyLiveTimer={applyLiveStopTimer}
+          onExtendLiveTimer={extendLiveStopTimer}
           perceptionInjectOverride={perceptionInject}
           onPerceptionChange={setPerceptionOverride}
           poolSnapshot={poolSnapshot}
@@ -2347,6 +2981,7 @@ export function ShioriWorkbench({
                 project,
                 run: data.run,
                 baseUpdatedAt: data.updatedAt,
+                appliedAtMs: Date.now(),
                 status: hostStatus,
               });
             }
@@ -2407,28 +3042,46 @@ export function ShioriWorkbench({
                 : observationSlot}
             </div>
 
-            {/* 2. Compact Loop Budget & Session Telemetry */}
+            {/* 2. Session Runtime & Live Stop-Timer + OMP Telemetry */}
             {summary && (
               <div className="codex-dock-section">
-                <div className="flex items-center justify-between">
+                <div className="codex-runtime-header">
                   <h3 className="codex-dock-heading">{t("telemetryCardTitle")}</h3>
-                  <span className="font-mono text-[11px] text-muted-foreground">
-                    {activeMaxSeconds != null
-                      ? `${formatDurationCompact(cycleElapsedSeconds)} / ${formatDurationCompact(activeMaxSeconds)}`
-                      : `${formatDurationCompact(elapsedSeconds)} · ∞ ${t("durationUnbounded")}`}
-                  </span>
+                  <div className="codex-runtime-header-right">
+                    {isAuto && hostOnline ? (
+                      <>
+                        <span className="codex-runtime-elapsed">
+                          {t("runtimeElapsedPrefix").replace(
+                            "{elapsed}",
+                            formatDurationCompact(cycleElapsedSeconds),
+                          )}
+                        </span>
+                        <LiveStopTimerControl
+                          remainingSeconds={liveRemainingSeconds}
+                          placement="down"
+                          onApplyTimer={applyLiveStopTimer}
+                          onExtendTimer={extendLiveStopTimer}
+                        />
+                      </>
+                    ) : (
+                      <span className="font-mono text-[11px] text-muted-foreground">
+                        {formatDurationCompact(elapsedSeconds)} · {stateTitle}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
-                <div
-                  className="shiori-budget-bar"
-                  data-unbounded={activeMaxSeconds == null || undefined}
-                  role="progressbar"
-                  aria-valuenow={budgetRatio}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <div className="shiori-budget-bar-fill" style={{ width: `${budgetRatio}%` }} />
-                </div>
+                {isAuto && activeMaxSeconds != null && liveRemainingSeconds != null && (
+                  <div
+                    className="shiori-budget-bar"
+                    role="progressbar"
+                    aria-valuenow={budgetRatio}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                  >
+                    <div className="shiori-budget-bar-fill" style={{ width: `${budgetRatio}%` }} />
+                  </div>
+                )}
 
                 <div className="codex-stat-cards">
                   <div className="codex-stat-card">
