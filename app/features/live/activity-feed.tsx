@@ -226,6 +226,17 @@ function extractSystemSummary(block: LogBlock): string | null {
     const tokens = typeof data?.tokensBefore === "number" ? ` · ${data.tokensBefore.toLocaleString()} tokens` : "";
     return `${block.title.replaceAll("_", " ")}${tokens}`;
   }
+  if (block.title === "pool_receipt" || data?.role === "pool_receipt") {
+    const actor = data?.actor === "human" ? "human" : "shiori";
+    const events = Array.isArray(data?.events) ? data.events : [];
+    const seqs = events
+      .map(item => (item && typeof item === "object" ? (item as { seq?: unknown }).seq : undefined))
+      .filter((seq): seq is number => typeof seq === "number")
+      .map(seq => `#${seq}`);
+    const idCount = Array.isArray(data?.ids) ? data.ids.length : events.length;
+    const target = seqs.length > 0 ? seqs.join(", ") : `${idCount} event${idCount === 1 ? "" : "s"}`;
+    return actor === "human" ? `✓ Event Pool · human handled ${target}` : `📨 Event Pool · Shiori read ${target}`;
+  }
   return null;
 }
 

@@ -304,6 +304,7 @@ function sampleWorkbenchFeed(historical = true): ActivityFeedData {
     selected: undefined,
     selectionReady: true,
     before: null,
+    historyFloorAt: null,
     hasMore: false,
     total: 0,
     historical,
@@ -354,11 +355,18 @@ test("ShioriWorkbench renders 46px header slots, scroll-stage anchor above compo
 
   const runPickerPos = html.indexOf("data-test-run-picker");
   const expandBtnPos = html.indexOf("codex-expand-all-btn");
+  const poolTriggerPos = html.indexOf("codex-pool-trigger-btn");
   const dockTogglePos = html.indexOf("codex-dock-toggle-btn");
   assert.ok(
     runPickerPos > -1 && expandBtnPos > runPickerPos && dockTogglePos > expandBtnPos,
     "runPicker renders inside .codex-thread-actions before expand-steps and right-dock toggle",
   );
+  assert.ok(
+    poolTriggerPos > expandBtnPos && dockTogglePos > poolTriggerPos,
+    "Event Pool quick trigger sits between expand-steps and right-dock toggle (runPicker < expandAll < poolTrigger < dockToggle)",
+  );
+  assert.match(html, /class="codex-pool-trigger-label"/);
+  assert.doesNotMatch(html, /codex-pool-header-pill/, "legacy dual inline header pills are gone");
 
   const scrollStagePos = html.indexOf("codex-chat-scroll-stage");
   const scrollBtnPos = html.indexOf("codex-scroll-bottom-btn");
@@ -371,6 +379,104 @@ test("ShioriWorkbench renders 46px header slots, scroll-stage anchor above compo
   assert.match(html, /class="codex-dock-header"/);
   assert.match(html, /class="codex-dock-header-title"/);
   assert.match(html, /codex-dock-close-btn/);
+
+  const dockHeader = html.slice(html.indexOf('class="codex-dock-header"'), html.indexOf("codex-dock-close-btn"));
+  assert.match(dockHeader, /class="codex-dock-seg" role="tablist"/);
+  assert.equal((dockHeader.match(/role="tab"/g) ?? []).length, 2, "dock header renders 画面与遥测 | 事件池 tabs");
+  assert.match(dockHeader, /aria-selected="true"[^>]*><span class="codex-dock-header-title">/, "stage tab is the default");
+  assert.match(dockHeader, /data-dock-tab-pool/);
+  assert.match(html, /data-dock-tab="stage"/);
+});
+
+test("ShioriWorkbench renders Event Pool Message 1 at createdAt with #seq + status and Message 2 receipt card at T_read", async () => {
+  const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
+  const sentEvent = {
+    id: "ev-12",
+    seq: 12,
+    direction: "inbound" as const,
+    kind: "message" as const,
+    status: "pending" as const,
+    text: "wifi dropped, check the Switch connection",
+    createdAt: "2026-01-01T00:00:05.000Z",
+  };
+  const withdrawnEvent = { ...sentEvent, id: "ev-13", seq: 13, createdAt: "2026-01-01T00:00:06.000Z" };
+  const receipt = (id: string, at: string, actor: "shiori" | "human", event: typeof sentEvent) =>
+    block({
+      id,
+      kind: "system",
+      title: "pool_receipt",
+      at,
+      data: {
+        role: "pool_receipt",
+        action: "handled",
+        actor,
+        ids: [event.id],
+        events: [{ ...event, status: "handled", handledAt: at, handledBy: actor }],
+      },
+      trace: { epoch: "epoch-1" },
+    });
+  const feed = {
+    ...sampleWorkbenchFeed(false),
+    blocks: [
+      block({
+        id: "ctrl",
+        kind: "system",
+        title: "control",
+        at: "2026-01-01T00:00:00.000Z",
+        data: { mode: "auto", epoch: "epoch-1" },
+        trace: { epoch: "epoch-1" },
+      }),
+      block({
+        id: "sent-12",
+        kind: "text",
+        title: "Event",
+        at: sentEvent.createdAt,
+        data: { role: "user", mode: "event", text: sentEvent.text, event: sentEvent },
+        trace: { epoch: "epoch-1" },
+      }),
+      block({
+        id: "sent-13",
+        kind: "text",
+        title: "Event",
+        at: withdrawnEvent.createdAt,
+        data: { role: "user", mode: "event", text: withdrawnEvent.text, event: withdrawnEvent },
+        trace: { epoch: "epoch-1" },
+      }),
+      receipt("withdraw-13", "2026-01-01T00:00:09.000Z", "human", withdrawnEvent),
+      receipt("read-12", "2026-01-01T00:00:13.000Z", "shiori", sentEvent),
+    ],
+  };
+  const html = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-ws",
+        workspace: "/tmp/demo-ws",
+        workspaceTitle: "Demo Workspace",
+        data: sampleWorkbenchRunData(),
+        feed,
+        isLiveRun: true,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", null, "viewport"),
+      }),
+    ),
+  );
+
+  const message1Pos = html.indexOf('data-pool-event-id="ev-12"');
+  const receiptPos = html.indexOf('data-pool-receipt="ev-12"');
+  assert.ok(message1Pos > -1, "Message 1 carries data-pool-event-id");
+  assert.match(html, /data-pool-event-id="ev-12" data-pool-seq="12"/);
+  assert.match(html, /codex-pool-seq-link[^>]*>[^<]*· #12/);
+  assert.ok(receiptPos > message1Pos, "Message 2 receipt renders after Message 1");
+  assert.match(html, /class="codex-pool-receipt" data-actor="shiori"/);
+  assert.match(html, /codex-pool-receipt-latency/, "receipt shows turnaround latency");
+  assert.match(html, /codex-pool-receipt-jump/);
+  assert.doesNotMatch(html, /data-pool-receipt="ev-13"/, "human withdrawal emits no receipt card");
+  assert.match(html, /data-pool-event-id="ev-13"[\s\S]*?data-withdrawn="true"/, "withdrawn bubble is marked in place");
 });
 
 test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100px overlay drawer, and anti-wrap telemetry badges", () => {

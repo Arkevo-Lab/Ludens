@@ -1211,29 +1211,215 @@
   color: var(--primary);
 }
 
-/* Header Event Pool Badges */
-.codex-pool-header-pill {
+/* Header Event Pool Quick Trigger (Col 2 → opens Col 3 `事件池` tab) */
+.codex-pool-trigger-btn {
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
+  font-family: inherit;
+}
+.codex-pool-trigger-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+.codex-pool-trigger-count {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 9px;
-  border-radius: 999px;
-  border: 1px solid color-mix(in srgb, var(--primary) 34%, var(--border));
-  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--primary) 18%, transparent);
   color: var(--primary);
-  font: 600 11px/1 var(--font-mono);
-  white-space: nowrap;
-  flex-shrink: 0;
+  font: 700 10.5px/1 var(--font-mono);
 }
-.codex-pool-header-pill[data-tone="outbound"] {
+.codex-pool-trigger-btn[data-tone="inbound"] {
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  color: var(--primary);
+}
+.codex-pool-trigger-btn[data-tone="outbound"] {
   border-color: color-mix(in srgb, #d97706 42%, var(--border));
-  background: color-mix(in srgb, #f59e0b 14%, transparent);
+  background: color-mix(in srgb, #f59e0b 12%, transparent);
   color: #d97706;
+}
+.codex-pool-trigger-btn[data-tone="outbound"] .codex-pool-trigger-count {
+  background: color-mix(in srgb, #f59e0b 22%, transparent);
+  color: #d97706;
+}
+.codex-pool-trigger-btn[data-tone="outbound"]:hover {
+  background: color-mix(in srgb, #f59e0b 20%, transparent);
+  color: #d97706;
+}
+
+/* Clickable `#seq` header tags on stream Event Pool cards */
+.codex-pool-seq-link {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+.codex-pool-seq-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.codex-outbound-badge.codex-pool-seq-link {
+  padding: 2px 8px;
+  background: color-mix(in srgb, #d97706 16%, transparent);
+}
+.codex-outbound-card[data-kind="notice"] .codex-outbound-badge.codex-pool-seq-link {
+  background: color-mix(in srgb, var(--primary) 15%, transparent);
+}
+
+/* Pending inbound withdraw + withdrawn state */
+.codex-pool-withdraw-btn {
+  height: 20px;
+  padding: 0 7px;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, var(--border) 85%, transparent);
+  background: transparent;
+  color: var(--muted-foreground);
+  font: 500 11px/1 var(--font-mono);
   cursor: pointer;
 }
-.codex-pool-header-pill[data-tone="outbound"]:hover {
-  background: color-mix(in srgb, #f59e0b 20%, transparent);
+.codex-pool-withdraw-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--destructive) 40%, var(--border));
+  color: var(--destructive);
+}
+.codex-pool-withdraw-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.codex-user-event-status[data-withdrawn="true"] {
+  color: var(--muted-foreground);
+}
+.codex-user-bubble[data-withdrawn] {
+  opacity: 0.62;
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 50%, var(--card));
+  border-style: dashed;
+}
+.codex-user-bubble[data-withdrawn] p {
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted-foreground) 55%, transparent);
+}
+
+/* Causal read / resolution receipt at T_read */
+.codex-pool-receipt {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  font-size: 12px;
+  color: var(--muted-foreground);
+  min-width: 0;
+}
+.codex-pool-receipt[data-actor="human"] {
+  border-color: color-mix(in srgb, #d97706 26%, var(--border));
+  background: color-mix(in srgb, #f59e0b 5%, transparent);
+}
+.codex-pool-receipt-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--primary) 14%, transparent);
+  color: var(--primary);
+}
+.codex-pool-receipt[data-actor="human"] .codex-pool-receipt-icon {
+  background: color-mix(in srgb, #f59e0b 16%, transparent);
+  color: #d97706;
+}
+.codex-pool-receipt-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.codex-pool-receipt-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 22px;
+  color: var(--foreground);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.codex-pool-receipt-quote {
+  padding-left: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--border) 90%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.codex-pool-receipt-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 22px;
+  font: 500 11px/1 var(--font-mono);
+}
+.codex-pool-receipt-latency {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: var(--surface-inset, var(--muted));
+  color: var(--foreground);
+}
+.codex-pool-receipt-jump {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.codex-pool-receipt-jump:hover {
+  border-color: var(--border);
+  color: var(--foreground);
+}
+@media (max-width: 680px) {
+  .codex-pool-receipt {
+    flex-wrap: wrap;
+  }
+  .codex-pool-receipt-meta {
+    width: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* Locate-in-stream target pulse */
+.is-pool-target-flash > .codex-user-bubble,
+.codex-outbound-card.is-pool-target-flash {
+  animation: codex-pool-target-flash 2.4s ease-out 1;
+}
+@keyframes codex-pool-target-flash {
+  0%,
+  35% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 70%, transparent),
+      0 0 0 6px color-mix(in srgb, var(--primary) 18%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .is-pool-target-flash > .codex-user-bubble,
+  .codex-outbound-card.is-pool-target-flash {
+    animation: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 70%, transparent);
+  }
 }
 
 /* Pending Outbound Event Quick Strip docked above Composer */
@@ -1507,6 +1693,125 @@
 .codex-dock-close-btn {
   display: none;
   padding: 0 6px;
+}
+
+/* Col 3 segmented header: 画面与遥测 | 事件池 (inside the fixed 46px header) */
+.codex-dock-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 30px;
+  padding: 2px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 60%, transparent);
+  box-sizing: border-box;
+}
+.codex-dock-seg-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  min-width: 0;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.codex-dock-seg-tab .codex-dock-header-title {
+  font-size: 12px;
+  font-weight: inherit;
+  color: inherit;
+}
+.codex-dock-seg-tab:hover {
+  color: var(--foreground);
+}
+.codex-dock-seg-tab[data-active] {
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--foreground);
+  font-weight: 600;
+}
+.codex-dock-seg-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 700 10.5px/1 var(--font-mono);
+  color: var(--primary);
+}
+.codex-dock-seg-badge > i {
+  display: block;
+  width: 6px;
+  height: 6px;
+  background: currentColor;
+}
+.codex-dock-seg-badge[data-tone="warn"] {
+  color: #d97706;
+}
+.codex-dock-body[hidden] {
+  display: none;
+}
+.codex-dock-body[data-dock-tab="pool"] {
+  padding: 0;
+  gap: 0;
+}
+
+/* Minimal built-in Event Pool list (when no overview panel slot is wired) */
+.codex-pool-fallback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 12px;
+  list-style: none;
+}
+.codex-pool-fallback-list > li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.codex-pool-fallback-list > li[data-focused] {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+}
+.codex-pool-fallback-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foreground);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.codex-pool-fallback-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.codex-pool-seq {
+  font: 600 11px/1 var(--font-mono);
+  color: var(--muted-foreground);
+}
+.codex-pool-fallback-empty {
+  padding: 24px 8px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted-foreground);
 }
 
 .codex-dock-tabs {
@@ -2430,6 +2735,24 @@
   .codex-workbench[data-dock-open] .codex-thread-doc-icon,
   .codex-workbench[data-dock-open] .codex-live-phase {
     display: none;
+  }
+}
+
+/* Event Pool trigger collapses to icon (+count) on compact widths so the Shiori title never clips */
+@media (max-width: 1279px) {
+  .codex-pool-trigger-label {
+    display: none;
+  }
+  .codex-pool-trigger-btn {
+    padding: 0 7px;
+  }
+}
+@media (min-width: 1100px) and (max-width: 1380px) {
+  .codex-workbench[data-dock-open] .codex-pool-trigger-label {
+    display: none;
+  }
+  .codex-workbench[data-dock-open] .codex-pool-trigger-btn {
+    padding: 0 7px;
   }
 }
 

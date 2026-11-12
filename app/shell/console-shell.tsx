@@ -7,6 +7,7 @@ import { PixelMark } from "@/components/ui/pixel-mark";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ShioriWorkbench } from "@/features/live/shiori-cockpit";
+import { EventPoolOverviewPanel } from "@/features/live/event-pool-panel";
 import { WorkspaceStudioView } from "@/features/workspaces/workspace-studio-view";
 import { ConsoleSidebar } from "@/shell/console-sidebar";
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
@@ -314,6 +315,7 @@ export default function ConsoleShell() {
                   runs={project?.runs ?? []}
                   runPicker={contextualRunPicker}
                   mobileNavSlot={mobileNavButton}
+                  renderEventPoolPanel={props => <EventPoolOverviewPanel {...props} />}
                   jumpTarget={liveJumpTarget}
                   onClearJumpTarget={clearLiveJumpTarget}
                   onActiveSegmentChange={setActiveLiveSegment}

@@ -21,6 +21,9 @@ interface FeedState {
   selected?: ActivityBlock;
   selectionReady: boolean;
   before: string | null;
+  /** `at` of the oldest block delivered by server history paging: the true floor of the loaded window,
+   *  unlike `blocks[0]`, which may be an older block re-delivered by a late live update. */
+  historyFloorAt: string | null;
   hasMore: boolean;
   total: number;
   historical: boolean;
@@ -30,7 +33,7 @@ interface FeedState {
 }
 
 const emptyState = (resetRevision = 0): FeedState => ({ resetRevision, loadedRevision: null, scope: null, generation: null, snapshot: 0,
-  blocks: [], selectionReady: false, before: null, hasMore: false, total: 0,
+  blocks: [], selectionReady: false, before: null, historyFloorAt: null, hasMore: false, total: 0,
   historical: false, loading: true, loadingOlder: false, error: "" });
 
 const scopeParams = activityScopeParams;
@@ -164,7 +167,7 @@ export function useActivityFeed(options: {
       update(value => ({ ...value, blocks: mergeActivity(result.blocks,
         value.blocks.filter(block => block.revision > result.projection.revision || block.status === "running"), {
           filter, query: search, append: true, keep: "latest", limit: ACTIVITY_WINDOW_SIZE,
-        }), before: result.before ?? null, hasMore: result.hasMore, total: result.total ?? 0,
+        }), before: result.before ?? null, historyFloorAt: result.blocks[0]?.at ?? null, hasMore: result.hasMore, total: result.total ?? 0,
         historical: false, loading: false, loadedRevision: value.resetRevision, error: "" }));
     }).catch(error => {
       if (isCurrentRequest()) update(value => ({ ...value, loading: false, error: String(error) }));
@@ -231,7 +234,8 @@ export function useActivityFeed(options: {
           : ACTIVITY_WINDOW_SIZE;
         return { ...value, blocks: mergeActivity(value.blocks, result.blocks, {
           filter, query: search, append: true, keep: continuousStream ? "latest" : "oldest", limit: nextLimit,
-        }), before: result.before ?? null, hasMore: result.hasMore, total: result.total ?? value.total,
+        }), before: result.before ?? null, historyFloorAt: result.blocks[0]?.at ?? value.historyFloorAt,
+          hasMore: result.hasMore, total: result.total ?? value.total,
           historical: continuousStream ? false : true, loadingOlder: false };
       });
     } catch (error) {

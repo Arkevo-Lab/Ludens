@@ -338,9 +338,46 @@ test("pool_event activity projection renders inbound, outbound and handled block
   expect(blocks.map(block => [block.kind, block.title, block.text])).toEqual([
     ["text", "Event", "please continue"],
     ["text", "Help Request", "need a decision"],
-    ["diagnostic", "pool_event", expect.any(String)],
+    ["system", "pool_receipt", "Human handled #2"],
   ]);
   expect(blocks[0].data).toMatchObject({ role: "user", mode: "event", text: "please continue" });
   expect(blocks[1].data).toMatchObject({ role: "shiori_event", mode: "help_request", text: "need a decision" });
-  expect(blocks[2].data).toMatchObject({ action: "handled", actor: "human" });
+  expect(blocks[2].data).toMatchObject({ role: "pool_receipt", action: "handled", actor: "human", ids: ["ev-2-b"] });
+});
+
+test("pool receipts project shiori read and human withdrawal alongside send blocks", async () => {
+  const poolEvent = (seq: number, data: Record<string, unknown>): Event => ({
+    seq, at: new Date(2026, 0, 2, 0, 0, seq).toISOString(), atMs: seq, type: "pool_event", trace: {}, data,
+  });
+  const inbound = { id: "ev-12-a", seq: 12, direction: "inbound", kind: "message", status: "handled", text: "check the shop", title: "Shop" };
+  const withdrawn = { id: "ev-13-b", seq: 13, direction: "inbound", kind: "message", status: "handled", handledBy: "human", text: "never mind" };
+  const blocks = await activityBlocks("runs/test-run/events.jsonl", [
+    poolEvent(1, { action: "created", event: inbound }),
+    poolEvent(2, { action: "created", event: withdrawn }),
+    poolEvent(3, { action: "handled", actor: "shiori", ids: [inbound.id], events: [inbound] }),
+    poolEvent(4, { action: "handled", actor: "human", ids: [withdrawn.id], events: [withdrawn] }),
+  ]);
+  const receipts = blocks.filter(block => block.title === "pool_receipt");
+  expect(receipts.map(block => [block.kind, block.status, block.text])).toEqual([
+    ["system", "complete", "Shiori read #12: Shop"],
+    ["system", "complete", "Human withdrew #13"],
+  ]);
+  expect(receipts[0].data).toMatchObject({ role: "pool_receipt", action: "handled", actor: "shiori", ids: ["ev-12-a"] });
+  expect(receipts[1].data).toMatchObject({ role: "pool_receipt", actor: "human", events: [withdrawn] });
+  expect(blocks.map(block => block.at)).toEqual([...blocks.map(block => block.at)].sort());
+});
+
+test("human withdrawal of an unread pending inbound event marks it handled by human", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ludens-pool-withdraw-"));
+  try {
+    const pool = new WorkspaceEventPool(directory);
+    const { event } = await pool.postInbound({ text: "oops", runId: null, epoch: null });
+    const acked = await pool.ack([event.id], "human", "inbound", "2026-01-02T00:00:00.000Z");
+    expect(acked.updated[0]).toMatchObject({ id: event.id, status: "handled", handledBy: "human", handledAt: "2026-01-02T00:00:00.000Z" });
+    const snapshot = await pool.snapshot();
+    expect(snapshot.summary.pendingInbound).toBe(0);
+    expect(snapshot.events.find(item => item.id === event.id)).toMatchObject({ status: "handled", handledBy: "human" });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

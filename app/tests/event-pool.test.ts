@@ -6,7 +6,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WorkspaceEventPool } from "@ludens/core/core/storage/event-pool";
 import { DashboardWorker } from "../lib/dashboard-worker";
-import { buildCodexSegments } from "../features/live/shiori-segments";
+import {
+  buildCodexSegments,
+  mergePoolSnapshotSegments,
+  segmentTimestampMs,
+  type StreamSegment,
+} from "../features/live/shiori-segments";
+import type { PoolEvent } from "@ludens/protocol/event-pool";
 import type { ActivityBlock } from "../features/live/activity-feed-model";
 import { registerFixture } from "./fixtures/registry";
 
@@ -221,4 +227,231 @@ test("en and zh shioriCockpit locale keys stay in exact parity with Event Pool t
   assert.equal(enKeys.includes("deliveryEventPool"), true);
   assert.equal(enKeys.includes("poolHelpRequestBadge"), true);
   assert.equal(enKeys.includes("poolReplyResumeBtn"), true);
+});
+
+// ── Chronological split: sent bubble @ createdAt + causal receipt @ handledAt ──
+
+const STREAM_RUN = "20261112T051955Z-diablo3";
+
+function poolStreamBlock(
+  overrides: Pick<ActivityBlock, "id" | "kind" | "at" | "title"> & Partial<ActivityBlock>,
+): ActivityBlock {
+  return { text: "", status: "complete", createdRevision: 1, revision: 1, ...overrides };
+}
+
+function poolEventFixture(overrides: Partial<PoolEvent> & Pick<PoolEvent, "id" | "seq" | "createdAt">): PoolEvent {
+  return {
+    direction: "inbound",
+    kind: "message",
+    status: "pending",
+    text: `event ${overrides.seq}`,
+    ...overrides,
+  };
+}
+
+function autoControl(at: string): ActivityBlock {
+  return poolStreamBlock({
+    id: `ctrl-${at}`,
+    kind: "system",
+    title: "control",
+    at,
+    data: { mode: "auto", epoch: "ep-today", maxSeconds: null },
+    trace: { epoch: "ep-today" },
+  });
+}
+
+function assistantText(id: string, at: string, text: string): ActivityBlock {
+  return poolStreamBlock({
+    id,
+    kind: "text",
+    title: "assistant",
+    at,
+    text,
+    source: { component: "shiori" },
+    trace: { epoch: "ep-today" },
+  });
+}
+
+function inboundEventBlock(event: PoolEvent): ActivityBlock {
+  return poolStreamBlock({
+    id: `pool-created-${event.id}`,
+    kind: "text",
+    title: "Event",
+    at: event.createdAt,
+    text: event.text,
+    data: { role: "user", mode: "event", text: event.text, event },
+    trace: { epoch: "ep-today" },
+  });
+}
+
+function receiptBlock(id: string, at: string, actor: "shiori" | "human", events: PoolEvent[]): ActivityBlock {
+  return poolStreamBlock({
+    id,
+    kind: "system",
+    title: "pool_receipt",
+    at,
+    text: `${actor} handled ${events.map(item => `#${item.seq}`).join(", ")}`,
+    data: {
+      role: "pool_receipt",
+      action: "handled",
+      actor,
+      ids: events.map(item => item.id),
+      events: events.map(item => ({ ...item, status: "handled", handledAt: at, handledBy: actor })),
+    },
+    trace: { epoch: "ep-today" },
+  });
+}
+
+function segmentTimes(segments: StreamSegment[]): number[] {
+  return segments.map(segmentTimestampMs).filter(Number.isFinite);
+}
+
+test("mergePoolSnapshotSegments never pins yesterday's handled 21:40:10 bubble below today's 13:20:30 stream and inserts in-window events chronologically", () => {
+  const segments = buildCodexSegments(
+    [
+      autoControl("2026-11-12T13:20:00.000Z"),
+      assistantText("a-1", "2026-11-12T13:20:21.000Z", "Opening the inventory."),
+      assistantText("a-2", "2026-11-12T13:20:30.000Z", "Equipping the new gem."),
+    ],
+    [],
+    [],
+    { runId: STREAM_RUN, cycles: [], isLatestRun: true, isAuto: true },
+  );
+  const yesterdayHandled = poolEventFixture({
+    id: "ev-yesterday",
+    seq: 7,
+    runId: null,
+    status: "handled",
+    handledBy: "shiori",
+    createdAt: "2026-11-11T21:40:02.000Z",
+    handledAt: "2026-11-11T21:40:10.000Z",
+  });
+  const yesterdayPendingOffline = poolEventFixture({
+    id: "ev-yesterday-pending",
+    seq: 8,
+    runId: null,
+    createdAt: "2026-11-11T21:41:00.000Z",
+  });
+  const inWindow = poolEventFixture({ id: "ev-now", seq: 12, runId: null, createdAt: "2026-11-12T13:20:25.000Z" });
+  const earliestLoadedMs = Date.parse("2026-11-12T13:20:00.000Z");
+
+  const merged = mergePoolSnapshotSegments(segments, [yesterdayHandled, yesterdayPendingOffline, inWindow], {
+    earliestLoadedMs,
+    hasMoreUpwardHistory: true,
+  });
+
+  const poolIds = merged.flatMap(seg => (seg.kind === "user" && seg.poolEvent ? [seg.poolEvent.id] : []));
+  assert.deepEqual(poolIds, ["ev-now"], "events older than the loaded window stay out of today's stream");
+  const insertedIdx = merged.findIndex(seg => seg.kind === "user" && seg.poolEvent?.id === "ev-now");
+  const idx2021 = merged.findIndex(seg => seg.kind === "turn" && seg.responseBlock?.id === "a-1");
+  const idx2030 = merged.findIndex(seg => seg.kind === "turn" && seg.responseBlock?.id === "a-2");
+  assert.ok(idx2021 < insertedIdx && insertedIdx < idx2030, "in-window event lands between 13:20:21 and 13:20:30");
+  assert.notEqual(insertedIdx, merged.length - 1, "never appended to the tail");
+  const times = segmentTimes(merged);
+  assert.deepEqual(times, [...times].sort((a, b) => a - b));
+
+  // Already-projected events are not duplicated; full history loaded => older items sit at their true position (top).
+  const fullHistory = mergePoolSnapshotSegments(merged, [yesterdayHandled, inWindow], {
+    earliestLoadedMs: 0,
+    hasMoreUpwardHistory: false,
+  });
+  assert.equal(fullHistory.filter(seg => seg.kind === "user" && seg.poolEvent?.id === "ev-now").length, 1);
+  assert.equal(fullHistory[0]?.kind, "user");
+  assert.equal(fullHistory[0]?.kind === "user" ? fullHistory[0].poolEvent?.id : null, "ev-yesterday");
+});
+
+test("pool_receipt splits a 13:20:05 send and a 13:20:42 Shiori read into two chronological stream events", () => {
+  const sent = poolEventFixture({
+    id: "ev-12",
+    seq: 12,
+    text: "刚才 wifi 断了宝宝，你看看现在能不能连到 Switch",
+    createdAt: "2026-11-12T13:20:05.000Z",
+    runId: STREAM_RUN,
+  });
+  const segments = buildCodexSegments(
+    [
+      autoControl("2026-11-12T13:20:00.000Z"),
+      inboundEventBlock(sent),
+      assistantText("a-1", "2026-11-12T13:20:20.000Z", "Clearing the dungeon floor."),
+      poolStreamBlock({
+        id: "tool-1",
+        kind: "tool",
+        title: "event_pool",
+        at: "2026-11-12T13:20:41.000Z",
+        tool: { args: { action: "read" } },
+        trace: { epoch: "ep-today" },
+      }),
+      receiptBlock("receipt-1", "2026-11-12T13:20:42.000Z", "shiori", [sent]),
+      assistantText("a-2", "2026-11-12T13:20:50.000Z", "Reconnecting to the Switch."),
+    ],
+    [],
+    [],
+    { runId: STREAM_RUN, cycles: [], isLatestRun: true, isAuto: true },
+  );
+
+  assert.deepEqual(
+    segments.map(seg => seg.kind),
+    ["session_divider", "user", "turn", "turn", "pool_receipt", "turn"],
+  );
+  const message1 = segments.find(seg => seg.kind === "user");
+  assert.equal(message1?.kind === "user" ? message1.block.at : null, "2026-11-12T13:20:05.000Z");
+  assert.equal(message1?.kind === "user" ? message1.poolEvent?.status : null, "handled");
+  assert.equal(message1?.kind === "user" ? message1.poolEvent?.handledBy : null, "shiori");
+  assert.equal(message1?.kind === "user" ? message1.poolEvent?.handledAt : null, "2026-11-12T13:20:42.000Z");
+
+  const message2 = segments.find(seg => seg.kind === "pool_receipt");
+  assert.ok(message2?.kind === "pool_receipt");
+  if (message2?.kind === "pool_receipt") {
+    assert.equal(message2.at, "2026-11-12T13:20:42.000Z");
+    assert.equal(message2.actor, "shiori");
+    assert.deepEqual(message2.ids, ["ev-12"]);
+    assert.equal(message2.events[0]?.seq, 12);
+    assert.equal(message2.id, `${STREAM_RUN}:pool-receipt:receipt-1`);
+  }
+  const times = segmentTimes(segments);
+  assert.deepEqual(times, [...times].sort((a, b) => a - b), "turns between send and read keep exact timestamp order");
+});
+
+test("human withdrawal marks the inbound bubble withdrawn without a receipt card, while human outbound resolution keeps one", () => {
+  const withdrawn = poolEventFixture({ id: "ev-20", seq: 20, createdAt: "2026-11-12T13:20:05.000Z" });
+  const outbound = poolEventFixture({
+    id: "ev-21",
+    seq: 21,
+    direction: "outbound",
+    kind: "notice",
+    createdAt: "2026-11-12T13:20:10.000Z",
+  });
+  const segments = buildCodexSegments(
+    [
+      autoControl("2026-11-12T13:20:00.000Z"),
+      inboundEventBlock(withdrawn),
+      poolStreamBlock({
+        id: "out-21",
+        kind: "text",
+        title: "Notice",
+        at: outbound.createdAt,
+        source: { component: "shiori" },
+        data: { role: "shiori_event", mode: "notice", text: outbound.text, event: outbound },
+        trace: { epoch: "ep-today" },
+      }),
+      receiptBlock("receipt-withdraw", "2026-11-12T13:20:15.000Z", "human", [withdrawn]),
+      receiptBlock("receipt-resolve", "2026-11-12T13:20:30.000Z", "human", [outbound]),
+    ],
+    [],
+    [],
+    { runId: STREAM_RUN, cycles: [], isLatestRun: true, isAuto: true },
+  );
+
+  assert.deepEqual(
+    segments.map(seg => seg.kind),
+    ["session_divider", "user", "outbound_event", "pool_receipt"],
+  );
+  const bubble = segments.find(seg => seg.kind === "user");
+  assert.equal(bubble?.kind === "user" ? bubble.poolEvent?.status : null, "handled");
+  assert.equal(bubble?.kind === "user" ? bubble.poolEvent?.handledBy : null, "human");
+  const outboundSeg = segments.find(seg => seg.kind === "outbound_event");
+  assert.equal(outboundSeg?.kind === "outbound_event" ? outboundSeg.event.status : null, "handled");
+  const receipt = segments.find(seg => seg.kind === "pool_receipt");
+  assert.equal(receipt?.kind === "pool_receipt" ? receipt.actor : null, "human");
+  assert.deepEqual(receipt?.kind === "pool_receipt" ? receipt.ids : null, ["ev-21"]);
 });
