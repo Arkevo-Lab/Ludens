@@ -189,11 +189,143 @@ import {
   cleanErrorMessage,
   cleanInlinePreview,
   extractReadableText,
+  mergePoolSnapshotSegments,
   summarizeStepBlock,
   type BuildSegmentsOptions,
   type StreamSegment,
 } from "@/features/live/shiori-segments";
-export { buildCodexSegments, type BuildSegmentsOptions, type StreamSegment };
+import { summarizePoolEventPreview } from "@ludens/protocol/event-pool";
+export { buildCodexSegments, mergePoolSnapshotSegments, type BuildSegmentsOptions, type StreamSegment };
+
+/** Shared contract between `ShioriWorkbench` (Col 3 dock host) and `EventPoolOverviewPanel`. */
+export interface EventPoolOverviewPanelProps {
+  snapshot: EventPoolSnapshot | null;
+  pendingInboundCount: number;
+  pendingOutboundCount: number;
+  canMutate: boolean;
+  canResumeAuto: boolean;
+  submitting?: boolean;
+  focusedEventId?: string | null;
+  onFocusEvent?: (eventId: string | null) => void;
+  onComposeNewEvent: () => void;
+  onReply: (event: PoolEvent, resumeAuto: boolean) => void;
+  onAck: (eventId: string) => Promise<void> | void;
+  onWithdraw: (eventId: string) => Promise<void> | void;
+  onLocateInStream: (event: PoolEvent) => void;
+}
+
+/** `HH:MM:SS` for today, `MM-DD HH:MM:SS` otherwise (local time). */
+export function formatPoolTimestamp(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "—";
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return "—";
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const clock = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  return sameDay ? clock : `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${clock}`;
+}
+
+function poolLatencySeconds(event: Pick<PoolEvent, "createdAt">, handledAt: string | null | undefined): number | null {
+  const created = Date.parse(event.createdAt);
+  const handled = handledAt ? Date.parse(handledAt) : NaN;
+  if (!Number.isFinite(created) || !Number.isFinite(handled) || handled < created) return null;
+  return Math.round((handled - created) / 1000);
+}
+
+/** Minimal built-in Event Pool list used when no `renderEventPoolPanel` slot is wired (isolated tests). */
+function FallbackEventPoolPanel({ snapshot, focusedEventId, onFocusEvent, onLocateInStream }: EventPoolOverviewPanelProps) {
+  const t = useTranslations("shioriCockpit");
+  const events = [...(snapshot?.events ?? [])].sort((a, b) => b.seq - a.seq);
+  if (events.length === 0) {
+    return (
+      <div className="codex-pool-fallback-empty" data-event-pool-fallback>
+        {t("poolEmptyAllTitle")}
+      </div>
+    );
+  }
+  return (
+    <ul className="codex-pool-fallback-list" data-event-pool-fallback aria-label={t("poolPanelAria")}>
+      {events.map(item => (
+        <li key={item.id} data-focused={focusedEventId === item.id || undefined}>
+          <button type="button" className="codex-pool-fallback-row" onClick={() => onFocusEvent?.(item.id)}>
+            <span className="codex-pool-seq">#{item.seq}</span>
+            <span className="codex-pool-fallback-text">{item.title || summarizePoolEventPreview(item.text).preview}</span>
+          </button>
+          <button type="button" className="codex-pool-receipt-jump" onClick={() => onLocateInStream(item)}>
+            {t("poolLocateInStreamBtn")}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function CodexPoolReceiptCard({
+  segment,
+  poolById,
+  onJumpSource,
+}: {
+  segment: Extract<StreamSegment, { kind: "pool_receipt" }>;
+  poolById: Map<string, PoolEvent>;
+  onJumpSource: (event: PoolEvent) => void;
+}) {
+  const t = useTranslations("shioriCockpit");
+  const events = segment.ids
+    .map(id => segment.events.find(item => item.id === id) ?? poolById.get(id))
+    .filter((item): item is PoolEvent => Boolean(item));
+  const seqs = events.map(item => `#${item.seq}`);
+  const primary = events[0];
+  const isHuman = segment.actor === "human";
+  const title = isHuman
+    ? t("poolReceiptHumanResolved").replace("{seq}", primary ? String(primary.seq) : "—")
+    : seqs.length > 1
+      ? t("poolReceiptShioriReadMulti").replace("{seqs}", seqs.join(", "))
+      : t("poolReceiptShioriReadSingle").replace("{seq}", primary ? String(primary.seq) : "—");
+  const latency = primary ? poolLatencySeconds(primary, segment.at) : null;
+  return (
+    <article
+      className="codex-pool-receipt"
+      data-actor={segment.actor}
+      data-pool-receipt={segment.ids.join(",")}
+      id={segment.id}
+    >
+      <span className="codex-pool-receipt-icon" aria-hidden="true">
+        {isHuman ? <Check className="size-3.5" /> : <Inbox className="size-3.5" />}
+      </span>
+      <div className="codex-pool-receipt-main">
+        <strong className="codex-pool-receipt-title">{title}</strong>
+        {events.slice(0, 3).map(item => (
+          <span key={item.id} className="codex-pool-receipt-quote" title={item.text}>
+            {item.title ? `${item.title} · ` : ""}
+            {summarizePoolEventPreview(item.text).preview}
+          </span>
+        ))}
+      </div>
+      <div className="codex-pool-receipt-meta">
+        {latency != null && (
+          <span className="codex-pool-receipt-latency">
+            {t("poolReceiptLatency").replace("{duration}", formatDurationCompact(latency))}
+          </span>
+        )}
+        <time dateTime={segment.at}>{formatPoolTimestamp(segment.at)}</time>
+        {primary && (
+          <button
+            type="button"
+            className="codex-pool-receipt-jump"
+            title={t("poolReceiptJumpSource")}
+            onClick={() => onJumpSource(primary)}
+          >
+            <CornerUpLeft className="size-3" aria-hidden="true" />
+            <span>{t("poolReceiptJumpSource")}</span>
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
 
 function renderInlineFormatting(text: string): ReactNode[] {
   const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
@@ -1893,6 +2025,8 @@ export interface ShioriWorkbenchProps {
   runPicker?: ReactNode;
   /** Mobile <=680px sidebar drawer trigger rendered at the start of .codex-thread-header */
   mobileNavSlot?: ReactNode;
+  /** Col 3 `事件池` tab body (wired to `EventPoolOverviewPanel` by ConsoleShell); falls back to a minimal list. */
+  renderEventPoolPanel?: (props: EventPoolOverviewPanelProps) => ReactNode;
 }
 
 export function ShioriWorkbench({
@@ -1923,6 +2057,7 @@ export function ShioriWorkbench({
   observationSlot,
   runPicker,
   mobileNavSlot,
+  renderEventPoolPanel,
 }: ShioriWorkbenchProps) {
   const t = useTranslations("shioriCockpit");
   const streamRef = useRef<HTMLDivElement | null>(null);
@@ -1949,6 +2084,28 @@ export function ShioriWorkbench({
   const toggleDock = () => {
     if (isOverlayDock) setDrawerDockOpen(prev => !prev);
     else setDesktopDockOpen(prev => !prev);
+  };
+  const [dockTab, setDockTab] = useState<"stage" | "pool">("stage");
+  const [focusedPoolEventId, setFocusedPoolEventId] = useState<string | null>(null);
+  const [pendingPoolLocateEvent, setPendingPoolLocateEvent] = useState<PoolEvent | null>(null);
+  const [poolFlashId, setPoolFlashId] = useState<string | null>(null);
+  const [poolSubmitting, setPoolSubmitting] = useState(false);
+  const poolFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openDockOnStage = () => {
+    setDockTab("stage");
+    openDock();
+  };
+  const openPoolOverview = (eventId?: string | null) => {
+    setDockTab("pool");
+    if (eventId !== undefined) setFocusedPoolEventId(eventId);
+    openDock();
+  };
+  const togglePoolOverview = () => {
+    if (dockOpen && dockTab === "pool") {
+      closeDock();
+      return;
+    }
+    openPoolOverview();
   };
   const [atBottom, setAtBottom] = useState(true);
   const [modelOverride, setModelOverride] = useState<{
@@ -1984,7 +2141,7 @@ export function ShioriWorkbench({
   } | null>(null);
   const [workflowCommand, setWorkflowCommand] = useState<{
     mode: ComposerMode;
-    prompt: string;
+    prompt: string | null;
   } | null>(null);
   const [poolSnapshot, setPoolSnapshot] = useState<EventPoolSnapshot | null>(null);
   const [replyTarget, setReplyTarget] = useState<PoolEvent | null>(null);
@@ -2001,6 +2158,9 @@ export function ShioriWorkbench({
     setPoolSnapshot(null);
     setReplyTarget(null);
     setReplyAutoResumeDefault(undefined);
+    setFocusedPoolEventId(null);
+    setPendingPoolLocateEvent(null);
+    setPoolFlashId(null);
   }, [project]);
 
   useEffect(() => {
@@ -2068,6 +2228,7 @@ export function ShioriWorkbench({
       imageId: selectedImage ?? null,
       at: matchedCall?.at ?? data.updatedAt,
     });
+    setDockTab("stage");
     setDesktopDockOpen(true);
     setDrawerDockOpen(true);
   }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt]);
@@ -2323,10 +2484,44 @@ export function ShioriWorkbench({
     () => new Map((poolSnapshot?.events ?? []).map(item => [item.id, item])),
     [poolSnapshot],
   );
+  // Prefer the live snapshot, but never regress a receipt-enriched `handled` state back to a stale `pending`.
+  const resolveLivePoolEvent = (event: PoolEvent): PoolEvent => {
+    const snapshotItem = poolEventsById.get(event.id);
+    if (!snapshotItem) return event;
+    return snapshotItem.status === "pending" && event.status === "handled"
+      ? { ...snapshotItem, status: "handled", handledAt: event.handledAt, handledBy: event.handledBy }
+      : snapshotItem;
+  };
   const pendingOutboundCount =
     poolSnapshot?.summary.pendingOutbound ?? live?.eventPool?.pendingOutbound ?? 0;
   const pendingInboundCount =
     poolSnapshot?.summary.pendingInbound ?? live?.eventPool?.pendingInbound ?? 0;
+  const pendingPoolCount = pendingInboundCount + pendingOutboundCount;
+  const canMutatePool = Boolean(isLiveRun && project && workspace);
+  const canResumeAuto = hostOnline && !isAuto && !consolidating;
+
+  // Floor of the loaded stream window: workspace Event Pool items older than this stay in the overview
+  // until the user pages upward (or explicitly locates them), instead of leaking into today's tail.
+  const earliestLoadedMs = useMemo(() => {
+    if (!hasMoreUpwardHistory) return 0;
+    const minFinite = (...values: Array<string | null | undefined>) => {
+      const parsed = values.map(v => (v ? Date.parse(v) : NaN)).filter(Number.isFinite);
+      return parsed.length > 0 ? Math.min(...parsed) : NaN;
+    };
+    const first = loadedOlderRuns[0];
+    if (first) {
+      return first.hasMore
+        ? minFinite(first.blocks[0]?.at)
+        : minFinite(
+            first.blocks[0]?.at,
+            first.data.cycles[0]?.startedAt,
+            runs.find(r => r.id === first.runId)?.startedAt,
+          );
+    }
+    return feed.hasMore
+      ? minFinite(feed.blocks[0]?.at)
+      : minFinite(feed.blocks[0]?.at, data.cycles[0]?.startedAt, runs.find(r => r.id === data.run)?.startedAt);
+  }, [hasMoreUpwardHistory, loadedOlderRuns, runs, feed.hasMore, feed.blocks, data.cycles, data.run]);
 
   const computedSegments = useMemo(() => {
     const allSegments: StreamSegment[] = [];
@@ -2368,53 +2563,17 @@ export function ShioriWorkbench({
     });
     allSegments.push(...currentSegs);
 
-    // Append workspace Event Pool items not yet projected in `feed.blocks` (e.g. standby/offline submissions)
+    // Synthesize workspace Event Pool items not yet projected in loaded blocks (e.g. standby/offline submissions)
+    // at their true `createdAt` position; never pin older events to the stream tail.
     if (isLiveRun && !feed.historical && poolSnapshot?.events.length) {
-      const seenPoolIds = new Set<string>();
-      for (const seg of allSegments) {
-        if (seg.kind === "user" && seg.poolEvent?.id) seenPoolIds.add(seg.poolEvent.id);
-        if (seg.kind === "outbound_event") seenPoolIds.add(seg.event.id);
-      }
-      const runWindowStartMs = Date.parse(data.cycles[0]?.startedAt ?? data.updatedAt) - 60_000;
-      for (const item of poolSnapshot.events) {
-        if (seenPoolIds.has(item.id)) continue;
-        // Show all pending events plus any offline/current-run events created at or after this run's window
-        const createdMs = Date.parse(item.createdAt) || 0;
-        if (item.status !== "pending" && item.runId && item.runId !== data.run && createdMs < runWindowStartMs) {
-          continue;
-        }
-        const syntheticBlock: ActivityBlock = {
-          id: `pool-live:${item.id}`,
-          kind: "text",
-          at: item.createdAt,
-          title: item.direction === "inbound" ? (item.kind === "reply" ? "Reply" : "Event") : "Help Request",
-          text: item.text,
-          status: "complete",
-          createdRevision: item.seq,
-          revision: item.seq,
-        };
-        if (item.direction === "inbound") {
-          allSegments.push({
-            kind: "user",
-            id: syntheticBlock.id,
-            block: syntheticBlock,
-            text: item.text,
-            mode: "event",
-            poolEvent: item,
-          });
-        } else {
-          allSegments.push({
-            kind: "outbound_event",
-            id: syntheticBlock.id,
-            block: syntheticBlock,
-            event: item,
-          });
-        }
-      }
+      return mergePoolSnapshotSegments(allSegments, poolSnapshot.events, {
+        earliestLoadedMs,
+        hasMoreUpwardHistory,
+      });
     }
 
     return allSegments;
-  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, feed.historical, data.calls, data.observations, data.run, data.cycles, data.updatedAt, isLiveRun, isAuto, live, poolSnapshot]);
+  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, feed.historical, data.calls, data.observations, data.run, data.cycles, data.updatedAt, isLiveRun, isAuto, live, poolSnapshot, earliestLoadedMs, hasMoreUpwardHistory]);
 
   if (computedSegments.length > 0) {
     cachedSegmentsRef.current = { run: data.run, segments: computedSegments };
@@ -2460,6 +2619,120 @@ export function ShioriWorkbench({
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
     setAtBottom(true);
+  };
+
+  const flashPoolEvent = (eventId: string) => {
+    setPoolFlashId(eventId);
+    if (poolFlashTimerRef.current) clearTimeout(poolFlashTimerRef.current);
+    poolFlashTimerRef.current = setTimeout(() => {
+      setPoolFlashId(prev => (prev === eventId ? null : prev));
+    }, 2400);
+  };
+
+  const scrollToPoolEvent = (eventId: string): boolean => {
+    const container = streamRef.current;
+    if (!container) return false;
+    const targetEl = container.querySelector<HTMLElement>(`[data-pool-event-id="${CSS.escape(eventId)}"]`);
+    if (!targetEl) return false;
+    programmaticScrollUntilRef.current = Date.now() + 900;
+    setAtBottom(false);
+    const top =
+      container.scrollTop + (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) - 72;
+    container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+    flashPoolEvent(eventId);
+    return true;
+  };
+
+  const locatePoolEventInStream = (event: PoolEvent) => {
+    if (isOverlayDock) setDrawerDockOpen(false);
+    if (scrollToPoolEvent(event.id)) {
+      setPendingPoolLocateEvent(null);
+      return;
+    }
+    const createdMs = Date.parse(event.createdAt);
+    if (hasMoreUpwardHistory && (!Number.isFinite(earliestLoadedMs) || !(createdMs >= earliestLoadedMs))) {
+      setPendingPoolLocateEvent(event);
+      return;
+    }
+    // Target may mount on the next frame (e.g. after the overlay drawer closes).
+    requestAnimationFrame(() => {
+      scrollToPoolEvent(event.id);
+    });
+  };
+
+  // Page upward history until a requested Event Pool item enters the loaded stream window.
+  useEffect(() => {
+    if (!pendingPoolLocateEvent) return;
+    if (scrollToPoolEvent(pendingPoolLocateEvent.id)) {
+      setPendingPoolLocateEvent(null);
+      return;
+    }
+    if (!hasMoreUpwardHistory || olderRunError) {
+      setPendingPoolLocateEvent(null);
+      return;
+    }
+    loadNextUpwardHistory();
+  }, [
+    pendingPoolLocateEvent,
+    segments.length,
+    hasMoreUpwardHistory,
+    feed.loadingOlder,
+    loadingOlderRun,
+    olderRunError,
+  ]);
+
+  useEffect(
+    () => () => {
+      if (poolFlashTimerRef.current) clearTimeout(poolFlashTimerRef.current);
+    },
+    [],
+  );
+
+  const ackPoolEvent = async (eventId: string) => {
+    if (!project || !workspace) return;
+    setPoolSubmitting(true);
+    try {
+      const res = await mutateEventPool(project, workspace, { action: "ack", ids: [eventId] });
+      setPoolSnapshot(res.snapshot);
+      if (res.hostStatus) {
+        setHostStatusOverride({
+          project,
+          run: data.run,
+          baseUpdatedAt: data.updatedAt,
+          appliedAtMs: Date.now(),
+          status: res.hostStatus,
+        });
+      }
+      if (replyTarget?.id === eventId) setReplyTarget(null);
+      onUpdated();
+    } catch {
+      // Snapshot polling surfaces the authoritative state; keep the action non-fatal.
+    } finally {
+      setPoolSubmitting(false);
+    }
+  };
+
+  const eventPoolPanelProps: EventPoolOverviewPanelProps = {
+    snapshot: poolSnapshot,
+    pendingInboundCount,
+    pendingOutboundCount,
+    canMutate: canMutatePool,
+    canResumeAuto,
+    submitting: poolSubmitting,
+    focusedEventId: focusedPoolEventId,
+    onFocusEvent: setFocusedPoolEventId,
+    onComposeNewEvent: () => {
+      if (isOverlayDock) setDrawerDockOpen(false);
+      setWorkflowCommand({ mode: "event", prompt: null });
+    },
+    onReply: (event, resumeAuto) => {
+      if (isOverlayDock) setDrawerDockOpen(false);
+      setReplyTarget(event);
+      setReplyAutoResumeDefault(resumeAuto);
+    },
+    onAck: ackPoolEvent,
+    onWithdraw: ackPoolEvent,
+    onLocateInStream: locatePoolEventInStream,
   };
 
   // Auto-fill preceding run history when viewport has spare room so sessions form one continuous stream
@@ -2563,7 +2836,7 @@ export function ShioriWorkbench({
           imageId: jumpTarget.image ?? null,
           at: matchedCall?.at ?? ownerData.updatedAt,
         });
-        openDock();
+        openDockOnStage();
       }
 
       const rawTargetTop = Math.max(
@@ -2691,7 +2964,7 @@ export function ShioriWorkbench({
             at: block.at,
           },
     );
-    if (!isDeselecting) openDock();
+    if (!isDeselecting) openDockOnStage();
     onSelectBlock?.(block);
   };
 
@@ -2709,7 +2982,7 @@ export function ShioriWorkbench({
             at: at ?? call?.at ?? data.updatedAt,
           },
     );
-    if (!isDeselecting) openDock();
+    if (!isDeselecting) openDockOnStage();
   };
 
   const inspectedRunData =
@@ -2854,32 +3127,6 @@ export function ShioriWorkbench({
                 {displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}
               </span>
             )}
-            {isLiveRun && pendingOutboundCount > 0 && (
-              <button
-                type="button"
-                className="codex-pool-header-pill"
-                data-tone="outbound"
-                onClick={() => {
-                  const firstPending = (poolSnapshot?.events ?? []).find(
-                    item => item.direction === "outbound" && item.status === "pending",
-                  );
-                  if (firstPending) {
-                    setReplyTarget(firstPending);
-                    setReplyAutoResumeDefault(Boolean(firstPending.pauseRequested));
-                  }
-                  scrollToBottom();
-                }}
-              >
-                <span>🆘</span>
-                <span>{t("poolOutboundBadge").replace("{count}", String(pendingOutboundCount))}</span>
-              </button>
-            )}
-            {isLiveRun && pendingInboundCount > 0 && (
-              <span className="codex-pool-header-pill" data-tone="inbound">
-                <span>📥</span>
-                <span>{t("poolInboundBadge").replace("{count}", String(pendingInboundCount))}</span>
-              </span>
-            )}
           </div>
 
           <div className="codex-thread-actions">
@@ -2896,6 +3143,24 @@ export function ShioriWorkbench({
               <span className="codex-expand-all-label">
                 {showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
               </span>
+            </button>
+            <button
+              type="button"
+              className="codex-header-btn codex-pool-trigger-btn"
+              data-tone={pendingOutboundCount > 0 ? "outbound" : pendingInboundCount > 0 ? "inbound" : undefined}
+              data-active={(dockOpen && dockTab === "pool") || undefined}
+              aria-pressed={dockOpen && dockTab === "pool"}
+              title={t("poolHeaderTriggerHint")}
+              aria-label={t("poolHeaderTriggerHint")}
+              onClick={togglePoolOverview}
+            >
+              {pendingOutboundCount > 0 ? (
+                <span className="codex-pool-trigger-icon" aria-hidden="true">🆘</span>
+              ) : (
+                <Inbox className="size-3.5 shrink-0" aria-hidden="true" />
+              )}
+              {pendingPoolCount > 0 && <span className="codex-pool-trigger-count">{pendingPoolCount}</span>}
+              <span className="codex-pool-trigger-label">{t("poolHeaderTrigger")}</span>
             </button>
             <button
               type="button"
@@ -2917,6 +3182,12 @@ export function ShioriWorkbench({
             <div className="codex-jump-toast" role="status">
               <span className="codex-thinking-dot" />
               <span>{t("locatingSegmentBanner")}</span>
+            </div>
+          )}
+          {pendingPoolLocateEvent && (
+            <div className="codex-jump-toast" role="status" data-pool-locating={pendingPoolLocateEvent.id}>
+              <span className="codex-thinking-dot" />
+              <span>{t("locatingPoolEventBanner").replace("{seq}", String(pendingPoolLocateEvent.seq))}</span>
             </div>
           )}
           <div ref={streamRef} className="codex-chat-scroll" onScroll={handleScroll}>
@@ -2995,21 +3266,36 @@ export function ShioriWorkbench({
                 }
 
                 if (seg.kind === "user") {
-                  const livePoolItem = seg.poolEvent ? (poolEventsById.get(seg.poolEvent.id) ?? seg.poolEvent) : undefined;
+                  const livePoolItem = seg.poolEvent ? resolveLivePoolEvent(seg.poolEvent) : undefined;
                   const isReply = livePoolItem?.kind === "reply";
                   const isRead = livePoolItem?.status === "handled";
+                  const isWithdrawn = isRead && livePoolItem?.handledBy === "human";
+                  const seqTag = livePoolItem ? ` · #${livePoolItem.seq}` : "";
                   return (
-                    <article key={seg.id} id={seg.block.id} className="codex-turn-user">
-                      <div className="codex-user-bubble" data-mode={seg.mode}>
-                        {seg.mode !== "start" && (
-                          <span className="codex-user-mode-tag">
-                            {seg.mode === "steer"
-                              ? "⚡ Steer"
-                              : isReply
-                                ? `↩ ${t("poolReplyBtn")}`
-                                : `📥 ${t("deliveryEventPool")}`}
-                          </span>
-                        )}
+                    <article
+                      key={seg.id}
+                      id={seg.block.id}
+                      className={`codex-turn-user${livePoolItem && poolFlashId === livePoolItem.id ? " is-pool-target-flash" : ""}`}
+                      data-pool-event-id={livePoolItem?.id}
+                      data-pool-seq={livePoolItem?.seq}
+                    >
+                      <div className="codex-user-bubble" data-mode={seg.mode} data-withdrawn={isWithdrawn || undefined}>
+                        {seg.mode !== "start" &&
+                          (livePoolItem ? (
+                            <button
+                              type="button"
+                              className="codex-user-mode-tag codex-pool-seq-link"
+                              title={t("poolOpenInOverviewHint").replace("{seq}", String(livePoolItem.seq))}
+                              onClick={() => openPoolOverview(livePoolItem.id)}
+                            >
+                              {isReply ? `↩ ${t("poolReplyBtn")}` : `📥 ${t("deliveryEventPool")}`}
+                              {seqTag}
+                            </button>
+                          ) : (
+                            <span className="codex-user-mode-tag">
+                              {seg.mode === "steer" ? "⚡ Steer" : `📥 ${t("deliveryEventPool")}`}
+                            </span>
+                          ))}
                         {livePoolItem?.title && (
                           <strong className="codex-user-event-title">{livePoolItem.title}</strong>
                         )}
@@ -3018,11 +3304,27 @@ export function ShioriWorkbench({
                           <div className="codex-user-event-footer">
                             <span
                               className="codex-user-event-status"
-                              data-read={isRead ? "true" : undefined}
+                              data-read={isRead && !isWithdrawn ? "true" : undefined}
+                              data-withdrawn={isWithdrawn ? "true" : undefined}
                             >
-                              {isRead ? `✓ ${t("poolStatusRead")}` : `⏳ ${t("poolStatusPending")}`}
+                              {isWithdrawn
+                                ? `⊘ ${livePoolItem.handledAt ? t("poolStatusWithdrawnAt").replace("{time}", formatPoolTimestamp(livePoolItem.handledAt)) : t("poolStatusWithdrawn")}`
+                                : isRead
+                                  ? `✓ ${livePoolItem.handledAt ? t("poolStatusReadAt").replace("{time}", formatPoolTimestamp(livePoolItem.handledAt)) : t("poolStatusRead")}`
+                                  : `⏳ ${t("poolStatusPendingShort")}`}
                             </span>
-                            <time dateTime={livePoolItem.createdAt}>{clockTime(livePoolItem.createdAt)}</time>
+                            {!isRead && canMutatePool && (
+                              <button
+                                type="button"
+                                className="codex-pool-withdraw-btn"
+                                title={t("poolWithdrawHint")}
+                                disabled={poolSubmitting}
+                                onClick={() => void ackPoolEvent(livePoolItem.id)}
+                              >
+                                {t("poolWithdrawBtn")}
+                              </button>
+                            )}
+                            <time dateTime={livePoolItem.createdAt}>{formatPoolTimestamp(livePoolItem.createdAt)}</time>
                           </div>
                         )}
                       </div>
@@ -3030,25 +3332,43 @@ export function ShioriWorkbench({
                   );
                 }
 
+                if (seg.kind === "pool_receipt") {
+                  return (
+                    <CodexPoolReceiptCard
+                      key={seg.id}
+                      segment={seg}
+                      poolById={poolEventsById}
+                      onJumpSource={locatePoolEventInStream}
+                    />
+                  );
+                }
+
                 if (seg.kind === "outbound_event") {
-                  const liveEvent = poolEventsById.get(seg.event.id) ?? seg.event;
+                  const liveEvent = resolveLivePoolEvent(seg.event);
                   const isHelp = liveEvent.kind === "help_request";
                   const isPending = liveEvent.status === "pending";
                   return (
                     <article
                       key={seg.id}
                       id={seg.block.id}
-                      className="codex-outbound-card"
+                      className={`codex-outbound-card${poolFlashId === liveEvent.id ? " is-pool-target-flash" : ""}`}
                       data-kind={liveEvent.kind}
                       data-handled={!isPending ? "true" : undefined}
                       data-pool-stream-card={liveEvent.id}
+                      data-pool-event-id={liveEvent.id}
+                      data-pool-seq={liveEvent.seq}
                     >
                       <header className="codex-outbound-header">
                         <div className="codex-outbound-badges">
-                          <span className="codex-outbound-badge">
+                          <button
+                            type="button"
+                            className="codex-outbound-badge codex-pool-seq-link"
+                            title={t("poolOpenInOverviewHint").replace("{seq}", String(liveEvent.seq))}
+                            onClick={() => openPoolOverview(liveEvent.id)}
+                          >
                             {isHelp ? "🆘" : "📌"}{" "}
-                            {isHelp ? t("poolHelpRequestBadge") : t("poolNoticeBadge")}
-                          </span>
+                            {isHelp ? t("poolHelpRequestBadge") : t("poolNoticeBadge")} · #{liveEvent.seq}
+                          </button>
                           {liveEvent.pauseRequested && (
                             <span className="codex-outbound-paused">{t("poolPausedTag")}</span>
                           )}
@@ -3058,9 +3378,11 @@ export function ShioriWorkbench({
                             className="codex-outbound-status"
                             data-pending={isPending ? "true" : undefined}
                           >
-                            {isPending ? `● ${t("poolStatusAwaitingHuman")}` : `✓ ${t("poolStatusHandled")}`}
+                            {isPending
+                              ? `● ${t("poolStatusAwaitingHuman")}`
+                              : `✓ ${t("poolStatusHandled")}${liveEvent.handledAt ? ` · ${formatPoolTimestamp(liveEvent.handledAt)}` : ""}`}
                           </span>
-                          <time dateTime={liveEvent.createdAt}>{clockTime(liveEvent.createdAt)}</time>
+                          <time dateTime={liveEvent.createdAt}>{formatPoolTimestamp(liveEvent.createdAt)}</time>
                         </div>
                       </header>
                       {liveEvent.title && <h4 className="codex-outbound-title">{liveEvent.title}</h4>}
@@ -3098,29 +3420,8 @@ export function ShioriWorkbench({
                               type="button"
                               className="codex-pool-btn"
                               data-variant="ghost"
-                              onClick={() => {
-                                void mutateEventPool(project, workspace, {
-                                  action: "ack",
-                                  ids: [liveEvent.id],
-                                })
-                                  .then(res => {
-                                    setPoolSnapshot(res.snapshot);
-                                    if (res.hostStatus) {
-                                      setHostStatusOverride({
-                                        project,
-                                        run: data.run,
-                                        baseUpdatedAt: data.updatedAt,
-                                        appliedAtMs: Date.now(),
-                                        status: res.hostStatus,
-                                      });
-                                    }
-                                    if (replyTarget?.id === liveEvent.id) {
-                                      setReplyTarget(null);
-                                    }
-                                    onUpdated();
-                                  })
-                                  .catch(() => {});
-                              }}
+                              disabled={poolSubmitting}
+                              onClick={() => void ackPoolEvent(liveEvent.id)}
                             >
                               <Check className="size-3" aria-hidden="true" />
                               <span>{t("poolDismissBtn")}</span>
@@ -3274,7 +3575,38 @@ export function ShioriWorkbench({
           aria-label={t("stageColumnAria")}
         >
           <header className="codex-dock-header">
-            <span className="codex-dock-header-title">{t("dockHeaderTitle")}</span>
+            <div className="codex-dock-seg" role="tablist" aria-label={t("stageColumnAria")}>
+              <button
+                type="button"
+                role="tab"
+                className="codex-dock-seg-tab"
+                aria-selected={dockTab === "stage"}
+                data-active={dockTab === "stage" || undefined}
+                onClick={() => setDockTab("stage")}
+              >
+                <span className="codex-dock-header-title">{t("dockTabStageTelemetry")}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className="codex-dock-seg-tab"
+                aria-selected={dockTab === "pool"}
+                data-active={dockTab === "pool" || undefined}
+                data-dock-tab-pool
+                onClick={() => setDockTab("pool")}
+              >
+                <span className="codex-dock-seg-label">{t("dockTabEventPool")}</span>
+                {pendingPoolCount > 0 && (
+                  <span
+                    className="codex-dock-seg-badge"
+                    data-tone={pendingOutboundCount > 0 ? "warn" : "ok"}
+                  >
+                    <i aria-hidden="true" />
+                    {pendingPoolCount}
+                  </span>
+                )}
+              </button>
+            </div>
             <button
               type="button"
               className="codex-header-btn codex-dock-close-btn"
@@ -3285,7 +3617,17 @@ export function ShioriWorkbench({
               <X className="size-4" aria-hidden="true" />
             </button>
           </header>
-          <div className="codex-dock-body">
+          {dockTab === "pool" && (
+            <div className="codex-dock-body codex-dock-scroll" data-dock-tab="pool" role="tabpanel">
+              {renderEventPoolPanel ? (
+                renderEventPoolPanel(eventPoolPanelProps)
+              ) : (
+                <FallbackEventPoolPanel {...eventPoolPanelProps} />
+              )}
+            </div>
+          )}
+          {/* Stage stays mounted while the pool tab is shown so live frames/streams are not torn down. */}
+          <div className="codex-dock-body" data-dock-tab="stage" role="tabpanel" hidden={dockTab !== "stage"}>
             {/* 1. Primary Live Game / Device Viewport */}
             <div className="codex-dock-viewport">
               {inspectedTurn && (

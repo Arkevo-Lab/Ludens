@@ -234,6 +234,16 @@ export type StreamSegment =
       event: PoolEvent;
     }
   | {
+      kind: "pool_receipt";
+      id: string;
+      runId?: string;
+      block: ActivityBlock;
+      actor: "shiori" | "human";
+      ids: string[];
+      events: PoolEvent[];
+      at: string;
+    }
+  | {
       kind: "input";
       id: string;
       runId?: string;
@@ -250,6 +260,134 @@ export type StreamSegment =
       responseBlock: ActivityBlock | null;
       responseText: string | null;
     };
+
+export function isPoolReceiptBlock(block: ActivityBlock): boolean {
+  return (
+    block.kind === "system" &&
+    (block.title === "pool_receipt" || asRecord(block.data)?.role === "pool_receipt")
+  );
+}
+
+function asPoolEvent(value: unknown): PoolEvent | null {
+  const record = asRecord(value);
+  return record && typeof record.id === "string" ? (record as unknown as PoolEvent) : null;
+}
+
+/** Inbound Event Pool payload carried by a `user` creation block (if any). */
+export function extractPoolEventFromBlock(block: ActivityBlock): PoolEvent | null {
+  return isUserMessageBlock(block) ? asPoolEvent(asRecord(block.data)?.event) : null;
+}
+
+/** Outbound Shiori Event Pool payload carried by a `shiori_event` creation block (if any). */
+export function extractOutboundPoolEvent(block: ActivityBlock): PoolEvent | null {
+  return isOutboundPoolEventBlock(block) ? asPoolEvent(asRecord(block.data)?.event) : null;
+}
+
+export interface PoolReceiptInfo {
+  actor: "shiori" | "human";
+  ids: string[];
+  events: PoolEvent[];
+}
+
+/** Parses `pool_event(handled)` receipt blocks: `{ role: "pool_receipt", action: "handled", actor, ids, events }`. */
+export function parsePoolReceiptBlock(block: ActivityBlock): PoolReceiptInfo | null {
+  if (!isPoolReceiptBlock(block)) return null;
+  const record = asRecord(block.data);
+  const actor = record?.actor === "human" ? "human" : "shiori";
+  const events = Array.isArray(record?.events)
+    ? record.events.map(asPoolEvent).filter((item): item is PoolEvent => Boolean(item))
+    : [];
+  const ids = [
+    ...new Set([
+      ...(Array.isArray(record?.ids) ? record.ids.filter((id): id is string => typeof id === "string") : []),
+      ...events.map(item => item.id),
+    ]),
+  ];
+  return { actor, ids, events };
+}
+
+/** Chronological anchor (ms) of a stream segment; `NaN` when unknown. */
+export function segmentTimestampMs(seg: StreamSegment): number {
+  switch (seg.kind) {
+    case "session_divider":
+      return Date.parse(seg.startedAt);
+    case "user":
+      return Date.parse(seg.poolEvent?.createdAt ?? seg.block.at);
+    case "outbound_event":
+      return Date.parse(seg.event.createdAt ?? seg.block.at);
+    case "pool_receipt":
+      return Date.parse(seg.at);
+    case "input":
+      return Date.parse(seg.at);
+    case "turn":
+      return Date.parse(seg.steps[0]?.at ?? seg.responseBlock?.at ?? "");
+  }
+}
+
+export interface MergePoolSnapshotOptions {
+  /** Floor (ms) of the loaded stream window; ignored when `hasMoreUpwardHistory` is false. */
+  earliestLoadedMs: number;
+  /** Whether older history can still be paged in above the loaded window. */
+  hasMoreUpwardHistory: boolean;
+}
+
+/**
+ * Synthesizes workspace Event Pool items that are not yet projected in the loaded stream
+ * (e.g. standby/offline submissions) and inserts each one at its true `createdAt` position.
+ * Items older than the loaded window stay out while upward history remains unloaded.
+ */
+export function mergePoolSnapshotSegments(
+  segments: StreamSegment[],
+  poolEvents: PoolEvent[],
+  options: MergePoolSnapshotOptions,
+): StreamSegment[] {
+  const seen = new Set<string>();
+  for (const seg of segments) {
+    if (seg.kind === "user" && seg.poolEvent?.id) seen.add(seg.poolEvent.id);
+    if (seg.kind === "outbound_event") seen.add(seg.event.id);
+  }
+  const enforceFloor = options.hasMoreUpwardHistory && Number.isFinite(options.earliestLoadedMs);
+  const missing = poolEvents
+    .filter(item => {
+      if (seen.has(item.id)) return false;
+      const createdMs = Date.parse(item.createdAt);
+      if (!Number.isFinite(createdMs)) return false;
+      if (enforceFloor && createdMs < options.earliestLoadedMs) return false;
+      return true;
+    })
+    .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.seq - b.seq);
+  if (missing.length === 0) return segments;
+
+  const result = [...segments];
+  for (const item of missing) {
+    seen.add(item.id);
+    const createdMs = Date.parse(item.createdAt);
+    const syntheticBlock: ActivityBlock = {
+      id: `pool-live:${item.id}`,
+      kind: "text",
+      at: item.createdAt,
+      title: item.direction === "inbound" ? (item.kind === "reply" ? "Reply" : "Event") : "Help Request",
+      text: item.text,
+      status: "complete",
+      createdRevision: item.seq,
+      revision: item.seq,
+    };
+    const synthetic: StreamSegment =
+      item.direction === "inbound"
+        ? { kind: "user", id: syntheticBlock.id, block: syntheticBlock, text: item.text, mode: "event", poolEvent: item }
+        : { kind: "outbound_event", id: syntheticBlock.id, block: syntheticBlock, event: item };
+    let insertAt = 0;
+    for (let idx = result.length - 1; idx >= 0; idx--) {
+      const ts = segmentTimestampMs(result[idx]);
+      if (Number.isFinite(ts) && ts <= createdMs) {
+        insertAt = idx + 1;
+        break;
+      }
+    }
+    result.splice(insertAt, 0, synthetic);
+  }
+  return result;
+}
 
 export interface BuildSegmentsOptions {
   runId?: string;
@@ -303,6 +441,37 @@ export function buildCodexSegments(
       }
     }
   }
+
+  // Pre-scan Event Pool creation + `pool_receipt` blocks so historical bubbles reflect their handled state
+  // and receipts can resolve event payloads even outside the snapshot retention window.
+  const createdEventsById = new Map<string, PoolEvent>();
+  const handledEventsById = new Map<string, PoolEvent>();
+  for (const block of blocks) {
+    const created = extractPoolEventFromBlock(block) ?? extractOutboundPoolEvent(block);
+    if (created) createdEventsById.set(created.id, created);
+  }
+  for (const block of blocks) {
+    const receipt = parsePoolReceiptBlock(block);
+    if (!receipt) continue;
+    for (const id of receipt.ids) {
+      const fromReceipt = receipt.events.find(item => item.id === id);
+      const base = fromReceipt ?? createdEventsById.get(id);
+      handledEventsById.set(id, {
+        ...(base ?? ({ id } as PoolEvent)),
+        status: "handled",
+        handledAt: fromReceipt?.handledAt ?? block.at,
+        handledBy: fromReceipt?.handledBy ?? receipt.actor,
+      });
+    }
+  }
+  const enrichPoolEvent = (event: PoolEvent): PoolEvent => {
+    if (event.status !== "pending") return event;
+    const handled = handledEventsById.get(event.id);
+    return handled
+      ? { ...event, status: "handled", handledAt: handled.handledAt, handledBy: handled.handledBy }
+      : event;
+  };
+  const segPrefix = options.runId ? `${options.runId}:` : "";
 
   const emitDividerForEpoch = (epoch: string | null, fallbackStartAt: string, autoBlockData?: Record<string, unknown> | null) => {
     const key = `${options.runId ?? ""}:${epoch ?? "default"}`;
@@ -588,30 +757,61 @@ export function buildCodexSegments(
     if (isUserMessageBlock(block)) {
       flushTurn();
       const record = asRecord(block.data);
-      const rawPoolEvent = asRecord(record?.event);
+      const poolEvent = extractPoolEventFromBlock(block);
       segments.push({
         kind: "user",
         id: block.id,
         block,
         text: extractReadableText(block),
         mode: typeof record?.mode === "string" ? record.mode : "start",
-        ...(rawPoolEvent && typeof rawPoolEvent.id === "string"
-          ? { poolEvent: rawPoolEvent as unknown as PoolEvent }
-          : {}),
+        ...(poolEvent ? { poolEvent: enrichPoolEvent(poolEvent) } : {}),
       });
       continue;
     }
 
     if (isOutboundPoolEventBlock(block)) {
       flushTurn();
-      const record = asRecord(block.data);
-      const rawPoolEvent = asRecord(record?.event);
-      if (rawPoolEvent && typeof rawPoolEvent.id === "string") {
+      const outbound = extractOutboundPoolEvent(block);
+      if (outbound) {
         segments.push({
           kind: "outbound_event",
           id: block.id,
           block,
-          event: rawPoolEvent as unknown as PoolEvent,
+          event: enrichPoolEvent(outbound),
+        });
+      }
+      continue;
+    }
+
+    const receipt = parsePoolReceiptBlock(block);
+    if (receipt) {
+      const events = receipt.ids
+        .map(id => {
+          const fromReceipt = receipt.events.find(item => item.id === id);
+          const created = createdEventsById.get(id);
+          if (!fromReceipt && !created) return null;
+          return {
+            ...created,
+            ...fromReceipt,
+            status: "handled",
+            handledAt: fromReceipt?.handledAt ?? block.at,
+            handledBy: fromReceipt?.handledBy ?? receipt.actor,
+          } as PoolEvent;
+        })
+        .filter((item): item is PoolEvent => Boolean(item));
+      const resolvesOutbound = events.some(item => item.direction === "outbound");
+      // Human self-withdrawal of unread inbound messages updates the sent bubble in place: no receipt card.
+      if (receipt.actor === "shiori" || resolvesOutbound) {
+        flushTurn();
+        segments.push({
+          kind: "pool_receipt",
+          id: `${segPrefix}pool-receipt:${block.id}`,
+          runId: options.runId,
+          block,
+          actor: receipt.actor,
+          ids: receipt.ids,
+          events,
+          at: block.at,
         });
       }
       continue;
