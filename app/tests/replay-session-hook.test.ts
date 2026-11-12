@@ -211,3 +211,59 @@ test("clock store notifies subscribers only on change", () => {
   assert.equal(calls, 1);
   assert.equal(clock.get(), 7);
 });
+
+test("single-point recording (startAt === endAt) still plans required frame and event windows", () => {
+  const pointRange = { startAt: 5_000, endAt: 5_000 };
+  const plan = replayPrefetchPlan({
+    at: 5_000,
+    speed: 1,
+    range: pointRange,
+    frameWindowMs: REPLAY_WINDOW_MS,
+    eventWindowMs: REPLAY_WINDOW_MS,
+    boundsOf: (at, windowMs) => replayWindowBounds(at, pointRange, windowMs),
+  });
+  assert.deepEqual(
+    plan.map(entry => [entry.mode, entry.startAt, entry.endAt, entry.required]),
+    [
+      ["frames", 5_000, 5_000, true],
+      ["events", 5_000, 5_000, true],
+    ],
+  );
+});
+
+test("fresher refreshed window wins over older prefetched window carrying the same pending frame; failed refresh is retryable; synchronous re-ensure after cancelStale starts fresh", async () => {
+  const { cache, calls } = fakeNetwork();
+  const pendingVideo: VideoSource = { assetId: "seg-1", revision: "pending:0", url: "u", originAt: 0, width: 1, height: 1, durationSeconds: 10, status: "pending" };
+  const readyVideo: VideoSource = { ...pendingVideo, revision: "ready", status: "ready" };
+  // Both window 0 and prefetched window 1 carry frame "shared" initially as pending
+  void cache.ensure("frames", range.startAt, range.startAt + 30_000);
+  void cache.ensure("frames", range.startAt + 30_000, range.startAt + 60_000);
+  calls[0].resolve({ frames: [frame("shared", range.startAt + 100, "cam", { media: [{ index: 0, mediaType: "image/png", url: "m", video: pendingVideo }] })] });
+  calls[1].resolve({ frames: [frame("shared", range.startAt + 100, "cam", { media: [{ index: 0, mediaType: "image/png", url: "m", video: pendingVideo }] })] });
+  await tick();
+
+  // Refresh window 0 -> shared becomes ready; merged cache.frames() must expose ready, not window 1's stale pending!
+  void cache.ensure("frames", range.startAt, range.startAt + 30_000, { refresh: true });
+  calls[2].resolve({ frames: [frame("shared", range.startAt + 100, "cam", { media: [{ index: 0, mediaType: "image/png", url: "m", video: readyVideo }] })] });
+  await tick();
+  assert.equal(cache.frames().find(f => f.id === "shared")?.media[0]?.video?.status, "ready");
+
+  // If a subsequent refresh fails, a plain ensure() (retry) must re-fetch rather than returning the errored complete entry
+  void cache.ensure("frames", range.startAt, range.startAt + 30_000, { refresh: true });
+  calls[3].reject(new Error("transient failure"));
+  await tick();
+  assert.equal(cache.peek("frames", range.startAt, range.startAt + 30_000)?.error, "transient failure");
+  void cache.ensure("frames", range.startAt, range.startAt + 30_000, { required: true });
+  assert.equal(calls.length, 5, "errored complete entry triggers a fresh retry fetch");
+  calls[4].resolve({ frames: [frame("shared", range.startAt + 100)] });
+  await tick();
+  assert.equal(cache.peek("frames", range.startAt, range.startAt + 30_000)?.error, undefined);
+
+  // Synchronous cancelStale([]) + ensure() before microtask settle must start a new flight
+  void cache.ensure("frames", range.startAt + 60_000, range.startAt + 90_000);
+  cache.cancelStale([]);
+  const retryPromise = cache.ensure("frames", range.startAt + 60_000, range.startAt + 90_000, { required: true });
+  assert.equal(calls.length, 7, "new flight started synchronously without joining aborted promise");
+  calls[6].resolve({ frames: [frame("fresh", range.startAt + 60_100)] });
+  assert.equal((await retryPromise)?.frames[0]?.id, "fresh");
+});

@@ -187,9 +187,11 @@ async function readTimelinePayloadFrom(handle: FileHandle, size: number, pointer
 export type TimelineCursor = [at: number, sequence: number];
 const comparePoint = (a: TimelineCursor, b: TimelineCursor) => a[0] - b[0] || a[1] - b[1];
 const point = (value: TimelinePointer): TimelineCursor => [value.at, value.sequence];
-/** Latest pointer per capabilityHash over one whole segment, cached per (root, stem, index metadata). */
+/** Latest pointer per capabilityHash over one whole segment, cached per (root, stem, index file stat). */
 async function segmentSummary(root: string, segment: TimelineSegment, signal?: AbortSignal) {
-  const key = `${root}\0${segment.stem}\0${segment.firstSequence}\0${segment.lastSequence}\0${segment.count}`;
+  const idxPath = await timelinePath(root, `segments/${segment.stem}.idx`);
+  const { mtimeMs, size } = await stat(idxPath);
+  const key = `${root}\0${segment.stem}\0${segment.firstSequence}\0${segment.lastSequence}\0${segment.count}\0${mtimeMs}\0${size}`;
   const cached = segmentSummaries.get(key);
   if (cached) return cached;
   const latest = new Map<string, TimelinePointer>();
@@ -200,6 +202,8 @@ async function segmentSummary(root: string, segment: TimelineSegment, signal?: A
   segmentSummaries.set(key, latest);
   return latest;
 }
+
+const MAX_OPEN_PAYLOAD_FILES = 8;
 
 /** Select one bounded page from the existing binary indexes; never build a frame projection. */
 export async function timelineWindow(root: string, options: {
@@ -215,10 +219,23 @@ export async function timelineWindow(root: string, options: {
   const payloadFiles = new Map<string, { handle: FileHandle; size: number }>();
   const payload = async (pointer: TimelinePointer) => {
     let cached = payloadFiles.get(pointer.file);
-    if (!cached) {
-      const handle = await open(pointer.file, "r");
-      cached = { handle, size: (await handle.stat()).size };
+    if (cached) {
+      payloadFiles.delete(pointer.file);
       payloadFiles.set(pointer.file, cached);
+    } else {
+      if (payloadFiles.size >= MAX_OPEN_PAYLOAD_FILES) {
+        const [oldestKey, oldest] = payloadFiles.entries().next().value!;
+        payloadFiles.delete(oldestKey);
+        await oldest.handle.close();
+      }
+      const handle = await open(pointer.file, "r");
+      try {
+        cached = { handle, size: (await handle.stat()).size };
+        payloadFiles.set(pointer.file, cached);
+      } catch (error) {
+        await handle.close();
+        throw error;
+      }
     }
     return readTimelinePayloadFrom(cached.handle, cached.size, pointer, options.signal);
   };

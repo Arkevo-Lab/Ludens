@@ -28,7 +28,8 @@ export async function readReplayWindow(scope: string, mode: ReplayWindowMode, st
   onPage?: (page: ReplayWindow) => void, initial?: ReplayWindow, read = readArchiveJson) {
   let merged = initial, cursor = initial?.nextCursor;
   const seen = new Set<string>();
-  for (let n = 0; n < 20; n++) {
+  const maxPages = mode === "frames" ? 50 : 20;
+  for (let n = 0; n < maxPages; n++) {
     const page = await read<ReplayWindow>(replayEndpoint(scope, { mode, start: startAt, end: endAt, ...(cursor ? { cursor } : {}) }), signal);
     signal.throwIfAborted();
     merged = merged ? mergeReplayPages([merged, page]) : page;
@@ -181,16 +182,8 @@ export function useReplaySession(options: ReplaySessionOptions) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [archiveRevision]);
 
-  const frameEntry = range ? cache.entry("frames", bounds.startAt, bounds.endAt) : undefined;
+  const frameEntry = range ? cache.peek("frames", bounds.startAt, bounds.endAt) : undefined;
   const activeWindow = frameEntry?.window;
-  // Segments still being written: refresh the current window in place until they settle.
-  const pendingSegments = !!activeWindow?.frames.some(frame => frame.media.some(media => media.video?.status === "pending"));
-  useEffect(() => {
-    if (!pendingSegments || !frameEntry?.complete) return;
-    const timer = setTimeout(() => void cache.ensure("frames", bounds.startAt, bounds.endAt, { refresh: true }), PENDING_REFRESH_MS);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pendingSegments, frameEntry?.complete, frameEntry?.window, bounds.startAt, bounds.endAt, cache]);
 
   // ---- frame index (rebuilt only when cached windows change) ----------------------------------
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,14 +193,24 @@ export function useReplaySession(options: ReplaySessionOptions) {
   const stageRange = useCallback((value: number) => {
     if (!range) return { from: 0, to: 0 };
     const current = replayWindowBounds(value, range);
-    // The previous window keeps sparse capabilities on stage across a boundary; previews stay within the window.
-    return { from: current.startAt - REPLAY_WINDOW_MS, to: current.endAt };
+    // Any recorded past sample in the run remains valid evidence; previews stay bounded to the current window.
+    return { from: range.startAt, to: current.endAt };
   }, [range]);
   const stageAt = useCallback((value: number) => {
     const { from, to } = stageRange(value);
     return indexedStageFramesAt(indexRef.current, value, optionsRef.current.capability, from, to);
   }, [stageRange]);
   const stageFrames = useMemo(() => stageAt(at), [stageAt, at, index, capability]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Segments still being written: refresh the current window in place until they settle.
+  const pendingSegments = !!(activeWindow?.frames.some(frame => frame.media.some(media => media.video?.status === "pending"))
+    || stageFrames.some(frame => frame.media.some(media => media.video?.status === "pending")));
+  useEffect(() => {
+    if (!pendingSegments || !frameEntry?.complete || frameEntry.error) return;
+    const timer = setTimeout(() => void cache.ensure("frames", bounds.startAt, bounds.endAt, { refresh: true }), PENDING_REFRESH_MS);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSegments, frameEntry?.complete, frameEntry?.error, frameEntry?.window, bounds.startAt, bounds.endAt, cache]);
 
   // ---- playback loop --------------------------------------------------------------------------
   useEffect(() => {
@@ -258,7 +261,7 @@ export function useReplaySession(options: ReplaySessionOptions) {
   }, [firstWindowEmpty, range, cache]);
 
   // ---- events ---------------------------------------------------------------------------------
-  const eventEntry = range ? cache.entry("events", eventBounds.startAt, eventBounds.endAt) : undefined;
+  const eventEntry = range ? cache.peek("events", eventBounds.startAt, eventBounds.endAt) : undefined;
   // Until the exact window lands, show whatever cached windows already cover it instead of an empty lane.
   const items = useMemo<ReplayItem[]>(() => eventEntry?.window?.items
     ?? (range ? cache.items(eventBounds.startAt, eventBounds.endAt) : []),
@@ -267,19 +270,22 @@ export function useReplaySession(options: ReplaySessionOptions) {
   const [continuing, setContinuing] = useState(false);
   const [continueError, setContinueError] = useState("");
   const continueRequest = useRef<AbortController | null>(null);
-  // A scope change or unmount abandons an explicit continuation; it must never land in another run's cache.
-  useEffect(() => () => { continueRequest.current?.abort(); continueRequest.current = null; }, [scope]);
-  useEffect(() => setContinueError(""), [scope, eventBounds.startAt, eventBounds.endAt]);
+  const refreshGeneration = useRef(0);
+  // A scope change, refresh or unmount abandons an explicit continuation; it must never land over newer state.
+  useEffect(() => () => { continueRequest.current?.abort(); continueRequest.current = null; }, [scope, refreshRevision]);
+  useEffect(() => setContinueError(""), [scope, refreshRevision, retryRevision, eventBounds.startAt, eventBounds.endAt]);
   const continueEvents = useCallback(async () => {
     const current = cache.get("events", eventBounds.startAt, eventBounds.endAt);
     if (!current?.nextCursor) return;
     continueRequest.current?.abort();
-    const controller = new AbortController(), origin = scopeRef.current;
+    const controller = new AbortController(), origin = scopeRef.current, gen = refreshGeneration.current;
     continueRequest.current = controller;
     setContinuing(true); setContinueError("");
     try {
       const next = await readReplayWindow(origin, "events", eventBounds.startAt, eventBounds.endAt, controller.signal, undefined, current);
-      if (!controller.signal.aborted && scopeRef.current === origin) cache.store("events", eventBounds.startAt, eventBounds.endAt, next);
+      if (!controller.signal.aborted && scopeRef.current === origin && refreshGeneration.current === gen) {
+        cache.store("events", eventBounds.startAt, eventBounds.endAt, next);
+      }
     } catch (error) {
       if (!controller.signal.aborted) setContinueError(error instanceof Error ? error.message : String(error));
     } finally {
@@ -297,7 +303,7 @@ export function useReplaySession(options: ReplaySessionOptions) {
     const cached = indexedAdjacentFrame(indexRef.current, from, direction, cap);
     const current = replayWindowBounds(from, range);
     // Short-circuit only inside a fully loaded current window; otherwise walk outward from it so no frame is skipped.
-    if (cached && cache.entry("frames", current.startAt, current.endAt)?.complete && cached.at >= current.startAt && cached.at < current.endAt) return cached;
+    if (cached && cache.peek("frames", current.startAt, current.endAt)?.complete && cached.at >= current.startAt && cached.at <= current.endAt) return cached;
     setStepping(true);
     try {
       let edge = direction === 1 ? current.startAt : current.endAt;
@@ -316,7 +322,14 @@ export function useReplaySession(options: ReplaySessionOptions) {
   const cancelStep = useCallback(() => { stepRequest.current++; setStepping(false); }, []);
 
   const retry = useCallback(() => setRetryRevision(value => value + 1), []);
-  const refresh = useCallback(() => { cache.clear(); setRefreshRevision(value => value + 1); setRetryRevision(value => value + 1); }, [cache]);
+  const refresh = useCallback(() => {
+    refreshGeneration.current++;
+    continueRequest.current?.abort();
+    continueRequest.current = null;
+    cache.clear();
+    setRefreshRevision(value => value + 1);
+    setRetryRevision(value => value + 1);
+  }, [cache]);
   const refreshOverview = useCallback(() => setRefreshRevision(value => value + 1), []);
 
   return {

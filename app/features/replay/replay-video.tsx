@@ -25,6 +25,7 @@ function Surface({ source, at, liveAt, sampledAt, playing, clockReady, speed, vi
     // The coarse React clock lags by up to 250 ms (2 s of video at 8x); drift is measured against the live clock.
     const now_at = c.liveAt?.() ?? c.at;
     if (!video || !c.current) { video?.pause(); return; }
+    if (video.error) { onError(c.source.url); return; }
     if (!video.readyState) { c.onReady(c.source.url, false); return; }
     const now = performance.now();
     const explicitSeek = lastRevision.current !== c.revision;

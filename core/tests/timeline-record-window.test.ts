@@ -110,3 +110,35 @@ test("timelineWindow reflects appended tail-segment entries (no stale summary or
     expect(page.records.map(record => record.id)).toEqual(["b1", "a2", "c1", "a3", "b3"]);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test("timelineWindow bounds open payload handles across >8 segments and invalidates summary if .idx is removed", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "timeline-many-")));
+  try {
+    await mkdir(join(root, "segments"));
+    for (let i = 0; i < 12; i++) {
+      await writeSegment(root, `seg-${String(i + 1).padStart(4, "0")}`, i + 1, [
+        { id: `id-${i}`, capability: `cap-${i}`, at: t0 + i * 10, runId: "run1" },
+      ], 2000 + i);
+    }
+    const first = await timelineWindow(root, {
+      run: "run1",
+      start: t0 + 500,
+      end: t0 + 600,
+      scopeStart: t0,
+      scopeEnd: t0 + 700,
+      limit: 20,
+    });
+    expect(first.records).toHaveLength(12);
+    await rm(join(root, "segments/seg-0001.idx"));
+    await expect(
+      timelineWindow(root, {
+        run: "run1",
+        start: t0 + 500,
+        end: t0 + 600,
+        scopeStart: t0,
+        scopeEnd: t0 + 700,
+        limit: 20,
+      }),
+    ).rejects.toThrow();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

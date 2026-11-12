@@ -24,6 +24,7 @@ export interface ReplayWindowEntry {
   loading: boolean;
   error?: string;
   used: number;
+  updated: number;
 }
 
 interface Flight { controller: AbortController; promise: Promise<ReplayWindow | undefined>; required: boolean }
@@ -45,6 +46,10 @@ export class ReplayWindowCache {
   getVersion = () => this.version;
   private emit() { this.version++; for (const listener of this.listeners) listener(); }
 
+  /** Pure read for render paths without mutating LRU order. */
+  peek(mode: ReplayWindowMode, startAt: number, endAt: number) {
+    return this.entries.get(replayWindowKey(mode, startAt, endAt));
+  }
   entry(mode: ReplayWindowMode, startAt: number, endAt: number) {
     const entry = this.entries.get(replayWindowKey(mode, startAt, endAt));
     if (entry) entry.used = ++this.clock;
@@ -58,25 +63,25 @@ export class ReplayWindowCache {
   ensure(mode: ReplayWindowMode, startAt: number, endAt: number, options: { required?: boolean; refresh?: boolean } = {}) {
     const key = replayWindowKey(mode, startAt, endAt);
     const flight = this.flights.get(key);
-    if (flight) { flight.required ||= !!options.required; return flight.promise; }
+    if (flight && !flight.controller.signal.aborted) { flight.required ||= !!options.required; return flight.promise; }
     const existing = this.entries.get(key);
-    if (existing?.complete && !options.refresh) { existing.used = ++this.clock; return Promise.resolve(existing.window); }
+    if (existing?.complete && !existing.error && !options.refresh) { existing.used = ++this.clock; return Promise.resolve(existing.window); }
     return this.start(key, mode, startAt, endAt, !!options.required, !!options.refresh);
   }
 
   private start(key: string, mode: ReplayWindowMode, startAt: number, endAt: number, required: boolean, refresh: boolean) {
     const controller = new AbortController();
-    const entry: ReplayWindowEntry = this.entries.get(key) ?? { key, mode, startAt, endAt, complete: false, loading: true, used: 0 };
+    const entry: ReplayWindowEntry = this.entries.get(key) ?? { key, mode, startAt, endAt, complete: false, loading: true, used: 0, updated: 0 };
     entry.loading = true; entry.error = undefined; entry.used = ++this.clock;
     this.entries.set(key, entry);
     const current = () => this.entries.get(key) === entry && this.flights.get(key)?.controller === controller;
     const promise = this.fetcher(mode, startAt, endAt, controller.signal, page => {
       // A refresh keeps the previous complete window on screen until the full replacement is ready.
       if (!current() || controller.signal.aborted || (refresh && entry.complete)) return;
-      entry.window = page; this.emit();
+      entry.window = page; entry.updated = ++this.clock; this.emit();
     }).then(window => {
       if (!current() || controller.signal.aborted) return undefined;
-      entry.window = window; entry.complete = true;
+      entry.window = window; entry.complete = true; entry.updated = ++this.clock;
       return window;
     }, error => {
       if (!current() || controller.signal.aborted) return undefined;
@@ -99,13 +104,27 @@ export class ReplayWindowCache {
   /** Abort in-flight loads whose window is no longer wanted. Kept windows continue unaffected. */
   cancelStale(keep: Iterable<string>) {
     const wanted = new Set(keep);
-    for (const [key, flight] of this.flights) if (!wanted.has(key)) flight.controller.abort();
+    let changed = false;
+    for (const [key, flight] of this.flights) {
+      if (!wanted.has(key)) {
+        flight.controller.abort();
+        this.flights.delete(key);
+        const entry = this.entries.get(key);
+        if (entry) {
+          entry.loading = false;
+          if (!entry.complete) this.entries.delete(key);
+        }
+        changed = true;
+      }
+    }
+    if (changed) this.emit();
   }
 
   /** Publish a window obtained outside `ensure` (e.g. an explicit "continue" page). */
   store(mode: ReplayWindowMode, startAt: number, endAt: number, window: ReplayWindow) {
     const key = replayWindowKey(mode, startAt, endAt);
-    this.entries.set(key, { key, mode, startAt, endAt, window, complete: true, loading: false, used: ++this.clock });
+    const stamp = ++this.clock;
+    this.entries.set(key, { key, mode, startAt, endAt, window, complete: true, loading: false, used: stamp, updated: stamp });
     this.evict(); this.emit();
   }
 
@@ -122,14 +141,14 @@ export class ReplayWindowCache {
     }
   }
 
-  /** Frames of every cached frame window overlapping [from, to], deduplicated and ordered. */
+  /** Frames of every cached frame window overlapping [from, to], deduplicated (freshest fetch wins) and ordered. */
   frames(from = -Infinity, to = Infinity): ReplayFrame[] {
     const frames = new Map<string, ReplayFrame>();
-    for (const entry of [...this.entries.values()].sort((a, b) => a.startAt - b.startAt)) {
+    for (const entry of [...this.entries.values()].sort((a, b) => a.updated - b.updated || a.startAt - b.startAt)) {
       if (entry.mode !== "frames" || !entry.window || entry.endAt < from || entry.startAt > to) continue;
       for (const frame of entry.window.frames) frames.set(frame.id, frame);
     }
-    return [...frames.values()];
+    return [...frames.values()].sort((a, b) => a.at - b.at || a.sequence - b.sequence);
   }
 
   /** Items of every cached event window overlapping [from, to]. */
@@ -165,7 +184,8 @@ export function replayPrefetchPlan(input: { at: number; speed: number; range: { 
   const speed = Math.max(1, input.speed), plan: ReplayWindowRequest[] = [];
   const add = (mode: ReplayWindowMode, bounds: { startAt: number; endAt: number }, required: boolean) => {
     const key = replayWindowKey(mode, bounds.startAt, bounds.endAt);
-    if (bounds.endAt > bounds.startAt && !plan.some(entry => entry.key === key)) plan.push({ mode, ...bounds, required, key });
+    const nonEmpty = bounds.endAt > bounds.startAt || (required && bounds.endAt === bounds.startAt);
+    if (nonEmpty && !plan.some(entry => entry.key === key)) plan.push({ mode, ...bounds, required, key });
   };
   const frame = boundsOf(at, frameWindowMs);
   add("frames", frame, true);
