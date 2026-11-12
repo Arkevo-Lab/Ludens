@@ -1,4 +1,5 @@
 import { dashboardWorker } from "@ludens/core/core/query/dashboard-worker";
+import { isOmpEffort, isOmpServiceTier } from "@ludens/protocol/ludens";
 import { controlWorkspaceRuntime } from "@/lib/runtime-control";
 import { localRequest, errorResponse } from "@/lib/local-request";
 export const runtime = "nodejs";
@@ -10,8 +11,12 @@ export async function POST(request: Request) {
       const model = typeof b.model === "string" ? b.model.trim() : "";
       const slash = model.indexOf("/");
       const serviceTier = b.serviceTier;
-      if (serviceTier !== undefined && serviceTier !== null && serviceTier !== "priority" && serviceTier !== "ultrafast") {
+      const effort = b.effort;
+      if (serviceTier !== undefined && serviceTier !== null && !isOmpServiceTier(serviceTier)) {
         throw new Error("serviceTier 必须是 priority、ultrafast 或 null");
+      }
+      if (effort !== undefined && effort !== null && !isOmpEffort(effort)) {
+        throw new Error("effort 必须是 minimal、low、medium、high、xhigh、max 或 null");
       }
       if (!b.project || !b.workspace || !model || slash <= 0 || slash === model.length - 1) {
         throw new Error("必须提供 project、workspace 与有效的 provider/id 模型标识");
@@ -20,7 +25,8 @@ export async function POST(request: Request) {
         await controlWorkspaceRuntime(b.project, b.workspace, {
           action: "set_model",
           model,
-          serviceTier,
+          ...(serviceTier !== undefined ? { serviceTier } : {}),
+          ...(effort !== undefined ? { effort } : {}),
           ...(typeof b.runId === "string"
             ? { runId: b.runId }
             : typeof b.run === "string"

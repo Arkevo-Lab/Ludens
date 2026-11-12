@@ -39,7 +39,13 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ModelPickerDialog, ServiceTierBadge, type ModelServiceTier } from "@/components/model-picker-dialog";
+import {
+  ModelEffortBadge,
+  ModelPickerDialog,
+  ServiceTierBadge,
+  type ModelEffort,
+  type ModelServiceTier,
+} from "@/components/model-picker-dialog";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
@@ -411,6 +417,7 @@ export function ModelAndBudgetPanel({
     driver: "cua",
     model: studio.defaults.model ?? "openai-codex/gpt-6.1-sol",
     serviceTier: studio.defaults.serviceTier,
+    effort: studio.defaults.effort,
     seconds: studio.defaults.seconds ?? 1800,
     requests: studio.defaults.requests ?? 1000,
     compactionThreshold: studio.defaults.compactionThreshold,
@@ -421,6 +428,7 @@ export function ModelAndBudgetPanel({
 
   const [model, setModel] = useState(initial.model);
   const [serviceTier, setServiceTier] = useState<ModelServiceTier | null>(initial.serviceTier ?? null);
+  const [effort, setEffort] = useState<ModelEffort | null>(initial.effort ?? null);
   const [seconds, setSeconds] = useState(String(initial.seconds));
   const [requests, setRequests] = useState(String(initial.requests));
   const [compaction, setCompaction] = useState(
@@ -442,6 +450,7 @@ export function ModelAndBudgetPanel({
     if (!cfg) return;
     setModel(cfg.model);
     setServiceTier(cfg.serviceTier ?? null);
+    setEffort(cfg.effort ?? null);
     setSeconds(String(cfg.seconds));
     setRequests(String(cfg.requests));
     setCompaction(cfg.compactionThreshold !== undefined ? String(cfg.compactionThreshold) : "");
@@ -466,6 +475,7 @@ export function ModelAndBudgetPanel({
   const dirty =
     model.trim() !== initial.model ||
     serviceTier !== (initial.serviceTier ?? null) ||
+    effort !== (initial.effort ?? null) ||
     seconds.trim() !== String(initial.seconds) ||
     requests.trim() !== String(initial.requests) ||
     (compaction.trim() === "" ? undefined : Number(compaction.trim())) !== initial.compactionThreshold ||
@@ -478,6 +488,7 @@ export function ModelAndBudgetPanel({
   const resetDraft = () => {
     setModel(initial.model);
     setServiceTier(initial.serviceTier ?? null);
+    setEffort(initial.effort ?? null);
     setSeconds(String(initial.seconds));
     setRequests(String(initial.requests));
     setCompaction(initial.compactionThreshold !== undefined ? String(initial.compactionThreshold) : "");
@@ -505,6 +516,7 @@ export function ModelAndBudgetPanel({
           patch: {
             model: model.trim(),
             serviceTier,
+            effort,
             seconds: parsedSeconds,
             requests: parsedRequests,
             compactionThreshold: parsedCompaction,
@@ -564,13 +576,19 @@ export function ModelAndBudgetPanel({
                 onChange={event => {
                   setModel(event.target.value);
                   setServiceTier(null);
+                  setEffort(null);
                   setSavedNotice(false);
                 }}
                 placeholder="openai-codex/gpt-6.1-sol"
                 className="font-mono text-sm sm:flex-1"
                 spellCheck={false}
               />
-              <ServiceTierBadge tier={serviceTier} className="self-start sm:self-center" />
+              <ModelEffortBadge effort={effort} className="self-start sm:self-center" />
+              <ServiceTierBadge
+                tier={serviceTier}
+                showStandard={Boolean(model.trim())}
+                className="self-start sm:self-center"
+              />
               <Button
                 type="button"
                 variant="outline"
@@ -589,11 +607,13 @@ export function ModelAndBudgetPanel({
               onOpenChange={setModelPickerOpen}
               value={model}
               serviceTier={serviceTier}
+              effort={effort}
               projectId={studio.id}
               allowUnauthenticated={true}
-              onSelect={(nextModel, nextServiceTier) => {
+              onSelect={(nextModel, nextServiceTier, nextEffort) => {
                 setModel(nextModel);
                 setServiceTier(nextServiceTier);
+                setEffort(nextEffort);
                 setSavedNotice(false);
               }}
             />
@@ -607,6 +627,7 @@ export function ModelAndBudgetPanel({
                     onClick={() => {
                       setModel(preset.id);
                       setServiceTier(null);
+                      setEffort(null);
                       setSavedNotice(false);
                     }}
                     className={

@@ -2,7 +2,17 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { discoverAuthStorage, ModelRegistry, Settings, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import { serviceTierFamily, shouldSendServiceTier, type Model } from "@oh-my-pi/pi-ai";
-import { isOmpServiceTier, mergeConnectionConfig, readGlobalConfig, validateConnectionConfig, type ModelConnectionConfig, type OmpServiceTier } from "@ludens/protocol/ludens";
+import {
+  OMP_EFFORTS,
+  isOmpEffort,
+  isOmpServiceTier,
+  mergeConnectionConfig,
+  readGlobalConfig,
+  validateConnectionConfig,
+  type ModelConnectionConfig,
+  type OmpEffort,
+  type OmpServiceTier,
+} from "@ludens/protocol/ludens";
 import type { AvailableModelItem, AvailableModelsCatalog } from "../query/available-models";
 
 export type { AvailableModelItem, AvailableModelsCatalog };
@@ -11,10 +21,12 @@ export function ompSettingsOverrides(options: {
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
   serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
 }): Record<string, unknown> {
   const connection = options.connection;
   return {
     "tier.openai": options.serviceTier ?? "none",
+    ...(options.effort ? { defaultThinkingLevel: options.effort } : {}),
     // Host invariant: fallback models may lack image input, and device control
     // plus run attribution require the selected model to stay sticky.
     "retry.modelFallback": false,
@@ -38,6 +50,44 @@ export function supportedOmpServiceTiers(model: Model): OmpServiceTier[] {
 
 export function effectiveOmpServiceTier(model: Model, tier: unknown): OmpServiceTier | null {
   return serviceTierFamily(model) === "openai" && isOmpServiceTier(tier) && shouldSendServiceTier(tier, model) ? tier : null;
+}
+
+export function supportedOmpEfforts(model: Model): OmpEffort[] {
+  if (!model.reasoning || !Array.isArray(model.thinking?.efforts)) return [];
+  return model.thinking.efforts.filter((effort): effort is OmpEffort => isOmpEffort(effort));
+}
+
+function clampEffortToSupported(supported: readonly OmpEffort[], target: OmpEffort): OmpEffort | null {
+  if (supported.length === 0) return null;
+  if (supported.includes(target)) return target;
+  const targetRank = OMP_EFFORTS.indexOf(target);
+  for (let idx = targetRank - 1; idx >= 0; idx--) {
+    const candidate = OMP_EFFORTS[idx]!;
+    if (supported.includes(candidate)) return candidate;
+  }
+  return supported[0] ?? null;
+}
+
+export function defaultOmpEffort(model: Model): OmpEffort | null {
+  const supported = supportedOmpEfforts(model);
+  if (supported.length === 0 || model.thinking?.unverified) return null;
+  const preferred = isOmpEffort(model.thinking?.defaultLevel) ? model.thinking.defaultLevel : "high";
+  return clampEffortToSupported(supported, preferred);
+}
+
+export function effectiveOmpEffort(model: Model, effort: unknown): OmpEffort | null {
+  if (!isOmpEffort(effort)) return null;
+  const supported = supportedOmpEfforts(model);
+  return clampEffortToSupported(supported, effort);
+}
+
+/** Concrete OMP thinking selector to apply to a live AgentSession so resumed transcripts respect workspace config. */
+export function resolvedOmpSessionEffort(model: Model, configuredEffort: OmpEffort | null): OmpEffort | "off" | undefined {
+  const explicit = effectiveOmpEffort(model, configuredEffort);
+  if (explicit) return explicit;
+  const fallback = defaultOmpEffort(model);
+  if (fallback) return fallback;
+  return model.thinking?.unverified ? "off" : undefined;
 }
 
 /**
@@ -77,6 +127,7 @@ export async function listAvailableOmpModels(options?: {
   home?: string;
   currentModel?: string | null;
   currentServiceTier?: OmpServiceTier | null;
+  currentEffort?: OmpEffort | null;
   authStorage?: AuthStorage;
   modelRegistry?: ModelRegistry;
 }): Promise<AvailableModelsCatalog> {
@@ -132,6 +183,8 @@ export async function listAvailableOmpModels(options?: {
         maxTokens: model.maxTokens ?? 0,
         authenticated,
         supportedServiceTiers: supportedOmpServiceTiers(model),
+        supportedEfforts: supportedOmpEfforts(model),
+        defaultEffort: defaultOmpEffort(model),
       });
       const stat = providerStats.get(model.provider) ?? { count: 0, authenticated: false };
       stat.count += 1;
@@ -169,11 +222,21 @@ export async function listAvailableOmpModels(options?: {
       ? configuredServiceTier
       : null;
 
+    const configuredEffort = options && "currentEffort" in options
+      ? options.currentEffort
+      : isOmpEffort(workspaceConfig?.effort)
+        ? workspaceConfig.effort
+        : options?.workspace ? null : globalConfig?.defaults.effort;
+    const currentEffort = configuredEffort && currentModelEntry
+      ? clampEffortToSupported(currentModelEntry.supportedEfforts, configuredEffort)
+      : null;
+
     return {
       models,
       providers,
       currentModel: resolvedCurrentModel,
       currentServiceTier,
+      currentEffort,
     };
   } finally {
     ownedAuth?.close();

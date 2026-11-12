@@ -11,7 +11,7 @@ ludens auto off
 ludens steer <message>
 ludens event <list|send|reply|ack>
 ludens consolidate [--seconds <n>]
-ludens model [<provider/id>] [--service-tier none|priority|ultrafast]
+ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]
 ludens perception status | state | reload | stop
 ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
 ludens perception inject [on|off]

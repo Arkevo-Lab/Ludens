@@ -1587,10 +1587,10 @@
   gap: 5px;
   height: 28px;
   min-width: 84px;
-  max-width: 220px;
+  max-width: 268px;
   flex: 0 1 auto;
   overflow: hidden;
-  padding: 0 9px;
+  padding: 0 8px 0 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface-inset, var(--muted)) 65%, var(--card));
@@ -2707,7 +2707,7 @@
     gap: 16px;
   }
   .codex-model-pill {
-    max-width: 185px;
+    max-width: 220px;
   }
 }
 

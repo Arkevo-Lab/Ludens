@@ -20,6 +20,7 @@ import {
   validateMachineSpec,
   BUILTIN_LOCAL_DESKTOP_MACHINE,
   validateConnectionConfig,
+  isOmpEffort,
   isOmpServiceTier,
   withWorkspaceRegistrationLock,
   type BasewareMachineSpec,
@@ -27,6 +28,7 @@ import {
   type MachineTransportConfig,
   type LudensConfig,
   type ModelConnectionConfig,
+  type OmpEffort,
   type OmpServiceTier,
   type WorkspaceDefaults,
   type WorkspaceRegistration,
@@ -52,6 +54,7 @@ export interface WorkspaceConfigSummary {
   cuaCommand?: string;
   model: string;
   serviceTier?: OmpServiceTier;
+  effort?: OmpEffort;
   seconds: number;
   requests: number;
   compactionThreshold?: number;
@@ -191,6 +194,7 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
       ...(typeof raw.cuaCommand === "string" && raw.cuaCommand.trim() ? { cuaCommand: raw.cuaCommand.trim() } : {}),
       model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "openai-codex/gpt-6.1-sol",
       ...(isOmpServiceTier(raw.serviceTier) ? { serviceTier: raw.serviceTier } : {}),
+      ...(isOmpEffort(raw.effort) ? { effort: raw.effort } : {}),
       seconds: typeof raw.seconds === "number" && Number.isInteger(raw.seconds) && raw.seconds > 0 ? raw.seconds : 1800,
       requests: typeof raw.requests === "number" && Number.isInteger(raw.requests) && raw.requests > 0 ? raw.requests : 1000,
       ...(typeof raw.compactionThreshold === "number" && Number.isInteger(raw.compactionThreshold) && raw.compactionThreshold > 0
@@ -251,7 +255,7 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
     throw new Error("全局默认配置必须是对象");
   }
   const patch = input as Record<string, unknown>;
-  const allowed = ["model", "serviceTier", "seconds", "requests", "compactionThreshold", "dashboard", "pet", "connection"];
+  const allowed = ["model", "serviceTier", "effort", "seconds", "requests", "compactionThreshold", "dashboard", "pet", "connection"];
   for (const key of Object.keys(patch)) {
     if (!allowed.includes(key)) throw new Error(`未知的全局默认配置字段：${key}`);
   }
@@ -266,6 +270,11 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
       if (patch.serviceTier === null || patch.serviceTier === undefined || patch.serviceTier === "") delete defaults.serviceTier;
       else if (isOmpServiceTier(patch.serviceTier)) defaults.serviceTier = patch.serviceTier;
       else throw new Error("defaults.serviceTier 必须是 priority、ultrafast 或 null");
+    }
+    if ("effort" in patch) {
+      if (patch.effort === null || patch.effort === undefined || patch.effort === "") delete defaults.effort;
+      else if (isOmpEffort(patch.effort)) defaults.effort = patch.effort;
+      else throw new Error("defaults.effort 必须是 minimal、low、medium、high、xhigh、max 或 null");
     }
     for (const key of ["seconds", "requests", "compactionThreshold"] as const) {
       if (key in patch) {
@@ -951,6 +960,7 @@ export async function updateWorkspaceStudioConfig(
   const allowed = [
     "model",
     "serviceTier",
+    "effort",
     "seconds",
     "requests",
     "compactionThreshold",
@@ -985,6 +995,11 @@ export async function updateWorkspaceStudioConfig(
       if (patch.serviceTier === null || patch.serviceTier === undefined || patch.serviceTier === "") delete next.serviceTier;
       else if (isOmpServiceTier(patch.serviceTier)) next.serviceTier = patch.serviceTier;
       else throw new Error("serviceTier 必须是 priority、ultrafast 或 null");
+    }
+    if ("effort" in patch) {
+      if (patch.effort === null || patch.effort === undefined || patch.effort === "") delete next.effort;
+      else if (isOmpEffort(patch.effort)) next.effort = patch.effort;
+      else throw new Error("effort 必须是 minimal、low、medium、high、xhigh、max 或 null");
     }
     for (const key of ["seconds", "requests"] as const) {
       if (key in patch) {
@@ -1143,6 +1158,11 @@ export async function updateWorkspaceShiori(
         if (body.serviceTier === null || body.serviceTier === undefined || body.serviceTier === "") delete next.serviceTier;
         else if (isOmpServiceTier(body.serviceTier)) next.serviceTier = body.serviceTier;
         else throw new Error("serviceTier 必须是 priority、ultrafast 或 null");
+      }
+      if ("effort" in body) {
+        if (body.effort === null || body.effort === undefined || body.effort === "") delete next.effort;
+        else if (isOmpEffort(body.effort)) next.effort = body.effort;
+        else throw new Error("effort 必须是 minimal、low、medium、high、xhigh、max 或 null");
       }
       const temporary = `${configPath}.${randomUUID()}.tmp`;
       try {

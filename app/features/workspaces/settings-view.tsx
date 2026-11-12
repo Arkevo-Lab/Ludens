@@ -4,7 +4,13 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Bot, Cable, CheckCircle2, Cpu, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
-import { ModelPickerDialog, ServiceTierBadge, type ModelServiceTier } from "@/components/model-picker-dialog";
+import {
+  ModelEffortBadge,
+  ModelPickerDialog,
+  ServiceTierBadge,
+  type ModelEffort,
+  type ModelServiceTier,
+} from "@/components/model-picker-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -148,6 +154,7 @@ export function GlobalDefaultsCard() {
   const [saved, setSaved] = useState<{
     model: string;
     serviceTier: ModelServiceTier | null;
+    effort: ModelEffort | null;
     seconds: string;
     requests: string;
     compactionThreshold: string;
@@ -155,6 +162,7 @@ export function GlobalDefaultsCard() {
   }>({
     model: "",
     serviceTier: null,
+    effort: null,
     seconds: "",
     requests: "",
     compactionThreshold: "",
@@ -180,6 +188,7 @@ export function GlobalDefaultsCard() {
         const next = {
           model: d.model ?? "",
           serviceTier: d.serviceTier ?? null,
+          effort: d.effort ?? null,
           seconds: d.seconds !== undefined ? String(d.seconds) : "",
           requests: d.requests !== undefined ? String(d.requests) : "",
           compactionThreshold: d.compactionThreshold !== undefined ? String(d.compactionThreshold) : "",
@@ -201,6 +210,7 @@ export function GlobalDefaultsCard() {
   const dirty =
     draft.model.trim() !== saved.model.trim() ||
     draft.serviceTier !== saved.serviceTier ||
+    draft.effort !== saved.effort ||
     draft.seconds.trim() !== saved.seconds.trim() ||
     draft.requests.trim() !== saved.requests.trim() ||
     draft.compactionThreshold.trim() !== saved.compactionThreshold.trim() ||
@@ -220,6 +230,7 @@ export function GlobalDefaultsCard() {
           defaults: {
             model: draft.model.trim() || null,
             serviceTier: draft.serviceTier,
+            effort: draft.effort,
             seconds: draft.seconds.trim() ? Number(draft.seconds.trim()) : null,
             requests: draft.requests.trim() ? Number(draft.requests.trim()) : null,
             compactionThreshold: draft.compactionThreshold.trim() ? Number(draft.compactionThreshold.trim()) : null,
@@ -233,6 +244,7 @@ export function GlobalDefaultsCard() {
       const next = {
         model: d.model ?? "",
         serviceTier: d.serviceTier ?? null,
+        effort: d.effort ?? null,
         seconds: d.seconds !== undefined ? String(d.seconds) : "",
         requests: d.requests !== undefined ? String(d.requests) : "",
         compactionThreshold: d.compactionThreshold !== undefined ? String(d.compactionThreshold) : "",
@@ -287,14 +299,24 @@ export function GlobalDefaultsCard() {
                 disabled={loading || saving}
                 value={draft.model}
                 onChange={event => {
-                  setDraft(current => ({ ...current, model: event.target.value, serviceTier: null }));
+                  setDraft(current => ({
+                    ...current,
+                    model: event.target.value,
+                    serviceTier: null,
+                    effort: null,
+                  }));
                   setSavedNotice(false);
                 }}
                 placeholder="openai-codex/gpt-6.1-sol"
                 className="font-mono text-sm sm:flex-1"
                 spellCheck={false}
               />
-              <ServiceTierBadge tier={draft.serviceTier} className="self-start sm:self-center" />
+              <ModelEffortBadge effort={draft.effort} className="self-start sm:self-center" />
+              <ServiceTierBadge
+                tier={draft.serviceTier}
+                showStandard={Boolean(draft.model.trim())}
+                className="self-start sm:self-center"
+              />
               <Button
                 type="button"
                 variant="outline"
@@ -313,9 +335,15 @@ export function GlobalDefaultsCard() {
               onOpenChange={setModelPickerOpen}
               value={draft.model}
               serviceTier={draft.serviceTier}
+              effort={draft.effort}
               allowUnauthenticated={true}
-              onSelect={(nextModel, nextServiceTier) => {
-                setDraft(current => ({ ...current, model: nextModel, serviceTier: nextServiceTier }));
+              onSelect={(nextModel, nextServiceTier, nextEffort) => {
+                setDraft(current => ({
+                  ...current,
+                  model: nextModel,
+                  serviceTier: nextServiceTier,
+                  effort: nextEffort,
+                }));
                 setSavedNotice(false);
               }}
             />

@@ -1,5 +1,5 @@
 import { dashboardWorker } from "@ludens/core/core/query/dashboard-worker";
-import type { OmpServiceTier } from "@ludens/protocol/ludens";
+import type { OmpEffort, OmpServiceTier } from "@ludens/protocol/ludens";
 import type {
   HostControlStatus as CoreHostControlStatus,
   RuntimeControlCommand as CoreRuntimeControlCommand,
@@ -7,11 +7,19 @@ import type {
 
 export type RuntimeControlCommand =
   | CoreRuntimeControlCommand
-  | { action: "set_model"; model: string; serviceTier?: OmpServiceTier | null; runId?: string; expectedEpoch?: string | null };
+  | {
+      action: "set_model";
+      model: string;
+      serviceTier?: OmpServiceTier | null;
+      effort?: OmpEffort | null;
+      runId?: string;
+      expectedEpoch?: string | null;
+    };
 
 export type HostControlStatus = CoreHostControlStatus & {
   model?: string | null;
   serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
   hostOffline?: boolean;
 };
 

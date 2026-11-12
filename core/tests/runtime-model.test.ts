@@ -89,15 +89,17 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
     }
     expect(runtime.status().model).toBe("openai-codex/gpt-6.1-sol");
 
-    await runtime.setModel("openai/gpt-6.1-sol", "ultrafast");
+    await runtime.setModel("openai/gpt-6.1-sol", "ultrafast", "xhigh");
     expect(runtime.status().serviceTier).toBe("ultrafast");
+    expect(runtime.status().effort).toBe("xhigh");
 
     // Switch in manual mode succeeds and updates status + session log + projections.
-    const switched = await runtime.setModel(nextModelId);
+    const switched = await runtime.setModel(nextModelId, undefined, null);
     expect(switched).toMatchObject({
       mode: "manual",
       model: nextModelId,
       serviceTier: null,
+      effort: null,
     });
     expect(runtime.status().model).toBe(nextModelId);
 
@@ -159,6 +161,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
     });
     runtime.attach({ agent: resumedAgent });
     expect(runtime.status().serviceTier).toBeNull();
+    expect(runtime.status().effort).toBeNull();
   } finally {
     await runtime.close();
     auth.close();
@@ -234,7 +237,11 @@ test("Runtime.setModel strictly blocks hot-switching during auto runs and consol
       expectedEpoch: null,
     });
     expect(updated).toMatchObject({ mode: "manual", model: "anthropic/claude-sonnet-4-5" });
-    expect(await dispatch(runtime, { kind: "model", argv: [] })).toEqual({ model: "anthropic/claude-sonnet-4-5", serviceTier: null });
+    expect(await dispatch(runtime, { kind: "model", argv: [] })).toEqual({
+      model: "anthropic/claude-sonnet-4-5",
+      serviceTier: null,
+      effort: null,
+    });
   } finally {
     runGate.resolve();
     consolidateGate.resolve();
@@ -323,7 +330,7 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
     }
 
     const customVision = catalog.models.find(item => item.fullId === "custom-vision/v1-vision");
-    expect(customVision).toEqual({
+    expect(customVision).toMatchObject({
       fullId: "custom-vision/v1-vision",
       provider: "custom-vision",
       id: "v1-vision",
@@ -334,9 +341,12 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
       authenticated: true,
       supportedServiceTiers: [],
     });
+    expect(Array.isArray(customVision?.supportedEfforts)).toBe(true);
 
     const codexSol = catalog.models.find(item => item.fullId === "openai-codex/gpt-6.1-sol");
     expect(codexSol?.authenticated).toBe(true);
+    expect(codexSol?.supportedEfforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
+    expect(codexSol?.defaultEffort).toBe("high");
     const openaiSol = catalog.models.find(item => item.fullId === "openai/gpt-6.1-sol");
     expect(openaiSol?.supportedServiceTiers).toEqual(["priority", "ultrafast"]);
     const googleModels = catalog.models.filter(item => item.provider === "google");
@@ -348,8 +358,10 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
       modelRegistry: registry,
       currentModel: "openai/gpt-6.1-sol",
       currentServiceTier: "ultrafast",
+      currentEffort: "xhigh",
     });
     expect(tieredCatalog.currentServiceTier).toBe("ultrafast");
+    expect(tieredCatalog.currentEffort).toBe("xhigh");
 
     const unauthedVision = catalog.models.find(item => item.fullId === "unauthed-vision/u-vision");
     expect(unauthedVision?.authenticated).toBe(false);
@@ -375,21 +387,23 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
     await writeFile(join(home, "config.json"), JSON.stringify({
       version: 1,
       workspaceRoot: join(home, "workspaces"),
-      defaults: { model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" },
+      defaults: { model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast", effort: "xhigh" },
     }));
     const globalCatalog = await availableModels(undefined, home);
     expect(globalCatalog.currentModel).toBe("openai-codex/gpt-6.1-sol");
+    expect(globalCatalog.currentEffort).toBe("xhigh");
     expect(globalCatalog.models.length).toBeGreaterThan(0);
 
     const bridgedCatalog = await listAvailableModelsViaBun({ workspace, home });
     expect(bridgedCatalog.currentModel).toBe("custom-vision/v1-vision");
     expect(bridgedCatalog.currentServiceTier).toBeNull();
+    expect(bridgedCatalog.currentEffort).toBeNull();
     expect(bridgedCatalog.models.length).toBeGreaterThan(0);
   } finally {
     auth.close();
     await rm(directory, { recursive: true, force: true });
   }
-});
+}, 15_000);
 
 test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live host and ludens.json", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "ludens-control-model-")));
@@ -398,6 +412,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
   const gate = Promise.withResolvers<void>();
   let activeModel = "openai-codex/gpt-6.1-sol";
   let activeServiceTier: "priority" | "ultrafast" | null = null;
+  let activeEffort: "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null = null;
   const agent: AgentRunner = {
     async run({ signal }) {
       const aborted = Promise.withResolvers<void>();
@@ -407,9 +422,11 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     async consolidate() {},
     model: () => activeModel,
     serviceTier: () => activeServiceTier,
-    async setModel(next, nextServiceTier) {
+    effort: () => activeEffort,
+    async setModel(next, nextServiceTier, nextEffort) {
       activeModel = next;
-      activeServiceTier = nextServiceTier ?? null;
+      if (nextServiceTier !== undefined) activeServiceTier = nextServiceTier;
+      if (nextEffort !== undefined) activeEffort = nextEffort;
       return activeModel;
     },
     abort: async () => {},
@@ -449,16 +466,18 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     const tieredSwitch = await controlWorkspaceRuntime(
       identity.id,
       workspace,
-      { action: "set_model", model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" },
+      { action: "set_model", model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast", effort: "xhigh" },
       home,
     );
-    expect(tieredSwitch).toMatchObject({ model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" });
-    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).serviceTier).toBe("ultrafast");
+    expect(tieredSwitch).toMatchObject({ model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast", effort: "xhigh" });
+    const tieredRaw = JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8"));
+    expect(tieredRaw.serviceTier).toBe("ultrafast");
+    expect(tieredRaw.effort).toBe("xhigh");
 
     await controlWorkspaceRuntime(
       identity.id,
       workspace,
-      { action: "set_model", model: "anthropic/claude-sonnet-4-5", serviceTier: null },
+      { action: "set_model", model: "anthropic/claude-sonnet-4-5", serviceTier: null, effort: null },
       home,
     );
 
@@ -470,8 +489,13 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     try {
       await cli(["model"], socket);
       expect(printed.at(-1)).toBe("anthropic/claude-sonnet-4-5");
-      await cli(["model", "openai-codex/gpt-6.1-sol", "--service-tier", "ultrafast"], socket);
-      expect(JSON.parse(printed.at(-1)!)).toMatchObject({ mode: "manual", model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" });
+      await cli(["model", "openai-codex/gpt-6.1-sol", "--service-tier", "ultrafast", "--effort", "high"], socket);
+      expect(JSON.parse(printed.at(-1)!)).toMatchObject({
+        mode: "manual",
+        model: "openai-codex/gpt-6.1-sol",
+        serviceTier: "ultrafast",
+        effort: "high",
+      });
     } finally {
       logSpy.mockRestore();
     }
@@ -516,17 +540,23 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
 
     const studioTiered = await updateWorkspaceStudioConfig(identity.id, {
       serviceTier: "ultrafast",
+      effort: "xhigh",
     }, home);
     expect(studioTiered.config?.serviceTier).toBe("ultrafast");
+    expect(studioTiered.config?.effort).toBe("xhigh");
     const studioStandard = await updateWorkspaceStudioConfig(identity.id, {
       serviceTier: null,
+      effort: null,
     }, home);
     expect(studioStandard.config?.serviceTier).toBeUndefined();
+    expect(studioStandard.config?.effort).toBeUndefined();
 
-    await updateGlobalDefaults({ serviceTier: "priority" }, home);
+    await updateGlobalDefaults({ serviceTier: "priority", effort: "medium" }, home);
     expect((await readGlobalConfig(home)).defaults.serviceTier).toBe("priority");
-    await updateGlobalDefaults({ serviceTier: null }, home);
+    expect((await readGlobalConfig(home)).defaults.effort).toBe("medium");
+    await updateGlobalDefaults({ serviceTier: null, effort: null }, home);
     expect((await readGlobalConfig(home)).defaults.serviceTier).toBeUndefined();
+    expect((await readGlobalConfig(home)).defaults.effort).toBeUndefined();
 
     // Leading/trailing slash selectors are rejected consistently.
     for (const invalidSelector of ["/foo", "foo/", "/"]) {
