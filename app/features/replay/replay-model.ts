@@ -28,45 +28,6 @@ export function mergeReplayPages(pages: ReplayWindow[]): ReplayWindow {
     ...(pages.at(-1)?.coverage ? { coverage: pages.at(-1)!.coverage } : {}) };
 }
 
-/** One current frame per capability; never replace missing history with future pixels. */
-export function replayFramesAt(frames: ReplayFrame[], at: number, capability = "") {
-  const latest = new Map<string, ReplayFrame>();
-  for (const frame of frames) {
-    if (frame.at > at || (capability && frame.capability !== capability)) continue;
-    const previous = latest.get(frame.capability);
-    if (!previous || frame.at > previous.at || (frame.at === previous.at && frame.sequence > previous.sequence))
-      latest.set(frame.capability, frame);
-  }
-  return [...latest.values()].sort((a, b) => a.capability.localeCompare(b.capability));
-}
-
-/**
- * Stage display helper: returns the latest frame at or before `at` per capability,
- * and when the playhead is before a capability's very first frame in the window,
- * falls back to that capability's earliest frame so the stage previews frame 0 instead of a blank screen.
- */
-export function replayStageFramesAt(frames: ReplayFrame[], at: number, capability = "") {
-  const current = replayFramesAt(frames, at, capability);
-  const covered = new Set(current.map(frame => frame.capability));
-  const earliest = new Map<string, ReplayFrame>();
-  for (const frame of frames) {
-    if (covered.has(frame.capability) || (capability && frame.capability !== capability)) continue;
-    const previous = earliest.get(frame.capability);
-    if (!previous || frame.at < previous.at || (frame.at === previous.at && frame.sequence < previous.sequence))
-      earliest.set(frame.capability, frame);
-  }
-  return [...current, ...earliest.values()].sort((a, b) => a.capability.localeCompare(b.capability));
-}
-
-export function adjacentReplayFrame(frames: ReplayFrame[], at: number, direction: -1 | 1, capability = "") {
-  let closest: ReplayFrame | undefined;
-  for (const frame of frames) {
-    if ((capability && frame.capability !== capability) || (direction === 1 ? frame.at <= at : frame.at >= at)) continue;
-    if (!closest || (direction === 1 ? frame.at < closest.at : frame.at > closest.at)) closest = frame;
-  }
-  return closest;
-}
-
 export function replayItemActive(item: ReplayItem, at: number) {
   return item.startAt <= at && (item.endAt === null || at <= item.endAt);
 }
@@ -122,8 +83,94 @@ export function coalesceReplayFrameTicks(
     }));
 }
 
-export function retainReplayWindows(windows: ReplayWindow[], currentStart: number) {
-  return [...new Map(windows.map(window => [window.startAt, window])).values()]
-    .sort((a, b) => Math.abs(a.startAt - currentStart) - Math.abs(b.startAt - currentStart) || b.startAt - a.startAt)
-    .slice(0, 2);
+/** Grid-aligned window starts intersecting [from, to], at most `limit`. */
+export function replayWindowsBetween(from: number, to: number, range: Pick<ReplayOverview, "startAt" | "endAt">,
+  windowMs = REPLAY_WINDOW_MS, limit = 8) {
+  const result: { startAt: number; endAt: number }[] = [];
+  if (range.endAt < range.startAt) return result;
+  let bounds = replayWindowBounds(Math.max(range.startAt, from), range, windowMs);
+  while (result.length < limit) {
+    result.push(bounds);
+    if (bounds.endAt >= Math.min(to, range.endAt) || bounds.endAt >= range.endAt) break;
+    bounds = replayWindowBounds(bounds.endAt, range, windowMs);
+  }
+  return result;
+}
+
+/** Sorted by (at, sequence); `upperBound` returns the first index whose frame is strictly after `at`. */
+const compareFrames = (a: ReplayFrame, b: ReplayFrame) => a.at - b.at || a.sequence - b.sequence;
+export function upperBoundFrame(frames: readonly ReplayFrame[], at: number) {
+  let lo = 0, hi = frames.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (frames[mid].at <= at) lo = mid + 1; else hi = mid; }
+  return lo;
+}
+
+export interface ReplayFrameIndex {
+  /** Every frame, ordered by (at, sequence), deduplicated by id. */
+  all: readonly ReplayFrame[];
+  byCapability: ReadonlyMap<string, readonly ReplayFrame[]>;
+}
+export const emptyReplayFrameIndex: ReplayFrameIndex = { all: [], byCapability: new Map() };
+
+/** Build once per cached-window change; every playhead lookup is then O(capabilities · log N). */
+export function buildReplayFrameIndex(frames: Iterable<ReplayFrame>): ReplayFrameIndex {
+  const unique = new Map<string, ReplayFrame>();
+  for (const frame of frames) unique.set(frame.id, frame);
+  const all = [...unique.values()].sort(compareFrames);
+  const byCapability = new Map<string, ReplayFrame[]>();
+  for (const frame of all) {
+    const list = byCapability.get(frame.capability);
+    if (list) list.push(frame); else byCapability.set(frame.capability, [frame]);
+  }
+  return { all, byCapability };
+}
+
+const indexCapabilities = (index: ReplayFrameIndex, capability: string) =>
+  capability ? (index.byCapability.has(capability) ? [capability] : []) : [...index.byCapability.keys()];
+
+/** Same contract as `replayFramesAt`, by binary search per capability. */
+export function indexedFramesAt(index: ReplayFrameIndex, at: number, capability = "") {
+  const result: ReplayFrame[] = [];
+  for (const name of indexCapabilities(index, capability)) {
+    const list = index.byCapability.get(name)!, position = upperBoundFrame(list, at);
+    if (position > 0) result.push(list[position - 1]);
+  }
+  return result.sort((a, b) => a.capability.localeCompare(b.capability));
+}
+
+/**
+ * Stage frames by binary search per capability: the latest frame at or before `at` (no older than `from`),
+ * otherwise that capability's first frame before `to` as a preview, so the stage never goes blank at frame 0.
+ */
+export function indexedStageFramesAt(index: ReplayFrameIndex, at: number, capability = "", from = -Infinity, to = Infinity) {
+  const result: ReplayFrame[] = [];
+  for (const name of indexCapabilities(index, capability)) {
+    const list = index.byCapability.get(name)!, position = upperBoundFrame(list, at);
+    const past = position > 0 ? list[position - 1] : undefined, next = list[position];
+    if (past && past.at >= from) result.push(past);
+    else if (next && next.at < to) result.push(next);
+  }
+  return result.sort((a, b) => a.capability.localeCompare(b.capability));
+}
+
+export function indexedAdjacentFrame(index: ReplayFrameIndex, at: number, direction: -1 | 1, capability = "") {
+  const list = capability ? index.byCapability.get(capability) ?? [] : index.all;
+  if (direction === 1) return list[upperBoundFrame(list, at)];
+  let lo = 0, hi = list.length;
+  while (lo < hi) { const mid = (lo + hi) >>> 1; if (list[mid].at < at) lo = mid + 1; else hi = mid; }
+  return lo > 0 ? list[lo - 1] : undefined;
+}
+
+/** Frames strictly after `at`, in order, at most `limit`. */
+export function indexedFramesAfter(index: ReplayFrameIndex, at: number, capability = "", limit = 8) {
+  const list = capability ? index.byCapability.get(capability) ?? [] : index.all;
+  const start = upperBoundFrame(list, at);
+  return list.slice(start, start + limit);
+}
+
+/** Identity of the frame set on stage: changes only when a different record becomes current. */
+export function replayFrameSignature(frames: readonly ReplayFrame[]) {
+  let signature = "";
+  for (const frame of frames) signature += frame.id + "|";
+  return signature;
 }

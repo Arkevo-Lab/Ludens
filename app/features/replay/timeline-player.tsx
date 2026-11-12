@@ -5,15 +5,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import type { ReplayFrame, ReplayItem, ReplayOverview, ReplayOverviewResult, ReplayCoverage, ReplayWindow } from "@/lib/replay-types";
-import { adjacentReplayFrame, clampReplayTime, coalesceReplayFrameTicks, mergeReplayPages, nearbyReplayItems, REPLAY_WINDOW_MS,
-  replayDuration, replayFramesAt, replayItemActive, replayStageFramesAt, replayTracks, replayWindowBounds,
-  retainReplayWindows } from "@/features/replay/replay-model";
+import type { ReplayFrame, ReplayItem, ReplayOverview, ReplayOverviewResult } from "@/lib/replay-types";
+import { clampReplayTime, coalesceReplayFrameTicks, indexedFramesAfter, nearbyReplayItems, REPLAY_WINDOW_MS,
+  replayDuration, replayItemActive, replayTracks, type CoalescedReplayFrameTick } from "@/features/replay/replay-model";
 import { useBufferedMedia } from "@/features/live/use-buffered-media";
 import type { BufferedImage } from "@/features/replay/image-buffer";
 import { ReplayVideo } from "@/features/replay/replay-video";
-import { replayVideoReady } from "@/features/replay/replay-video-model";
-import { readArchiveJson } from "@/lib/archive-client";
+import { replayUpcomingVideos, replayVideoReady, type VideoSource } from "@/features/replay/replay-video-model";
+import { REPLAY_COARSE_TICK_MS, useReplayClock, useReplaySession, type ReplayClock } from "@/features/replay/use-replay-session";
 import "@/features/replay/timeline-player.css";
 import { useTranslations } from "@/lib/locale";
 import { ChevronLeft, ChevronRight, PanelRight, RefreshCw, RotateCcw, RotateCw, Search, Share2, X } from "lucide-react";
@@ -35,33 +34,6 @@ const isDesktopDock = () => window.matchMedia(DESKTOP_DOCK_QUERY).matches;
 /** Render 3 ticks on narrow lanes (<420px) and 5 ticks on wider lanes. */
 export function replayRulerRatios(laneWidth: number): readonly number[] {
   return laneWidth > 0 && laneWidth < 420 ? [0, 0.5, 1] : [0, 0.25, 0.5, 0.75, 1];
-}
-
-const read = readArchiveJson;
-
-const endpoint = (scope: string, params: Record<string, string | number>) =>
-  "/api/replay?" + scope + "&" + new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]));
-
-async function readWindow(scope: string, start: number, end: number, signal: AbortSignal,
-  mode: "frames" | "events" = "frames", onPage?: (page: ReplayWindow) => void, initial?: ReplayWindow,
-  stalledMessage = "Replay pagination stalled; please retry") {
-  const pages: ReplayWindow[] = initial ? [initial] : [], cursors = new Set<string>();
-  let cursor = initial?.nextCursor;
-  for (let n = 0; n < 10; n++) {
-    const page = await read<ReplayWindow>(endpoint(scope, { mode, start, end, ...(cursor ? { cursor } : {}) }), signal);
-    pages.push(page);
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-    const merged = mergeReplayPages(pages);
-    // History remains accessible through the cursor; the browser keeps a bounded working page.
-    merged.frames = merged.frames.slice(-5000); merged.items = merged.items.slice(-5000);
-    onPage?.(merged);
-    cursor = page.nextCursor;
-    if (!cursor) return merged;
-    if (cursors.has(cursor)) throw new Error(stalledMessage);
-    cursors.add(cursor);
-    pages.splice(0, pages.length, merged);
-  }
-  return mergeReplayPages(pages);
 }
 
 const wallTime = (at: number) => new Date(at).toLocaleTimeString("zh-CN", {
@@ -90,9 +62,9 @@ const formatSampleAge = (deltaMs: number, secondsAgoLabel: string) => {
 const statusKey: Record<string, string> = { completed: "completed", success: "completed", error: "failed", failed: "failed",
   cancelled: "cancelled", pending: "pending", running: "running" };
 
-type VideoPlayback = { at: number; playing: boolean; clockReady: boolean; speed: number; revision: number; onReady(slot: string, url: string, ready: boolean): void };
-function ReplayMedia({ media, label, sampledAt, image, playback, slot }: { media: ReplayFrame["media"][number]; label: string; image?: BufferedImage;
-  sampledAt: number; playback: VideoPlayback; slot: string }) {
+type VideoPlayback = { at: number; liveAt?: () => number; playing: boolean; clockReady: boolean; speed: number; revision: number; onReady(slot: string, url: string, ready: boolean): void };
+function ReplayMedia({ media, label, sampledAt, image, playback, slot, upcoming }: { media: ReplayFrame["media"][number]; label: string; image?: BufferedImage;
+  sampledAt: number; playback: VideoPlayback; slot: string; upcoming?: VideoSource }) {
   const t = useTranslations("timelinePlayer");
   const [failure, setFailure] = useState<{ url: string; message: string } | null>(null);
   const error = failure?.url === media.url ? failure.message : "";
@@ -110,7 +82,7 @@ function ReplayMedia({ media, label, sampledAt, image, playback, slot }: { media
     }).catch(error => { if (!controller.signal.aborted) setError(error.message); });
     return () => controller.abort();
   }, [media.url, isText]);
-  if (media.video) return <ReplayVideo source={media.video} sampledAt={sampledAt} {...playback} slot={slot} label={label} />;
+  if (media.video) return <ReplayVideo source={media.video} sampledAt={sampledAt} {...playback} slot={slot} label={label} upcoming={upcoming} />;
   if (image?.error || error) return <div className="replay-media-missing" role="status">{image?.error || error}<small>{t("mediaKeepPosition")}</small></div>;
   if (media.mediaType.startsWith("image/")) return <img src={image?.src} width={image?.width} height={image?.height} alt={label} draggable={false}
     onError={() => setError(t("imageUnavailable"))} />;
@@ -122,14 +94,15 @@ function ReplayMedia({ media, label, sampledAt, image, playback, slot }: { media
   return <a href={media.url} target="_blank" rel="noreferrer">{t("view")} {media.mediaType} {t("record")} ↗</a>;
 }
 
-const FrameMedia = memo(function FrameMedia({ frame, images, playback, onInspect }: {
-  frame: ReplayFrame; images: Map<string, BufferedImage>; playback: VideoPlayback;
+const FrameMedia = memo(function FrameMedia({ frame, images, playback, upcoming, onInspect }: {
+  frame: ReplayFrame; images: Map<string, BufferedImage>; playback: VideoPlayback; upcoming: ReadonlyMap<string, VideoSource>;
   onInspect?: (trigger: HTMLElement) => void;
 }) {
   const t = useTranslations("timelinePlayer");
   return <><div className="replay-media-grid">
     {frame.media.map(media => <div className={"replay-media" + (media.mediaType.startsWith("image/") ? " replay-image" : "")} key={media.index}>
       <ReplayMedia media={media} sampledAt={frame.at} image={images.get(media.url)} playback={playback} slot={frame.capability + ":" + media.index}
+        upcoming={upcoming.get(frame.capability + ":" + media.index)}
         label={frame.capability + " · " + wallTime(frame.at) + " · " + (media.index + 1)} />
     </div>)}
     {!frame.media.length && (
@@ -145,6 +118,106 @@ const FrameMedia = memo(function FrameMedia({ frame, images, playback, onInspect
   </div>
     {frame.text && <details className="replay-frame-text"><summary>{t("frameText")}</summary><pre>{frame.text}</pre></details>}
   </>;
+});
+
+const EMPTY_IMAGES = new Map<string, BufferedImage>();
+
+/** Native range input bound to the animation clock; it re-renders alone, never the player tree. */
+function ReplaySeekInput({ clock, startAt, endAt, label, onScrub, onSeek, onRelease }: {
+  clock: ReplayClock; startAt: number; endAt: number; label: string; onScrub(value: number): void; onSeek(value: number): void; onRelease(): void;
+}) {
+  const at = useReplayClock(clock), duration = endAt - startAt;
+  // Only a pointer drag is a scrub (network settles on release); any other change seeks and commits at once.
+  const dragging = useRef(false);
+  const release = () => { if (!dragging.current) return; dragging.current = false; onRelease(); };
+  return <input className="replay-seek accent-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
+    type="range" min={startAt} max={Math.max(endAt, startAt + 1)} step="1" value={at}
+    disabled={duration <= 0} aria-label={label} aria-valuetext={replayDuration(at - startAt) + " / " + replayDuration(duration)}
+    onPointerDown={() => { dragging.current = true; }}
+    onChange={event => { const value = Number(event.target.value); if (dragging.current) onScrub(value); else onSeek(value); }}
+    onPointerUp={release} onPointerCancel={release} onBlur={release} onKeyUp={onRelease} />;
+}
+
+function ReplayClockText({ clock, className }: { clock: ReplayClock; className: string }) {
+  return <span className={className}>{wallTime(useReplayClock(clock))}</span>;
+}
+
+function ReplayCursor({ clock, className, startAt, span }: { clock: ReplayClock; className: string; startAt: number; span: number }) {
+  const at = useReplayClock(clock);
+  return <i className={className} style={{ left: Math.max(0, Math.min(100, (at - startAt) / span * 100)) + "%" }} />;
+}
+
+/** Event lanes only re-render when items, the window, or the set of active items change. */
+const ReplayTrackStack = memo(function ReplayTrackStack({ clock, items, activeKey, startAt, endAt, sampledStartAt, sampledEndAt, ticks,
+  onSelectFrame, onSelectItem, onSeek }: {
+  clock: ReplayClock; items: ReplayItem[]; activeKey: string; startAt: number; endAt: number; sampledStartAt: number; sampledEndAt: number;
+  ticks: CoalescedReplayFrameTick[]; onSelectFrame(frame: ReplayFrame, trigger: HTMLElement): void;
+  onSelectItem(item: ReplayItem, trigger: HTMLElement): void; onSeek(at: number): void;
+}) {
+  const t = useTranslations("timelinePlayer");
+  const nt = useTranslations("replayNavigation");
+  const span = Math.max(1, endAt - startAt);
+  const x = (time: number) => Math.max(0, Math.min(100, (time - startAt) / span * 100));
+  const active = new Set(activeKey ? activeKey.split("|") : []);
+  const sampledLeftPct = x(sampledStartAt), sampledRightPct = x(sampledEndAt);
+  const hasUnsampledPerceptionEdges = span > sampledEndAt - sampledStartAt + 500;
+  const byTrack = useMemo(() => new Map(replayTracks.map(track => [track, items.filter(item => item.track === track)])), [items]);
+  const seekOnLaneClick = (event: MouseEvent<HTMLElement>) => {
+    if (event.target !== event.currentTarget) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0) return;
+    onSeek(startAt + Math.max(0, Math.min(1, (event.clientX - rect.left) / rect.width)) * span);
+  };
+  return <div className="replay-tracks-stack">
+    <div className="replay-track-row">
+      <span className="replay-track-label"><i className="replay-track-dot perception" />{t("track.perception")}</span>
+      <div className="replay-track-lane" onClick={seekOnLaneClick}>
+        {hasUnsampledPerceptionEdges && sampledLeftPct > 0.25 && (
+          <span className="replay-unsampled-region" aria-hidden="true" title={nt("frameWindowNote")}
+            style={{ left: "0%", width: `${sampledLeftPct}%` }} />
+        )}
+        {hasUnsampledPerceptionEdges && sampledRightPct < 99.75 && (
+          <span className="replay-unsampled-region" aria-hidden="true" title={nt("frameWindowNote")}
+            style={{ left: `${sampledRightPct}%`, width: `${100 - sampledRightPct}%` }} />
+        )}
+        <span className="replay-sampled-window" aria-hidden="true" title={t("sampledWindowHint")}
+          style={{ left: sampledLeftPct + "%", width: Math.max(0.5, sampledRightPct - sampledLeftPct) + "%" }} />
+        {ticks.map(tick => (
+          <button type="button" key={tick.frame.id}
+            className={"replay-frame-tick focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring" + (tick.count > 1 ? " coalesced" : "")}
+            style={{ left: x(tick.startAt) + "%", width: tick.count > 1 ? Math.max(0.35, x(tick.endAt) - x(tick.startAt)) + "%" : undefined }}
+            aria-label={t("viewPerception") + " " + wallTime(tick.frame.at)}
+            title={tick.frame.capability + " · " + wallTime(tick.frame.at) + (tick.count > 1 ? ` (${tick.count})` : "")}
+            onClick={event => { event.stopPropagation(); onSelectFrame(tick.frame, event.currentTarget); }} />
+        ))}
+        <ReplayCursor clock={clock} className="replay-cursor" startAt={startAt} span={span} />
+      </div>
+    </div>
+
+    {replayTracks.map(track => (
+      <div key={track} className="replay-track-row">
+        <span className="replay-track-label"><i className={"replay-track-dot " + track} />{t(`track.${track}`)}</span>
+        <div className="replay-track-lane" onClick={seekOnLaneClick}>
+          {byTrack.get(track)!.map(item => {
+            const leftPct = x(item.startAt);
+            const rawWidthPct = x(item.track === "log" ? item.startAt : item.endAt ?? endAt) - leftPct;
+            const widthPct = Math.max(0.45, rawWidthPct);
+            return (
+              <button type="button" key={item.id}
+                className={"replay-span focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring " + track + (active.has(item.id) ? " active" : "") + (/error|failed/.test(item.status ?? "") ? " failed" : "")}
+                style={{ left: leftPct + "%", width: widthPct + "%" }}
+                title={item.label + " · " + wallTime(item.startAt)}
+                aria-label={t(`track.${track}`) + " · " + item.label}
+                onClick={event => { event.stopPropagation(); onSelectItem(item, event.currentTarget); }}>
+                {track === "log" || widthPct < 4.5 ? "" : item.label}
+              </button>
+            );
+          })}
+          <ReplayCursor clock={clock} className="replay-cursor" startAt={startAt} span={span} />
+        </div>
+      </div>
+    ))}
+  </div>;
 });
 
 export interface TimelinePlayerProps {
@@ -260,34 +333,9 @@ export function TimelinePlayer({
   }, [evidenceKey]);
 
   const requestedScope = new URLSearchParams({ project, run, ...(epoch ? { epoch } : {}) }).toString();
-  const [overview, setOverview] = useState<ReplayOverview | null>(initialOverview);
-  const resolvedEpoch = overview ? overview.epoch : epoch;
-  const scope = new URLSearchParams({ project, run, ...(resolvedEpoch ? { epoch: resolvedEpoch } : {}) }).toString();
-  const [coverage, setCoverage] = useState<ReplayCoverage | null>(initialOverview?.coverage ?? null);
-  const [eventWindow, setEventWindow] = useState<ReplayWindow | null>(null);
-  const [eventError, setEventError] = useState("");
-  const [eventsLoading, setEventsLoading] = useState(false);
-  const [eventPage, setEventPage] = useState(0);
-  const [overviewError, setOverviewError] = useState("");
-  const [refresh, setRefresh] = useState(0);
-  const [overviewPoll, setOverviewPoll] = useState(0);
-  const [refreshing, setRefreshing] = useState(false);
-  const [at, setAt] = useState<number>(() =>
-    initialOverview ? clampReplayTime(Number(position ?? initialOverview.startAt), initialOverview) : 0,
-  );
-  const atRef = useRef(at);
-  const [clockRevision, setClockRevision] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
   const [capability, setCapability] = useState("");
   const [windowMs, setWindowMs] = useState(REPLAY_WINDOW_MS);
-  const [windows, setWindows] = useState<ReplayWindow[]>([]);
-  const cached = useRef(windows);
-  const [windowError, setWindowError] = useState("");
-  const [retry, setRetry] = useState(0);
   const [shareState, setShareState] = useState("");
-  const stepRequest = useRef<AbortController | null>(null);
-  const [stepping, setStepping] = useState(false);
   const [videoReadiness, setVideoReadiness] = useState<Record<string, { url: string; ready: boolean }>>({});
   const onVideoReady = useCallback((slot: string, url: string, ready: boolean) => {
     setVideoReadiness(previous => previous[slot]?.url === url && previous[slot].ready === ready
@@ -296,16 +344,20 @@ export function TimelinePlayer({
   const initialPosition = useRef(position);
   const userMovedRef = useRef(Boolean(position != null || evidence));
   const [knownCapabilities, setKnownCapabilities] = useState<string[]>(initialOverview?.capabilities ?? []);
-  const [initialPreviewFrame, setInitialPreviewFrame] = useState<ReplayFrame | null>(null);
-  const initialProbeDoneRef = useRef(false);
-  const hasOverview = useRef(Boolean(initialOverview));
-  const previousEpoch = useRef<string | null>(initialOverview?.epoch ?? null);
   const positionApplied = useRef<string | null | undefined>(undefined);
-  const move = useCallback((next: number) => { atRef.current = next; setAt(next); setClockRevision(value => value + 1); }, []);
+  const evidenceRef = useRef(evidence);
+  evidenceRef.current = evidence;
   const commitPosition = useCallback((next: number, selection: ReplayEvidenceSelection | null = null, options?: { replace?: boolean }) => {
     positionApplied.current = String(Math.round(next));
     onPosition(Math.round(next), selection, options);
   }, [onPosition]);
+
+  const session = useReplaySession({
+    project, run, epoch, initialOverview, initialPosition: initialPosition.current, archiveRevision, capability, eventWindowMs: windowMs,
+    onOverview, onEnded: next => commitPosition(next, evidenceRef.current, { replace: true }), userMoved: () => userMovedRef.current,
+  });
+  const { overview, scope, coverage, overviewError, refreshing, at, clock, clockRevision, playing, setPlaying, speed, setSpeed, move,
+    bounds, eventBounds, index, activeWindow, items, stepping, initialPreviewFrame, windowError } = session;
 
   useEffect(() => {
     if (typeof ResizeObserver === "undefined") return;
@@ -333,187 +385,46 @@ export function TimelinePlayer({
   useEffect(() => {
     userMovedRef.current = Boolean(position != null || evidence);
     setKnownCapabilities([]);
-    setInitialPreviewFrame(null);
-    initialProbeDoneRef.current = false;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestedScope]);
-
-  useEffect(() => {
-    if (!project || !run) return;
-    const controller = new AbortController();
-    setRefreshing(true); setOverviewError("");
-    void read<ReplayOverviewResult>(endpoint(requestedScope, { mode: "overview" }), controller.signal).then(next => {
-      if (controller.signal.aborted) return;
-      onOverview?.(next);
-      setCoverage(next.coverage ?? null);
-      if (next.startAt === null) return;
-      if (hasOverview.current && previousEpoch.current !== next.epoch) {
-        cached.current = []; setWindows([]); setEventWindow(null); setPlaying(false);
-        move(next.startAt);
-      }
-      previousEpoch.current = next.epoch;
-      if (!hasOverview.current) {
-        hasOverview.current = true;
-        move(clampReplayTime(Number(initialPosition.current ?? next.startAt), next));
-      }
-      setOverview(next);
-    }).catch(error => { if (!controller.signal.aborted) setOverviewError(error.message); })
-      .finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
-    return () => controller.abort();
-  }, [requestedScope, project, run, refresh, overviewPoll, move, onOverview, archiveRevision]);
-
-  useEffect(() => {
-    if (!coverage || coverage.complete || overviewError) return;
-    const timer = setTimeout(() => setOverviewPoll(value => value + 1), 750);
-    return () => clearTimeout(timer);
-  }, [coverage, overviewError]);
 
   useEffect(() => {
     if (!overview || position === positionApplied.current) return;
     positionApplied.current = position;
     if (position != null) { setPlaying(false); move(clampReplayTime(Number(position), overview)); }
-  }, [position, overview, move]);
-  useEffect(() => () => stepRequest.current?.abort(), []);
-
-  // Video sampling stays bounded even when event inspection spans fifteen minutes.
-  const bounds = overview ? replayWindowBounds(at, overview) : { startAt: 0, endAt: 0 };
-  const eventBounds = overview ? replayWindowBounds(at, overview, windowMs) : { startAt: 0, endAt: 0 };
-  const activeWindow = windows.find(window => window.startAt === bounds.startAt && window.endAt === bounds.endAt);
-  const frameLoads = useRef(new Map<string, AbortController>());
-  const [framePass, setFramePass] = useState(0);
-  const currentStart = useRef(bounds.startAt);
-  currentStart.current = bounds.startAt;
-  const storeWindow = useCallback((next: ReplayWindow) => {
-    cached.current = retainReplayWindows([...cached.current.filter(value => value.startAt !== next.startAt), next], currentStart.current);
-    setWindows(cached.current);
-  }, []);
-  useEffect(() => {
-    if (!overview || overview.endAt < overview.startAt) return;
-    const controller = new AbortController();
-    setWindowError("");
-    const load = async (start: number, end: number, required: boolean) => {
-      if (cached.current.some(window => window.startAt === start && window.endAt === end)) return;
-      const key = `${start}:${end}`;
-      frameLoads.current.set(key, controller);
-      try {
-        const result = await readWindow(scope, start, end, controller.signal, "frames", page => {
-          if (!controller.signal.aborted) storeWindow(page);
-        });
-        if (!controller.signal.aborted) storeWindow(result);
-      } catch (error) {
-        if (!controller.signal.aborted && required) setWindowError(String(error));
-      } finally {
-        if (frameLoads.current.get(key) === controller) frameLoads.current.delete(key);
-        setFramePass(value => value + 1);
-      }
-    };
-    void load(bounds.startAt, bounds.endAt, true);
-    if (bounds.endAt < overview.endAt) void load(bounds.endAt, Math.min(bounds.endAt + REPLAY_WINDOW_MS, overview.endAt), false);
-    return () => controller.abort();
-  }, [scope, bounds.startAt, bounds.endAt, overview?.startAt, overview?.endAt, retry, storeWindow]);
+  }, [position, overview, move, setPlaying]);
 
   useEffect(() => {
-    if (!overview) return;
-    const controller = new AbortController();
-    setEventError(""); setEventsLoading(true);
-    const prior = eventWindow?.startAt === eventBounds.startAt && eventWindow.endAt === eventBounds.endAt && eventPage ? eventWindow : undefined;
-    if (!prior) setEventWindow(null);
-    void readWindow(scope, eventBounds.startAt, eventBounds.endAt, controller.signal, "events", page => {
-      if (!controller.signal.aborted) setEventWindow(page);
-    }, prior).catch(error => { if (!controller.signal.aborted) setEventError(String(error)); })
-      .finally(() => { if (!controller.signal.aborted) setEventsLoading(false); });
-    return () => controller.abort();
-    // Events have their own cursor and never gate frame readiness.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, eventBounds.startAt, eventBounds.endAt, eventPage, retry, overview?.coverage?.complete, archiveRevision]);
-
-  const moreFrameRequest = useRef<AbortController | null>(null);
-  const frameTail = activeWindow?.frames.at(-1)?.at;
-  const needsFrames = !!activeWindow?.nextCursor && frameTail !== undefined && at >= frameTail - 1000;
-  useEffect(() => {
-    if (!needsFrames || !activeWindow || frameLoads.current.has(`${activeWindow.startAt}:${activeWindow.endAt}`)) return;
-    const controller = new AbortController(); moreFrameRequest.current = controller;
-    void readWindow(scope, activeWindow.startAt, activeWindow.endAt, controller.signal, "frames", undefined, activeWindow)
-      .then(page => { if (!controller.signal.aborted) storeWindow(page); })
-      .catch(error => { if (!controller.signal.aborted) setWindowError(String(error)); });
-    return () => { controller.abort(); moreFrameRequest.current = null; };
-    // A new buffered tail schedules the next page only when the playhead approaches it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scope, needsFrames, bounds.startAt, activeWindow?.nextCursor, storeWindow, framePass]);
-
-  const frames = useMemo(() => mergeReplayPages(windows).frames, [windows]);
-  useEffect(() => {
-    const discovered = [...(overview?.capabilities ?? []), ...frames.map(frame => frame.capability)];
+    const discovered = [...(overview?.capabilities ?? []), ...index.byCapability.keys()];
     if (!discovered.length) return;
     setKnownCapabilities(previous => {
       const merged = [...new Set([...previous, ...discovered])];
       return merged.length === previous.length ? previous : merged;
     });
-  }, [overview?.capabilities, frames]);
+  }, [overview?.capabilities, index]);
 
-  useEffect(() => {
-    if (
-      !overview ||
-      !activeWindow ||
-      activeWindow.startAt !== overview.startAt ||
-      activeWindow.frames.length > 0 ||
-      Boolean(activeWindow.nextCursor) ||
-      userMovedRef.current ||
-      initialPreviewFrame ||
-      initialProbeDoneRef.current
-    ) {
-      return;
-    }
-    const controller = new AbortController();
-    void (async () => {
-      let edge = activeWindow.endAt;
-      for (let i = 0; i < 12 && edge < overview.endAt; i += 1) {
-        const targetBounds = replayWindowBounds(edge, overview);
-        const result = await readWindow(scope, targetBounds.startAt, targetBounds.endAt, controller.signal, "frames");
-        if (controller.signal.aborted) return;
-        if (result.frames.length > 0) {
-          const caps = [...new Set(result.frames.map(frame => frame.capability))];
-          setKnownCapabilities(previous => {
-            const merged = [...new Set([...previous, ...caps])];
-            return merged.length === previous.length ? previous : merged;
-          });
-          const preview = result.frames.find(frame => frame.media.length > 0 || Boolean(frame.text)) ?? result.frames[0];
-          initialProbeDoneRef.current = true;
-          setInitialPreviewFrame(preview);
-          return;
-        }
-        edge = targetBounds.endAt;
-      }
-      if (!controller.signal.aborted) initialProbeDoneRef.current = true;
-    })().catch(() => {
-      if (!controller.signal.aborted) initialProbeDoneRef.current = true;
-    });
-    return () => controller.abort();
-  }, [overview, activeWindow, scope, initialPreviewFrame]);
-
-  const pastFrames = useMemo(() => replayFramesAt(activeWindow?.frames ?? [], at, capability), [activeWindow, at, capability]);
-  const rawVisibleFrames = useMemo(() => replayStageFramesAt(activeWindow?.frames ?? [], at, capability), [activeWindow, at, capability]);
   const visibleFrames = useMemo(
     () =>
-      rawVisibleFrames.length > 0
-        ? rawVisibleFrames
+      session.stageFrames.length > 0
+        ? session.stageFrames
         : !userMovedRef.current && overview && at <= overview.startAt && initialPreviewFrame && initialPreviewFrame.at > at && (!capability || initialPreviewFrame.capability === capability)
           ? [initialPreviewFrame]
           : [],
-    [rawVisibleFrames, overview, initialPreviewFrame, at, capability],
+    [session.stageFrames, overview, initialPreviewFrame, at, capability],
   );
-  const pastCapabilities = useMemo(() => new Set(pastFrames.map(frame => frame.capability)), [pastFrames]);
+  const pastCapabilities = useMemo(() => new Set(visibleFrames.filter(frame => frame.at <= at).map(frame => frame.capability)), [visibleFrames, at]);
   // Records are immutable. Keep frame identity stable while the playhead moves within one sample.
-  const frameKey = JSON.stringify(visibleFrames.map(frame => [frame.id, frame.media]));
+  const frameKey = useMemo(() => JSON.stringify(visibleFrames.map(frame => [frame.id, frame.media])), [visibleFrames]);
   const target = useMemo(() => activeWindow ? { key: frameKey, value: visibleFrames,
     urls: visibleFrames.flatMap(frame => frame.media.filter(media => media.mediaType.startsWith("image/") && !media.video).map(media => media.url)) } : null,
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [frameKey, !!activeWindow]);
-  const future = frames.filter(frame => frame.at > at && (!capability || frame.capability === capability)).slice(0, 2)
-    .flatMap(frame => frame.media.filter(media => media.mediaType.startsWith("image/") && !media.video).map(media => media.url));
-  const { displayed, pending } = useBufferedMedia(scope + ":" + capability + ":" + refresh + ":" + retry, target, future, !activeWindow || stepping);
+  const future = useMemo(() => indexedFramesAfter(index, at, capability, 6)
+    .flatMap(frame => frame.media.filter(media => media.mediaType.startsWith("image/") && !media.video).map(media => media.url)), [index, at, capability]);
+  const { displayed, pending } = useBufferedMedia(scope + ":" + capability + ":" + session.refreshRevision + ":" + session.retryRevision, target, future, !activeWindow || stepping);
   // Video frames share a decoder for the entire segment; advancing record metadata must not pause playback.
-  const imageReady = !!activeWindow && (!activeWindow.nextCursor || frameTail === undefined || at <= frameTail) && (!target?.urls.length || !pending) && !stepping;
+  const frameTail = activeWindow?.frames.at(-1)?.at;
+  const imageReady = !!activeWindow && (session.frameWindowComplete || frameTail === undefined || at <= frameTail) && (!target?.urls.length || !pending) && !stepping;
   const shownFrames = (target && !target.urls.length ? visibleFrames : displayed?.value ?? [])
     .filter(frame => frame.at <= at || !pastCapabilities.has(frame.capability));
   const visualFrames = [...shownFrames.filter(frame => frame.media.length > 0 || Boolean(frame.text))].sort((a, b) => {
@@ -528,9 +439,9 @@ export function TimelinePlayer({
   const dataOnlyFrames = shownFrames.filter(frame => frame.media.length === 0 && !frame.text);
   const compactDataFrames = visualFrames.length > 0 ? dataOnlyFrames : dataOnlyFrames.length > 1 ? dataOnlyFrames : [];
   const stageFrames = visualFrames.length > 0 ? visualFrames : dataOnlyFrames.length === 1 ? dataOnlyFrames : [];
-  const videoSlots = visibleFrames.flatMap(frame => frame.media.filter(media => media.video)
-    .map(media => ({ slot: frame.capability + ":" + media.index, video: media.video! })));
-  const slotsKey = JSON.stringify(videoSlots.flatMap(({ slot }) => [slot]));
+  const videoSlots = useMemo(() => visibleFrames.flatMap(frame => frame.media.filter(media => media.video)
+    .map(media => ({ slot: frame.capability + ":" + media.index, capability: frame.capability, index: media.index, video: media.video! }))), [visibleFrames]);
+  const slotsKey = JSON.stringify(videoSlots.map(({ slot }) => slot));
   useEffect(() => {
     const keep = new Set<string>(JSON.parse(slotsKey));
     setVideoReadiness(previous => {
@@ -538,83 +449,34 @@ export function TimelinePlayer({
       return Object.fromEntries(Object.entries(previous).filter(([slot]) => keep.has(slot)));
     });
   }, [slotsKey]);
+  // Warm the next segment's decoder before the playhead crosses into it.
+  const upcomingVideos = useMemo(() => replayUpcomingVideos(index, videoSlots, at, Math.max(1, speed) * 8_000), [index, videoSlots, at, speed]);
   const ready = imageReady && videoSlots.every(({ slot, video }) => replayVideoReady(video, videoReadiness[slot]));
-  const pendingSegments = !!activeWindow?.frames.some(frame => frame.media.some(media => media.video?.status === "pending"));
-  useEffect(() => {
-    if (!pendingSegments || !activeWindow) return;
-    const controller = new AbortController();
-    const timer = setTimeout(() => {
-      void readWindow(scope, activeWindow.startAt, activeWindow.endAt, controller.signal)
-        .then(window => { if (!controller.signal.aborted) storeWindow(window); })
-        .catch(error => { if (!controller.signal.aborted) setWindowError(String(error)); });
-    }, 2000);
-    return () => { clearTimeout(timer); controller.abort(); };
-  }, [pendingSegments, activeWindow, scope, storeWindow]);
-  useEffect(() => {
-    if (!playing || !ready || !overview) return;
-    let animation = 0, previous = performance.now(), lastPaint = previous;
-    const tick = (now: number) => {
-      const next = Math.min(overview.endAt, atRef.current + (now - previous) * speed);
-      previous = now;
-      atRef.current = next;
-      if (now - lastPaint >= 60 || next >= overview.endAt) { setAt(next); lastPaint = now; }
-      if (next >= overview.endAt) {
-        setPlaying(false);
-        commitPosition(next, evidence, { replace: true });
-        return;
-      }
-      animation = requestAnimationFrame(tick);
-    };
-    animation = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animation);
-  }, [playing, speed, ready, overview, commitPosition, evidence]);
+  session.readyRef.current = ready;
 
-  const items = eventWindow?.startAt === eventBounds.startAt && eventWindow.endAt === eventBounds.endAt ? eventWindow.items : [];
-  const activeItems = items.filter(item => item.track !== "log" && replayItemActive(item, at));
-  const logs = nearbyReplayItems(items.filter(item => item.track === "log"), at, 8);
+  const coarseAt = Math.floor(at / REPLAY_COARSE_TICK_MS) * REPLAY_COARSE_TICK_MS;
+  const activeItems = useMemo(() => items.filter(item => item.track !== "log" && replayItemActive(item, coarseAt)), [items, coarseAt]);
+  const logs = useMemo(() => nearbyReplayItems(items.filter(item => item.track === "log"), coarseAt, 8), [items, coarseAt]);
+  const activeKey = activeItems.map(item => item.id).join("|");
   const capabilities = [...new Set([
     ...knownCapabilities,
     ...(overview?.capabilities ?? []),
-    ...frames.map(frame => frame.capability),
     ...(capability ? [capability] : []),
   ])];
-  const seek = (next: number, commit = true, selection: ReplayEvidenceSelection | null = null) => {
+  const seek = (next: number, commit = true, selection: ReplayEvidenceSelection | null = null, scrub = false) => {
     if (!overview) return;
     userMovedRef.current = true;
-    stepRequest.current?.abort(); moreFrameRequest.current?.abort(); setStepping(false); setPlaying(false);
+    session.cancelStep(); setPlaying(false);
     const value = clampReplayTime(next, overview);
-    if (activeWindow?.nextCursor && value < (activeWindow.frames[0]?.at ?? value)) {
-      cached.current = []; setWindows([]); setRetry(current => current + 1);
-    }
-    setShareState(""); move(value);
+    setShareState(""); move(value, { scrub });
     if (commit) commitPosition(value, selection);
   };
   const step = async (direction: -1 | 1) => {
     if (!overview) return;
     userMovedRef.current = true;
-    setPlaying(false); stepRequest.current?.abort();
-    const nearby = adjacentReplayFrame(activeWindow?.frames ?? [], at, direction, capability);
-    if (nearby) { seek(nearby.at); return; }
-    const controller = new AbortController(); stepRequest.current = controller; setStepping(true);
-    try {
-      if (direction === 1 && activeWindow?.nextCursor) {
-        const rest = await readWindow(scope, activeWindow.startAt, activeWindow.endAt, controller.signal, "frames", undefined, activeWindow);
-        if (controller.signal.aborted) return;
-        storeWindow(rest);
-        const withinActive = adjacentReplayFrame(rest.frames, at, direction, capability);
-        if (withinActive) { move(withinActive.at); commitPosition(withinActive.at); return; }
-      }
-      let edge = direction === 1 ? bounds.endAt : bounds.startAt;
-      while (direction === 1 ? edge < overview.endAt : edge > overview.startAt) {
-        const targetBounds = replayWindowBounds(direction === 1 ? edge : edge - 1, overview);
-        const result = await readWindow(scope, targetBounds.startAt, targetBounds.endAt, controller.signal);
-        if (controller.signal.aborted) return;
-        const next = adjacentReplayFrame(result.frames, at, direction, capability);
-        if (next) { move(next.at); storeWindow(result); commitPosition(next.at); return; }
-        edge = direction === 1 ? targetBounds.endAt : targetBounds.startAt;
-      }
-    } catch (error) { if (!controller.signal.aborted) setWindowError(String(error)); }
-    finally { if (!controller.signal.aborted) setStepping(false); }
+    setPlaying(false);
+    const next = await session.findAdjacent(direction);
+    if (next) seek(next.at);
   };
   const selectFrame = (frame: ReplayFrame, trigger: HTMLElement) => {
     evidenceOpener.current = trigger;
@@ -630,6 +492,12 @@ export function TimelinePlayer({
     seek(item.startAt, true, { kind: "item", id: item.id });
     requestAnimationFrame(() => evidencePanel.current?.focus({ preventScroll: true }));
   };
+  // Stable handles for memoized lanes: the latest closure runs, the identity never changes.
+  const latest = useRef({ selectFrame, selectItem, seek });
+  latest.current = { selectFrame, selectItem, seek };
+  const onSelectFrame = useCallback((frame: ReplayFrame, trigger: HTMLElement) => latest.current.selectFrame(frame, trigger), []);
+  const onSelectItem = useCallback((item: ReplayItem, trigger: HTMLElement) => latest.current.selectItem(item, trigger), []);
+  const onSeekTo = useCallback((value: number) => latest.current.seek(value), []);
   const closeEvidence = () => {
     setInspectorTab("events");
     onEvidence(null);
@@ -651,14 +519,15 @@ export function TimelinePlayer({
     }
     return url.pathname + url.search;
   };
-  const evidenceView = evidence && <ReplayEvidencePanel key={scope + evidenceKey} scope={scope} selection={evidence} refreshRevision={refresh} focusRef={evidencePanel} onClose={closeEvidence}
+  const evidenceView = evidence && <ReplayEvidencePanel key={scope + evidenceKey} scope={scope} selection={evidence} refreshRevision={session.refreshRevision} focusRef={evidencePanel} onClose={closeEvidence}
     onLoaded={detail => {
       if (position == null && overview && detail.summary) seek(detail.summary.startAt, true, evidence);
     }} />;
   const share = async () => {
-    commitPosition(at, evidence);
+    const now = session.atRef.current;
+    commitPosition(now, evidence);
     const url = new URL(window.location.href);
-    url.searchParams.set("view", "replay"); url.searchParams.set("at", String(Math.round(at)));
+    url.searchParams.set("view", "replay"); url.searchParams.set("at", String(Math.round(now)));
     url.searchParams.set("project", project); url.searchParams.set("run", run);
     url.searchParams.set("epoch", overview?.epoch ?? "all");
     for (const [key, value] of Object.entries(replayEvidencePatch(evidence))) {
@@ -676,6 +545,9 @@ export function TimelinePlayer({
     () => coalesceReplayFrameTicks(trackFrames, eventBounds.startAt, eventBounds.endAt, 120),
     [trackFrames, eventBounds.startAt, eventBounds.endAt],
   );
+  const playbackLive = useMemo<VideoPlayback>(() => ({ at, liveAt: clock.get, playing, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }),
+    [at, clock, playing, ready, speed, clockRevision, onVideoReady]);
+  const playbackPreview = useMemo<VideoPlayback>(() => ({ ...playbackLive, liveAt: undefined, playing: false }), [playbackLive]);
 
   if (!project || !run) {
     return (
@@ -713,7 +585,7 @@ export function TimelinePlayer({
             </p>
           )}
           {overviewError && (
-            <Button type="button" variant="outline" size="sm" onClick={() => setRefresh(value => value + 1)}>
+            <Button type="button" variant="outline" size="sm" onClick={session.refreshOverview}>
               {t("retryLoad")}
             </Button>
           )}
@@ -725,9 +597,6 @@ export function TimelinePlayer({
   const duration = overview.endAt - overview.startAt;
   const windowSpan = Math.max(1, eventBounds.endAt - eventBounds.startAt);
   const x = (time: number) => Math.max(0, Math.min(100, (time - eventBounds.startAt) / windowSpan * 100));
-  const sampledLeftPct = x(bounds.startAt);
-  const sampledRightPct = x(bounds.endAt);
-  const hasUnsampledPerceptionEdges = windowSpan > bounds.endAt - bounds.startAt + 500;
 
   const seekOnLaneClick = (event: MouseEvent<HTMLElement>) => {
     if (event.target !== event.currentTarget) return;
@@ -775,7 +644,7 @@ export function TimelinePlayer({
                   className="h-7 max-w-[156px] py-0 pr-7 text-xs data-[size=sm]:h-7 data-[size=sm]:py-0"
                   value={capability}
                   onChange={event => {
-                    stepRequest.current?.abort(); setStepping(false); setCapability(event.target.value);
+                    session.cancelStep(); setCapability(event.target.value);
                   }}
                 >
                   <NativeSelectOption value="">{t("allCapabilities")}</NativeSelectOption>
@@ -821,12 +690,7 @@ export function TimelinePlayer({
               disabled={refreshing}
               title={refreshLabel}
               aria-label={refreshLabel}
-              onClick={() => {
-                cached.current = [];
-                setWindows([]);
-                setRefresh(value => value + 1);
-                setRetry(value => value + 1);
-              }}
+              onClick={session.refresh}
             >
               <RefreshCw className={"size-3.5" + (refreshing ? " animate-spin" : "")} aria-hidden="true" />
               <span className="replay-topbar-btn-label">{refreshLabel}</span>
@@ -899,10 +763,11 @@ export function TimelinePlayer({
                         )}
                       </div>
                       <FrameMedia
-                        key={refresh + ":" + retry}
+                        key={session.refreshRevision + ":" + session.retryRevision}
                         frame={frame}
-                        images={displayed?.images ?? new Map()}
-                        playback={{ at, playing: playing && !isPreview, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }}
+                        images={displayed?.images ?? EMPTY_IMAGES}
+                        playback={isPreview ? playbackPreview : playbackLive}
+                        upcoming={upcomingVideos}
                         onInspect={trigger => selectFrame(frame, trigger)}
                       />
                     </article>
@@ -968,30 +833,28 @@ export function TimelinePlayer({
         </div>
 
         {windowError && <Alert variant="destructive" className="mx-4 my-2"><AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-          <span>{windowError}</span><Button type="button" variant="outline" size="xs" onClick={() => setRetry(value => value + 1)}>{t("retrySegment")}</Button>
+          <span>{windowError}</span><Button type="button" variant="outline" size="xs" onClick={session.retry}>{t("retrySegment")}</Button>
         </AlertDescription></Alert>}
 
         <div className="replay-controls">
           {/* The media scrubber keeps native pointer/key commit semantics and millisecond steps. */}
-          <input className="replay-seek accent-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
-            type="range" min={overview.startAt} max={Math.max(overview.endAt, overview.startAt + 1)} step="1" value={at}
-            disabled={duration <= 0} aria-label={t("seekLabel")} aria-valuetext={replayDuration(at - overview.startAt) + " / " + replayDuration(duration)}
-            onChange={event => seek(Number(event.target.value), false)} onPointerUp={() => commitPosition(atRef.current)}
-            onKeyUp={() => commitPosition(atRef.current)} />
+          <ReplaySeekInput clock={clock} startAt={overview.startAt} endAt={overview.endAt} label={t("seekLabel")}
+            onScrub={value => seek(value, false, null, true)} onSeek={value => seek(value)}
+            onRelease={() => { const now = session.atRef.current; move(now); commitPosition(now); }} />
 
           <div className="replay-control-row">
             <div className="replay-transport">
               <Button type="button" size="xs" className="min-w-[50px] px-1.5 font-medium" aria-label={playing ? t("pauseReplay") : t("playReplay")} disabled={duration <= 0 || !!windowError}
                 onClick={() => {
                   userMovedRef.current = true;
-                  stepRequest.current?.abort(); setStepping(false);
+                  session.cancelStep();
                   if (playing) {
                     setPlaying(false);
-                    commitPosition(atRef.current, evidence, { replace: true });
+                    move(session.atRef.current);
+                    commitPosition(session.atRef.current, evidence, { replace: true });
                     return;
                   }
-                  if (at >= overview.endAt) {
-                    if (activeWindow?.nextCursor) { cached.current = []; setWindows([]); setRetry(current => current + 1); }
+                  if (session.atRef.current >= overview.endAt) {
                     move(overview.startAt);
                     commitPosition(overview.startAt, evidence, { replace: true });
                   }
@@ -1015,7 +878,7 @@ export function TimelinePlayer({
             </div>
 
             <div className="replay-clock">
-              <span className="replay-wallclock-pill mono">{wallTime(at)}</span>
+              <ReplayClockText clock={clock} className="replay-wallclock-pill mono" />
               <NativeSelect size="sm" className="h-6 min-w-[62px] rounded-[5px] py-0 pl-2 pr-6 text-xs data-[size=sm]:h-6 data-[size=sm]:py-0" aria-label={t("speedLabel")} value={speed} onChange={event => setSpeed(Number(event.target.value))}>
                 {[0.25, 0.5, 1, 2, 4, 8].map(value => <NativeSelectOption key={value} value={value}>{value}×</NativeSelectOption>)}
               </NativeSelect>
@@ -1030,15 +893,15 @@ export function TimelinePlayer({
               <span className="replay-window-range-pill mono">
                 {replayElapsedInput(eventBounds.startAt - overview.startAt, "seconds")} – {replayElapsedInput(eventBounds.endAt - overview.startAt, "seconds")}
               </span>
-              {eventsLoading && <span className="replay-timeline-status" role="status">{t("supplementingEvents")}</span>}
-              {eventWindow?.nextCursor && !eventsLoading && (
-                <Button type="button" variant="ghost" size="xs" className="h-5 px-1.5 text-[11px]" onClick={() => setEventPage(value => value + 1)}>{t("continueEvents")}</Button>
+              {session.eventsLoading && <span className="replay-timeline-status" role="status">{t("supplementingEvents")}</span>}
+              {session.eventsHaveMore && !session.eventsLoading && (
+                <Button type="button" variant="ghost" size="xs" className="h-5 px-1.5 text-[11px]" onClick={() => void session.continueEvents()}>{t("continueEvents")}</Button>
               )}
             </div>
             <div className="replay-window-size">
               <Label htmlFor={`${controlsId}-window`} className="replay-window-label text-xs font-normal">{t("windowLabel")}</Label>
               <NativeSelect id={`${controlsId}-window`} size="sm" className="h-6 min-w-[74px] rounded-[5px] py-0 pl-2 pr-6 text-xs data-[size=sm]:h-6 data-[size=sm]:py-0" aria-label={t("windowSelectLabel")} value={windowMs} onChange={event => {
-                setEventPage(0); setWindowMs(Number(event.target.value));
+                setWindowMs(Number(event.target.value));
               }}>
                 {[5, 15, 30, 60, 300, 900].map(seconds => (
                   <NativeSelectOption key={seconds} value={seconds * 1000}>
@@ -1065,76 +928,17 @@ export function TimelinePlayer({
               {rulerTicks.map(({ ratio }) => (
                 <span key={`tick-${ratio}`} style={{ left: `${ratio * 100}%` }} className="replay-ruler-hairline" />
               ))}
-              <i className="replay-playhead-cap" style={{ left: x(at) + "%" }} />
+              <ReplayCursor clock={clock} className="replay-playhead-cap" startAt={eventBounds.startAt} span={windowSpan} />
             </div>
           </div>
 
-          <div className="replay-tracks-stack">
-            <div className="replay-track-row">
-              <span className="replay-track-label"><i className="replay-track-dot perception" />{t("track.perception")}</span>
-              <div className="replay-track-lane" onClick={seekOnLaneClick}>
-                {hasUnsampledPerceptionEdges && sampledLeftPct > 0.25 && (
-                  <span
-                    className="replay-unsampled-region"
-                    aria-hidden="true"
-                    title={nt("frameWindowNote")}
-                    style={{ left: "0%", width: `${sampledLeftPct}%` }}
-                  />
-                )}
-                {hasUnsampledPerceptionEdges && sampledRightPct < 99.75 && (
-                  <span
-                    className="replay-unsampled-region"
-                    aria-hidden="true"
-                    title={nt("frameWindowNote")}
-                    style={{ left: `${sampledRightPct}%`, width: `${100 - sampledRightPct}%` }}
-                  />
-                )}
-                <span
-                  className="replay-sampled-window"
-                  aria-hidden="true"
-                  title={t("sampledWindowHint")}
-                  style={{ left: sampledLeftPct + "%", width: Math.max(0.5, sampledRightPct - sampledLeftPct) + "%" }}
-                />
-                {coalescedTrackTicks.map(tick => (
-                  <button type="button" key={tick.frame.id}
-                    className={"replay-frame-tick focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring" + (tick.count > 1 ? " coalesced" : "")}
-                    style={{ left: x(tick.startAt) + "%", width: tick.count > 1 ? Math.max(0.35, x(tick.endAt) - x(tick.startAt)) + "%" : undefined }}
-                    aria-label={t("viewPerception") + " " + wallTime(tick.frame.at)}
-                    title={tick.frame.capability + " · " + wallTime(tick.frame.at) + (tick.count > 1 ? ` (${tick.count})` : "")}
-                    onClick={event => { event.stopPropagation(); selectFrame(tick.frame, event.currentTarget); }} />
-                ))}
-                <i className="replay-cursor" style={{ left: x(at) + "%" }} />
-              </div>
-            </div>
+          <ReplayTrackStack clock={clock} items={items} activeKey={activeKey} startAt={eventBounds.startAt} endAt={eventBounds.endAt}
+            sampledStartAt={bounds.startAt} sampledEndAt={bounds.endAt} ticks={coalescedTrackTicks}
+            onSelectFrame={onSelectFrame} onSelectItem={onSelectItem} onSeek={onSeekTo} />
 
-            {replayTracks.map(track => (
-              <div key={track} className="replay-track-row">
-                <span className="replay-track-label"><i className={"replay-track-dot " + track} />{t(`track.${track}`)}</span>
-                <div className="replay-track-lane" onClick={seekOnLaneClick}>
-                  {items.filter(item => item.track === track).map(item => {
-                    const leftPct = x(item.startAt);
-                    const rawWidthPct = x(item.track === "log" ? item.startAt : item.endAt ?? eventBounds.endAt) - leftPct;
-                    const widthPct = Math.max(0.45, rawWidthPct);
-                    return (
-                      <button type="button" key={item.id}
-                        className={"replay-span focus-visible:z-10 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-ring " + track + (replayItemActive(item, at) ? " active" : "") + (/error|failed/.test(item.status ?? "") ? " failed" : "")}
-                        style={{ left: leftPct + "%", width: widthPct + "%" }}
-                        title={item.label + " · " + wallTime(item.startAt)}
-                        aria-label={t(`track.${track}`) + " · " + item.label}
-                        onClick={event => { event.stopPropagation(); selectItem(item, event.currentTarget); }}>
-                        {track === "log" || widthPct < 4.5 ? "" : item.label}
-                      </button>
-                    );
-                  })}
-                  <i className="replay-cursor" style={{ left: x(at) + "%" }} />
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {eventError && <Alert variant="destructive" className="mx-4 mt-2"><AlertDescription className="flex flex-wrap items-center justify-between gap-2">
-            <span>{t("eventTrackPrefix")}{eventError}{t("videoContinues")}</span>
-            <Button type="button" variant="outline" size="xs" onClick={() => setEventPage(value => value + 1)}>{t("retry")}</Button>
+          {session.eventError && <Alert variant="destructive" className="mx-4 mt-2"><AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+            <span>{t("eventTrackPrefix")}{session.eventError}{t("videoContinues")}</span>
+            <Button type="button" variant="outline" size="xs" onClick={session.retry}>{t("retry")}</Button>
           </AlertDescription></Alert>}
         </div>
       </section>
@@ -1191,8 +995,8 @@ export function TimelinePlayer({
               key={scope}
               scope={scope}
               startAt={overview.startAt}
-              at={at}
-              refreshRevision={refresh}
+              at={Math.floor(at / 500) * 500}
+              refreshRevision={session.refreshRevision}
               itemUrl={evidenceUrl}
               onSelect={selectItem}
               selectedId={evidence?.kind === "item" ? evidence.id : undefined}

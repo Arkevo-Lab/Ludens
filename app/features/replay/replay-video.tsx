@@ -9,27 +9,30 @@ type Source = NonNullable<ReplayFrame["media"][number]["video"]>;
 type Ready = (slot: string, url: string, ready: boolean) => void;
 
 /** Each mounted segment has its own decoder; the old surface stays until the new frame has decoded. */
-function Surface({ source, at, sampledAt, playing, clockReady, speed, visible, current, revision, onReady, onError, label }: {
-  source: Source; at: number; sampledAt: number; playing: boolean; clockReady: boolean; speed: number; visible: boolean; current: boolean; revision: number;
+function Surface({ source, at, liveAt, sampledAt, playing, clockReady, speed, visible, current, revision, onReady, onError, label }: {
+  source: Source; at: number; liveAt?: () => number; sampledAt: number; playing: boolean; clockReady: boolean; speed: number; visible: boolean; current: boolean; revision: number;
   onReady(url: string, ready: boolean): void; onError(url: string): void; label: string;
 }) {
   const element = useRef<HTMLVideoElement>(null);
-  const lastRevision = useRef(-1);
+  // A warmed (not yet current) decoder already sits at its segment start: crossing into it is not an explicit seek.
+  const lastRevision = useRef(current ? -1 : revision);
   const driftSince = useRef<number | null>(null);
   const waiting = useRef(false);
-  const control = useRef({ source, at, sampledAt, playing, clockReady, speed, current, revision, onReady });
-  control.current = { source, at, sampledAt, playing, clockReady, speed, current, revision, onReady };
+  const control = useRef({ source, at, liveAt, sampledAt, playing, clockReady, speed, current, revision, onReady });
+  control.current = { source, at, liveAt, sampledAt, playing, clockReady, speed, current, revision, onReady };
   const sync = useCallback(() => {
     const video = element.current, c = control.current;
+    // The coarse React clock lags by up to 250 ms (2 s of video at 8x); drift is measured against the live clock.
+    const now_at = c.liveAt?.() ?? c.at;
     if (!video || !c.current) { video?.pause(); return; }
     if (!video.readyState) { c.onReady(c.source.url, false); return; }
     const now = performance.now();
     const explicitSeek = lastRevision.current !== c.revision;
-    const drift = Math.abs(video.currentTime - videoPosition(c.at, c.source.originAt));
+    const drift = Math.abs(video.currentTime - videoPosition(now_at, c.source.originAt));
     const drifting = c.playing && c.clockReady && !waiting.current && video.readyState >= 2 && !video.seeking && drift > 1;
     if (drifting && driftSince.current === null) driftSince.current = now;
     else if (!drifting) driftSince.current = null;
-    const state = videoSyncState({ at: c.at, sampledAt: c.sampledAt, originAt: c.source.originAt,
+    const state = videoSyncState({ at: now_at, sampledAt: c.sampledAt, originAt: c.source.originAt,
       duration: c.source.durationSeconds, currentTime: video.currentTime, readyState: video.readyState,
       seeking: video.seeking, ended: video.ended, playing: c.playing, clockReady: c.clockReady,
       explicitSeek, driftMs: drifting && driftSince.current !== null ? now - driftSince.current : 0, waiting: waiting.current });
@@ -72,8 +75,10 @@ function Surface({ source, at, sampledAt, playing, clockReady, speed, visible, c
     onWaiting={() => { waiting.current = true; sync(); }} onError={() => current && onError(source.url)} />;
 }
 
-export function ReplayVideo({ source, at, sampledAt, playing, clockReady, speed, slot, revision, onReady, label }: {
-  source: Source; at: number; sampledAt: number; playing: boolean; clockReady: boolean; speed: number; slot: string; revision: number; onReady: Ready; label: string;
+export function ReplayVideo({ source, at, liveAt, sampledAt, playing, clockReady, speed, slot, revision, onReady, label, upcoming }: {
+  source: Source; at: number; liveAt?: () => number; sampledAt: number; playing: boolean; clockReady: boolean; speed: number; slot: string; revision: number; onReady: Ready; label: string;
+  /** Next segment of this slot: mounted paused and hidden so its metadata and first frame are decoded before the boundary. */
+  upcoming?: Source;
 }) {
   const t = useTranslations("replayVideo");
   const resource = useRef(source);
@@ -103,10 +108,11 @@ export function ReplayVideo({ source, at, sampledAt, playing, clockReady, speed,
     if (pending) onReady(slot, source.assetId, false);
   }, [pending, slot, source.assetId, onReady]);
   const playable = !error && !pending;
-  // At most two decoders per channel, including a segment transition.
+  // At most three decoders per channel: the frame still shown, the current segment, and the warmed next segment.
   const sources = [...(shown && (shown.url !== source.url || !playable) && !error ? [shown] : []), ...(playable ? [source] : [])];
+  if (upcoming && upcoming.assetId !== source.assetId && !sources.some(value => value.url === upcoming.url)) sources.push(upcoming);
   return <div className="replay-video-stack">
-    {sources.map(value => <Surface key={value.url} source={value} at={at} sampledAt={sampledAt} playing={playing} clockReady={clockReady}
+    {sources.map(value => <Surface key={value.url} source={value} at={at} liveAt={liveAt} sampledAt={sampledAt} playing={playing} clockReady={clockReady}
       speed={speed} revision={revision} current={playable && value.url === source.url} visible={shown?.url === value.url}
       onReady={report} onError={failed} label={label} />)}
     {error ? <div className="replay-media-missing" role="status">{source.reason ?? t("unavailable")}<small>{t("gapKept")}</small></div>
