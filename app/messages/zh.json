@@ -57,6 +57,13 @@
     }
   },
   "settings": {
+    "sectionsNavLabel": "设置分组导航",
+    "sections": {
+      "console": "界面与语言",
+      "defaults": "新建默认参数",
+      "connection": "模型与传输",
+      "pet": "桌面伴侣"
+    },
     "language": "语言",
     "languageDescription": "控制台与桌宠显示语言。默认跟随浏览器。",
     "languageEnglish": "English",
@@ -523,6 +530,8 @@
     "boundCapabilitiesLabel": "绑定的能力",
     "contextManagedEnv": "通过上下文管理器调用（with Env(...)）",
     "analyticsSectionLabel": "三元可视遥测图表",
+    "toggleAnalyticsShow": "展开评测概览",
+    "toggleAnalyticsHide": "收起评测概览",
     "healthChartTitle": "三元验证率与契约覆盖度",
     "healthChartVerifiedRate": "已验证",
     "coverageCapabilityObserve": "@record 实机录制占比",
@@ -1685,7 +1694,8 @@
     "empty": "暂无工作区，请先添加",
     "unavailable": "无法读取工作区列表",
     "emptyHint": "前往工作区页面，新建工作区或添加已有工作区。",
-    "errorHint": "工作区列表读取失败，请前往工作区页面重试。"
+    "errorHint": "工作区列表读取失败，请前往工作区页面重试。",
+    "globalScopeHint": "当前选定工作区（切回工作区视图时生效）"
   },
   "liveContext": {
     "autoRefreshOn": "自动刷新：开",
@@ -1764,7 +1774,11 @@
     "eventsTab": "事件流",
     "momentTab": "当前时刻",
     "evidenceTab": "节点详情",
-    "evidenceDialogHint": "查看所选记录及其来源。"
+    "evidenceDialogHint": "查看所选记录及其来源。",
+    "showInspector": "展开事件与证据栏",
+    "hideInspector": "收起事件与证据栏",
+    "closeInspector": "关闭事件与证据栏",
+    "compactCount": "{count} 条"
   },
   "replayEvidence": {
     "recordedOnly": "原始归档记录",
@@ -1867,6 +1881,8 @@
     "collapseStepsBtn": "收起执行步骤",
     "expandAllStepsBtn": "展开全部步骤",
     "toggleDockHint": "展开/收起右侧环境与工具栏",
+    "dockHeaderTitle": "实时遥测与画面",
+    "closeDock": "关闭检查器",
     "loadingOlder": "正在加载更早的消息…",
     "loadOlderMessages": "加载更早的消息",
     "emptyThreadTitle": "与 Shiori 开始本轮会话",

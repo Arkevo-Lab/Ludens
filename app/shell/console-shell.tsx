@@ -1,13 +1,14 @@
 "use client";
+import { useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from "react";
+import { MenuIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { ArrowRight } from "lucide-react";
+import { PixelMark } from "@/components/ui/pixel-mark";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
-import { ActivityFeed } from "@/features/live/activity-feed";
 import { ShioriWorkbench } from "@/features/live/shiori-cockpit";
 import { WorkspaceStudioView } from "@/features/workspaces/workspace-studio-view";
-import { ConsoleSidebar, type ConsoleView as View } from "@/shell/console-sidebar";
+import { ConsoleSidebar } from "@/shell/console-sidebar";
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
 import { RunPicker } from "@/features/workspaces/run-picker";
 import { DesktopBridge } from "@/features/pet/desktop-bridge";
@@ -18,14 +19,33 @@ import { SettingsView } from "@/features/workspaces/settings-view";
 import { DevPanel } from "@/shell/dev-panel";
 import { TimelinePlayer } from "@/features/replay/timeline-player";
 import { replayEvidenceFromSearch, replayEvidencePatch } from "@/features/replay/replay-navigation";
-import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { ArchiveBuild } from "@/shell/archive-build";
 import { WorkspacesView } from "@/features/workspaces/workspaces-view";
 import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clockTime } from "@/features/live/run-visuals";
+import { useTranslations } from "@/lib/locale";
 import { useDashboardController } from "@/shell/use-dashboard-controller";
 
+type ShellHeaderSlots = {
+  runPicker?: ReactNode;
+  handoverSlot?: ReactNode;
+  mobileNavSlot?: ReactNode;
+};
+
+const SlottedShioriWorkbench = ShioriWorkbench as ComponentType<
+  ComponentProps<typeof ShioriWorkbench> & Pick<ShellHeaderSlots, "runPicker" | "mobileNavSlot">
+>;
+const SlottedTimelinePlayer = TimelinePlayer as ComponentType<
+  ComponentProps<typeof TimelinePlayer> & Pick<ShellHeaderSlots, "runPicker" | "mobileNavSlot">
+>;
+const SlottedRunAnalysis = RunAnalysis as ComponentType<
+  ComponentProps<typeof RunAnalysis> & ShellHeaderSlots
+>;
+
 export default function ConsoleShell() {
-  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, observedStatus, staleStatus, phase, context, contextTitles, latestRequested, returningLatest, latestScopeChanged, latestFailed, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, createWithDriver, closeCreateIntent, toggleRefresh, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, returnButton, setPausedSelection, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, activeLiveSegment, setActiveLiveSegment, jumpToLiveSegment, clearLiveJumpTarget} = useDashboardController();
+  const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, staleStatus, phase, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, closeCreateIntent, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, activeLiveSegment, setActiveLiveSegment, jumpToLiveSegment, clearLiveJumpTarget} = useDashboardController();
+  const st = useTranslations("consoleSidebar");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const openReplayAtFrame = (frame: { run?: string; at?: number; record: string; sequence: number }) => {
     navigate({
       view: "replay",
@@ -45,6 +65,7 @@ export default function ConsoleShell() {
     s?.medianWsWaitMs != null ? dt("waitWs") + " " + seconds(s.medianWsWaitMs) : "",
   ].filter(Boolean).join(" · ");
   const eff = data?.telemetry.efficiency;
+  const clampedAutonomyRatio = eff?.autonomyActionRatio != null ? Math.min(1, eff.autonomyActionRatio) : null;
   const sampler = data?.telemetry.perception.sampler;
   const metrics = data ? (
     <section className={view === "live" ? "metrics live-metrics" : "metrics perf-metrics"} aria-label={dt("roundSummary")}>
@@ -72,7 +93,7 @@ export default function ConsoleShell() {
           />
           <Metric
             label={dt("metric.autonomy")}
-            value={percent(eff?.autonomyActionRatio)}
+            value={percent(clampedAutonomyRatio)}
             detail={dt("metric.pythonDuty") + " " + percent(eff?.localPythonTimeRatio) + ` · ${data.telemetry.capabilities.localPython.started} calls`}
           />
         </>
@@ -80,95 +101,124 @@ export default function ConsoleShell() {
     </section>
   ) : null;
   const workspaceScopedView = view === "live" || view === "replay" || view === "perf" || view === "caps" || view === "perception" || view === "baseware";
+  const workspaceSlot = (
+    <WorkspacePicker
+      variant="sidebar"
+      muted={!workspaceScopedView}
+      projects={projects}
+      value={selection.project}
+      loading={!catalogReady}
+      error={catalogError}
+      onChange={id => {
+        setMobileNavOpen(false);
+        navigate({
+          project: id,
+          workspace: null,
+          run: null,
+          epoch: null,
+          beforeCall: null,
+          call: null,
+          block: null,
+          image: null,
+          at: null,
+          ...replayEvidencePatch(null),
+        });
+      }}
+    />
+  );
+  const contextualRunPicker = runControls ? (
+    <RunPicker
+      variant="compact"
+      runs={project?.runs ?? []}
+      latest={latest}
+      cycles={view === "live" ? cycles : undefined}
+      quickJump={view === "live"}
+      value={view === "live" ? (activeLiveSegment || liveJumpTarget?.value || "") : selection.run}
+      onChange={value => {
+        if (view === "live") {
+          jumpToLiveSegment(value);
+          return;
+        }
+        if (!value) {
+          setSnapshotRevision(rev => rev + 1);
+        }
+        navigate({
+          run: value || null,
+          epoch: null,
+          beforeCall: null,
+          call: null,
+          block: null,
+          image: null,
+          at: null,
+          ...replayEvidencePatch(null),
+        });
+      }}
+    />
+  ) : null;
+  const mobileNavButton = (
+    <Button
+      ref={mobileNavTriggerRef}
+      type="button"
+      variant="ghost"
+      size="icon-sm"
+      className="mobile-nav-trigger min-[681px]:hidden"
+      aria-expanded={mobileNavOpen}
+      aria-label={st(mobileNavOpen ? "menuClose" : "menuOpen")}
+      title={st(mobileNavOpen ? "menuClose" : "menuOpen")}
+      onClick={() => setMobileNavOpen(open => !open)}
+    >
+      <MenuIcon className="size-4" aria-hidden="true" />
+    </Button>
+  );
+  const perfHandoverSlot = data && (auto || stopping) ? (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      className="h-7 shrink-0 px-2.5 text-xs"
+      disabled={!data.controlAllowed || !auto || stopping}
+      title={data.controlReason ?? dt("noRun")}
+      onClick={stop}
+    >
+      {stopping ? dt("handingOver") : dt("handover")}
+    </Button>
+  ) : null;
+  const hasWorkbenchHeader =
+    (view === "replay" && entry === "ready") ||
+    ((view === "live" || view === "perf") && entry === "ready" && Boolean(data));
   return (
     <div className="console-shell">
       <DesktopBridge onNavigate={navigateUrl} />
-      <ConsoleSidebar view={view} viewLink={viewLink} onNavigate={navigateUrl} />
+      <ConsoleSidebar
+        view={view}
+        viewLink={viewLink}
+        onNavigate={navigateUrl}
+        workspaceSlot={workspaceSlot}
+        mobileOpen={mobileNavOpen}
+        onMobileOpenChange={setMobileNavOpen}
+        mobileTriggerRef={mobileNavTriggerRef}
+      />
       <div className="console-main">
-        <header className={"context-bar" + (view === "live" ? " live-context-bar" : "")}>
-          <div className="context-workspace">
-            {workspaceScopedView ? (
-              <>
-                <WorkspacePicker projects={projects} value={selection.project} loading={!catalogReady} error={catalogError}
-                  onChange={id => navigate({ project: id, workspace: null, run: null, epoch: null,
-                    beforeCall: null, call: null, block: null, image: null, at: null, ...replayEvidencePatch(null) })} />
-                <div className="breadcrumb"><i>/</i><strong>{t(`nav.${view}`)}</strong></div>
-              </>
-            ) : (
-              <div className="breadcrumb">
-                <span>{t(view === "dev" ? "navSectionDev" : "navSectionGlobal")}</span>
-                <i>/</i>
-                <strong>{t(`nav.${view}`)}</strong>
-              </div>
-            )}
-          </div>
-          <div className="context-controls">
-            {!workspaceScopedView && project && (
-              <Button asChild size="sm" variant="outline" className="text-muted-foreground">
-                <a href={viewLink("live")} onClick={event => {
-                  if (!isPlainNavigationClick(event)) return;
-                  event.preventDefault();
-                  navigateUrl(viewLink("live"));
-                }}>
-                  {workspaceName(project)} · {t("nav.live")} <ArrowRight className="size-3.5" aria-hidden="true" />
-                </a>
-              </Button>
-            )}
-            {runControls && (
-              <RunPicker runs={project?.runs ?? []} latest={latest}
-                cycles={view === "live" ? cycles : undefined}
-                quickJump={view === "live"}
-                value={view === "live" ? (activeLiveSegment || liveJumpTarget?.value || "") : (!refresh && !selection.run ? run : selection.run)}
-                onChange={value =>
-                  view === "live"
-                    ? jumpToLiveSegment(value)
-                    : !value
-                      ? returnToLatest()
-                      : navigate({
-                          run: value,
-                          epoch: null,
-                          beforeCall: null,
-                          call: null,
-                          block: null,
-                          image: null,
-                          at: null, ...replayEvidencePatch(null),
-                        })
-                }
-              />
-            )}
-            {run && (view === "live" || view === "perf") && <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="text-muted-foreground"
-              aria-pressed={refresh}
-              title={lt("refreshHint")}
-              onClick={toggleRefresh}
-            >
-              <i className="status-dot" />
-              {lt(refresh ? "autoRefreshOn" : "autoRefreshOff")}
-            </Button>}
-          </div>
-        </header>
+        {!hasWorkbenchHeader && (
+          <header className="mobile-shell-bar">
+            {mobileNavButton}
+            <span className="mobile-shell-brand">
+              <PixelMark />
+              <strong>{t(`nav.${view}`)}</strong>
+            </span>
+            {runControls && entry === "ready" && contextualRunPicker ? (
+              <div className="mobile-shell-actions">{contextualRunPicker}</div>
+            ) : null}
+          </header>
+        )}
         <main ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
           tabIndex={runControls ? -1 : undefined} aria-label={runControls ? t(`views.${view}.title`) : undefined}
-          className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : view === "replay" && entry === "ready" ? " replay-page" : "")}>
-          {view !== "workspaces" && view !== "baseware" && view !== "docs" && view !== "perception" && view !== "caps" && view !== "live" && (view !== "replay" || entry !== "ready") && <div className={"page-heading" + (view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
+          className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : view === "replay" && entry === "ready" ? " replay-page" : view === "perf" ? " perf-page" : "")}>
+          {(view === "settings" || view === "dev") && <div className={"page-heading" + (view === "settings" ? " mx-auto w-full max-w-5xl" : "")}>
             <div>
               <h1>{t(`views.${view}.title`)}</h1>
               <p>{t(`views.${view}.description`)}</p>
             </div>
-            {data && view === "perf" && (
-              <Button
-                type="button"
-                variant="outline"
-                disabled={!data?.controlAllowed || !auto || stopping}
-                title={data?.controlReason ?? dt("noRun")}
-                onClick={stop}
-              >
-                {stopping ? dt("handingOver") : dt("handover")}
-              </Button>
-            )}
           </div>}
           {runControls && run && <ArchiveBuild key={selection.project + "/" + run}
             project={selection.project} run={run} onReady={archiveReady} />}
@@ -178,7 +228,8 @@ export default function ConsoleShell() {
               {data && (
                 <small>{dt("keepLast")} · {clockTime(data.updatedAt)}</small>
               )}</span>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {!data && entry === "ready" && contextualRunPicker}
                 {catalogError && <Button type="button" size="sm" variant="outline" aria-disabled={catalogLoading}
                   className="aria-disabled:opacity-50" onClick={event => retryCatalog(event.currentTarget)}>
                   {t(catalogLoading ? "workspaceRunEmpty.retrying" : "workspaceRunEmpty.retry")}
@@ -220,7 +271,8 @@ export default function ConsoleShell() {
               workspacePath={project?.workspace ?? undefined}
               error={catalogError} retrying={catalogLoading} onRetry={retryCatalog} onNavigate={navigateUrl} />
           ) : view === "replay" ? (
-            <TimelinePlayer key={scopeKey} project={selection.project} run={run} epoch={selection.epoch || "all"}
+            <SlottedTimelinePlayer key={scopeKey} project={selection.project} run={run} epoch={selection.epoch || "all"}
+              runPicker={contextualRunPicker} mobileNavSlot={mobileNavButton}
               onOverview={onReplayOverview} archiveRevision={archiveRevision}
               position={query.get("at")} evidence={replayEvidenceFromSearch(search)}
               onPosition={(at, nextEvidence = null, options) => {
@@ -255,11 +307,13 @@ export default function ConsoleShell() {
           ) : (
             <>
               {view === "live" ? (
-                <ShioriWorkbench
+                <SlottedShioriWorkbench
                   project={selection.project}
                   workspace={project?.workspace ?? data.manifest.workspace ?? null}
                   workspaceTitle={workspaceName(project)}
                   runs={project?.runs ?? []}
+                  runPicker={contextualRunPicker}
+                  mobileNavSlot={mobileNavButton}
                   jumpTarget={liveJumpTarget}
                   onClearJumpTarget={clearLiveJumpTarget}
                   onActiveSegmentChange={setActiveLiveSegment}
@@ -355,7 +409,7 @@ export default function ConsoleShell() {
                 />
               ) : (
                 <>
-                  <RunAnalysis
+                  <SlottedRunAnalysis
                     data={data}
                     detailData={analysis.detail}
                     call={call}
@@ -364,6 +418,9 @@ export default function ConsoleShell() {
                     error={error}
                     retrying={retryingRun}
                     metrics={metrics}
+                    runPicker={contextualRunPicker}
+                    handoverSlot={perfHandoverSlot}
+                    mobileNavSlot={mobileNavButton}
                     statusSlot={
                       <div className="run-status perf-run-status">
                         <span className={"status-dot " + (auto && !staleStatus ? "online" : "")} />
@@ -372,7 +429,7 @@ export default function ConsoleShell() {
                           <span>{dt("elapsed")} {seconds(phase.elapsedMs)}</span>
                         )}
                         <i />
-                        <span>
+                        <span className="perf-status-model">
                           {(data.live as { model?: string | null } | null)?.model ??
                             data.manifest.model ??
                             dt("deviceOnly")}
@@ -453,7 +510,7 @@ export default function ConsoleShell() {
                                 </div>
                                 <div>
                                   <dt>{dt("telemetry.autonomyRatio")}</dt>
-                                  <dd><strong>{percent(eff?.autonomyActionRatio)}</strong></dd>
+                                  <dd><strong>{percent(clampedAutonomyRatio)}</strong></dd>
                                 </div>
                                 <div>
                                   <dt>{dt("telemetry.pythonRpcs")}</dt>

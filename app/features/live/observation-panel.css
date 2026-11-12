@@ -1,17 +1,30 @@
+.observation-panel .surface-heading,
 .observation-priority .surface-heading {
-  gap: 10px;
-  padding: 14px;
-  align-items: baseline;
-}
-
-.observation-priority .surface-heading h2 {
+  gap: 8px;
+  padding: 11px 12px;
+  align-items: center;
+  flex-wrap: nowrap;
   min-width: 0;
-  overflow-wrap: anywhere;
 }
 
+.observation-panel .surface-heading h2,
+.observation-priority .surface-heading h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.observation-panel .surface-heading > span,
 .observation-priority .surface-heading > span {
-  flex-shrink: 0;
-  max-width: 45%;
+  flex: 0 0 auto;
+  max-width: none;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
   text-align: right;
 }
 

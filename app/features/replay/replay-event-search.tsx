@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type Ref } from "react";
-import { Search, X } from "lucide-react";
+import { LocateFixed, Search, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -156,94 +156,124 @@ export function ReplayEventSearch({ scope, startAt, at, refreshRevision = 0, ite
     return Math.abs(item.startAt - at) <= 1200;
   };
 
+  const compactCountTemplate = t("compactCount");
+  const countToken = state ? `${state.items.length}${state.cursor ? "+" : ""}` : "0";
+  const compactCountLabel = compactCountTemplate.includes("{count}")
+    ? compactCountTemplate.replace("{count}", countToken)
+    : countToken;
+  const fullStatusTitle = state
+    ? state.loading
+      ? t("searching").replace("{percent}", String(progress))
+      : `${t("resultCount").replace("{count}", String(state.items.length)).replace("{page}", String(state.page))} · ${
+          state.stopped ? t("searchStopped") : state.error ? t("searchFailed") : complete ? t("searchComplete") : state.cursor ? t("moreMatches") : t("searchPartial")
+        }`
+    : undefined;
+
   return <section className="replay-event-search" aria-label={t("eventSearchTitle")}>
     <form className="replay-search-form" onSubmit={event => { event.preventDefault(); run(); }}>
-      <Label htmlFor={inputId} className="sr-only">{t("searchLabel")}</Label>
-      <div className="replay-search-input-wrap">
-        <Search className="replay-search-icon" aria-hidden="true" />
-        <Input
-          id={inputId}
-          ref={inputRef}
-          value={query}
-          maxLength={200}
-          className="replay-search-input pl-8 pr-7 text-xs"
-          placeholder={t("searchPlaceholder")}
-          onChange={event => changeQuery(event.target.value)}
-        />
-        {query && (
-          <button type="button" className="replay-search-clear" aria-label={t("clearSearch")} onClick={() => changeQuery("")}>
-            <X className="size-3.5" aria-hidden="true" />
-          </button>
-        )}
-      </div>
-      <div className="replay-track-pills" role="group" aria-label={t("trackFilter")}>
-        {TRACK_OPTIONS.map(option => (
-          <button
-            key={option}
+      <div className="replay-search-row-top">
+        <Label htmlFor={inputId} className="sr-only">{t("searchLabel")}</Label>
+        <div className="replay-search-input-wrap">
+          <Search className="replay-search-icon" aria-hidden="true" />
+          <Input
+            id={inputId}
+            ref={inputRef}
+            value={query}
+            maxLength={200}
+            className="replay-search-input h-7 pl-7 pr-6 text-xs"
+            placeholder={t("searchPlaceholder")}
+            onChange={event => changeQuery(event.target.value)}
+          />
+          {query && (
+            <button type="button" className="replay-search-clear" aria-label={t("clearSearch")} onClick={() => changeQuery("")}>
+              <X className="size-3" aria-hidden="true" />
+            </button>
+          )}
+        </div>
+        {state && !state.loading && at !== undefined && (state.items.length > 0 || Boolean(state.cursor)) && (
+          <Button
             type="button"
-            className="replay-track-pill"
-            data-active={track === option ? "true" : undefined}
-            data-track={option}
+            variant="outline"
+            size="xs"
+            className="replay-locate-btn h-7 px-2"
+            title={t("locatePlayhead")}
+            aria-label={t("locatePlayhead")}
             onClick={() => {
-              if (track === option) return;
-              if (request.current) stop();
-              setTrack(option);
+              const lastStart = state.items.at(-1)?.startAt ?? -Infinity;
+              const firstStart = state.items[0]?.startAt ?? Infinity;
+              if (at >= firstStart - 1500 && (at <= lastStart + 1500 || !state.cursor)) {
+                scrollClosestItemIntoView(at, state.items);
+              } else if (at < firstStart) {
+                void scan({ query: query.trim(), track, items: [], loading: true, error: "", stopped: false, page: 1 }, at);
+              } else if (state.cursor) {
+                void scan({ ...state, page: state.page + 1 }, at);
+              }
             }}
           >
-            {option === "all" ? t("allTracks") : timeline(`track.${option}`)}
-          </button>
-        ))}
+            <LocateFixed className="size-3.5" aria-hidden="true" />
+            <span className="replay-locate-label">{t("locatePlayhead")}</span>
+          </Button>
+        )}
+        {state?.loading && (
+          <Button type="button" size="xs" variant="ghost" className="h-7 px-2" onClick={stop}>
+            {t("stopSearch")}
+          </Button>
+        )}
+        {state && !changed && (state.stopped || state.error) && (
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            className="h-7 px-2"
+            onClick={event => { focus.remember(event.currentTarget); void scan(state); }}
+          >
+            {t("continueSearch")}
+          </Button>
+        )}
+      </div>
+
+      <div className="replay-search-row-bottom">
+        <div className="replay-track-pills" role="group" aria-label={t("trackFilter")}>
+          {TRACK_OPTIONS.map(option => (
+            <button
+              key={option}
+              type="button"
+              className="replay-track-pill"
+              data-active={track === option ? "true" : undefined}
+              data-track={option}
+              onClick={() => {
+                if (track === option) return;
+                if (request.current) stop();
+                setTrack(option);
+              }}
+            >
+              {option === "all" ? t("allTracks") : timeline(`track.${option}`)}
+            </button>
+          ))}
+        </div>
+
+        {state && (
+          <div ref={focus.target} tabIndex={-1} className="replay-search-meta-bar outline-none" role="status" title={fullStatusTitle}>
+            <span className="replay-search-meta-text mono">
+              {state.loading ? `${progress}%` : compactCountLabel}
+            </span>
+            {!changed && !state.loading && !state.stopped && !state.error && state.cursor && (
+              <Button
+                type="button"
+                variant="outline"
+                size="xs"
+                className="h-5 px-1.5 text-[11px]"
+                onClick={event => { focus.remember(event.currentTarget); void scan({ ...state, items: [], page: state.page + 1 }); }}
+              >
+                {t("nextResults")}
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     </form>
 
     {state && <>
-      <div ref={focus.target} tabIndex={-1} className="replay-search-meta-bar outline-none" role="status">
-        <span className="replay-search-meta-text">
-          {state.loading
-            ? t("searching").replace("{percent}", String(progress))
-            : `${t("resultCount").replace("{count}", String(state.items.length)).replace("{page}", String(state.page))} · ${
-                state.stopped ? t("searchStopped") : state.error ? t("searchFailed") : complete ? t("searchComplete") : state.cursor ? t("moreMatches") : t("searchPartial")
-              }`}
-        </span>
-        <div className="replay-search-meta-actions">
-          {state.loading && (
-            <Button type="button" size="xs" variant="ghost" onClick={stop}>{t("stopSearch")}</Button>
-          )}
-          {!state.loading && at !== undefined && (state.items.length > 0 || Boolean(state.cursor)) && (
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => {
-                const lastStart = state.items.at(-1)?.startAt ?? -Infinity;
-                const firstStart = state.items[0]?.startAt ?? Infinity;
-                if (at >= firstStart - 1500 && (at <= lastStart + 1500 || !state.cursor)) {
-                  scrollClosestItemIntoView(at, state.items);
-                } else if (at < firstStart) {
-                  void scan({ query: query.trim(), track, items: [], loading: true, error: "", stopped: false, page: 1 }, at);
-                } else if (state.cursor) {
-                  void scan({ ...state, page: state.page + 1 }, at);
-                }
-              }}
-            >
-              {t("locatePlayhead")}
-            </Button>
-          )}
-          {!changed && !state.loading && !state.stopped && !state.error && state.cursor && (
-            <Button type="button" variant="outline" size="xs"
-              onClick={event => { focus.remember(event.currentTarget); void scan({ ...state, items: [], page: state.page + 1 }); }}>
-              {t("nextResults")}
-            </Button>
-          )}
-          {!changed && (state.stopped || state.error) && (
-            <Button type="button" variant="outline" size="xs"
-              onClick={event => { focus.remember(event.currentTarget); void scan(state); }}>
-              {t("continueSearch")}
-            </Button>
-          )}
-        </div>
-      </div>
-
       {state.error && <Alert variant="destructive"><AlertDescription>
         <p>{t("searchFailed")}</p>
         <details className="mt-2 text-xs"><summary>{t("technicalDetails")}</summary><p className="mt-2 break-all">{state.error}</p></details>
