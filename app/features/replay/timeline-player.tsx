@@ -62,7 +62,7 @@ const formatSampleAge = (deltaMs: number, secondsAgoLabel: string) => {
 const statusKey: Record<string, string> = { completed: "completed", success: "completed", error: "failed", failed: "failed",
   cancelled: "cancelled", pending: "pending", running: "running" };
 
-type VideoPlayback = { at: number; playing: boolean; clockReady: boolean; speed: number; revision: number; onReady(slot: string, url: string, ready: boolean): void };
+type VideoPlayback = { at: number; liveAt?: () => number; playing: boolean; clockReady: boolean; speed: number; revision: number; onReady(slot: string, url: string, ready: boolean): void };
 function ReplayMedia({ media, label, sampledAt, image, playback, slot, upcoming }: { media: ReplayFrame["media"][number]; label: string; image?: BufferedImage;
   sampledAt: number; playback: VideoPlayback; slot: string; upcoming?: VideoSource }) {
   const t = useTranslations("timelinePlayer");
@@ -123,14 +123,19 @@ const FrameMedia = memo(function FrameMedia({ frame, images, playback, upcoming,
 const EMPTY_IMAGES = new Map<string, BufferedImage>();
 
 /** Native range input bound to the animation clock; it re-renders alone, never the player tree. */
-function ReplaySeekInput({ clock, startAt, endAt, label, onScrub, onRelease }: {
-  clock: ReplayClock; startAt: number; endAt: number; label: string; onScrub(value: number): void; onRelease(): void;
+function ReplaySeekInput({ clock, startAt, endAt, label, onScrub, onSeek, onRelease }: {
+  clock: ReplayClock; startAt: number; endAt: number; label: string; onScrub(value: number): void; onSeek(value: number): void; onRelease(): void;
 }) {
   const at = useReplayClock(clock), duration = endAt - startAt;
+  // Only a pointer drag is a scrub (network settles on release); any other change seeks and commits at once.
+  const dragging = useRef(false);
+  const release = () => { if (!dragging.current) return; dragging.current = false; onRelease(); };
   return <input className="replay-seek accent-primary focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring"
     type="range" min={startAt} max={Math.max(endAt, startAt + 1)} step="1" value={at}
     disabled={duration <= 0} aria-label={label} aria-valuetext={replayDuration(at - startAt) + " / " + replayDuration(duration)}
-    onChange={event => onScrub(Number(event.target.value))} onPointerUp={onRelease} onKeyUp={onRelease} />;
+    onPointerDown={() => { dragging.current = true; }}
+    onChange={event => { const value = Number(event.target.value); if (dragging.current) onScrub(value); else onSeek(value); }}
+    onPointerUp={release} onPointerCancel={release} onBlur={release} onKeyUp={onRelease} />;
 }
 
 function ReplayClockText({ clock, className }: { clock: ReplayClock; className: string }) {
@@ -540,9 +545,9 @@ export function TimelinePlayer({
     () => coalesceReplayFrameTicks(trackFrames, eventBounds.startAt, eventBounds.endAt, 120),
     [trackFrames, eventBounds.startAt, eventBounds.endAt],
   );
-  const playbackLive = useMemo<VideoPlayback>(() => ({ at, playing, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }),
-    [at, playing, ready, speed, clockRevision, onVideoReady]);
-  const playbackPreview = useMemo<VideoPlayback>(() => ({ ...playbackLive, playing: false }), [playbackLive]);
+  const playbackLive = useMemo<VideoPlayback>(() => ({ at, liveAt: clock.get, playing, clockReady: ready, speed, revision: clockRevision, onReady: onVideoReady }),
+    [at, clock, playing, ready, speed, clockRevision, onVideoReady]);
+  const playbackPreview = useMemo<VideoPlayback>(() => ({ ...playbackLive, liveAt: undefined, playing: false }), [playbackLive]);
 
   if (!project || !run) {
     return (
@@ -834,7 +839,7 @@ export function TimelinePlayer({
         <div className="replay-controls">
           {/* The media scrubber keeps native pointer/key commit semantics and millisecond steps. */}
           <ReplaySeekInput clock={clock} startAt={overview.startAt} endAt={overview.endAt} label={t("seekLabel")}
-            onScrub={value => seek(value, false, null, true)}
+            onScrub={value => seek(value, false, null, true)} onSeek={value => seek(value)}
             onRelease={() => { const now = session.atRef.current; move(now); commitPosition(now); }} />
 
           <div className="replay-control-row">

@@ -265,14 +265,26 @@ export function useReplaySession(options: ReplaySessionOptions) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   [eventEntry?.window, version, eventBounds.startAt, eventBounds.endAt]);
   const [continuing, setContinuing] = useState(false);
+  const [continueError, setContinueError] = useState("");
+  const continueRequest = useRef<AbortController | null>(null);
+  // A scope change or unmount abandons an explicit continuation; it must never land in another run's cache.
+  useEffect(() => () => { continueRequest.current?.abort(); continueRequest.current = null; }, [scope]);
+  useEffect(() => setContinueError(""), [scope, eventBounds.startAt, eventBounds.endAt]);
   const continueEvents = useCallback(async () => {
     const current = cache.get("events", eventBounds.startAt, eventBounds.endAt);
     if (!current?.nextCursor) return;
-    setContinuing(true);
+    continueRequest.current?.abort();
+    const controller = new AbortController(), origin = scopeRef.current;
+    continueRequest.current = controller;
+    setContinuing(true); setContinueError("");
     try {
-      const next = await readReplayWindow(scopeRef.current, "events", eventBounds.startAt, eventBounds.endAt, new AbortController().signal, undefined, current);
-      cache.store("events", eventBounds.startAt, eventBounds.endAt, next);
-    } finally { setContinuing(false); }
+      const next = await readReplayWindow(origin, "events", eventBounds.startAt, eventBounds.endAt, controller.signal, undefined, current);
+      if (!controller.signal.aborted && scopeRef.current === origin) cache.store("events", eventBounds.startAt, eventBounds.endAt, next);
+    } catch (error) {
+      if (!controller.signal.aborted) setContinueError(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (continueRequest.current === controller) { continueRequest.current = null; setContinuing(false); }
+    }
   }, [cache, eventBounds.startAt, eventBounds.endAt]);
 
   // ---- stepping -------------------------------------------------------------------------------
@@ -284,7 +296,8 @@ export function useReplaySession(options: ReplaySessionOptions) {
     const token = ++stepRequest.current, from = atRef.current, cap = optionsRef.current.capability;
     const cached = indexedAdjacentFrame(indexRef.current, from, direction, cap);
     const current = replayWindowBounds(from, range);
-    if (cached && cached.at >= current.startAt - REPLAY_WINDOW_MS && cached.at < current.endAt + REPLAY_WINDOW_MS) return cached;
+    // Short-circuit only inside a fully loaded current window; otherwise walk outward from it so no frame is skipped.
+    if (cached && cache.entry("frames", current.startAt, current.endAt)?.complete && cached.at >= current.startAt && cached.at < current.endAt) return cached;
     setStepping(true);
     try {
       let edge = direction === 1 ? current.startAt : current.endAt;
@@ -312,7 +325,7 @@ export function useReplaySession(options: ReplaySessionOptions) {
     bounds, eventBounds, index, stageFrames, activeWindow,
     frameWindowComplete: !!frameEntry?.complete,
     windowError: frameEntry?.error ?? "",
-    items, eventsLoading: !!eventEntry?.loading || continuing, eventError: eventEntry?.error ?? "",
+    items, eventsLoading: !!eventEntry?.loading || continuing, eventError: eventEntry?.error ?? continueError,
     eventsHaveMore: !!eventEntry?.window?.nextCursor, continueEvents,
     initialPreviewFrame, stepping, findAdjacent, cancelStep,
     retry, refresh, refreshOverview,
