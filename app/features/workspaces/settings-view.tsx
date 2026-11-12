@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Bot, Cable, CheckCircle2, Cpu, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
-import { ModelPickerDialog } from "@/components/model-picker-dialog";
+import { ModelPickerDialog, type ModelServiceTier } from "@/components/model-picker-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -147,12 +147,14 @@ export function GlobalDefaultsCard() {
 
   const [saved, setSaved] = useState<{
     model: string;
+    serviceTier: ModelServiceTier | null;
     seconds: string;
     requests: string;
     compactionThreshold: string;
     pet: boolean;
   }>({
     model: "",
+    serviceTier: null,
     seconds: "",
     requests: "",
     compactionThreshold: "",
@@ -177,6 +179,7 @@ export function GlobalDefaultsCard() {
         const d = settings.config.defaults;
         const next = {
           model: d.model ?? "",
+          serviceTier: d.serviceTier ?? null,
           seconds: d.seconds !== undefined ? String(d.seconds) : "",
           requests: d.requests !== undefined ? String(d.requests) : "",
           compactionThreshold: d.compactionThreshold !== undefined ? String(d.compactionThreshold) : "",
@@ -197,6 +200,7 @@ export function GlobalDefaultsCard() {
 
   const dirty =
     draft.model.trim() !== saved.model.trim() ||
+    draft.serviceTier !== saved.serviceTier ||
     draft.seconds.trim() !== saved.seconds.trim() ||
     draft.requests.trim() !== saved.requests.trim() ||
     draft.compactionThreshold.trim() !== saved.compactionThreshold.trim() ||
@@ -215,6 +219,7 @@ export function GlobalDefaultsCard() {
           action: "globalDefaults",
           defaults: {
             model: draft.model.trim() || null,
+            serviceTier: draft.serviceTier,
             seconds: draft.seconds.trim() ? Number(draft.seconds.trim()) : null,
             requests: draft.requests.trim() ? Number(draft.requests.trim()) : null,
             compactionThreshold: draft.compactionThreshold.trim() ? Number(draft.compactionThreshold.trim()) : null,
@@ -227,6 +232,7 @@ export function GlobalDefaultsCard() {
       const d = (value as GlobalDefaultsResult).config.defaults;
       const next = {
         model: d.model ?? "",
+        serviceTier: d.serviceTier ?? null,
         seconds: d.seconds !== undefined ? String(d.seconds) : "",
         requests: d.requests !== undefined ? String(d.requests) : "",
         compactionThreshold: d.compactionThreshold !== undefined ? String(d.compactionThreshold) : "",
@@ -281,7 +287,7 @@ export function GlobalDefaultsCard() {
                 disabled={loading || saving}
                 value={draft.model}
                 onChange={event => {
-                  setDraft(current => ({ ...current, model: event.target.value }));
+                  setDraft(current => ({ ...current, model: event.target.value, serviceTier: null }));
                   setSavedNotice(false);
                 }}
                 placeholder="openai-codex/gpt-6.1-sol"
@@ -305,9 +311,10 @@ export function GlobalDefaultsCard() {
               open={modelPickerOpen}
               onOpenChange={setModelPickerOpen}
               value={draft.model}
+              serviceTier={draft.serviceTier}
               allowUnauthenticated={true}
-              onSelect={nextModel => {
-                setDraft(current => ({ ...current, model: nextModel }));
+              onSelect={(nextModel, nextServiceTier) => {
+                setDraft(current => ({ ...current, model: nextModel, serviceTier: nextServiceTier }));
                 setSavedNotice(false);
               }}
             />

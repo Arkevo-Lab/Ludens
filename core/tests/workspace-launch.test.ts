@@ -844,6 +844,7 @@ test("model connection config validates, merges, maps to OMP isolated settings, 
   });
 
   expect(ompSettingsOverrides({ compactionThreshold: 64000, connection: merged })).toEqual({
+    "tier.openai": "none",
     "title.refreshOnReplan": false,
     "retry.modelFallback": false,
     "compaction.thresholdTokens": 64000,
@@ -869,6 +870,8 @@ test("model connection config validates, merges, maps to OMP isolated settings, 
     appendOnlyContext: "on",
     imageUrls: { enabled: true, backends: ["uguu", "tmpfiles"] },
   });
+  expect(parseConfig({ driver: "cua", serviceTier: "ultrafast" }, manifestFor("cua")).serviceTier).toBe("ultrafast");
+  expect(() => parseConfig({ driver: "cua", serviceTier: "invalid" }, manifestFor("cua"))).toThrow("serviceTier");
 
   const directory = await mkdtemp(join(tmpdir(), "ludens-connection-config-"));
   const home = join(directory, "home");

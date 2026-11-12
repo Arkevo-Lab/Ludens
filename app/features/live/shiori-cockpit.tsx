@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
 import { PixelMark } from "@/components/ui/pixel-mark";
-import { ModelPickerDialog, shortModelLabel } from "@/components/model-picker-dialog";
+import { ModelPickerDialog, shortModelLabel, type ModelServiceTier } from "@/components/model-picker-dialog";
 import { useTranslations } from "@/lib/locale";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
@@ -46,7 +46,7 @@ export type RuntimeControlAction =
   | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
-  | { action: "set_model"; model: string; runId?: string; expectedEpoch?: string | null }
+  | { action: "set_model"; model: string; serviceTier?: ModelServiceTier | null; runId?: string; expectedEpoch?: string | null }
   | { action: "perception_inject"; enabled: boolean; runId?: string }
   | { action: "perception_reload"; runId?: string };
 
@@ -149,14 +149,14 @@ async function sendRuntimeControl(
   return payload;
 }
 
-async function updateWorkspaceShioriModel(project: string, model: string) {
+async function updateWorkspaceShioriModel(project: string, model: string, serviceTier: ModelServiceTier | null) {
   const response = await fetch("/api/workspaces", {
     method: "PUT",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       action: "workspaceShiori",
       id: project,
-      shiori: { model },
+      shiori: { model, serviceTier },
     }),
   });
   const payload = await response.json().catch(() => ({}));
@@ -981,6 +981,7 @@ export function ShioriComposer({
     project: string;
     baseServerModel: string | null;
     model: string;
+    serviceTier?: ModelServiceTier | null;
   } | null>(null);
   const [localHostOverride, setLocalHostOverride] = useState<{
     project: string;
@@ -1043,9 +1044,10 @@ export function ShioriComposer({
   const effectiveHost = (hostStatusOverride ?? activeLocalStatus ?? data.live) as (NonNullable<RunData["live"]> & {
     consolidating?: boolean;
     model?: string | null;
+    serviceTier?: ModelServiceTier | null;
     hostOffline?: boolean;
   }) | null;
-  const control = data.lastControl as (RunData["lastControl"] & { model?: string | null }) | undefined;
+  const control = data.lastControl as (RunData["lastControl"] & { model?: string | null; serviceTier?: ModelServiceTier | null }) | undefined;
   const runtimeMode =
     effectiveHost?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
   const consolidating = Boolean(effectiveHost?.consolidating ?? control?.consolidating);
@@ -1085,6 +1087,9 @@ export function ShioriComposer({
     controlModel: typeof control?.model === "string" ? control.model : null,
     manifestModel: data.manifest.model ?? null,
   });
+  const activeServiceTier = validLocalModel && activeModel === localModelOverride?.model
+    ? localModelOverride.serviceTier ?? null
+    : effectiveHost?.serviceTier ?? control?.serviceTier ?? null;
 
   useEffect(() => {
     if (!replyTarget) {
@@ -1145,7 +1150,12 @@ export function ShioriComposer({
     onHostStatusChange?.(status);
     if (typeof status.model === "string" && status.model.trim()) {
       const nextModel = status.model.trim();
-      setLocalModelOverride({ project, baseServerModel: serverModel, model: nextModel });
+      setLocalModelOverride({
+        project,
+        baseServerModel: serverModel,
+        model: nextModel,
+        serviceTier: status.serviceTier === "priority" || status.serviceTier === "ultrafast" ? status.serviceTier : null,
+      });
       onModelChange?.(nextModel);
     }
   };
@@ -1157,7 +1167,7 @@ export function ShioriComposer({
     return status;
   };
 
-  const handleSelectModel = async (nextModel: string) => {
+  const handleSelectModel = async (nextModel: string, nextServiceTier: ModelServiceTier | null) => {
     const trimmed = nextModel.trim();
     if (!trimmed || !project) return;
     if (!canSwitchModel) {
@@ -1168,30 +1178,35 @@ export function ShioriComposer({
     setModelLockNotice(null);
 
     let persistedOffline = !hostOnline;
+    let appliedServiceTier = nextServiceTier;
     if (workspace) {
       try {
         const res = await sendRuntimeControl(project, workspace, {
           action: "set_model",
           model: trimmed,
+          serviceTier: nextServiceTier,
           runId: data.run,
           expectedEpoch: effectiveHost?.epoch ?? null,
         });
         const status = applyReturnedStatus(res);
+        if (status && "serviceTier" in status) {
+          appliedServiceTier = status.serviceTier === "priority" || status.serviceTier === "ultrafast" ? status.serviceTier : null;
+        }
         persistedOffline = Boolean(status?.hostOffline) || !hostOnline;
       } catch (cause) {
         if (isHostOfflineError(cause)) {
-          await updateWorkspaceShioriModel(project, trimmed);
+          await updateWorkspaceShioriModel(project, trimmed, nextServiceTier);
           persistedOffline = true;
         } else {
           throw cause;
         }
       }
     } else {
-      await updateWorkspaceShioriModel(project, trimmed);
+      await updateWorkspaceShioriModel(project, trimmed, nextServiceTier);
       persistedOffline = true;
     }
 
-    setLocalModelOverride({ project, baseServerModel: serverModel, model: trimmed });
+    setLocalModelOverride({ project, baseServerModel: serverModel, model: trimmed, serviceTier: appliedServiceTier });
     onModelChange?.(trimmed);
     setLastSent(
       (persistedOffline ? t("modelSwitchedOfflineFeedback") : t("modelSwitchedFeedback")).replace(
@@ -1826,6 +1841,7 @@ export function ShioriComposer({
         open={modelPickerOpen}
         onOpenChange={setModelPickerOpen}
         value={activeModel}
+        serviceTier={activeServiceTier}
         projectId={project}
         disabled={!canSwitchModel}
         disabledReason={!canSwitchModel ? t("modelSwitchLockedHint") : undefined}

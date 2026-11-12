@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuthStorage, ModelRegistry, Settings } from "@oh-my-pi/pi-coding-agent";
-import { ensureWorkspaceIdentity } from "@ludens/protocol/ludens";
+import { ensureWorkspaceIdentity, readGlobalConfig } from "@ludens/protocol/ludens";
 import { cli, HELP } from "../src/cli/control-cli.ts";
 import { dispatch, listen } from "../src/daemon/transport.ts";
 import { listAvailableOmpModels, resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
@@ -13,7 +13,7 @@ import { availableModels, listAvailableModelsViaBun } from "../src/core/query/av
 import { getLogIndex } from "../src/core/query/log-index.ts";
 import { refreshRunProjection, readRunProjection } from "../src/core/query/run-index.ts";
 import { controlWorkspaceRuntime } from "../src/core/query/runtime-control.ts";
-import { updateWorkspaceShiori } from "../src/core/query/workspaces.ts";
+import { updateGlobalDefaults, updateWorkspaceShiori, updateWorkspaceStudioConfig } from "../src/core/query/workspaces.ts";
 import { Runtime, type AgentRunner } from "../src/core/shiori/runtime.ts";
 import { EventLog } from "../src/core/storage/events.ts";
 import { resolveWorkspaceAddress, resolveWorkspaceState } from "../src/core/storage/workspace-state.ts";
@@ -32,6 +32,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
   const settings = Settings.isolated({ "retry.modelFallback": false, "title.refreshOnReplan": false });
   const auth = await AuthStorage.create(join(directory, "auth.db"));
   auth.keys.setRuntime("openai-codex", "offline-codex-key");
+  auth.keys.setRuntime("openai", "offline-openai-key");
   auth.keys.setRuntime("anthropic", "offline-anthropic-key");
 
   const probeRegistry = new ModelRegistry(auth, undefined, { settings });
@@ -88,11 +89,15 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
     }
     expect(runtime.status().model).toBe("openai-codex/gpt-6.1-sol");
 
+    await runtime.setModel("openai/gpt-6.1-sol", "ultrafast");
+    expect(runtime.status().serviceTier).toBe("ultrafast");
+
     // Switch in manual mode succeeds and updates status + session log + projections.
     const switched = await runtime.setModel(nextModelId);
     expect(switched).toMatchObject({
       mode: "manual",
       model: nextModelId,
+      serviceTier: null,
     });
     expect(runtime.status().model).toBe(nextModelId);
 
@@ -116,6 +121,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
     const sessionEvents = rawEvents.filter(event => event.type === "session" && event.source?.component === "shiori");
     expect(sessionEvents.map(event => event.data?.model)).toEqual([
       "openai-codex/gpt-6.1-sol",
+      "openai/gpt-6.1-sol",
       nextModelId,
     ]);
 
@@ -133,6 +139,26 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       release();
     }
     expect(network).not.toHaveBeenCalled();
+
+    // A resumed transcript may contain the earlier Ultrafast entry, but the
+    // workspace's explicit Standard configuration must win on every restart.
+    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ model: "openai/gpt-6.1-sol" }));
+    await agent.close();
+    const resumedAgent = await createOmpAgent({
+      runtime,
+      workspace,
+      runDir,
+      state,
+      log,
+      binDir: "/tmp",
+      ludensSocket: state.socket,
+      basewareSocket: "/tmp/unused-baseware.sock",
+      model: "openai/gpt-6.1-sol",
+      maxRequests: 10,
+      authStorage: auth,
+    });
+    runtime.attach({ agent: resumedAgent });
+    expect(runtime.status().serviceTier).toBeNull();
   } finally {
     await runtime.close();
     auth.close();
@@ -208,7 +234,7 @@ test("Runtime.setModel strictly blocks hot-switching during auto runs and consol
       expectedEpoch: null,
     });
     expect(updated).toMatchObject({ mode: "manual", model: "anthropic/claude-sonnet-4-5" });
-    expect(await dispatch(runtime, { kind: "model", argv: [] })).toEqual({ model: "anthropic/claude-sonnet-4-5" });
+    expect(await dispatch(runtime, { kind: "model", argv: [] })).toEqual({ model: "anthropic/claude-sonnet-4-5", serviceTier: null });
   } finally {
     runGate.resolve();
     consolidateGate.resolve();
@@ -292,7 +318,7 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
     // Text-only models must never appear in Shiori's picker catalog.
     expect(catalog.models.find(item => item.fullId === "custom-vision/v1-text-only")).toBeUndefined();
     for (const item of catalog.models) {
-      const raw = registry.find(item.provider, item.id);
+      const raw = registry.getAll().find(model => model.provider === item.provider && model.id === item.id);
       expect(raw?.input.includes("image")).toBe(true);
     }
 
@@ -306,10 +332,24 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
       contextWindow: 128000,
       maxTokens: 8192,
       authenticated: true,
+      supportedServiceTiers: [],
     });
 
     const codexSol = catalog.models.find(item => item.fullId === "openai-codex/gpt-6.1-sol");
     expect(codexSol?.authenticated).toBe(true);
+    const openaiSol = catalog.models.find(item => item.fullId === "openai/gpt-6.1-sol");
+    expect(openaiSol?.supportedServiceTiers).toEqual(["priority", "ultrafast"]);
+    const googleModels = catalog.models.filter(item => item.provider === "google");
+    expect(googleModels.length).toBeGreaterThan(0);
+    expect(googleModels.every(item => item.supportedServiceTiers.length === 0)).toBe(true);
+    const tieredCatalog = await listAvailableOmpModels({
+      workspace,
+      home,
+      modelRegistry: registry,
+      currentModel: "openai/gpt-6.1-sol",
+      currentServiceTier: "ultrafast",
+    });
+    expect(tieredCatalog.currentServiceTier).toBe("ultrafast");
 
     const unauthedVision = catalog.models.find(item => item.fullId === "unauthed-vision/u-vision");
     expect(unauthedVision?.authenticated).toBe(false);
@@ -335,7 +375,7 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
     await writeFile(join(home, "config.json"), JSON.stringify({
       version: 1,
       workspaceRoot: join(home, "workspaces"),
-      defaults: { model: "openai-codex/gpt-6.1-sol" },
+      defaults: { model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" },
     }));
     const globalCatalog = await availableModels(undefined, home);
     expect(globalCatalog.currentModel).toBe("openai-codex/gpt-6.1-sol");
@@ -343,6 +383,7 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
 
     const bridgedCatalog = await listAvailableModelsViaBun({ workspace, home });
     expect(bridgedCatalog.currentModel).toBe("custom-vision/v1-vision");
+    expect(bridgedCatalog.currentServiceTier).toBeNull();
     expect(bridgedCatalog.models.length).toBeGreaterThan(0);
   } finally {
     auth.close();
@@ -356,6 +397,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
   const workspace = join(directory, "workspace");
   const gate = Promise.withResolvers<void>();
   let activeModel = "openai-codex/gpt-6.1-sol";
+  let activeServiceTier: "priority" | "ultrafast" | null = null;
   const agent: AgentRunner = {
     async run({ signal }) {
       const aborted = Promise.withResolvers<void>();
@@ -364,8 +406,10 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     },
     async consolidate() {},
     model: () => activeModel,
-    async setModel(next) {
+    serviceTier: () => activeServiceTier,
+    async setModel(next, nextServiceTier) {
       activeModel = next;
+      activeServiceTier = nextServiceTier ?? null;
       return activeModel;
     },
     abort: async () => {},
@@ -402,6 +446,22 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     expect(onlineSwitch).toMatchObject({ mode: "manual", model: "anthropic/claude-sonnet-4-5" });
     expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("anthropic/claude-sonnet-4-5");
 
+    const tieredSwitch = await controlWorkspaceRuntime(
+      identity.id,
+      workspace,
+      { action: "set_model", model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" },
+      home,
+    );
+    expect(tieredSwitch).toMatchObject({ model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" });
+    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).serviceTier).toBe("ultrafast");
+
+    await controlWorkspaceRuntime(
+      identity.id,
+      workspace,
+      { action: "set_model", model: "anthropic/claude-sonnet-4-5", serviceTier: null },
+      home,
+    );
+
     // Online CLI `ludens model` reads and switches model in manual mode.
     const printed: string[] = [];
     const logSpy = spyOn(console, "log").mockImplementation((...args: unknown[]) => {
@@ -410,8 +470,8 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     try {
       await cli(["model"], socket);
       expect(printed.at(-1)).toBe("anthropic/claude-sonnet-4-5");
-      await cli(["model", "openai-codex/gpt-6.1-sol"], socket);
-      expect(JSON.parse(printed.at(-1)!)).toMatchObject({ mode: "manual", model: "openai-codex/gpt-6.1-sol" });
+      await cli(["model", "openai-codex/gpt-6.1-sol", "--service-tier", "ultrafast"], socket);
+      expect(JSON.parse(printed.at(-1)!)).toMatchObject({ mode: "manual", model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast" });
     } finally {
       logSpy.mockRestore();
     }
@@ -445,6 +505,29 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     });
     expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("google/gemini-2.5-pro");
 
+    const offlineTieredSwitch = await controlWorkspaceRuntime(
+      identity.id,
+      workspace,
+      { action: "set_model", model: "openai-codex/gpt-6.1-sol", serviceTier: "priority" },
+      home,
+    );
+    expect(offlineTieredSwitch).toMatchObject({ hostOffline: true, serviceTier: "priority" });
+    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).serviceTier).toBe("priority");
+
+    const studioTiered = await updateWorkspaceStudioConfig(identity.id, {
+      serviceTier: "ultrafast",
+    }, home);
+    expect(studioTiered.config?.serviceTier).toBe("ultrafast");
+    const studioStandard = await updateWorkspaceStudioConfig(identity.id, {
+      serviceTier: null,
+    }, home);
+    expect(studioStandard.config?.serviceTier).toBeUndefined();
+
+    await updateGlobalDefaults({ serviceTier: "priority" }, home);
+    expect((await readGlobalConfig(home)).defaults.serviceTier).toBe("priority");
+    await updateGlobalDefaults({ serviceTier: null }, home);
+    expect((await readGlobalConfig(home)).defaults.serviceTier).toBeUndefined();
+
     // Leading/trailing slash selectors are rejected consistently.
     for (const invalidSelector of ["/foo", "foo/", "/"]) {
       await expect(
@@ -454,7 +537,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
         updateWorkspaceShiori(identity.id, { kind: "setModel", model: invalidSelector }, home),
       ).rejects.toThrow("provider/model");
     }
-    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("google/gemini-2.5-pro");
+    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("openai-codex/gpt-6.1-sol");
   } finally {
     gate.resolve();
     await runtime.close();

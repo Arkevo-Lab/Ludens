@@ -46,8 +46,15 @@ import {
   type MachinesRegistryFile,
 } from "./machines";
 
+export const OMP_SERVICE_TIERS = ["priority", "ultrafast"] as const;
+export type OmpServiceTier = (typeof OMP_SERVICE_TIERS)[number];
+export function isOmpServiceTier(value: unknown): value is OmpServiceTier {
+  return typeof value === "string" && (OMP_SERVICE_TIERS as readonly string[]).includes(value);
+}
+
 export interface WorkspaceDefaults {
   model?: string;
+  serviceTier?: OmpServiceTier;
   seconds?: number;
   requests?: number;
   compactionThreshold?: number;
@@ -93,6 +100,9 @@ export function validateGlobalConfig(value: unknown): LudensConfig {
     } else if (key === "model") {
       if (typeof setting !== "string" || !setting.trim()) throw new Error("defaults.model must be non-empty");
       defaults.model = setting;
+    } else if (key === "serviceTier") {
+      if (!isOmpServiceTier(setting)) throw new Error("defaults.serviceTier must be priority or ultrafast");
+      defaults.serviceTier = setting;
     } else if (key === "connection") {
       const validated = validateConnectionConfig(setting, "defaults.connection");
       if (Object.keys(validated).length > 0) defaults.connection = validated;

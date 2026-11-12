@@ -9,6 +9,10 @@ export async function POST(request: Request) {
     if (b.action === "set_model") {
       const model = typeof b.model === "string" ? b.model.trim() : "";
       const slash = model.indexOf("/");
+      const serviceTier = b.serviceTier;
+      if (serviceTier !== undefined && serviceTier !== null && serviceTier !== "priority" && serviceTier !== "ultrafast") {
+        throw new Error("serviceTier 必须是 priority、ultrafast 或 null");
+      }
       if (!b.project || !b.workspace || !model || slash <= 0 || slash === model.length - 1) {
         throw new Error("必须提供 project、workspace 与有效的 provider/id 模型标识");
       }
@@ -16,6 +20,7 @@ export async function POST(request: Request) {
         await controlWorkspaceRuntime(b.project, b.workspace, {
           action: "set_model",
           model,
+          serviceTier,
           ...(typeof b.runId === "string"
             ? { runId: b.runId }
             : typeof b.run === "string"

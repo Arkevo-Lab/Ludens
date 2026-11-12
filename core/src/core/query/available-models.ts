@@ -5,6 +5,7 @@ import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-sta
 import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { repoRoot } from "./repo";
 import type { LiveStatus } from "./types";
+import type { OmpServiceTier } from "@ludens/protocol/ludens";
 
 export interface AvailableModelItem {
   fullId: string;
@@ -15,18 +16,21 @@ export interface AvailableModelItem {
   contextWindow: number;
   maxTokens: number;
   authenticated: boolean;
+  supportedServiceTiers: OmpServiceTier[];
 }
 
 export interface AvailableModelsCatalog {
   models: AvailableModelItem[];
   providers: { id: string; count: number; authenticated: boolean }[];
   currentModel?: string | null;
+  currentServiceTier?: OmpServiceTier | null;
 }
 
 interface AvailableModelsLookupOptions {
   workspace?: string;
   home?: string;
   currentModel?: string | null;
+  currentServiceTier?: OmpServiceTier | null;
 }
 
 /**
@@ -157,6 +161,7 @@ export async function availableModels(
         workspace,
         home,
         ...(live && "model" in live ? { currentModel: live.model ?? null } : {}),
+        ...(live && "serviceTier" in live ? { currentServiceTier: live.serviceTier ?? null } : {}),
       },
       signal,
     );

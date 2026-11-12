@@ -20,12 +20,14 @@ import {
   validateMachineSpec,
   BUILTIN_LOCAL_DESKTOP_MACHINE,
   validateConnectionConfig,
+  isOmpServiceTier,
   withWorkspaceRegistrationLock,
   type BasewareMachineSpec,
   type WorkspaceMachinesBinding,
   type MachineTransportConfig,
   type LudensConfig,
   type ModelConnectionConfig,
+  type OmpServiceTier,
   type WorkspaceDefaults,
   type WorkspaceRegistration,
 } from "@ludens/protocol/ludens";
@@ -49,6 +51,7 @@ export interface WorkspaceConfigSummary {
   port?: number;
   cuaCommand?: string;
   model: string;
+  serviceTier?: OmpServiceTier;
   seconds: number;
   requests: number;
   compactionThreshold?: number;
@@ -187,6 +190,7 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
       ...(typeof raw.port === "number" && Number.isInteger(raw.port) ? { port: raw.port } : {}),
       ...(typeof raw.cuaCommand === "string" && raw.cuaCommand.trim() ? { cuaCommand: raw.cuaCommand.trim() } : {}),
       model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "openai-codex/gpt-6.1-sol",
+      ...(isOmpServiceTier(raw.serviceTier) ? { serviceTier: raw.serviceTier } : {}),
       seconds: typeof raw.seconds === "number" && Number.isInteger(raw.seconds) && raw.seconds > 0 ? raw.seconds : 1800,
       requests: typeof raw.requests === "number" && Number.isInteger(raw.requests) && raw.requests > 0 ? raw.requests : 1000,
       ...(typeof raw.compactionThreshold === "number" && Number.isInteger(raw.compactionThreshold) && raw.compactionThreshold > 0
@@ -247,7 +251,7 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
     throw new Error("全局默认配置必须是对象");
   }
   const patch = input as Record<string, unknown>;
-  const allowed = ["model", "seconds", "requests", "compactionThreshold", "dashboard", "pet", "connection"];
+  const allowed = ["model", "serviceTier", "seconds", "requests", "compactionThreshold", "dashboard", "pet", "connection"];
   for (const key of Object.keys(patch)) {
     if (!allowed.includes(key)) throw new Error(`未知的全局默认配置字段：${key}`);
   }
@@ -257,6 +261,11 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
       if (patch.model === null || patch.model === "") delete defaults.model;
       else if (typeof patch.model === "string" && patch.model.trim()) defaults.model = patch.model.trim();
       else throw new Error("defaults.model 必须是非空字符串或 null");
+    }
+    if ("serviceTier" in patch) {
+      if (patch.serviceTier === null || patch.serviceTier === undefined || patch.serviceTier === "") delete defaults.serviceTier;
+      else if (isOmpServiceTier(patch.serviceTier)) defaults.serviceTier = patch.serviceTier;
+      else throw new Error("defaults.serviceTier 必须是 priority、ultrafast 或 null");
     }
     for (const key of ["seconds", "requests", "compactionThreshold"] as const) {
       if (key in patch) {
@@ -941,6 +950,7 @@ export async function updateWorkspaceStudioConfig(
   const patch = input as Record<string, unknown>;
   const allowed = [
     "model",
+    "serviceTier",
     "seconds",
     "requests",
     "compactionThreshold",
@@ -970,6 +980,11 @@ export async function updateWorkspaceStudioConfig(
         throw new Error("model 必须是 provider/model 格式的非空字符串");
       }
       next.model = nextModel;
+    }
+    if ("serviceTier" in patch) {
+      if (patch.serviceTier === null || patch.serviceTier === undefined || patch.serviceTier === "") delete next.serviceTier;
+      else if (isOmpServiceTier(patch.serviceTier)) next.serviceTier = patch.serviceTier;
+      else throw new Error("serviceTier 必须是 priority、ultrafast 或 null");
     }
     for (const key of ["seconds", "requests"] as const) {
       if (key in patch) {
@@ -1123,7 +1138,12 @@ export async function updateWorkspaceShiori(
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       }
-      const next = { ...raw, model: nextModel };
+      const next: Record<string, unknown> = { ...raw, model: nextModel };
+      if ("serviceTier" in body) {
+        if (body.serviceTier === null || body.serviceTier === undefined || body.serviceTier === "") delete next.serviceTier;
+        else if (isOmpServiceTier(body.serviceTier)) next.serviceTier = body.serviceTier;
+        else throw new Error("serviceTier 必须是 priority、ultrafast 或 null");
+      }
       const temporary = `${configPath}.${randomUUID()}.tmp`;
       try {
         await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });

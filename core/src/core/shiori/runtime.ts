@@ -12,6 +12,7 @@ import {
   type PoolEventStatus,
 } from "@ludens/protocol/event-pool";
 import type { DiagnosticsMode, EventTrace, RecordEvent } from "../storage/events.ts";
+import type { OmpServiceTier } from "@ludens/protocol/ludens";
 import type { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
 import type { WorkspaceController } from "../subsystems/controller.ts";
@@ -26,7 +27,8 @@ export interface AgentRunner {
   steer?(message: string): Promise<void>;
   queueState?(): { steering: number };
   model?(): string;
-  setModel?(model: string): Promise<string>;
+  serviceTier?(): OmpServiceTier | null;
+  setModel?(model: string, serviceTier?: OmpServiceTier | null): Promise<string>;
   abort(): Promise<void>;
   close(): Promise<void>;
 }
@@ -126,6 +128,7 @@ export class Runtime {
       reason: this.reason,
       agent: !!this._agent,
       model: this._agent?.model?.() ?? null,
+      serviceTier: this._agent?.serviceTier?.() ?? null,
       thinking: !!this.running,
       consolidating: this.consolidating,
       queue: this._agent?.queueState?.() ?? { steering: 0 },
@@ -301,10 +304,13 @@ export class Runtime {
     return { ...this.status(), consolidationId: epoch };
   }
 
-  /** Switch the active agent session model strictly while paused (manual mode). */
-  async setModel(model: string) {
+  /** Switch the active agent session model and serving tier strictly while paused (manual mode). */
+  async setModel(model: string, serviceTier?: OmpServiceTier | null) {
     const next = model.trim();
     if (!next) throw new Error("Model cannot be empty");
+    if (serviceTier !== undefined && serviceTier !== null && !["priority", "ultrafast"].includes(serviceTier)) {
+      throw new Error("Service tier must be priority, ultrafast, or null");
+    }
     if (this.mode !== "manual" || this.running || this.consolidating || this.calls.size > 0 || this.switchingModel) {
       throw new Error("Cannot switch model while Shiori is running; pause auto loop first");
     }
@@ -312,7 +318,7 @@ export class Runtime {
     if (!this._agent.setModel) throw new Error("Agent does not support model switching");
     this.switchingModel = true;
     try {
-      await this._agent.setModel(next);
+      await this._agent.setModel(next, serviceTier);
       return this.status();
     } finally {
       this.switchingModel = false;
