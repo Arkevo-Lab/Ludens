@@ -179,6 +179,7 @@ export interface LiveStatus {
   connected: boolean;
   reason: string;
   agent: boolean;
+  model?: string | null;
   thinking: boolean;
   maxSeconds?: number | null;
   remainingSeconds?: number | null;

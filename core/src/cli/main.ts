@@ -128,7 +128,10 @@ async function main() {
     log.record("run_start", { workspace, workspaceId: state.id, diagnostics });
     devices = await connectBaseware({ socket: basewareSocket, seconds, runDir, record: log.record });
     await writeCapabilityDocument(devices.catalog, join(workspace, "baseware.json"));
-    const model = values.model ?? "openai-codex/gpt-6.1-sol";
+    const configuredModel = values.model ?? await Bun.file(join(workspace, "ludens.json")).json()
+      .then((cfg: Record<string, unknown>) => typeof cfg?.model === "string" && cfg.model.trim() ? cfg.model.trim() : undefined)
+      .catch(() => undefined);
+    const model = configuredModel ?? "openai-codex/gpt-6.1-sol";
     if (!values["device-only"]) {
       // Device-only mode can run without importing OMP or opening credential storage.
       const postmortem = await import("@oh-my-pi/pi-utils/postmortem");

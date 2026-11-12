@@ -88,6 +88,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 - 保留 OMP 原生系统提示词（若工作区存在 `AGENTS.md`，通过原生 `contextFiles` 注入）。
 - 显式启用 OMP 原生工具 `read`、`write`、`edit`、`bash`、`wait`，并注册自定义工具 `observe`。
 - 仅覆盖宿主契约必需项：关闭 `retry.modelFallback`（保证所选视觉模型粘性）、关闭 `title.refreshOnReplan` 与 `cacheWarming`（确保每次模型请求严格归属控制周期）、将 `PROVIDER_IMAGE_BUDGETS` 设为 `Infinity`（在压缩前保留历史图像，避免中途丢图破坏 Prompt Cache 前缀），以及应用可选的 `compactionThreshold`。详见 [core/src/core/agent-omp/session.ts](../../../core/src/core/agent-omp/session.ts)。
+- 仅枚举支持图像的 OMP 模型并严格限制在暂停态切换：`availableModels`（见 [dashboard-protocol.ts](../../../core/src/core/query/dashboard-protocol.ts)）读取 OMP `ModelRegistry` 与 `discoverAuthStorage`（按工作区解析或回退至全局 `defaults`），仅返回具备图像输入能力（`input.includes("image")`）的模型并将已配置凭据的 Provider 排在前面。`Runtime.setModel`（通过 `ludens model [<provider/id>]` 与 [runtime-control.ts](../../../core/src/core/query/runtime-control.ts) 中的 Dashboard `set_model` 暴露）仅在 `mode === "manual"` 且无进行中轮次、记忆整理或在途调用时放行，显式禁止 `auto` 运行期间中途热切换模型；校验通过后以 `{ ...found, imageCountBudget: Infinity }` 更新 OMP 会话并写入 `shiori` `session` 事件，使 `Runtime.status().model` 与实时运行／活动投影即时同步（Dashboard `set_model` 在宿主在线处于 `manual` 态或宿主离线时均会原子写回 `ludens.json` 的 `model`）。
 
 在 `auto` 控制周期内，外层循环按以下步骤运转：
 

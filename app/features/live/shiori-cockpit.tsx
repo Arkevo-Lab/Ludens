@@ -9,11 +9,11 @@ import {
   ChevronRight,
   Clock,
   CornerUpLeft,
-  Eye,
-  EyeOff,
+  Cpu,
   FileText,
   Inbox,
   Infinity as InfinityIcon,
+  Lock,
   PanelRight,
   Play,
   Plus,
@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
 import { PixelMark } from "@/components/ui/pixel-mark";
+import { ModelPickerDialog, shortModelLabel } from "@/components/model-picker-dialog";
 import { useTranslations } from "@/lib/locale";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
@@ -33,7 +34,6 @@ import { readArchiveJson } from "@/lib/archive-client";
 import { runWindowSummary } from "@/lib/run-identity";
 import type { Call, Observation, RunData, RunInfo } from "@/lib/types";
 import { requestActivity } from "@ludens/protocol/activity";
-import "@/features/live/activity-feed.css";
 
 // The run budget is drawn as this many pixel blocks.
 const BUDGET_BLOCKS = 24;
@@ -45,8 +45,43 @@ export type RuntimeControlAction =
   | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
+  | { action: "set_model"; model: string; runId?: string; expectedEpoch?: string | null }
   | { action: "perception_inject"; enabled: boolean; runId?: string }
   | { action: "perception_reload"; runId?: string };
+
+export function canSwitchShioriModel(state: {
+  isLiveRun: boolean;
+  hostOnline: boolean;
+  mode: string;
+  consolidating?: boolean;
+  thinking?: boolean;
+}): boolean {
+  if (!state.isLiveRun) return false;
+  if (state.mode === "auto" || state.mode === "acquiring") return false;
+  if (state.consolidating) return false;
+  if (state.hostOnline && (state.thinking || state.mode !== "manual")) return false;
+  return true;
+}
+
+export function resolveShioriActiveModel(options: {
+  localModelOverride?: string | null;
+  liveModel?: string | null;
+  controlModel?: string | null;
+  manifestModel?: string | null;
+}): string | null {
+  const candidates = [
+    options.localModelOverride,
+    options.liveModel,
+    options.controlModel,
+    options.manifestModel,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === "string" && candidate.trim()) {
+      return candidate.trim();
+    }
+  }
+  return null;
+}
 
 export type EventPoolClientCommand =
   | { action: "send"; text: string; title?: string }
@@ -109,6 +144,27 @@ async function sendRuntimeControl(
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(typeof payload?.error === "string" ? payload.error : `Control request failed (${response.status})`);
+  }
+  return payload;
+}
+
+async function updateWorkspaceShioriModel(project: string, model: string) {
+  const response = await fetch("/api/workspaces", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      action: "workspaceShiori",
+      id: project,
+      shiori: { model },
+    }),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(
+      typeof payload?.error === "string"
+        ? payload.error
+        : `Workspace model update failed (${response.status})`,
+    );
   }
   return payload;
 }
@@ -842,11 +898,11 @@ export function ShioriComposer({
   isLiveRun,
   hostStatusOverride,
   onHostStatusChange,
+  activeModelOverride,
+  onModelChange,
   liveRemainingSeconds,
   onApplyLiveTimer,
   onExtendLiveTimer,
-  perceptionInjectOverride,
-  onPerceptionChange,
   poolSnapshot,
   replyTarget,
   replyAutoResumeDefault,
@@ -864,11 +920,11 @@ export function ShioriComposer({
   isLiveRun: boolean;
   hostStatusOverride?: Record<string, unknown> | null;
   onHostStatusChange?: (status: Record<string, unknown>) => void;
+  activeModelOverride?: string | null;
+  onModelChange?: (model: string) => void;
   liveRemainingSeconds?: number | null;
   onApplyLiveTimer?: (seconds: number | null) => Promise<void>;
   onExtendLiveTimer?: (deltaSeconds: number) => Promise<void>;
-  perceptionInjectOverride?: boolean | null;
-  onPerceptionChange?: (enabled: boolean) => void;
   poolSnapshot?: EventPoolSnapshot | null;
   replyTarget?: PoolEvent | null;
   replyAutoResumeDefault?: boolean;
@@ -887,6 +943,8 @@ export function ShioriComposer({
   const [selectedTab, setSelectedTab] = useState<ComposerMode | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
+  const [modelLockNotice, setModelLockNotice] = useState<string | null>(null);
   const [resumeOnReply, setResumeOnReply] = useState(false);
 
   useEffect(() => {
@@ -915,7 +973,11 @@ export function ShioriComposer({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(null);
-  const [localPerceptionInject, setLocalPerceptionInject] = useState<boolean | null>(null);
+  const [localModelOverride, setLocalModelOverride] = useState<{
+    project: string;
+    baseServerModel: string | null;
+    model: string;
+  } | null>(null);
   const [localHostOverride, setLocalHostOverride] = useState<{
     project: string;
     run: string;
@@ -924,8 +986,10 @@ export function ShioriComposer({
   } | null>(null);
 
   useEffect(() => {
-    setLocalPerceptionInject(null);
+    setLocalModelOverride(null);
     setLocalHostOverride(null);
+    setModelPickerOpen(false);
+    setModelLockNotice(null);
     setError(null);
     setLastSent(null);
     try {
@@ -942,6 +1006,12 @@ export function ShioriComposer({
       // Ignore storage errors
     }
   }, [project]);
+
+  useEffect(() => {
+    if (!modelLockNotice) return;
+    const timer = setTimeout(() => setModelLockNotice(null), 4000);
+    return () => clearTimeout(timer);
+  }, [modelLockNotice]);
 
   const updateDurationSeconds = (next: number | null) => {
     setDurationSeconds(next);
@@ -968,19 +1038,49 @@ export function ShioriComposer({
 
   const effectiveHost = (hostStatusOverride ?? activeLocalStatus ?? data.live) as (NonNullable<RunData["live"]> & {
     consolidating?: boolean;
-    context?: { perceptionInjection?: boolean };
+    model?: string | null;
+    hostOffline?: boolean;
   }) | null;
-  const control = data.lastControl;
+  const control = data.lastControl as (RunData["lastControl"] & { model?: string | null }) | undefined;
   const runtimeMode =
     effectiveHost?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
   const consolidating = Boolean(effectiveHost?.consolidating ?? control?.consolidating);
-  const serverPerceptionInject =
-    effectiveHost?.context?.perceptionInjection ?? control?.context?.perceptionInjection ?? true;
-  const perceptionInject =
-    perceptionInjectOverride ?? localPerceptionInject ?? serverPerceptionInject;
+  const thinking = Boolean(effectiveHost?.thinking ?? control?.thinking);
   const isAuto = runtimeMode === "auto";
-  const hostOnline = Boolean(isLiveRun && (effectiveHost || data.controlAllowed));
+  const isSyntheticOffline = Boolean(effectiveHost?.hostOffline);
+  const hostOnline = Boolean(isLiveRun && ((!isSyntheticOffline && effectiveHost) || data.controlAllowed));
   const canResumeFromReply = Boolean(hostOnline && !isAuto && !consolidating);
+  const canSwitchModel = canSwitchShioriModel({
+    isLiveRun,
+    hostOnline,
+    mode: runtimeMode,
+    consolidating,
+    thinking,
+  });
+
+  useEffect(() => {
+    if (canSwitchModel && modelLockNotice) {
+      setModelLockNotice(null);
+    }
+  }, [canSwitchModel, modelLockNotice]);
+
+  const serverModel = resolveShioriActiveModel({
+    liveModel: typeof effectiveHost?.model === "string" ? effectiveHost.model : null,
+    controlModel: typeof control?.model === "string" ? control.model : null,
+    manifestModel: data.manifest.model ?? null,
+  });
+  const validLocalModel =
+    localModelOverride &&
+    localModelOverride.project === project &&
+    (serverModel === localModelOverride.baseServerModel || serverModel === localModelOverride.model)
+      ? localModelOverride.model
+      : null;
+  const activeModel = resolveShioriActiveModel({
+    localModelOverride: activeModelOverride ?? validLocalModel,
+    liveModel: typeof effectiveHost?.model === "string" ? effectiveHost.model : null,
+    controlModel: typeof control?.model === "string" ? control.model : null,
+    manifestModel: data.manifest.model ?? null,
+  });
 
   useEffect(() => {
     if (!replyTarget) {
@@ -1039,10 +1139,10 @@ export function ShioriComposer({
     if (!status) return;
     setLocalHostOverride({ project, run: data.run, baseUpdatedAt: data.updatedAt, status });
     onHostStatusChange?.(status);
-    const contextRec = asRecord(status.context);
-    if (typeof contextRec?.perceptionInjection === "boolean") {
-      setLocalPerceptionInject(contextRec.perceptionInjection);
-      onPerceptionChange?.(contextRec.perceptionInjection);
+    if (typeof status.model === "string" && status.model.trim()) {
+      const nextModel = status.model.trim();
+      setLocalModelOverride({ project, baseServerModel: serverModel, model: nextModel });
+      onModelChange?.(nextModel);
     }
   };
 
@@ -1050,34 +1150,52 @@ export function ShioriComposer({
     const record = asRecord(res);
     const status = asRecord(record?.status) ?? (typeof record?.mode === "string" ? record : null);
     applyHostStatusObject(status);
+    return status;
   };
 
-  const togglePerception = async () => {
-    if (submitting || !project || !workspace) return;
-    const next = !perceptionInject;
+  const handleSelectModel = async (nextModel: string) => {
+    const trimmed = nextModel.trim();
+    if (!trimmed || !project) return;
+    if (!canSwitchModel) {
+      setModelLockNotice(t("modelSwitchLockedHint"));
+      throw new Error(t("modelSwitchLockedHint"));
+    }
     setError(null);
-    setLocalPerceptionInject(next);
-    onPerceptionChange?.(next);
-    try {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(`ludens:perception-inject:${project}`, next ? "1" : "0");
+    setModelLockNotice(null);
+
+    let persistedOffline = !hostOnline;
+    if (workspace) {
+      try {
+        const res = await sendRuntimeControl(project, workspace, {
+          action: "set_model",
+          model: trimmed,
+          runId: data.run,
+          expectedEpoch: effectiveHost?.epoch ?? null,
+        });
+        const status = applyReturnedStatus(res);
+        persistedOffline = Boolean(status?.hostOffline) || !hostOnline;
+      } catch (cause) {
+        if (isHostOfflineError(cause)) {
+          await updateWorkspaceShioriModel(project, trimmed);
+          persistedOffline = true;
+        } else {
+          throw cause;
+        }
       }
-    } catch {
-      // Ignore storage errors
+    } else {
+      await updateWorkspaceShioriModel(project, trimmed);
+      persistedOffline = true;
     }
-    try {
-      const res = await sendRuntimeControl(project, workspace, {
-        action: "perception_inject",
-        enabled: next,
-        runId: data.run,
-      });
-      applyReturnedStatus(res);
-      onUpdated();
-    } catch (cause) {
-      if (!isHostOfflineError(cause)) {
-        setError(cause instanceof Error ? cause.message : String(cause));
-      }
-    }
+
+    setLocalModelOverride({ project, baseServerModel: serverModel, model: trimmed });
+    onModelChange?.(trimmed);
+    setLastSent(
+      (persistedOffline ? t("modelSwitchedOfflineFeedback") : t("modelSwitchedFeedback")).replace(
+        "{model}",
+        trimmed,
+      ),
+    );
+    onUpdated();
   };
 
   const dismissOutboundEvent = async (eventId: string) => {
@@ -1231,7 +1349,7 @@ export function ShioriComposer({
           ? `${durationSeconds / 60}m`
           : `${durationSeconds}s`;
 
-  const modelShort = (data.manifest.model ?? t("deviceOnly")).replace(/^[^/]+\//, "");
+  const modelShort = shortModelLabel(activeModel, t("deviceOnly"));
 
   if (!isLiveRun) {
     return (
@@ -1569,28 +1687,41 @@ export function ShioriComposer({
                 <ChevronDown className="size-3 opacity-70" aria-hidden="true" />
               </button>
             )}
-
-            <button
-              type="button"
-              className="codex-subtle-pill"
-              aria-pressed={perceptionInject}
-              data-active={perceptionInject || undefined}
-              title={t("perceptionInjectHint")}
-              onClick={() => void togglePerception()}
-            >
-              {perceptionInject ? (
-                <Eye className="size-3.5" aria-hidden="true" />
-              ) : (
-                <EyeOff className="size-3.5" aria-hidden="true" />
-              )}
-              <span>{perceptionInject ? t("injectOn") : t("injectOff")}</span>
-            </button>
           </div>
 
           <div className="codex-pill-right">
-            <span className="codex-model-label" title={data.manifest.model ?? undefined}>
-              {modelShort}
-            </span>
+            <button
+              type="button"
+              className="codex-model-pill"
+              data-model-picker-trigger
+              data-locked={!canSwitchModel ? "true" : undefined}
+              aria-disabled={!canSwitchModel || submitting}
+              title={
+                canSwitchModel
+                  ? `${activeModel ?? t("deviceOnly")} · ${t("modelSwitchHint")}`
+                  : t("modelSwitchLockedHint")
+              }
+              onClick={() => {
+                if (submitting) return;
+                setMenuOpen(false);
+                setDurationMenuOpen(false);
+                if (!canSwitchModel) {
+                  setError(null);
+                  setModelLockNotice(t("modelSwitchLockedHint"));
+                  return;
+                }
+                setModelLockNotice(null);
+                setModelPickerOpen(true);
+              }}
+            >
+              <Cpu className="size-3.5 shrink-0 opacity-80" aria-hidden="true" />
+              <span className="codex-model-pill-text">{modelShort}</span>
+              {canSwitchModel ? (
+                <ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden="true" />
+              ) : (
+                <Lock className="size-3 shrink-0 opacity-65" aria-hidden="true" />
+              )}
+            </button>
 
             {isAuto && hostOnline && onApplyLiveTimer && (
               <LiveStopTimerControl
@@ -1675,11 +1806,28 @@ export function ShioriComposer({
           {error}
         </p>
       )}
-      {!error && lastSent && (
+      {!error && modelLockNotice && (
+        <p className="codex-composer-feedback codex-composer-feedback-warn" role="status">
+          <Lock className="inline size-3 -translate-y-[1px] mr-1" aria-hidden="true" />
+          {modelLockNotice}
+        </p>
+      )}
+      {!error && !modelLockNotice && lastSent && (
         <p className="codex-composer-feedback" role="status">
           ✓ {t("sentFeedback")}: <code>{lastSent.length > 72 ? `${lastSent.slice(0, 72)}…` : lastSent}</code>
         </p>
       )}
+
+      <ModelPickerDialog
+        open={modelPickerOpen}
+        onOpenChange={setModelPickerOpen}
+        value={activeModel}
+        projectId={project}
+        disabled={!canSwitchModel}
+        disabledReason={!canSwitchModel ? t("modelSwitchLockedHint") : undefined}
+        allowUnauthenticated={false}
+        onSelect={handleSelectModel}
+      />
     </div>
   );
 }
@@ -1760,7 +1908,11 @@ export function ShioriWorkbench({
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [dockOpen, setDockOpen] = useState(true);
   const [atBottom, setAtBottom] = useState(true);
-  const [perceptionOverride, setPerceptionOverride] = useState<boolean | null>(null);
+  const [modelOverride, setModelOverride] = useState<{
+    project: string;
+    baseServerModel: string | null;
+    model: string;
+  } | null>(null);
   const [hostStatusOverride, setHostStatusOverride] = useState<{
     project: string;
     run: string;
@@ -1801,20 +1953,11 @@ export function ShioriWorkbench({
     setOlderRunError(null);
     setHighlightedSegmentId(null);
     setInspectedTurn(null);
-    setPerceptionOverride(null);
+    setModelOverride(null);
     setHostStatusOverride(null);
     setPoolSnapshot(null);
     setReplyTarget(null);
     setReplyAutoResumeDefault(undefined);
-    try {
-      if (typeof window !== "undefined" && project) {
-        const stored = window.localStorage.getItem(`ludens:perception-inject:${project}`);
-        if (stored === "0") setPerceptionOverride(false);
-        else if (stored === "1") setPerceptionOverride(true);
-      }
-    } catch {
-      // Ignore storage errors
-    }
   }, [project]);
 
   useEffect(() => {
@@ -1872,22 +2015,35 @@ export function ShioriWorkbench({
     maxSeconds?: number | null;
     remainingSeconds?: number | null;
     consolidating?: boolean;
-    context?: { perceptionInjection?: boolean };
+    model?: string | null;
+    hostOffline?: boolean;
     queue?: { steering?: number };
     eventPool?: { pendingInbound?: number; pendingOutbound?: number; latestSeq?: number };
   }) | null;
-  const control = data.lastControl;
-  const hostOnline = Boolean(isLiveRun && (live || data.controlAllowed));
+  const control = data.lastControl as (RunData["lastControl"] & { model?: string | null }) | undefined;
+  const isSyntheticOffline = Boolean(live?.hostOffline);
+  const hostOnline = Boolean(isLiveRun && ((!isSyntheticOffline && live) || data.controlAllowed));
   const mode = live?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
   const consolidating = Boolean(live?.consolidating ?? control?.consolidating);
   const thinking = Boolean(live?.thinking ?? control?.thinking);
-  const serverPerceptionInject =
-    live?.context?.perceptionInjection ?? control?.context?.perceptionInjection ?? true;
-  const perceptionInject =
-    live?.connected && typeof live?.context?.perceptionInjection === "boolean" && !activeHostOverride
-      ? live.context.perceptionInjection
-      : (perceptionOverride ?? serverPerceptionInject);
   const isAuto = mode === "auto";
+  const serverModel = resolveShioriActiveModel({
+    liveModel: typeof live?.model === "string" ? live.model : null,
+    controlModel: typeof control?.model === "string" ? control.model : null,
+    manifestModel: data.manifest.model ?? null,
+  });
+  const activeModelOverride =
+    modelOverride &&
+    modelOverride.project === project &&
+    (serverModel === modelOverride.baseServerModel || serverModel === modelOverride.model)
+      ? modelOverride.model
+      : null;
+  const activeModel = resolveShioriActiveModel({
+    localModelOverride: activeModelOverride,
+    liveModel: typeof live?.model === "string" ? live.model : null,
+    controlModel: typeof control?.model === "string" ? control.model : null,
+    manifestModel: data.manifest.model ?? null,
+  });
 
   useEffect(() => {
     if (prevRunRef.current !== data.run) {
@@ -2596,7 +2752,7 @@ export function ShioriWorkbench({
       {/* ── LEFT / CENTER MAIN PANE: CODEX CHAT STREAM + FLOATING PILL COMPOSER ── */}
       <section className="codex-chat-pane" aria-label={t("ariaLabel")}>
         {/* 1-Line Clean Thread Header (just like ChatGPT/Codex desktop window bar) */}
-        <header className="codex-thread-header">
+        <header className="codex-thread-header codex-cockpit-header">
           <div className="codex-thread-title">
             <FileText className="size-4 text-muted-foreground shrink-0" aria-hidden="true" />
             <strong>Shiori · {workspaceTitle || project}</strong>
@@ -2610,7 +2766,7 @@ export function ShioriWorkbench({
               {stateTitle}
             </span>
             {phaseLabel && (
-              <span className="codex-phase-inline">
+              <span className="codex-phase-inline codex-live-phase">
                 {phaseLabel}
                 {displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}
               </span>
@@ -2646,7 +2802,7 @@ export function ShioriWorkbench({
           <div className="codex-thread-actions">
             <button
               type="button"
-              className="codex-header-btn"
+              className="codex-header-btn codex-expand-all-btn"
               data-active={showAllSteps || undefined}
               onClick={() => setShowAllSteps(prev => !prev)}
             >
@@ -2971,11 +3127,17 @@ export function ShioriWorkbench({
               status,
             })
           }
+          activeModelOverride={activeModelOverride}
+          onModelChange={nextModel =>
+            setModelOverride({
+              project,
+              baseServerModel: serverModel,
+              model: nextModel,
+            })
+          }
           liveRemainingSeconds={liveRemainingSeconds}
           onApplyLiveTimer={applyLiveStopTimer}
           onExtendLiveTimer={extendLiveStopTimer}
-          perceptionInjectOverride={perceptionInject}
-          onPerceptionChange={setPerceptionOverride}
           poolSnapshot={poolSnapshot}
           replyTarget={replyTarget}
           replyAutoResumeDefault={replyAutoResumeDefault}
@@ -3054,7 +3216,7 @@ export function ShioriWorkbench({
             {/* 2. Session Runtime & Live Stop-Timer + OMP Telemetry */}
             {summary && (
               <div className="codex-dock-section">
-                <div className="codex-runtime-header">
+                <div className="codex-runtime-header shiori-budget-header">
                   <h3 className="codex-dock-heading">{t("telemetryCardTitle")}</h3>
                   <div className="codex-runtime-header-right">
                     {isAuto && hostOnline ? (
@@ -3073,7 +3235,7 @@ export function ShioriWorkbench({
                         />
                       </>
                     ) : (
-                      <span className="font-mono text-[11px] text-muted-foreground">
+                      <span className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">
                         {formatDurationCompact(elapsedSeconds)} · {stateTitle}
                       </span>
                     )}
@@ -3096,30 +3258,30 @@ export function ShioriWorkbench({
                 )}
 
                 <div className="codex-stat-cards">
-                  <div className="codex-stat-card">
+                  <div className="codex-stat-card shiori-stat-card">
                     <div className="codex-stat-card-top">
-                      <span>{t("tileTurns")}</span>
+                      <span className="shiori-stat-label">{t("tileTurns")}</span>
                       <strong>{summary.completed}</strong>
                     </div>
                     <small>{t("tileTotalCalls").replace("{total}", String(data.paging.totalCalls))}</small>
                   </div>
-                  <div className="codex-stat-card">
+                  <div className="codex-stat-card shiori-stat-card">
                     <div className="codex-stat-card-top">
-                      <span>{t("tileActions")}</span>
+                      <span className="shiori-stat-label">{t("tileActions")}</span>
                       <strong>{summary.actions}</strong>
                     </div>
                     <small>{t("tileObserves").replace("{count}", String(summary.explicitObserves))}</small>
                   </div>
-                  <div className="codex-stat-card">
+                  <div className="codex-stat-card shiori-stat-card">
                     <div className="codex-stat-card-top">
-                      <span>{t("tileLatency")}</span>
+                      <span className="shiori-stat-label">{t("tileLatency")}</span>
                       <strong>{summary.medianMs != null ? `${(summary.medianMs / 1000).toFixed(1)}s` : "—"}</strong>
                     </div>
                     <small>P95 {summary.p95Ms != null ? `${(summary.p95Ms / 1000).toFixed(1)}s` : "—"}</small>
                   </div>
-                  <div className="codex-stat-card">
+                  <div className="codex-stat-card shiori-stat-card">
                     <div className="codex-stat-card-top">
-                      <span>{t("tileCache")}</span>
+                      <span className="shiori-stat-label">{t("tileCache")}</span>
                       <strong>{summary.cacheHit != null ? `${Math.round(summary.cacheHit * 100)}%` : "—"}</strong>
                     </div>
                     <small>
@@ -3137,7 +3299,7 @@ export function ShioriWorkbench({
                     <span>{t("provenanceTitle")}</span>
                     <span className="font-mono text-[11px] text-muted-foreground">
                       {data.manifest.shiori?.implementation ?? "omp"} ·{" "}
-                      {(data.manifest.model ?? t("deviceOnly")).replace(/^[^/]+\//, "")}
+                      {shortModelLabel(activeModel, t("deviceOnly"))}
                     </span>
                   </summary>
                   <dl className="codex-provenance-list">
@@ -3150,7 +3312,7 @@ export function ShioriWorkbench({
                     </div>
                     <div className="codex-provenance-row">
                       <dt>{t("provModel")}</dt>
-                      <dd>{data.manifest.model ?? t("deviceOnly")}</dd>
+                      <dd data-provenance-model>{activeModel ?? t("deviceOnly")}</dd>
                     </div>
                     <div className="codex-provenance-row">
                       <dt>{t("provCompaction")}</dt>

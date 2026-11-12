@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./pixel-motion.css";
+import "@/features/live/activity-feed.css";
 import "@/features/live/observation-panel.css";
 import "@/features/live/observation-media.css";
 import { LocaleProvider } from "@/lib/locale";

@@ -1,5 +1,6 @@
 import type { EventPoolSummary } from "@ludens/protocol/event-pool";
 import { globalHome, workspaceForProject } from "./data";
+import { updateWorkspaceShiori } from "./workspaces";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { send } from "../../daemon/transport.ts";
 
@@ -10,6 +11,7 @@ export type RuntimeControlCommand =
   | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
+  | { action: "set_model"; model: string; runId?: string; expectedEpoch?: string | null }
   | { action: "perception_inject"; enabled: boolean }
   | { action: "perception_reload" };
 
@@ -18,6 +20,7 @@ export interface HostControlStatus {
   runId: string;
   epoch: string | null;
   mode: string;
+  model?: string | null;
   queue: { steering: number };
   eventPool?: EventPoolSummary;
   [key: string]: unknown;
@@ -82,6 +85,37 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
         runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "consolidate":
       return await scoped({ kind: "consolidate", argv: command.seconds ? ["--seconds", String(command.seconds)] : [], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
+    case "set_model": {
+      const nextModel = typeof command.model === "string" ? command.model.trim() : "";
+      const slash = nextModel.indexOf("/");
+      if (slash <= 0 || slash === nextModel.length - 1) {
+        throw new Error("model 必须是 provider/model 格式的非空字符串");
+      }
+      try {
+        const result = await scoped({
+          kind: "model",
+          argv: [nextModel],
+          runId: command.runId,
+          expectedEpoch: command.expectedEpoch ?? undefined,
+        });
+        await updateWorkspaceShiori(project, { model: nextModel }, home);
+        return result;
+      } catch (error) {
+        if ((error as { code?: string } | null)?.code === "HOST_OFFLINE") {
+          await updateWorkspaceShiori(project, { model: nextModel }, home);
+          return {
+            runId: "",
+            epoch: null,
+            mode: "manual",
+            connected: false,
+            hostOffline: true,
+            model: nextModel,
+            queue: { steering: 0 },
+          };
+        }
+        throw error;
+      }
+    }
     case "perception_inject": {
       await rpc({ kind: "perception", argv: ["inject", command.enabled ? "on" : "off"] });
       return await status();

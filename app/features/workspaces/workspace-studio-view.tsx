@@ -39,6 +39,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ModelPickerDialog } from "@/components/model-picker-dialog";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
@@ -384,7 +385,7 @@ export function WorkspaceStudioView({
   );
 }
 
-function ModelAndBudgetPanel({
+export function ModelAndBudgetPanel({
   studio,
   isZh,
   onSaved,
@@ -432,6 +433,7 @@ function ModelAndBudgetPanel({
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState(false);
   const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
+  const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
   useEffect(() => {
     const cfg = studio.config;
@@ -549,18 +551,42 @@ function ModelAndBudgetPanel({
         <CardContent className="space-y-5">
           <div className="space-y-2.5">
             <Label htmlFor={modelInputId}>{t("modelSection.modelLabel")}</Label>
-            <Input
-              id={modelInputId}
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                id={modelInputId}
+                value={model}
+                onChange={event => {
+                  setModel(event.target.value);
+                  setSavedNotice(false);
+                }}
+                placeholder="openai-codex/gpt-6.1-sol"
+                className="font-mono text-sm sm:flex-1"
+                spellCheck={false}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                disabled={saving}
+                data-browse-models="workspace-studio"
+                onClick={() => setModelPickerOpen(true)}
+              >
+                <Cpu className="size-3.5" aria-hidden="true" />
+                {t("modelSection.browseModels")}
+              </Button>
+            </div>
+            <p className="text-xs text-muted-foreground">{t("modelSection.modelHint")}</p>
+            <ModelPickerDialog
+              open={modelPickerOpen}
+              onOpenChange={setModelPickerOpen}
               value={model}
-              onChange={event => {
-                setModel(event.target.value);
+              projectId={studio.id}
+              allowUnauthenticated={true}
+              onSelect={nextModel => {
+                setModel(nextModel);
                 setSavedNotice(false);
               }}
-              placeholder="openai-codex/gpt-6.1-sol"
-              className="font-mono text-sm"
-              spellCheck={false}
             />
-            <p className="text-xs text-muted-foreground">{t("modelSection.modelHint")}</p>
             <div className="flex flex-wrap gap-2 pt-1">
               {MODEL_PRESETS.map(preset => {
                 const active = model.trim() === preset.id;

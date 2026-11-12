@@ -2,6 +2,7 @@ import { parentPort } from "node:worker_threads";
 import { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } from "./data";
 import { diagnosticEvents } from "./diagnostic-events";
 import { getActivity } from "./activity";
+import { availableModels } from "./available-models";
 import { getReplay } from "./replay";
 import { controlWorkspaceRuntime } from "./runtime-control";
 import { mutateWorkspaceEventPool, readWorkspaceEventPool } from "./event-pool";
@@ -36,6 +37,7 @@ import {
 } from "./workspaces";
 const port = parentPort!;
 const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], signal: AbortSignal) => unknown } = {
+  availableModels: ([workspaceId], signal) => availableModels(workspaceId, undefined, signal),
   workspaceSettings: () => workspaceSettings(),
   updateWorkspaceRoot: ([path]) => updateWorkspaceRoot(path),
   updateGlobalConnection: ([connection]) => updateGlobalConnection(connection),

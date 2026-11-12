@@ -8,7 +8,7 @@
 
 | 阶段 | 专题文档 | 解决什么问题 | 核心命令 / 入口 |
 | --- | --- | --- | --- |
-| **1. 安装与启停** | [**安装与工作区启停**](quickstart.md) | 安装组件、设置全局默认目录，在设备就绪后创建/登记/导入工作区，以及管理运行生命周期 | `ludens config` · `ludens init --name` · `ludens workspace` · `ludens up` · `ludens auto on` · `ludens down` |
+| **1. 安装与启停** | [**安装与工作区启停**](quickstart.md) | 安装组件、设置全局默认目录，在设备就绪后创建/登记/导入工作区，以及管理运行生命周期 | `ludens config` · `ludens init --name` · `ludens workspace` · `ludens up` · `ludens model` · `ludens auto on` · `ludens down` |
 | **2. 设备准备** | [**设备与驱动准备**](devices.md) | 配置内置 Cua 桌面驱动，或发现与接入外部模拟器驱动包 | `--driver-package` · `baseware driver discover` · `cua-driver` |
 | **3. 能力与留档** | [**工作区与能力编程**](workspace.md) | 理解工作区文件布局，声明 `@capability` 与 `@record`，调用设备与本地 Python 能力 | `ludens controller` · `ludens_tools.Client` · `.ludens/timeline/` |
 | **4. 感知与动作** | [**常驻感知与动作状态机**](perception-and-action.md) | 编写 30Hz 常驻 `perception.py` 状态机，查询历史时空轴并管理自动注入与录像参数 | `ludens perception reload` · `ludens observe` |
