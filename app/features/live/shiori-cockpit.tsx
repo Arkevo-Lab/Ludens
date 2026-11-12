@@ -2518,10 +2518,11 @@ export function ShioriWorkbench({
             runs.find(r => r.id === first.runId)?.startedAt,
           );
     }
+    // `blocks[0]` can be an older block re-delivered by a late live update; the history page floor is authoritative.
     return feed.hasMore
-      ? minFinite(feed.blocks[0]?.at)
+      ? minFinite(feed.historyFloorAt ?? feed.blocks[0]?.at)
       : minFinite(feed.blocks[0]?.at, data.cycles[0]?.startedAt, runs.find(r => r.id === data.run)?.startedAt);
-  }, [hasMoreUpwardHistory, loadedOlderRuns, runs, feed.hasMore, feed.blocks, data.cycles, data.run]);
+  }, [hasMoreUpwardHistory, loadedOlderRuns, runs, feed.hasMore, feed.historyFloorAt, feed.blocks, data.cycles, data.run]);
 
   const computedSegments = useMemo(() => {
     const allSegments: StreamSegment[] = [];

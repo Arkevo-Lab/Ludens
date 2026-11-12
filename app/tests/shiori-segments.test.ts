@@ -304,6 +304,7 @@ function sampleWorkbenchFeed(historical = true): ActivityFeedData {
     selected: undefined,
     selectionReady: true,
     before: null,
+    historyFloorAt: null,
     hasMore: false,
     total: 0,
     historical,
