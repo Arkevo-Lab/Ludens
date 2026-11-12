@@ -1,5 +1,5 @@
 import type { VideoFrameReference } from "@ludens/protocol/timeline-media";
-import type { OmpServiceTier } from "@ludens/protocol/ludens";
+import type { OmpEffort, OmpServiceTier } from "@ludens/protocol/ludens";
 
 export interface Event {
   /** Present on canonical device files; mirrored historical Ludens rows keep their local sequence. */
@@ -182,6 +182,7 @@ export interface LiveStatus {
   agent: boolean;
   model?: string | null;
   serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
   thinking: boolean;
   maxSeconds?: number | null;
   remainingSeconds?: number | null;

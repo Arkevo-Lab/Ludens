@@ -9,11 +9,15 @@ import en from "../messages/en.json";
 import zh from "../messages/zh.json";
 import { LocaleProvider } from "../lib/locale";
 import {
+  ModelEffortBadge,
   ModelPickerDialog,
+  ServiceTierBadge,
   buildProviderTabs,
+  effortForModel,
   filterAvailableModels,
   formatContextWindow,
   isModelSelectable,
+  normalizeSelectedEffort,
   serviceTierForModel,
   shortModelLabel,
   stepHighlightedIndex,
@@ -47,6 +51,8 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     maxTokens: 32_000,
     authenticated: true,
     supportedServiceTiers: [],
+    supportedEfforts: ["low", "medium", "high", "max"],
+    defaultEffort: "high",
   },
   {
     fullId: "openai-codex/gpt-6.1-sol",
@@ -58,6 +64,8 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     maxTokens: 64_000,
     authenticated: true,
     supportedServiceTiers: ["priority", "ultrafast"],
+    supportedEfforts: ["low", "medium", "high", "xhigh", "max"],
+    defaultEffort: "high",
   },
   {
     fullId: "openai-codex/gpt-5.4-mini",
@@ -69,6 +77,8 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     maxTokens: 16_384,
     authenticated: true,
     supportedServiceTiers: ["priority"],
+    supportedEfforts: [],
+    defaultEffort: null,
   },
   {
     fullId: "google/gemini-3-pro",
@@ -80,6 +90,8 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     maxTokens: 65_536,
     authenticated: false,
     supportedServiceTiers: [],
+    supportedEfforts: ["low", "medium", "high"],
+    defaultEffort: "high",
   },
 ];
 
@@ -312,9 +324,16 @@ test("ModelPickerDialog helpers format context windows, filter catalog models, g
   assert.equal(serviceTierForModel(CATALOG_MODELS[2], "ultrafast"), null, "Fast-only models drop Ultrafast");
   assert.equal(serviceTierForModel(CATALOG_MODELS[2], "priority"), "priority");
   assert.equal(serviceTierForModel(CATALOG_MODELS[0], "priority"), null, "Unsupported models use Standard");
+
+  assert.equal(effortForModel(CATALOG_MODELS[1], "xhigh"), "xhigh");
+  assert.equal(effortForModel(CATALOG_MODELS[1], "high"), null, "Default effort normalizes to null");
+  assert.equal(effortForModel(CATALOG_MODELS[0], "xhigh"), null, "Unsupported effort drops to model default");
+  assert.equal(effortForModel(CATALOG_MODELS[2], "low"), null, "Fixed-reasoning models drop effort");
+  assert.equal(normalizeSelectedEffort(CATALOG_MODELS[1], "high"), null);
+  assert.equal(normalizeSelectedEffort(CATALOG_MODELS[1], "max"), "max");
 });
 
-test("ModelPickerDialog renders search input, provider tabs, capability badges, current badge, and lock banner", () => {
+test("ModelPickerDialog renders inline Effort + Speed drawer inside selected model card and removes bottom service-tier section", () => {
   const html = renderToStaticMarkup(
     createElement(
       LocaleProvider,
@@ -324,6 +343,8 @@ test("ModelPickerDialog renders search input, provider tabs, capability badges, 
         inline: true,
         onOpenChange() {},
         value: "openai-codex/gpt-6.1-sol",
+        serviceTier: "priority",
+        effort: "xhigh",
         catalogOverride: SAMPLE_CATALOG,
         onSelect() {},
       }),
@@ -335,12 +356,37 @@ test("ModelPickerDialog renders search input, provider tabs, capability badges, 
   assert.match(html, /data-provider-tab="all"/);
   assert.match(html, /data-provider-tab="anthropic"/);
   assert.match(html, /data-provider-tab="openai-codex"/);
+  assert.match(html, /data-model-card="openai-codex\/gpt-6\.1-sol"[^>]*data-expanded="true"/);
   assert.match(html, /data-model-option="openai-codex\/gpt-6\.1-sol"/);
+  assert.match(html, /data-model-inline-options="openai-codex\/gpt-6\.1-sol"/);
+  assert.match(html, /data-inline-row="effort"/);
+  assert.match(html, /data-inline-row="speed"/);
+  assert.match(html, /data-effort-option="xhigh"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-effort-option="xhigh"/);
+  assert.match(html, /data-effort-option="high"[^>]*data-default-effort="true"/);
+  assert.match(html, /data-service-tier="standard"/);
+  assert.match(html, /data-service-tier="priority"/);
+  assert.match(html, /data-service-tier="ultrafast"/);
+  assert.match(html, /data-model-picker-apply/);
+  assert.doesNotMatch(html, /model-picker-service-tier/, "detached bottom service-tier panel must be removed");
+  assert.doesNotMatch(html, /model-picker-apply-btn/, "detached footer apply button must be removed");
   assert.match(html, /data-model-current-badge/);
   assert.match(html, /data-cap="vision"/);
   assert.match(html, /data-cap="reasoning"/);
   assert.match(html, />200K</);
   assert.match(html, />1M</);
+
+  const badgeStandard = renderToStaticMarkup(
+    createElement(LocaleProvider, null, createElement(ServiceTierBadge, { tier: null, iconOnly: true, showStandard: true })),
+  );
+  assert.match(badgeStandard, /data-service-tier="standard"/);
+  const badgeHiddenDefault = renderToStaticMarkup(
+    createElement(LocaleProvider, null, createElement(ServiceTierBadge, { tier: null })),
+  );
+  assert.equal(badgeHiddenDefault, "");
+  const effortChip = renderToStaticMarkup(
+    createElement(LocaleProvider, null, createElement(ModelEffortBadge, { effort: "xhigh", compact: true })),
+  );
+  assert.match(effortChip, /data-model-effort="xhigh"/);
 
   const lockedHtml = renderToStaticMarkup(
     createElement(
@@ -360,6 +406,7 @@ test("ModelPickerDialog renders search input, provider tabs, capability badges, 
   );
   assert.match(lockedHtml, /data-model-picker-locked/);
   assert.match(lockedHtml, /Pause auto loop before switching models/);
+  assert.doesNotMatch(lockedHtml, /data-model-inline-options/, "locked dialog does not expand inline mutating controls");
 });
 
 test("ShioriComposer removes perception injection toggle and enforces paused-only model switching", () => {
@@ -409,8 +456,39 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
   assert.match(pausedHtml, /data-model-picker-trigger/);
   assert.doesNotMatch(pausedHtml, /data-locked="true"/);
   assert.match(pausedHtml, /gpt-5\.4-mini/);
+  assert.match(pausedHtml, /data-service-tier="standard"/, "Composer pill always renders explicit speed icon for Standard");
   assert.doesNotMatch(pausedHtml, /感知注入/);
   assert.doesNotMatch(pausedHtml, /Inject:\s*(ON|OFF)/i);
+
+  const ultraWithEffortHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriComposer, {
+        project: "demo-ws",
+        workspace: "/tmp/demo-ws",
+        data: sampleRunData({
+          live: {
+            runId: "20261111T120000Z-demo",
+            mode: "manual",
+            epoch: "epoch-1",
+            connected: true,
+            reason: "paused",
+            agent: true,
+            thinking: false,
+            model: "openai-codex/gpt-6.1-sol",
+            serviceTier: "ultrafast",
+            effort: "xhigh",
+          } as NonNullable<RunData["live"]>,
+        }),
+        isLiveRun: true,
+        onUpdated() {},
+      }),
+    ),
+  );
+  assert.match(ultraWithEffortHtml, /gpt-6\.1-sol/);
+  assert.match(ultraWithEffortHtml, /data-service-tier="ultrafast"/);
+  assert.match(ultraWithEffortHtml, /data-model-effort="xhigh"/);
 
   const autoRunningData = sampleRunData({
     live: {

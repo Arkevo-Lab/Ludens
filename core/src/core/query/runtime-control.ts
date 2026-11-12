@@ -1,5 +1,5 @@
 import type { EventPoolSummary } from "@ludens/protocol/event-pool";
-import type { OmpServiceTier } from "@ludens/protocol/ludens";
+import type { OmpEffort, OmpServiceTier } from "@ludens/protocol/ludens";
 import { globalHome, workspaceForProject } from "./data";
 import { updateWorkspaceShiori } from "./workspaces";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
@@ -12,7 +12,14 @@ export type RuntimeControlCommand =
   | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
-  | { action: "set_model"; model: string; serviceTier?: OmpServiceTier | null; runId?: string; expectedEpoch?: string | null }
+  | {
+      action: "set_model";
+      model: string;
+      serviceTier?: OmpServiceTier | null;
+      effort?: OmpEffort | null;
+      runId?: string;
+      expectedEpoch?: string | null;
+    }
   | { action: "perception_inject"; enabled: boolean }
   | { action: "perception_reload" };
 
@@ -23,6 +30,7 @@ export interface HostControlStatus {
   mode: string;
   model?: string | null;
   serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
   queue: { steering: number };
   eventPool?: EventPoolSummary;
   [key: string]: unknown;
@@ -99,15 +107,32 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
           argv: [
             nextModel,
             ...(command.serviceTier !== undefined ? ["--service-tier", command.serviceTier ?? "none"] : []),
+            ...(command.effort !== undefined ? ["--effort", command.effort ?? "none"] : []),
           ],
           runId: command.runId,
           expectedEpoch: command.expectedEpoch ?? undefined,
         });
-        await updateWorkspaceShiori(project, { model: nextModel, serviceTier: result.serviceTier ?? null }, home);
+        await updateWorkspaceShiori(
+          project,
+          {
+            model: nextModel,
+            serviceTier: result.serviceTier ?? null,
+            ...(command.effort !== undefined || "effort" in result ? { effort: result.effort ?? null } : {}),
+          },
+          home,
+        );
         return result;
       } catch (error) {
         if ((error as { code?: string } | null)?.code === "HOST_OFFLINE") {
-          await updateWorkspaceShiori(project, { model: nextModel, ...(command.serviceTier !== undefined ? { serviceTier: command.serviceTier } : {}) }, home);
+          await updateWorkspaceShiori(
+            project,
+            {
+              model: nextModel,
+              ...(command.serviceTier !== undefined ? { serviceTier: command.serviceTier } : {}),
+              ...(command.effort !== undefined ? { effort: command.effort } : {}),
+            },
+            home,
+          );
           return {
             runId: "",
             epoch: null,
@@ -116,6 +141,7 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
             hostOffline: true,
             model: nextModel,
             serviceTier: command.serviceTier ?? null,
+            effort: command.effort ?? null,
             queue: { steering: 0 },
           };
         }

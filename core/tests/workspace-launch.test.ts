@@ -872,6 +872,8 @@ test("model connection config validates, merges, maps to OMP isolated settings, 
   });
   expect(parseConfig({ driver: "cua", serviceTier: "ultrafast" }, manifestFor("cua")).serviceTier).toBe("ultrafast");
   expect(() => parseConfig({ driver: "cua", serviceTier: "invalid" }, manifestFor("cua"))).toThrow("serviceTier");
+  expect(parseConfig({ driver: "cua", effort: "xhigh" }, manifestFor("cua")).effort).toBe("xhigh");
+  expect(() => parseConfig({ driver: "cua", effort: "invalid" }, manifestFor("cua"))).toThrow("effort");
 
   const directory = await mkdtemp(join(tmpdir(), "ludens-connection-config-"));
   const home = join(directory, "home");

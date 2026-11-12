@@ -2,7 +2,16 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createAgentSession, discoverAuthStorage, SessionManager, Settings, type AgentSession, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import type { Model } from "@oh-my-pi/pi-ai";
-import { isOmpServiceTier, mergeConnectionConfig, readGlobalConfig, validateConnectionConfig, type ModelConnectionConfig, type OmpServiceTier } from "@ludens/protocol/ludens";
+import {
+  isOmpEffort,
+  isOmpServiceTier,
+  mergeConnectionConfig,
+  readGlobalConfig,
+  validateConnectionConfig,
+  type ModelConnectionConfig,
+  type OmpEffort,
+  type OmpServiceTier,
+} from "@ludens/protocol/ludens";
 import type { AgentRunner } from "../shiori/runtime.ts";
 import { Workspace } from "../storage/workspace.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
@@ -17,6 +26,8 @@ import {
   ompSettingsOverrides,
   resolveOmpImageModel,
   effectiveOmpServiceTier,
+  effectiveOmpEffort,
+  resolvedOmpSessionEffort,
   type AvailableModelItem,
   type AvailableModelsCatalog,
 } from "./models.ts";
@@ -104,6 +115,11 @@ export async function createOmpAgent(options: {
     if (!isOmpServiceTier(workspaceConfig.serviceTier)) throw new Error("ludens.json serviceTier must be priority or ultrafast");
     configuredServiceTier = workspaceConfig.serviceTier;
   }
+  let configuredEffort: OmpEffort | null = null;
+  if (workspaceConfig?.effort !== undefined) {
+    if (!isOmpEffort(workspaceConfig.effort)) throw new Error("ludens.json effort must be minimal, low, medium, high, xhigh, or max");
+    configuredEffort = workspaceConfig.effort;
+  }
   // Superset shell: override only what this host owns. Keys whose value equals
   // the OMP default (memory.backend off, autolearn off, includeWorkspaceTree
   // off, providers.openaiWebsockets auto, async/launch enabled) stay unset.
@@ -111,6 +127,7 @@ export async function createOmpAgent(options: {
     compactionThreshold: options.compactionThreshold,
     connection,
     serviceTier: configuredServiceTier,
+    effort: configuredEffort,
   }));
   const ownsAuthStorage = !options.authStorage;
   const authStorage = options.authStorage ?? await discoverAuthStorage(undefined, { settings, cwd: options.workspace });
@@ -124,6 +141,7 @@ export async function createOmpAgent(options: {
     const model = resolveOmpImageModel(modelRegistry, options.model);
     let activeModel = `${model.provider}/${model.id}`;
     let activeServiceTier = effectiveOmpServiceTier(model, configuredServiceTier);
+    let activeEffort = effectiveOmpEffort(model, configuredEffort);
     const extensionPath = resolve(import.meta.dir, "extension.ts");
     const instructionsPath = join(options.workspace, "AGENTS.md");
     const instructions = await readFile(instructionsPath, "utf8").catch(error => {
@@ -147,9 +165,10 @@ export async function createOmpAgent(options: {
     });
     initializedSession = session;
     // Workspace configuration is authoritative across restarts. OMP otherwise
-    // prefers a transcript's previous tier entry over launch Settings, which
-    // could restore a paid tier after Standard was persisted offline.
+    // prefers a transcript's previous tier/thinking entry over launch Settings,
+    // which could restore a paid tier or stale effort after an offline edit.
     session.setServiceTierFamily("openai", activeServiceTier ?? undefined);
+    session.setThinkingLevel(resolvedOmpSessionEffort(model, activeEffort) as Parameters<typeof session.setThinkingLevel>[0], false);
     // Native background completions can wake an idle OMP session. Handback ends
     // permission to call the model as well as the device, without killing jobs.
     const removeControlGate = session.agent.addBeforeModelCall(() => {
@@ -158,7 +177,7 @@ export async function createOmpAgent(options: {
     const sessionFile = await selectWorkspaceSession(options.state, manager);
     const recordSession = options.log.recorder(SHIORI_SOURCE);
     const unsubscribe = trace.attach(session);
-    recordSession("session", { file: sessionFile, model: activeModel, serviceTier: activeServiceTier, tools: session.getActiveToolNames() });
+    recordSession("session", { file: sessionFile, model: activeModel, serviceTier: activeServiceTier, effort: activeEffort, tools: session.getActiveToolNames() });
     return {
       async run(context) {
         cycle = context;
@@ -180,7 +199,8 @@ export async function createOmpAgent(options: {
       },
       model: () => activeModel,
       serviceTier: () => activeServiceTier,
-      async setModel(nextSelector: string, nextServiceTier?: OmpServiceTier | null) {
+      effort: () => activeEffort,
+      async setModel(nextSelector: string, nextServiceTier?: OmpServiceTier | null, nextEffort?: OmpEffort | null) {
         if (cycle) throw new Error("Cannot switch model while Shiori is running; pause auto loop first");
         const candidate = resolveOmpImageModel(modelRegistry, nextSelector);
         await session.setModel(candidate, "default", { persist: false });
@@ -193,8 +213,10 @@ export async function createOmpAgent(options: {
         }
         activeServiceTier = effectiveOmpServiceTier(selected, nextServiceTier === undefined ? activeServiceTier : nextServiceTier);
         session.setServiceTierFamily("openai", activeServiceTier ?? undefined);
+        activeEffort = effectiveOmpEffort(selected, nextEffort === undefined ? activeEffort : nextEffort);
+        session.setThinkingLevel(resolvedOmpSessionEffort(selected, activeEffort) as Parameters<typeof session.setThinkingLevel>[0], false);
         activeModel = `${selected.provider}/${selected.id}`;
-        recordSession("session", { file: sessionFile, model: activeModel, serviceTier: activeServiceTier, tools: session.getActiveToolNames() });
+        recordSession("session", { file: sessionFile, model: activeModel, serviceTier: activeServiceTier, effort: activeEffort, tools: session.getActiveToolNames() });
         return activeModel;
       },
       steer: async (message: string) => { await session.steer(message); },

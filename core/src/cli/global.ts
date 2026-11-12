@@ -69,9 +69,18 @@ export async function globalCommand(command: string, args: string[], home = lude
         config.defaults = { ...config.defaults, connection: current };
       } else if (field.startsWith("defaults.")) {
         const key = field.slice("defaults.".length);
-        const setting = key === "model" ? value : ["pet", "dashboard"].includes(key)
-          ? value === "true" ? true : value === "false" ? false : value : Number(value);
-        config.defaults = { ...config.defaults, [key]: setting };
+        if ((key === "serviceTier" || key === "effort") && value === "none") {
+          const nextDefaults = { ...config.defaults } as Record<string, unknown>;
+          delete nextDefaults[key];
+          config.defaults = nextDefaults;
+        } else {
+          const setting = ["model", "serviceTier", "effort"].includes(key)
+            ? value
+            : ["pet", "dashboard"].includes(key)
+              ? value === "true" ? true : value === "false" ? false : value
+              : Number(value);
+          config.defaults = { ...config.defaults, [key]: setting };
+        }
       } else throw new Error(`Unknown global setting: ${field}`);
       return config;
     }, home);

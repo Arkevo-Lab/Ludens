@@ -52,9 +52,16 @@ export function isOmpServiceTier(value: unknown): value is OmpServiceTier {
   return typeof value === "string" && (OMP_SERVICE_TIERS as readonly string[]).includes(value);
 }
 
+export const OMP_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type OmpEffort = (typeof OMP_EFFORTS)[number];
+export function isOmpEffort(value: unknown): value is OmpEffort {
+  return typeof value === "string" && (OMP_EFFORTS as readonly string[]).includes(value);
+}
+
 export interface WorkspaceDefaults {
   model?: string;
   serviceTier?: OmpServiceTier;
+  effort?: OmpEffort;
   seconds?: number;
   requests?: number;
   compactionThreshold?: number;
@@ -103,6 +110,9 @@ export function validateGlobalConfig(value: unknown): LudensConfig {
     } else if (key === "serviceTier") {
       if (!isOmpServiceTier(setting)) throw new Error("defaults.serviceTier must be priority or ultrafast");
       defaults.serviceTier = setting;
+    } else if (key === "effort") {
+      if (!isOmpEffort(setting)) throw new Error("defaults.effort must be minimal, low, medium, high, xhigh, or max");
+      defaults.effort = setting;
     } else if (key === "connection") {
       const validated = validateConnectionConfig(setting, "defaults.connection");
       if (Object.keys(validated).length > 0) defaults.connection = validated;

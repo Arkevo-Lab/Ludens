@@ -1,7 +1,15 @@
 import { createHash } from "node:crypto";
 import { basename, join, resolve } from "node:path";
 import { defaultSocket } from "@ludens/baseware/address";
-import { isOmpServiceTier, ludensHome, validateConnectionConfig, type ModelConnectionConfig, type OmpServiceTier } from "@ludens/protocol/ludens";
+import {
+  isOmpEffort,
+  isOmpServiceTier,
+  ludensHome,
+  validateConnectionConfig,
+  type ModelConnectionConfig,
+  type OmpEffort,
+  type OmpServiceTier,
+} from "@ludens/protocol/ludens";
 import {
   validateWorkspaceMachinesBinding,
   type BasewareMachineSpec,
@@ -30,6 +38,7 @@ export interface LaunchConfig {
   cuaCommand?: string;
   model: string;
   serviceTier?: OmpServiceTier;
+  effort?: OmpEffort;
   seconds: number;
   requests: number;
   /** OMP native compaction trigger override; undefined follows the selected model's native OMP default. */
@@ -44,7 +53,7 @@ export interface LaunchConfig {
 export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("ludens.json must be an object");
   const config = value as Record<string, unknown>;
-  const allowed = ["driver", "driverPackage", "game", "port", "cuaCommand", "model", "serviceTier", "seconds", "requests", "compactionThreshold", "connection", "machines", "dashboard", "pet", "logging"];
+  const allowed = ["driver", "driverPackage", "game", "port", "cuaCommand", "model", "serviceTier", "effort", "seconds", "requests", "compactionThreshold", "connection", "machines", "dashboard", "pet", "logging"];
   for (const key of Object.keys(config)) if (!allowed.includes(key)) throw new Error(`Unknown ludens.json field: ${key}`);
   if (typeof config.driver !== "string" || !config.driver.trim()) throw new Error("ludens.json driver must be a non-empty driver id");
   if (config.driverPackage !== undefined && (typeof config.driverPackage !== "string" || !config.driverPackage.trim())) {
@@ -84,6 +93,7 @@ export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchCo
   if (result.port !== undefined && (!Number.isInteger(result.port) || result.port <= 0 || result.port > 65535)) throw new Error("port must be an integer from 1 to 65535");
   if (typeof result.model !== "string" || !result.model.trim()) throw new Error("model must be a non-empty string");
   if (result.serviceTier !== undefined && !isOmpServiceTier(result.serviceTier)) throw new Error("serviceTier must be priority or ultrafast");
+  if (result.effort !== undefined && !isOmpEffort(result.effort)) throw new Error("effort must be minimal, low, medium, high, xhigh, or max");
   for (const key of ["dashboard", "pet"] as const) if (typeof result[key] !== "boolean") throw new Error(`${key} must be boolean`);
   return result;
 }
