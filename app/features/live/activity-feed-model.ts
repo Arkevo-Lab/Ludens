@@ -14,8 +14,18 @@ export function activityScopeParams(scope: ActivityScope): URLSearchParams {
 
 export type ActivityFilter = "all" | LogBlock["kind"];
 
-export { blockLabels, activitySearchText, printable } from "@/lib/activity-view";
-import { printable, activitySearchText } from "@/lib/activity-view";
+export { blockLabels, printable } from "@/lib/activity-view";
+import { activitySearchText as rawActivitySearchText } from "@/lib/activity-view";
+
+const searchTextCache = new WeakMap<LogBlock, string>();
+
+export function activitySearchText(block: LogBlock): string {
+  const cached = searchTextCache.get(block);
+  if (cached !== undefined) return cached;
+  const value = rawActivitySearchText(block);
+  searchTextCache.set(block, value);
+  return value;
+}
 
 /** A preview is always a prefix; a streamed replacement may stop needing expansion. */
 export function activityContentView(text: string, requestedExpanded = false) {
@@ -54,6 +64,7 @@ export function matchesActivity(block: LogBlock, filter: ActivityFilter, query: 
 export const ACTIVITY_PAGE_SIZE = 100;
 export const ACTIVITY_WINDOW_SIZE = 300;
 export const ACTIVITY_LIVE_SIZE = 200;
+export const CONTINUOUS_STREAM_MAX_BLOCKS = 6000;
 
 export function newerBlock(left: ActivityBlock | undefined, right: ActivityBlock): ActivityBlock {
   return left && left.revision > right.revision ? left : right;
@@ -72,10 +83,57 @@ export function mergeActivity(
   for (const update of updates) {
     const previous = merged.get(update.id);
     if (!previous && !options.append) continue;
-    const next = newerBlock(previous, update);
+    const next = previous && previous.revision > update.revision ? previous : update;
     if (matchesActivity(next, options.filter, options.query)) merged.set(next.id, next);
     else merged.delete(next.id);
   }
   const sorted = [...merged.values()].filter(block => matchesActivity(block, options.filter, options.query)).sort(byPosition);
   return options.keep === "oldest" ? sorted.slice(0, options.limit) : sorted.slice(-options.limit);
+}
+
+/**
+ * Monotonic merge for the unified Live session store:
+ * - Never discards older paged blocks when new tail deltas or snapshots arrive
+ * - Preserves exact block references when incoming revisions do not advance
+ * - Returns `existing` verbatim (`changed: false`) when diagnostic-only or duplicate updates cause zero visible change
+ */
+export function mergeMonotonicBlocks(
+  existing: ActivityBlock[],
+  incoming: ActivityBlock[],
+  options: { maxBlocks?: number } = {},
+): { blocks: ActivityBlock[]; changed: boolean } {
+  const maxBlocks = options.maxBlocks ?? CONTINUOUS_STREAM_MAX_BLOCKS;
+  if (incoming.length === 0) return { blocks: existing, changed: false };
+
+  let map: Map<string, ActivityBlock> | null = null;
+  let existingById: Map<string, ActivityBlock> | null = null;
+
+  for (const update of incoming) {
+    if (update.kind === "diagnostic") {
+      if (!existingById) existingById = new Map(existing.map(item => [item.id, item]));
+      if (existingById.has(update.id)) {
+        if (!map) map = new Map(existingById);
+        map.delete(update.id);
+      }
+      continue;
+    }
+    if (!existingById) existingById = new Map(existing.map(item => [item.id, item]));
+    const current = (map ?? existingById).get(update.id);
+    if (current && current.revision >= update.revision) {
+      continue;
+    }
+    if (!map) map = new Map(existingById);
+    map.set(update.id, update);
+  }
+
+  if (!map) {
+    return { blocks: existing, changed: false };
+  }
+
+  const sorted = [...map.values()].sort(byPosition);
+  const bounded = sorted.length > maxBlocks ? sorted.slice(-maxBlocks) : sorted;
+  if (bounded.length === existing.length && bounded.every((item, idx) => item === existing[idx])) {
+    return { blocks: existing, changed: false };
+  }
+  return { blocks: bounded, changed: true };
 }

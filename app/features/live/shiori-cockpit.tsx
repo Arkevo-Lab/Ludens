@@ -1,6 +1,16 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import {
   ArrowDown,
   Bot,
@@ -24,6 +34,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
+import { summarizePoolEventPreview } from "@ludens/protocol/event-pool";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import {
   ModelEffortBadge,
@@ -37,158 +48,45 @@ import {
 import { useTranslations } from "@/lib/locale";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
+import { CachedObservationImg } from "@/features/live/live-media-cache";
+import {
+  getLiveSessionEngine,
+  type EventPoolCommand,
+  type RuntimeControlCommand,
+} from "@/features/live/live-session-store";
+import {
+  asRecord,
+  buildCodexSegments,
+  cleanErrorMessage,
+  mergePoolSnapshotSegments,
+  summarizeStepBlock,
+  type BuildSegmentsOptions,
+  type StreamSegment,
+} from "@/features/live/shiori-segments";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
+import {
+  canSwitchShioriModel,
+  resolveShioriActiveModel,
+  useLiveSession,
+  type LiveSessionActions,
+} from "@/features/live/use-live-session";
 import { clockTime } from "@/features/live/run-visuals";
-import { readArchiveJson } from "@/lib/archive-client";
 import { runWindowSummary } from "@/lib/run-identity";
 import type { Call, Observation, RunData, RunInfo } from "@/lib/types";
-import { requestActivity } from "@ludens/protocol/activity";
 
 // The run budget is drawn as this many pixel blocks.
 const BUDGET_BLOCKS = 24;
 
-export type RuntimeControlAction =
-  | { action: "status" }
-  | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
-  | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
-  | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
-  | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
-  | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
-  | {
-      action: "set_model";
-      model: string;
-      serviceTier?: ModelServiceTier | null;
-      effort?: ModelEffort | null;
-      runId?: string;
-      expectedEpoch?: string | null;
-    }
-  | { action: "perception_inject"; enabled: boolean; runId?: string }
-  | { action: "perception_reload"; runId?: string };
-
-export function canSwitchShioriModel(state: {
-  isLiveRun: boolean;
-  hostOnline: boolean;
-  mode: string;
-  consolidating?: boolean;
-  thinking?: boolean;
-}): boolean {
-  if (!state.isLiveRun) return false;
-  if (state.mode === "auto" || state.mode === "acquiring") return false;
-  if (state.consolidating) return false;
-  if (state.hostOnline && (state.thinking || state.mode !== "manual")) return false;
-  return true;
-}
-
-export function resolveShioriActiveModel(options: {
-  localModelOverride?: string | null;
-  liveModel?: string | null;
-  controlModel?: string | null;
-  manifestModel?: string | null;
-}): string | null {
-  const candidates = [
-    options.localModelOverride,
-    options.liveModel,
-    options.controlModel,
-    options.manifestModel,
-  ];
-  for (const candidate of candidates) {
-    if (typeof candidate === "string" && candidate.trim()) {
-      return candidate.trim();
-    }
-  }
-  return null;
-}
-
-export type EventPoolClientCommand =
-  | { action: "send"; text: string; title?: string }
-  | { action: "reply"; replyTo: string; text: string; resumeAuto?: boolean; seconds?: number | null }
-  | { action: "ack"; ids: string[] };
-
-interface EventPoolApiReadPayload {
-  snapshot: EventPoolSnapshot;
-  hostOnline: boolean;
-  hostStatus?: Record<string, unknown>;
-}
-
-interface EventPoolApiMutatePayload extends EventPoolApiReadPayload {
-  createdEvent?: PoolEvent;
-  resolvedOutbound?: PoolEvent;
-  updatedEvents?: PoolEvent[];
-}
-
-async function fetchEventPool(
-  project: string,
-  workspace: string,
-  signal?: AbortSignal,
-): Promise<EventPoolApiReadPayload> {
-  const params = new URLSearchParams({ project, workspace });
-  const response = await fetch(`/api/event-pool?${params}`, { signal, cache: "no-store" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(typeof payload?.error === "string" ? payload.error : `Event Pool read failed (${response.status})`);
-  }
-  return payload as EventPoolApiReadPayload;
-}
-
-async function mutateEventPool(
-  project: string,
-  workspace: string,
-  command: EventPoolClientCommand,
-): Promise<EventPoolApiMutatePayload> {
-  const response = await fetch("/api/event-pool", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ project, workspace, command }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(typeof payload?.error === "string" ? payload.error : `Event Pool request failed (${response.status})`);
-  }
-  return payload as EventPoolApiMutatePayload;
-}
-
-async function sendRuntimeControl(
-  project: string,
-  workspace: string,
-  command: RuntimeControlAction,
-) {
-  const response = await fetch("/api/runtime/control", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ project, workspace, command }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(typeof payload?.error === "string" ? payload.error : `Control request failed (${response.status})`);
-  }
-  return payload;
-}
-
-async function updateWorkspaceShioriModel(
-  project: string,
-  model: string,
-  serviceTier: ModelServiceTier | null,
-  effort: ModelEffort | null,
-) {
-  const response = await fetch("/api/workspaces", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      action: "workspaceShiori",
-      id: project,
-      shiori: { model, serviceTier, effort },
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string"
-        ? payload.error
-        : `Workspace model update failed (${response.status})`,
-    );
-  }
-  return payload;
-}
+export type RuntimeControlAction = RuntimeControlCommand;
+export type EventPoolClientCommand = EventPoolCommand;
+export {
+  buildCodexSegments,
+  canSwitchShioriModel,
+  mergePoolSnapshotSegments,
+  resolveShioriActiveModel,
+  type BuildSegmentsOptions,
+  type StreamSegment,
+};
 
 function formatDurationCompact(secondsTotal: number | null | undefined): string {
   if (secondsTotal == null || !Number.isFinite(secondsTotal)) return "—";
@@ -203,19 +101,69 @@ function formatDurationCompact(secondsTotal: number | null | undefined): string 
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 }
 
-import {
-  asRecord,
-  buildCodexSegments,
-  cleanErrorMessage,
-  cleanInlinePreview,
-  extractReadableText,
-  mergePoolSnapshotSegments,
-  summarizeStepBlock,
-  type BuildSegmentsOptions,
-  type StreamSegment,
-} from "@/features/live/shiori-segments";
-import { summarizePoolEventPreview } from "@ludens/protocol/event-pool";
-export { buildCodexSegments, mergePoolSnapshotSegments, type BuildSegmentsOptions, type StreamSegment };
+/** Isolated 1Hz clock hook used ONLY inside leaf timer badges so the chat stream never re-renders per second. */
+function useLiveUpdatedDeltaSec(enabled: boolean, statusAnchorMs: number): number {
+  const [nowMs, setNowMs] = useState<number | null>(null);
+  useEffect(() => {
+    if (!enabled) {
+      setNowMs(null);
+      return;
+    }
+    setNowMs(Date.now());
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [enabled]);
+
+  if (!enabled || nowMs === null || !Number.isFinite(statusAnchorMs)) return 0;
+  return Math.max(0, Math.min(15, Math.floor((nowMs - statusAnchorMs) / 1000)));
+}
+
+function computeLiveTimerValues(options: {
+  isAuto: boolean;
+  activeMaxSeconds: number | null;
+  baseCycleElapsed: number;
+  rawRemainingSeconds: number | null;
+  updatedDeltaSec: number;
+}) {
+  const { isAuto, activeMaxSeconds, baseCycleElapsed, rawRemainingSeconds, updatedDeltaSec } = options;
+  const cycleElapsedSeconds =
+    activeMaxSeconds != null
+      ? Math.min(activeMaxSeconds, baseCycleElapsed + updatedDeltaSec)
+      : baseCycleElapsed + updatedDeltaSec;
+  const liveRemainingSeconds =
+    isAuto && typeof rawRemainingSeconds === "number"
+      ? Math.max(0, Math.round(rawRemainingSeconds) - updatedDeltaSec)
+      : isAuto && activeMaxSeconds != null
+        ? Math.max(0, Math.round(activeMaxSeconds - cycleElapsedSeconds))
+        : null;
+  const budgetRatio =
+    activeMaxSeconds != null && activeMaxSeconds > 0
+      ? Math.min(100, Math.round((cycleElapsedSeconds / activeMaxSeconds) * 100))
+      : 0;
+  return { cycleElapsedSeconds, liveRemainingSeconds, budgetRatio };
+}
+
+const LivePhaseInlineBadge = memo(function LivePhaseInlineBadge({
+  phaseLabel,
+  phaseElapsedMs,
+  tickEnabled,
+  statusAnchorMs,
+}: {
+  phaseLabel: string;
+  phaseElapsedMs?: number | null;
+  tickEnabled: boolean;
+  statusAnchorMs: number;
+}) {
+  const updatedDeltaSec = useLiveUpdatedDeltaSec(tickEnabled, statusAnchorMs);
+  const displayPhaseElapsedMs =
+    phaseElapsedMs != null ? phaseElapsedMs + updatedDeltaSec * 1000 : null;
+  const text = `${phaseLabel}${displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}`;
+  return (
+    <span className="codex-phase-inline codex-live-phase" title={text}>
+      {text}
+    </span>
+  );
+});
 
 /** Shared contract between `ShioriWorkbench` (Col 3 dock host) and `EventPoolOverviewPanel`. */
 export interface EventPoolOverviewPanelProps {
@@ -283,7 +231,7 @@ function FallbackEventPoolPanel({ snapshot, focusedEventId, onFocusEvent, onLoca
   );
 }
 
-function CodexPoolReceiptCard({
+const CodexPoolReceiptCard = memo(function CodexPoolReceiptCard({
   segment,
   poolById,
   onJumpSource,
@@ -345,7 +293,7 @@ function CodexPoolReceiptCard({
       </div>
     </article>
   );
-}
+});
 
 function renderInlineFormatting(text: string): ReactNode[] {
   const tokens = text.split(/(`[^`]+`|\*\*[^*]+\*\*)/g);
@@ -376,7 +324,7 @@ function formatStopReason(reason: string | null, t: (key: string) => string): st
   return reason;
 }
 
-function CodexSessionDivider({
+const CodexSessionDivider = memo(function CodexSessionDivider({
   segment,
   highlighted,
 }: {
@@ -443,7 +391,7 @@ function CodexSessionDivider({
       </div>
     </div>
   );
-}
+});
 
 function CodexStepGroup({
   steps,
@@ -550,7 +498,8 @@ function CodexStepGroup({
   );
 }
 
-function CodexInputCard({
+const CodexInputCard = memo(function CodexInputCard({
+  segId,
   project,
   run,
   call,
@@ -558,9 +507,10 @@ function CodexInputCard({
   bgBlock,
   at,
   isSelected,
-  onSelect,
+  onInspectInput,
   onOpenReplayAt,
 }: {
+  segId: string;
   project: string;
   run: string;
   call?: Call;
@@ -568,7 +518,7 @@ function CodexInputCard({
   bgBlock?: ActivityBlock;
   at: string;
   isSelected: boolean;
-  onSelect: (imageId?: string) => void;
+  onInspectInput: (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => void;
   onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
 }) {
   const t = useTranslations("shioriCockpit");
@@ -643,7 +593,7 @@ function CodexInputCard({
       data-call-id={call?.id}
       data-run-segment={run}
       data-selected={isSelected || undefined}
-      onClick={() => onSelect(observations[0]?.id)}
+      onClick={() => onInspectInput(run, segId, call, observations[0]?.id, at)}
     >
       <header className="codex-input-header">
         <div className="codex-input-header-left">
@@ -696,16 +646,14 @@ function CodexInputCard({
                 title={t("inputPreviewInStage")}
                 onClick={event => {
                   event.stopPropagation();
-                  onSelect(obs.id);
+                  onInspectInput(run, segId, call, obs.id, at);
                 }}
               >
-                <img
+                <CachedObservationImg
                   src={`/api/media?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run)}&id=${encodeURIComponent(obs.id)}`}
                   alt={obs.origin || obs.id}
                   width={96}
                   height={54}
-                  loading="lazy"
-                  decoding="async"
                 />
                 {idx === visibleObservations.length - 1 && extraObservationCount > 0 && (
                   <span className="codex-input-thumb-more">+{extraObservationCount}</span>
@@ -789,17 +737,48 @@ function CodexInputCard({
       </div>
     </article>
   );
-}
+});
 
-function isHostOfflineError(cause: unknown): boolean {
-  const msg = cause instanceof Error ? cause.message : String(cause);
+const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
+  segment,
+  fallbackRunId,
+  showAllSteps,
+  isLastSegment,
+  selectedStepId,
+  onInspectBlock,
+}: {
+  segment: Extract<StreamSegment, { kind: "turn" }>;
+  fallbackRunId: string;
+  showAllSteps: boolean;
+  isLastSegment: boolean;
+  selectedStepId?: string;
+  onInspectBlock: (runId: string, block: ActivityBlock, siblingSteps: ActivityBlock[]) => void;
+}) {
+  const paragraphs = segment.responseText
+    ? segment.responseText.split(/\n{2,}/).filter(Boolean)
+    : [];
+  const ownerRunId = segment.runId || fallbackRunId;
+
   return (
-    msg.includes("未在线") ||
-    msg.includes("HOST_OFFLINE") ||
-    msg.includes("ENOENT") ||
-    msg.includes("ECONNREFUSED")
+    <article id={segment.responseBlock?.id} className="codex-turn-assistant">
+      <CodexStepGroup
+        steps={segment.steps}
+        forceExpanded={showAllSteps}
+        defaultOpen={paragraphs.length === 0 && isLastSegment}
+        selectedBlock={selectedStepId}
+        onSelect={step => onInspectBlock(ownerRunId, step, segment.steps)}
+      />
+
+      {paragraphs.length > 0 && (
+        <div className="codex-assistant-prose">
+          {paragraphs.map((para, idx) => (
+            <p key={idx}>{renderInlineFormatting(para)}</p>
+          ))}
+        </div>
+      )}
+    </article>
   );
-}
+});
 
 function resolveCallForTurn(
   block: ActivityBlock,
@@ -1047,16 +1026,156 @@ function LiveStopTimerControl({
   );
 }
 
+export interface LiveTimerSpec {
+  tickEnabled: boolean;
+  statusAnchorMs: number;
+  activeMaxSeconds: number | null;
+  baseCycleElapsed: number;
+  rawRemainingSeconds: number | null;
+}
+
+const LiveComposerTimerSlot = memo(function LiveComposerTimerSlot({
+  spec,
+  fallbackRemainingSeconds,
+  disabled,
+  onApplyTimer,
+  onExtendTimer,
+}: {
+  spec?: LiveTimerSpec | null;
+  fallbackRemainingSeconds: number | null;
+  disabled: boolean;
+  onApplyTimer: (seconds: number | null) => Promise<void>;
+  onExtendTimer?: (deltaSeconds: number, currentRemainingSeconds: number) => Promise<void>;
+}) {
+  const updatedDeltaSec = useLiveUpdatedDeltaSec(
+    Boolean(spec?.tickEnabled),
+    spec?.statusAnchorMs ?? NaN,
+  );
+  const computedRemaining = spec
+    ? computeLiveTimerValues({
+        isAuto: true,
+        activeMaxSeconds: spec.activeMaxSeconds,
+        baseCycleElapsed: spec.baseCycleElapsed,
+        rawRemainingSeconds: spec.rawRemainingSeconds,
+        updatedDeltaSec,
+      }).liveRemainingSeconds
+    : fallbackRemainingSeconds;
+
+  return (
+    <LiveStopTimerControl
+      remainingSeconds={computedRemaining}
+      disabled={disabled}
+      placement="up"
+      compact
+      onExtendTimer={
+        onExtendTimer
+          ? delta => onExtendTimer(delta, computedRemaining ?? 0)
+          : undefined
+      }
+      onApplyTimer={onApplyTimer}
+    />
+  );
+});
+
+const LiveRuntimeTelemetryHeader = memo(function LiveRuntimeTelemetryHeader({
+  isAuto,
+  hostOnline,
+  elapsedSeconds,
+  stateTitle,
+  spec,
+  onApplyTimer,
+  onExtendTimer,
+}: {
+  isAuto: boolean;
+  hostOnline: boolean;
+  elapsedSeconds: number;
+  stateTitle: string;
+  spec: LiveTimerSpec;
+  onApplyTimer: (seconds: number | null) => Promise<void>;
+  onExtendTimer: (deltaSeconds: number, currentRemainingSeconds: number) => Promise<void>;
+}) {
+  const t = useTranslations("shioriCockpit");
+  const updatedDeltaSec = useLiveUpdatedDeltaSec(spec.tickEnabled, spec.statusAnchorMs);
+  const { cycleElapsedSeconds, liveRemainingSeconds, budgetRatio } = computeLiveTimerValues({
+    isAuto,
+    activeMaxSeconds: spec.activeMaxSeconds,
+    baseCycleElapsed: spec.baseCycleElapsed,
+    rawRemainingSeconds: spec.rawRemainingSeconds,
+    updatedDeltaSec,
+  });
+
+  return (
+    <>
+      <div className="codex-runtime-header shiori-budget-header">
+        <h3 className="codex-dock-heading" title={t("telemetryCardTitle")}>
+          {t("telemetryCardTitle")}
+        </h3>
+        <div className="codex-runtime-header-right">
+          {isAuto && hostOnline ? (
+            <>
+              <span className="codex-runtime-elapsed">
+                {t("runtimeElapsedPrefix").replace(
+                  "{elapsed}",
+                  formatDurationCompact(cycleElapsedSeconds),
+                )}
+              </span>
+              <LiveStopTimerControl
+                remainingSeconds={liveRemainingSeconds}
+                placement="down"
+                onApplyTimer={onApplyTimer}
+                onExtendTimer={delta => onExtendTimer(delta, liveRemainingSeconds ?? 0)}
+              />
+            </>
+          ) : (
+            <span
+              className="codex-runtime-status-summary"
+              title={`${formatDurationCompact(elapsedSeconds)} · ${stateTitle}`}
+            >
+              {formatDurationCompact(elapsedSeconds)} · {stateTitle}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {isAuto && spec.activeMaxSeconds != null && liveRemainingSeconds != null && (
+        <div
+          className="shiori-budget-bar"
+          role="progressbar"
+          aria-valuenow={budgetRatio}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
+          {Array.from({ length: BUDGET_BLOCKS }, (_, index) => {
+            const lit = Math.round((budgetRatio / 100) * BUDGET_BLOCKS);
+            return (
+              <i
+                key={index}
+                data-on={index < lit || undefined}
+                data-head={(index === lit - 1 && lit < BUDGET_BLOCKS) || undefined}
+              />
+            );
+          })}
+        </div>
+      )}
+    </>
+  );
+});
+
 export function ShioriComposer({
   project,
   workspace,
   data,
   isLiveRun,
+  sessionActions,
   hostStatusOverride,
   onHostStatusChange,
   activeModelOverride,
+  activeServiceTierOverride,
+  activeEffortOverride,
+  submittingOverride,
   onModelChange,
   liveRemainingSeconds,
+  liveTimerSpec,
   onApplyLiveTimer,
   onExtendLiveTimer,
   poolSnapshot,
@@ -1074,13 +1193,18 @@ export function ShioriComposer({
   workspace: string | null;
   data: RunData;
   isLiveRun: boolean;
+  sessionActions?: LiveSessionActions;
   hostStatusOverride?: Record<string, unknown> | null;
   onHostStatusChange?: (status: Record<string, unknown>) => void;
   activeModelOverride?: string | null;
+  activeServiceTierOverride?: ModelServiceTier | null;
+  activeEffortOverride?: ModelEffort | null;
+  submittingOverride?: boolean;
   onModelChange?: (model: string) => void;
   liveRemainingSeconds?: number | null;
+  liveTimerSpec?: LiveTimerSpec | null;
   onApplyLiveTimer?: (seconds: number | null) => Promise<void>;
-  onExtendLiveTimer?: (deltaSeconds: number) => Promise<void>;
+  onExtendLiveTimer?: (deltaSeconds: number, currentRemainingSeconds?: number) => Promise<void>;
   poolSnapshot?: EventPoolSnapshot | null;
   replyTarget?: PoolEvent | null;
   replyAutoResumeDefault?: boolean;
@@ -1126,7 +1250,8 @@ export function ShioriComposer({
   }, [menuOpen, durationMenuOpen]);
   const [durationSeconds, setDurationSeconds] = useState<number | null>(null);
   const [customMinutes, setCustomMinutes] = useState("45");
-  const [submitting, setSubmitting] = useState(false);
+  const [localSubmitting, setLocalSubmitting] = useState(false);
+  const submitting = Boolean(localSubmitting || submittingOverride);
   const [error, setError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(null);
   const [localModelOverride, setLocalModelOverride] = useState<{
@@ -1245,16 +1370,22 @@ export function ShioriComposer({
     controlModel: typeof control?.model === "string" ? control.model : null,
     manifestModel: data.manifest.model ?? null,
   });
-  const activeServiceTier = validLocalModel && activeModel === localModelOverride?.model
-    ? localModelOverride.serviceTier ?? null
-    : effectiveHost?.serviceTier ?? control?.serviceTier ?? null;
-  const activeEffort: ModelEffort | null = validLocalModel && activeModel === localModelOverride?.model
-    ? localModelOverride.effort ?? null
-    : isModelEffort(effectiveHost?.effort)
-      ? effectiveHost.effort
-      : isModelEffort(control?.effort)
-        ? control.effort
-        : null;
+  const activeServiceTier: ModelServiceTier | null =
+    activeServiceTierOverride !== undefined
+      ? activeServiceTierOverride
+      : validLocalModel && activeModel === localModelOverride?.model
+        ? (localModelOverride.serviceTier ?? null)
+        : (effectiveHost?.serviceTier ?? control?.serviceTier ?? null);
+  const activeEffort: ModelEffort | null =
+    activeEffortOverride !== undefined
+      ? activeEffortOverride
+      : validLocalModel && activeModel === localModelOverride?.model
+        ? (localModelOverride.effort ?? null)
+        : isModelEffort(effectiveHost?.effort)
+          ? effectiveHost.effort
+          : isModelEffort(control?.effort)
+            ? control.effort
+            : null;
 
   useEffect(() => {
     if (!replyTarget) {
@@ -1326,13 +1457,6 @@ export function ShioriComposer({
     }
   };
 
-  const applyReturnedStatus = (res: unknown) => {
-    const record = asRecord(res);
-    const status = asRecord(record?.status) ?? (typeof record?.mode === "string" ? record : null);
-    applyHostStatusObject(status);
-    return status;
-  };
-
   const handleSelectModel = async (
     nextModel: string,
     nextServiceTier: ModelServiceTier | null,
@@ -1347,46 +1471,27 @@ export function ShioriComposer({
     setError(null);
     setModelLockNotice(null);
 
-    let persistedOffline = !hostOnline;
-    let appliedServiceTier = nextServiceTier;
-    let appliedEffort = nextEffort;
-    if (workspace) {
-      try {
-        const res = await sendRuntimeControl(project, workspace, {
-          action: "set_model",
+    const { persistedOffline } = sessionActions
+      ? await sessionActions.switchModel(trimmed, nextServiceTier, nextEffort)
+      : await getLiveSessionEngine(project).switchModel({
+          workspace,
+          run: data.run,
+          baseUpdatedAt: data.updatedAt,
+          baseServerModel: serverModel,
+          expectedEpoch: effectiveHost?.epoch ?? null,
+          hostOnline,
           model: trimmed,
           serviceTier: nextServiceTier,
           effort: nextEffort,
-          runId: data.run,
-          expectedEpoch: effectiveHost?.epoch ?? null,
+          onUpdated,
         });
-        const status = applyReturnedStatus(res);
-        if (status && "serviceTier" in status) {
-          appliedServiceTier = status.serviceTier === "priority" || status.serviceTier === "ultrafast" ? status.serviceTier : null;
-        }
-        if (status && "effort" in status) {
-          appliedEffort = isModelEffort(status.effort) ? status.effort : null;
-        }
-        persistedOffline = Boolean(status?.hostOffline) || !hostOnline;
-      } catch (cause) {
-        if (isHostOfflineError(cause)) {
-          await updateWorkspaceShioriModel(project, trimmed, nextServiceTier, nextEffort);
-          persistedOffline = true;
-        } else {
-          throw cause;
-        }
-      }
-    } else {
-      await updateWorkspaceShioriModel(project, trimmed, nextServiceTier, nextEffort);
-      persistedOffline = true;
-    }
 
     setLocalModelOverride({
       project,
       baseServerModel: serverModel,
       model: trimmed,
-      serviceTier: appliedServiceTier,
-      effort: appliedEffort,
+      serviceTier: nextServiceTier,
+      effort: nextEffort,
     });
     onModelChange?.(trimmed);
     setLastSent(
@@ -1395,23 +1500,33 @@ export function ShioriComposer({
         trimmed,
       ),
     );
-    onUpdated();
   };
 
   const dismissOutboundEvent = async (eventId: string) => {
     if (submitting || !project || !workspace) return;
-    setSubmitting(true);
+    setLocalSubmitting(true);
     setError(null);
     try {
-      const res = await mutateEventPool(project, workspace, { action: "ack", ids: [eventId] });
-      applyHostStatusObject(res.hostStatus);
-      onPoolMutated?.(res.snapshot, res.hostStatus);
+      const res = sessionActions
+        ? await sessionActions.ackPoolEvent(eventId, { fromComposer: true })
+        : await getLiveSessionEngine(project).mutatePool({
+            workspace,
+            run: data.run,
+            baseUpdatedAt: data.updatedAt,
+            baseServerModel: serverModel,
+            command: { action: "ack", ids: [eventId] },
+            fromComposer: true,
+            onUpdated,
+          });
+      if (res) {
+        applyHostStatusObject(res.hostStatus);
+        onPoolMutated?.(res.snapshot, res.hostStatus);
+      }
       if (replyTarget?.id === eventId) onSelectReplyTarget?.(null);
-      onUpdated();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setSubmitting(false);
+      setLocalSubmitting(false);
     }
   };
 
@@ -1419,92 +1534,115 @@ export function ShioriComposer({
     const text = (overrideText ?? draft).trim();
     if (submitting || !project || !workspace) return;
     if (effectiveTab !== "start" && !text) return;
-    setSubmitting(true);
+    setLocalSubmitting(true);
     setError(null);
     setDurationMenuOpen(false);
     try {
+      const engine = sessionActions ? null : getLiveSessionEngine(project);
       if (effectiveTab === "event") {
         const shouldResume = Boolean((forceResumeAuto ?? resumeOnReply) && canResumeFromReply);
-        const res = await mutateEventPool(
-          project,
-          workspace,
-          replyTarget
-            ? {
-                action: "reply",
+        const res = sessionActions
+          ? replyTarget
+            ? await sessionActions.replyPoolEvent({
                 replyTo: replyTarget.id,
                 text,
-                ...(shouldResume ? { resumeAuto: true, seconds: durationSeconds } : {}),
-              }
-            : { action: "send", text },
-        );
+                resumeAuto: shouldResume,
+                seconds: shouldResume ? durationSeconds : undefined,
+              })
+            : await sessionActions.sendPoolEvent(text)
+          : await engine!.mutatePool({
+              workspace,
+              run: data.run,
+              baseUpdatedAt: data.updatedAt,
+              baseServerModel: serverModel,
+              command: replyTarget
+                ? {
+                    action: "reply",
+                    replyTo: replyTarget.id,
+                    text,
+                    ...(shouldResume ? { resumeAuto: true, seconds: durationSeconds } : {}),
+                  }
+                : { action: "send", text },
+              fromComposer: true,
+              onUpdated,
+            });
         applyHostStatusObject(res.hostStatus);
         onPoolMutated?.(res.snapshot, res.hostStatus);
         if (!overrideText) setDraft("");
         onSelectReplyTarget?.(null);
         setLastSent(res.hostOnline ? text : `${t("poolOfflineQueuedFeedback")} · ${text}`);
-        onUpdated();
         return;
       }
 
-      let res: unknown;
       if (effectiveTab === "steer") {
-        try {
-          res = await sendRuntimeControl(project, workspace, {
-            action: "steer",
-            message: text,
-            runId: data.run,
-            expectedEpoch: effectiveHost?.epoch ?? undefined,
-          });
-        } catch (steerErr) {
-          const msg = steerErr instanceof Error ? steerErr.message : String(steerErr);
-          if (msg.includes("Auto loop is not active")) {
-            res = await sendRuntimeControl(project, workspace, {
-              action: "auto_on",
-              ...(text ? { message: text } : {}),
-              seconds: durationSeconds,
-              runId: data.run,
+        const { fellBackToAutoOn, status } = sessionActions
+          ? await sessionActions.steerOrStartAuto(text, durationSeconds)
+          : await engine!.steerOrStartAuto({
+              workspace,
+              run: data.run,
+              baseUpdatedAt: data.updatedAt,
+              baseServerModel: serverModel,
               expectedEpoch: effectiveHost?.epoch ?? null,
+              message: text,
+              fallbackSeconds: durationSeconds,
+              onUpdated,
             });
-            setSelectedTab(null);
-          } else {
-            throw steerErr;
-          }
-        }
+        if (fellBackToAutoOn) setSelectedTab(null);
+        applyHostStatusObject(status);
       } else {
-        res = await sendRuntimeControl(project, workspace, {
-          action: "auto_on",
-          ...(text ? { message: text } : {}),
-          seconds: durationSeconds,
-          runId: data.run,
-          expectedEpoch: effectiveHost?.epoch ?? null,
-        });
+        const { status } = sessionActions
+          ? await sessionActions.startAuto({
+              message: text || undefined,
+              seconds: durationSeconds,
+            })
+          : await engine!.runRuntimeCommand({
+              workspace,
+              run: data.run,
+              baseUpdatedAt: data.updatedAt,
+              baseServerModel: serverModel,
+              command: {
+                action: "auto_on",
+                ...(text ? { message: text } : {}),
+                seconds: durationSeconds,
+                runId: data.run,
+                expectedEpoch: effectiveHost?.epoch ?? null,
+              },
+              onUpdated,
+            });
+        applyHostStatusObject(status);
       }
-      applyReturnedStatus(res);
       if (!overrideText) setDraft("");
       setLastSent(text || t("resumedDefaultPrompt"));
-      onUpdated();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setSubmitting(false);
+      setLocalSubmitting(false);
     }
   };
 
   const runComposerAction = async (command: RuntimeControlAction, feedbackLabel: string) => {
     if (submitting || !project || !workspace) return;
-    setSubmitting(true);
+    setLocalSubmitting(true);
     setError(null);
     setMenuOpen(false);
     setDurationMenuOpen(false);
     try {
-      const res = await sendRuntimeControl(project, workspace, command);
-      applyReturnedStatus(res);
+      const { status } = sessionActions
+        ? await sessionActions.runRuntimeCommand(command)
+        : await getLiveSessionEngine(project).runRuntimeCommand({
+            workspace,
+            run: data.run,
+            baseUpdatedAt: data.updatedAt,
+            baseServerModel: serverModel,
+            command,
+            onUpdated,
+          });
+      applyHostStatusObject(status);
       setLastSent(feedbackLabel);
-      onUpdated();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
-      setSubmitting(false);
+      setLocalSubmitting(false);
     }
   };
 
@@ -1926,15 +2064,14 @@ export function ShioriComposer({
             </button>
 
             {isAuto && hostOnline && onApplyLiveTimer && (
-              <LiveStopTimerControl
-                remainingSeconds={liveRemainingSeconds ?? null}
+              <LiveComposerTimerSlot
+                spec={liveTimerSpec}
+                fallbackRemainingSeconds={liveRemainingSeconds ?? null}
                 disabled={submitting}
-                placement="up"
-                compact
                 onExtendTimer={
                   onExtendLiveTimer
-                    ? async delta => {
-                        await onExtendLiveTimer(delta);
+                    ? async (delta, currentRemaining) => {
+                        await onExtendLiveTimer(delta, currentRemaining);
                         setLastSent(t("timerExtend15m"));
                       }
                     : undefined
@@ -2089,7 +2226,7 @@ export function ShioriWorkbench({
   jumpTarget = null,
   onClearJumpTarget,
   onActiveSegmentChange,
-  data,
+  data: rawData,
   feed,
   isLiveRun,
   refresh = true,
@@ -2100,9 +2237,9 @@ export function ShioriWorkbench({
   selectedBlock,
   onSelectBlock,
   onUpdated,
-  onOpenPerf,
-  onOpenCaps,
-  onOpenReplay,
+  onOpenPerf: _onOpenPerf,
+  onOpenCaps: _onOpenCaps,
+  onOpenReplay: _onOpenReplay,
   onOpenReplayAt,
   onReturnLatest,
   renderObservation,
@@ -2112,77 +2249,105 @@ export function ShioriWorkbench({
   renderEventPoolPanel,
 }: ShioriWorkbenchProps) {
   const t = useTranslations("shioriCockpit");
+  const session = useLiveSession({
+    project,
+    workspace,
+    runs,
+    data: rawData,
+    feed,
+    isLiveRun,
+    refresh,
+    olderRunLoadFailedText: t("olderRunLoadFailed"),
+    onUpdated,
+  });
+  const {
+    data,
+    live,
+    statusAnchorMs,
+    hostOnline,
+    isAuto,
+    consolidating,
+    thinking,
+    activeModel,
+    activeServiceTier,
+    activeEffort,
+    submitting: sessionSubmitting,
+    poolSubmitting,
+    poolSnapshot,
+    poolEventsById,
+    resolveLivePoolEvent,
+    pendingInboundCount,
+    pendingOutboundCount,
+    pendingPoolCount,
+    olderRuns,
+    loadingOlderRun,
+    olderRunError,
+    hasMoreUpwardHistory,
+    earliestLoadedMs,
+    segments,
+    allCalls,
+    loadNextUpwardHistory,
+    loadOlderRunSegment,
+    clearOlderRunError,
+    actions,
+  } = session;
+
   const streamRef = useRef<HTMLDivElement | null>(null);
   const prependScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
   const isJumpingRef = useRef(false);
-  const prevRunRef = useRef(data.run);
-  const cachedSegmentsRef = useRef<{ run: string; segments: StreamSegment[] }>({
-    run: "",
-    segments: [],
-  });
+  const lastScrollTopRef = useRef<number | null>(null);
+  const scrollRafRef = useRef<number | null>(null);
+  const lastReportedSegmentRef = useRef("");
   const [showAllSteps, setShowAllSteps] = useState(false);
   const [desktopDockOpen, setDesktopDockOpen] = useState(true);
   const [drawerDockOpen, setDrawerDockOpen] = useState(false);
   const [isOverlayDock, setIsOverlayDock] = useState(false);
   const dockOpen = isOverlayDock ? drawerDockOpen : desktopDockOpen;
-  const openDock = () => {
+  const openDock = useCallback(() => {
     setDesktopDockOpen(true);
     setDrawerDockOpen(true);
-  };
-  const closeDock = () => {
+  }, []);
+  const closeDock = useCallback(() => {
     if (isOverlayDock) setDrawerDockOpen(false);
     else setDesktopDockOpen(false);
-  };
-  const toggleDock = () => {
+  }, [isOverlayDock]);
+  const toggleDock = useCallback(() => {
     if (isOverlayDock) setDrawerDockOpen(prev => !prev);
     else setDesktopDockOpen(prev => !prev);
-  };
+  }, [isOverlayDock]);
   const [dockTab, setDockTab] = useState<"stage" | "pool">("stage");
   const [focusedPoolEventId, setFocusedPoolEventId] = useState<string | null>(null);
   const [pendingPoolLocateEvent, setPendingPoolLocateEvent] = useState<PoolEvent | null>(null);
   const [poolFlashId, setPoolFlashId] = useState<string | null>(null);
-  const [poolSubmitting, setPoolSubmitting] = useState(false);
   const poolFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openDockOnStage = () => {
+  const openDockOnStage = useCallback(() => {
     setDockTab("stage");
     openDock();
-  };
-  const openPoolOverview = (eventId?: string | null) => {
-    setDockTab("pool");
-    if (eventId !== undefined) setFocusedPoolEventId(eventId);
-    openDock();
-  };
-  const togglePoolOverview = () => {
+  }, [openDock]);
+  const openPoolOverview = useCallback(
+    (eventId?: string | null) => {
+      setDockTab("pool");
+      if (eventId !== undefined) setFocusedPoolEventId(eventId);
+      openDock();
+    },
+    [openDock],
+  );
+  const togglePoolOverview = useCallback(() => {
     if (dockOpen && dockTab === "pool") {
       closeDock();
       return;
     }
     openPoolOverview();
-  };
-  const [atBottom, setAtBottom] = useState(true);
-  const [modelOverride, setModelOverride] = useState<{
-    project: string;
-    baseServerModel: string | null;
-    model: string;
-  } | null>(null);
-  const [hostStatusOverride, setHostStatusOverride] = useState<{
-    project: string;
-    run: string;
-    baseUpdatedAt: string;
-    appliedAtMs: number;
-    status: Record<string, unknown>;
-  } | null>(null);
-  const [loadedOlderRuns, setLoadedOlderRuns] = useState<
-    Array<{
-      runId: string;
-      data: RunData;
-      blocks: ActivityBlock[];
-      before: string | null;
-      hasMore: boolean;
-    }>
-  >([]);
-  const [loadingOlderRun, setLoadingOlderRun] = useState(false);
-  const [olderRunError, setOlderRunError] = useState<string | null>(null);
+  }, [dockOpen, dockTab, closeDock, openPoolOverview]);
+
+  const [atBottom, setAtBottomState] = useState(true);
+  const atBottomRef = useRef(true);
+  const setAtBottom = useCallback((next: boolean) => {
+    if (atBottomRef.current === next) return;
+    atBottomRef.current = next;
+    setAtBottomState(next);
+  }, []);
+
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [inspectedTurn, setInspectedTurn] = useState<{
     runId: string;
@@ -2195,55 +2360,21 @@ export function ShioriWorkbench({
     mode: ComposerMode;
     prompt: string | null;
   } | null>(null);
-  const [poolSnapshot, setPoolSnapshot] = useState<EventPoolSnapshot | null>(null);
   const [replyTarget, setReplyTarget] = useState<PoolEvent | null>(null);
   const [replyAutoResumeDefault, setReplyAutoResumeDefault] = useState<boolean | undefined>(undefined);
-  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
-    setLoadedOlderRuns([]);
-    setOlderRunError(null);
     setHighlightedSegmentId(null);
     setInspectedTurn(null);
-    setModelOverride(null);
-    setHostStatusOverride(null);
-    setPoolSnapshot(null);
     setReplyTarget(null);
     setReplyAutoResumeDefault(undefined);
     setFocusedPoolEventId(null);
     setPendingPoolLocateEvent(null);
     setPoolFlashId(null);
-  }, [project]);
-
-  useEffect(() => {
-    if (!isLiveRun || !project || !workspace) return;
-    let cancelled = false;
-    const controller = new AbortController();
-    const pull = async () => {
-      try {
-        const payload = await fetchEventPool(project, workspace, controller.signal);
-        if (cancelled) return;
-        setPoolSnapshot(payload.snapshot);
-      } catch {
-        // Non-fatal background refresh
-      }
-    };
-    void pull();
-    if (!refresh) {
-      return () => {
-        cancelled = true;
-        controller.abort();
-      };
-    }
-    const timer = setInterval(() => {
-      void pull();
-    }, 3500);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      clearInterval(timer);
-    };
-  }, [isLiveRun, project, workspace, data.updatedAt, refresh]);
+    lastScrollTopRef.current = null;
+    lastReportedSegmentRef.current = "";
+    setAtBottom(true);
+  }, [project, setAtBottom]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -2285,359 +2416,32 @@ export function ShioriWorkbench({
     setDrawerDockOpen(true);
   }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt]);
 
-  const activeHostOverride =
-    hostStatusOverride &&
-    hostStatusOverride.project === project &&
-    hostStatusOverride.run === data.run &&
-    hostStatusOverride.baseUpdatedAt === data.updatedAt
-      ? hostStatusOverride.status
-      : null;
-
-  const live = (activeHostOverride ?? data.live) as (NonNullable<RunData["live"]> & {
-    maxSeconds?: number | null;
-    remainingSeconds?: number | null;
-    consolidating?: boolean;
-    model?: string | null;
-    hostOffline?: boolean;
-    queue?: { steering?: number };
-    eventPool?: { pendingInbound?: number; pendingOutbound?: number; latestSeq?: number };
-  }) | null;
-  const control = data.lastControl as (RunData["lastControl"] & { model?: string | null }) | undefined;
-  const isSyntheticOffline = Boolean(live?.hostOffline);
-  const hostOnline = Boolean(isLiveRun && ((!isSyntheticOffline && live) || data.controlAllowed));
-  const mode = live?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
-  const consolidating = Boolean(live?.consolidating ?? control?.consolidating);
-  const thinking = Boolean(live?.thinking ?? control?.thinking);
-  const isAuto = mode === "auto";
-  const serverModel = resolveShioriActiveModel({
-    liveModel: typeof live?.model === "string" ? live.model : null,
-    controlModel: typeof control?.model === "string" ? control.model : null,
-    manifestModel: data.manifest.model ?? null,
-  });
-  const activeModelOverride =
-    modelOverride &&
-    modelOverride.project === project &&
-    (serverModel === modelOverride.baseServerModel || serverModel === modelOverride.model)
-      ? modelOverride.model
-      : null;
-  const activeModel = resolveShioriActiveModel({
-    localModelOverride: activeModelOverride,
-    liveModel: typeof live?.model === "string" ? live.model : null,
-    controlModel: typeof control?.model === "string" ? control.model : null,
-    manifestModel: data.manifest.model ?? null,
-  });
-
-  useEffect(() => {
-    if (prevRunRef.current !== data.run) {
-      prevRunRef.current = data.run;
-      setLoadedOlderRuns([]);
-      setOlderRunError(null);
-    }
-  }, [data.run]);
-
-  useEffect(() => {
-    if (!isLiveRun || !isAuto || !refresh) return;
-    setNowMs(Date.now());
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, [isLiveRun, isAuto, refresh]);
-
-  const earliestOlderRun = loadedOlderRuns[0] ?? null;
-  const earliestLoadedRunId = earliestOlderRun?.runId ?? data.run;
-  const earliestIdxInCatalog = runs.findIndex(r => r.id === earliestLoadedRunId);
-  const nextOlderRun =
-    earliestIdxInCatalog >= 0 && earliestIdxInCatalog + 1 < runs.length
-      ? runs[earliestIdxInCatalog + 1]
-      : null;
-
-  const hasMoreUpwardHistory = Boolean(
-    loadedOlderRuns.length === 0
-      ? feed.hasMore || nextOlderRun
-      : earliestOlderRun?.hasMore || nextOlderRun || feed.hasMore,
-  );
-
-  const olderRunAbortRef = useRef<AbortController | null>(null);
-  useEffect(() => {
-    return () => olderRunAbortRef.current?.abort();
-  }, [project, data.run]);
-
-  const fetchHistoricalRun = async (
-    targetRunId: string,
-    signal: AbortSignal,
-    evidence?: { targetRunId: string; call?: string; image?: string },
-  ) => {
-    const runParams = new URLSearchParams({ project, run: targetRunId, epoch: "all" });
-    if (evidence && evidence.targetRunId === targetRunId) {
-      if (evidence.call) runParams.set("call", evidence.call);
-      if (evidence.image) runParams.set("image", evidence.image);
-    }
-    const actParams = new URLSearchParams({
-      project,
-      run: targetRunId,
-      epoch: "all",
-      mode: "history",
-      kind: "all",
-      limit: "300",
-    });
-    const [runPayload, actPayload] = await Promise.all([
-      readArchiveJson<RunData>(`/api/run?${runParams}`, signal),
-      requestActivity(actParams, signal),
-    ]);
-    return {
-      runId: targetRunId,
-      data: runPayload,
-      blocks: Array.isArray(actPayload.blocks) ? actPayload.blocks : [],
-      before: typeof actPayload.before === "string" ? actPayload.before : null,
-      hasMore: Boolean(actPayload.hasMore && actPayload.before),
-    };
-  };
-
-  const capturePrependAnchor = () => {
+  const capturePrependAnchor = useCallback(() => {
     const el = streamRef.current;
-    if (el && !atBottom && !isJumpingRef.current) {
+    if (el && !atBottomRef.current && !isJumpingRef.current) {
       prependScrollAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
     }
-  };
+  }, []);
 
-  const loadEarlierBlocksOfOlderRun = async (targetRunId: string, beforeCursor: string) => {
-    if (loadingOlderRun || !project) return;
-    olderRunAbortRef.current?.abort();
-    const controller = new AbortController();
-    olderRunAbortRef.current = controller;
-    setLoadingOlderRun(true);
-    setOlderRunError(null);
-    capturePrependAnchor();
-    try {
-      const actParams = new URLSearchParams({
-        project,
-        run: targetRunId,
-        epoch: "all",
-        mode: "history",
-        kind: "all",
-        before: beforeCursor,
-        limit: "250",
-      });
-      const actPayload = await requestActivity(actParams, controller.signal);
-      if (controller.signal.aborted) return;
-      const earlierBlocks = Array.isArray(actPayload.blocks) ? actPayload.blocks : [];
-      setLoadedOlderRuns(prev =>
-        prev.map(entry => {
-          if (entry.runId !== targetRunId) return entry;
-          const seenIds = new Set(entry.blocks.map(b => b.id));
-          const dedupedEarlier = earlierBlocks.filter(b => !seenIds.has(b.id));
-          return {
-            ...entry,
-            blocks: [...dedupedEarlier, ...entry.blocks],
-            before: typeof actPayload.before === "string" ? actPayload.before : null,
-            hasMore: Boolean(actPayload.hasMore && actPayload.before && dedupedEarlier.length > 0),
-          };
-        }),
-      );
-    } catch (cause) {
-      if (controller.signal.aborted) return;
-      prependScrollAnchorRef.current = null;
-      setOlderRunError(cause instanceof Error ? cleanErrorMessage(cause.message) : t("olderRunLoadFailed"));
-    } finally {
-      if (olderRunAbortRef.current === controller) {
-        setLoadingOlderRun(false);
-      }
-    }
-  };
+  const triggerUpwardHistory = useCallback(() => {
+    if (isJumpingRef.current) return;
+    loadNextUpwardHistory(capturePrependAnchor);
+  }, [loadNextUpwardHistory, capturePrependAnchor]);
 
-  const loadOlderRunSegment = async (
-    upToRunId?: string,
-    options?: {
-      preserveScroll?: boolean;
-      evidence?: { targetRunId: string; call?: string; image?: string };
-    },
-  ) => {
-    if (loadingOlderRun || !project) return;
-    olderRunAbortRef.current?.abort();
-    const controller = new AbortController();
-    olderRunAbortRef.current = controller;
-    setLoadingOlderRun(true);
-    setOlderRunError(null);
-    if (options?.preserveScroll !== false) {
-      capturePrependAnchor();
-    } else {
-      prependScrollAnchorRef.current = null;
-    }
-    try {
-      const existingIds = new Set([data.run, ...loadedOlderRuns.map(r => r.runId)]);
-      const toFetch: string[] = [];
-      if (upToRunId) {
-        const startIdx = runs.findIndex(r => r.id === earliestLoadedRunId);
-        const endIdx = runs.findIndex(r => r.id === upToRunId);
-        if (startIdx >= 0 && endIdx > startIdx) {
-          for (let i = startIdx + 1; i <= endIdx; i++) {
-            if (!existingIds.has(runs[i].id)) toFetch.push(runs[i].id);
-          }
-        } else if (!existingIds.has(upToRunId)) {
-          toFetch.push(upToRunId);
-        }
-      } else if (nextOlderRun && !existingIds.has(nextOlderRun.id)) {
-        toFetch.push(nextOlderRun.id);
-      }
-
-      if (toFetch.length === 0) return;
-      const fetched = await Promise.all(
-        toFetch.map(id => fetchHistoricalRun(id, controller.signal, options?.evidence)),
-      );
-      if (controller.signal.aborted) return;
-      // fetched is newest-to-oldest; reverse so loadedOlderRuns stays chronological (oldest first)
-      const chronologicalFetched = [...fetched].reverse();
-      setLoadedOlderRuns(prev => {
-        const merged = [...chronologicalFetched, ...prev];
-        const seen = new Set<string>();
-        return merged.filter(item => {
-          if (seen.has(item.runId)) return false;
-          seen.add(item.runId);
-          return true;
-        });
-      });
-    } catch (cause) {
-      if (controller.signal.aborted) return;
-      prependScrollAnchorRef.current = null;
-      setOlderRunError(cause instanceof Error ? cleanErrorMessage(cause.message) : t("olderRunLoadFailed"));
-    } finally {
-      if (olderRunAbortRef.current === controller) {
-        setLoadingOlderRun(false);
-      }
-    }
-  };
-
-  const loadNextUpwardHistory = () => {
-    if (feed.loading || feed.loadingOlder || loadingOlderRun || isJumpingRef.current) return;
-    if (loadedOlderRuns.length === 0 && feed.hasMore) {
-      capturePrependAnchor();
-      void feed.earlier();
-      return;
-    }
-    if (earliestOlderRun?.hasMore && earliestOlderRun.before) {
-      void loadEarlierBlocksOfOlderRun(earliestOlderRun.runId, earliestOlderRun.before);
-      return;
-    }
-    if (nextOlderRun) {
-      void loadOlderRunSegment();
-      return;
-    }
-    if (feed.hasMore) {
-      capturePrependAnchor();
-      void feed.earlier();
-    }
-  };
-
-  const allCalls = useMemo(
-    () => [...loadedOlderRuns.flatMap(r => r.data.calls), ...data.calls],
-    [loadedOlderRuns, data.calls],
-  );
-
-  const poolEventsById = useMemo(
-    () => new Map((poolSnapshot?.events ?? []).map(item => [item.id, item])),
-    [poolSnapshot],
-  );
-  // Prefer the live snapshot, but never regress a receipt-enriched `handled` state back to a stale `pending`.
-  const resolveLivePoolEvent = (event: PoolEvent): PoolEvent => {
-    const snapshotItem = poolEventsById.get(event.id);
-    if (!snapshotItem) return event;
-    return snapshotItem.status === "pending" && event.status === "handled"
-      ? { ...snapshotItem, status: "handled", handledAt: event.handledAt, handledBy: event.handledBy }
-      : snapshotItem;
-  };
-  const pendingOutboundCount =
-    poolSnapshot?.summary.pendingOutbound ?? live?.eventPool?.pendingOutbound ?? 0;
-  const pendingInboundCount =
-    poolSnapshot?.summary.pendingInbound ?? live?.eventPool?.pendingInbound ?? 0;
-  const pendingPoolCount = pendingInboundCount + pendingOutboundCount;
   const canMutatePool = Boolean(isLiveRun && project && workspace);
   const canResumeAuto = hostOnline && !isAuto && !consolidating;
 
-  // Floor of the loaded stream window: workspace Event Pool items older than this stay in the overview
-  // until the user pages upward (or explicitly locates them), instead of leaking into today's tail.
-  const earliestLoadedMs = useMemo(() => {
-    if (!hasMoreUpwardHistory) return 0;
-    const minFinite = (...values: Array<string | null | undefined>) => {
-      const parsed = values.map(v => (v ? Date.parse(v) : NaN)).filter(Number.isFinite);
-      return parsed.length > 0 ? Math.min(...parsed) : NaN;
-    };
-    const first = loadedOlderRuns[0];
-    if (first) {
-      return first.hasMore
-        ? minFinite(first.blocks[0]?.at)
-        : minFinite(
-            first.blocks[0]?.at,
-            first.data.cycles[0]?.startedAt,
-            runs.find(r => r.id === first.runId)?.startedAt,
-          );
-    }
-    // `blocks[0]` can be an older block re-delivered by a late live update; the history page floor is authoritative.
-    return feed.hasMore
-      ? minFinite(feed.historyFloorAt ?? feed.blocks[0]?.at)
-      : minFinite(feed.blocks[0]?.at, data.cycles[0]?.startedAt, runs.find(r => r.id === data.run)?.startedAt);
-  }, [hasMoreUpwardHistory, loadedOlderRuns, runs, feed.hasMore, feed.historyFloorAt, feed.blocks, data.cycles, data.run]);
-
-  const computedSegments = useMemo(() => {
-    const allSegments: StreamSegment[] = [];
-    // Determine the run immediately preceding the earliest loaded run in `runs` (if any) so we can show inter-run gap
-    let prevEndedAt: string | null = nextOlderRun?.endedAt ?? nextOlderRun?.startedAt ?? null;
-
-    for (const older of loadedOlderRuns) {
-      const olderInfo = runs.find(r => r.id === older.runId);
-      const segs = buildCodexSegments(older.blocks, older.data.calls, older.data.observations, {
-        runId: older.runId,
-        cycles: older.data.cycles,
-        fallbackStartedAt: olderInfo?.startedAt ?? older.data.updatedAt,
-        prevEndedAt,
-        isLatestRun: false,
-        isAuto: false,
-      });
-      allSegments.push(...segs);
-      prevEndedAt =
-        older.data.cycles.at(-1)?.endedAt ??
-        olderInfo?.endedAt ??
-        older.blocks.at(-1)?.at ??
-        older.data.updatedAt ??
-        prevEndedAt;
-    }
-
-    const liveSyncedCycles =
-      isAuto && live && "maxSeconds" in live && data.cycles.length > 0
-        ? data.cycles.map((cycle, idx) =>
-            idx === data.cycles.length - 1 ? { ...cycle, maxSeconds: live.maxSeconds ?? null } : cycle,
-          )
-        : data.cycles;
-
-    const currentSegs = buildCodexSegments(feed.blocks, data.calls, data.observations, {
-      runId: data.run,
-      cycles: liveSyncedCycles,
-      prevEndedAt,
-      isLatestRun: isLiveRun,
-      isAuto,
-    });
-    allSegments.push(...currentSegs);
-
-    // Synthesize workspace Event Pool items not yet projected in loaded blocks (e.g. standby/offline submissions)
-    // at their true `createdAt` position; never pin older events to the stream tail.
-    if (isLiveRun && !feed.historical && poolSnapshot?.events.length) {
-      return mergePoolSnapshotSegments(allSegments, poolSnapshot.events, {
-        earliestLoadedMs,
-        hasMoreUpwardHistory,
-      });
-    }
-
-    return allSegments;
-  }, [loadedOlderRuns, runs, nextOlderRun, feed.blocks, feed.historical, data.calls, data.observations, data.run, data.cycles, data.updatedAt, isLiveRun, isAuto, live, poolSnapshot, earliestLoadedMs, hasMoreUpwardHistory]);
-
-  if (computedSegments.length > 0) {
-    cachedSegmentsRef.current = { run: data.run, segments: computedSegments };
-  }
-  const segments =
-    computedSegments.length === 0 && feed.loading && cachedSegmentsRef.current.run === data.run
-      ? cachedSegmentsRef.current.segments
-      : computedSegments;
-
   const programmaticScrollUntilRef = useRef(0);
   const lastJumpedSeqRef = useRef<number | null>(null);
+
+  const reportActiveSegment = useCallback(
+    (nextSegment: string) => {
+      if (!onActiveSegmentChange || lastReportedSegmentRef.current === nextSegment) return;
+      lastReportedSegmentRef.current = nextSegment;
+      onActiveSegmentChange(nextSegment);
+    },
+    [onActiveSegmentChange],
+  );
 
   // Preserve scroll position when prepending earlier history or older run segments
   useLayoutEffect(() => {
@@ -2648,17 +2452,18 @@ export function ShioriWorkbench({
     if (delta !== 0) {
       programmaticScrollUntilRef.current = Date.now() + 300;
       el.scrollTop = Math.max(0, anchor.scrollTop + delta);
+      lastScrollTopRef.current = el.scrollTop;
     }
     prependScrollAnchorRef.current = null;
-  }, [segments.length, feed.blocks.length, loadedOlderRuns.length]);
+  }, [segments.length, feed.blocks.length, olderRuns.length]);
 
-  const scrollToBottom = () => {
+  const scrollToBottom = useCallback(() => {
     if (feed.historical) {
       feed.latest();
     }
     isJumpingRef.current = false;
     onClearJumpTarget?.();
-    onActiveSegmentChange?.("");
+    reportActiveSegment("");
     const el = streamRef.current;
     if (!el) return;
     programmaticScrollUntilRef.current = Date.now() + 700;
@@ -2672,46 +2477,63 @@ export function ShioriWorkbench({
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
     setAtBottom(true);
-  };
+  }, [feed, onClearJumpTarget, reportActiveSegment, setAtBottom]);
 
-  const flashPoolEvent = (eventId: string) => {
+  const flashPoolEvent = useCallback((eventId: string) => {
     setPoolFlashId(eventId);
     if (poolFlashTimerRef.current) clearTimeout(poolFlashTimerRef.current);
     poolFlashTimerRef.current = setTimeout(() => {
       setPoolFlashId(prev => (prev === eventId ? null : prev));
     }, 2400);
+  }, []);
+
+  const scrollToPoolEvent = useCallback(
+    (eventId: string): boolean => {
+      const container = streamRef.current;
+      if (!container) return false;
+      const targetEl = container.querySelector<HTMLElement>(`[data-pool-event-id="${CSS.escape(eventId)}"]`);
+      if (!targetEl) return false;
+      programmaticScrollUntilRef.current = Date.now() + 900;
+      setAtBottom(false);
+      const top =
+        container.scrollTop + (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) - 72;
+      container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      flashPoolEvent(eventId);
+      return true;
+    },
+    [flashPoolEvent, setAtBottom],
+  );
+
+  const poolLocateContextRef = useRef({
+    isOverlayDock,
+    hasMoreUpwardHistory,
+    earliestLoadedMs,
+  });
+  poolLocateContextRef.current = {
+    isOverlayDock,
+    hasMoreUpwardHistory,
+    earliestLoadedMs,
   };
 
-  const scrollToPoolEvent = (eventId: string): boolean => {
-    const container = streamRef.current;
-    if (!container) return false;
-    const targetEl = container.querySelector<HTMLElement>(`[data-pool-event-id="${CSS.escape(eventId)}"]`);
-    if (!targetEl) return false;
-    programmaticScrollUntilRef.current = Date.now() + 900;
-    setAtBottom(false);
-    const top =
-      container.scrollTop + (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) - 72;
-    container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
-    flashPoolEvent(eventId);
-    return true;
-  };
-
-  const locatePoolEventInStream = (event: PoolEvent) => {
-    if (isOverlayDock) setDrawerDockOpen(false);
-    if (scrollToPoolEvent(event.id)) {
-      setPendingPoolLocateEvent(null);
-      return;
-    }
-    const createdMs = Date.parse(event.createdAt);
-    if (hasMoreUpwardHistory && (!Number.isFinite(earliestLoadedMs) || !(createdMs >= earliestLoadedMs))) {
-      setPendingPoolLocateEvent(event);
-      return;
-    }
-    // Target may mount on the next frame (e.g. after the overlay drawer closes).
-    requestAnimationFrame(() => {
-      scrollToPoolEvent(event.id);
-    });
-  };
+  const locatePoolEventInStream = useCallback(
+    (event: PoolEvent) => {
+      const ctx = poolLocateContextRef.current;
+      if (ctx.isOverlayDock) setDrawerDockOpen(false);
+      if (scrollToPoolEvent(event.id)) {
+        setPendingPoolLocateEvent(null);
+        return;
+      }
+      const createdMs = Date.parse(event.createdAt);
+      if (ctx.hasMoreUpwardHistory && (!Number.isFinite(ctx.earliestLoadedMs) || !(createdMs >= ctx.earliestLoadedMs))) {
+        setPendingPoolLocateEvent(event);
+        return;
+      }
+      requestAnimationFrame(() => {
+        scrollToPoolEvent(event.id);
+      });
+    },
+    [scrollToPoolEvent],
+  );
 
   // Page upward history until a requested Event Pool item enters the loaded stream window.
   useEffect(() => {
@@ -2724,7 +2546,7 @@ export function ShioriWorkbench({
       setPendingPoolLocateEvent(null);
       return;
     }
-    loadNextUpwardHistory();
+    triggerUpwardHistory();
   }, [
     pendingPoolLocateEvent,
     segments.length,
@@ -2732,38 +2554,32 @@ export function ShioriWorkbench({
     feed.loadingOlder,
     loadingOlderRun,
     olderRunError,
+    scrollToPoolEvent,
+    triggerUpwardHistory,
   ]);
 
   useEffect(
     () => () => {
       if (poolFlashTimerRef.current) clearTimeout(poolFlashTimerRef.current);
+      if (scrollRafRef.current != null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(scrollRafRef.current);
+      }
     },
     [],
   );
 
-  const ackPoolEvent = async (eventId: string) => {
-    if (!project || !workspace) return;
-    setPoolSubmitting(true);
-    try {
-      const res = await mutateEventPool(project, workspace, { action: "ack", ids: [eventId] });
-      setPoolSnapshot(res.snapshot);
-      if (res.hostStatus) {
-        setHostStatusOverride({
-          project,
-          run: data.run,
-          baseUpdatedAt: data.updatedAt,
-          appliedAtMs: Date.now(),
-          status: res.hostStatus,
-        });
+  const ackPoolEvent = useCallback(
+    async (eventId: string) => {
+      if (!project || !workspace) return;
+      try {
+        await actions.ackPoolEvent(eventId);
+        setReplyTarget(prev => (prev?.id === eventId ? null : prev));
+      } catch {
+        // Optimistic rollback & snapshot polling surface authoritative state; keep non-fatal.
       }
-      if (replyTarget?.id === eventId) setReplyTarget(null);
-      onUpdated();
-    } catch {
-      // Snapshot polling surfaces the authoritative state; keep the action non-fatal.
-    } finally {
-      setPoolSubmitting(false);
-    }
-  };
+    },
+    [project, workspace, actions],
+  );
 
   const eventPoolPanelProps: EventPoolOverviewPanelProps = {
     snapshot: poolSnapshot,
@@ -2797,7 +2613,7 @@ export function ShioriWorkbench({
     const el = streamRef.current;
     if (!el) return;
     if (el.scrollHeight <= el.clientHeight + 140) {
-      loadNextUpwardHistory();
+      triggerUpwardHistory();
     }
   }, [
     segments.length,
@@ -2806,6 +2622,7 @@ export function ShioriWorkbench({
     loadingOlderRun,
     olderRunError,
     hasMoreUpwardHistory,
+    triggerUpwardHistory,
   ]);
 
   // Handle Quick-Jump Segment selection from top-right RunPicker or deep-link without page reload
@@ -2824,12 +2641,12 @@ export function ShioriWorkbench({
     const runAlreadyLoaded =
       !targetRunId ||
       targetRunId === data.run ||
-      loadedOlderRuns.some(r => r.runId === targetRunId);
+      olderRuns.some(r => r.runId === targetRunId);
 
     if (!runAlreadyLoaded) {
       if (!loadingOlderRun) {
+        prependScrollAnchorRef.current = null;
         void loadOlderRunSegment(targetRunId, {
-          preserveScroll: false,
           evidence:
             jumpTarget.call || jumpTarget.image
               ? { targetRunId, call: jumpTarget.call, image: jumpTarget.image }
@@ -2872,12 +2689,12 @@ export function ShioriWorkbench({
 
     if (targetEl) {
       lastJumpedSeqRef.current = jumpTarget.seq;
-      onActiveSegmentChange?.(jumpTarget.value);
+      reportActiveSegment(jumpTarget.value);
       if (jumpTarget.call || jumpTarget.image) {
         const ownerData =
           targetRunId === data.run
             ? data
-            : (loadedOlderRuns.find(r => r.runId === targetRunId)?.data ?? data);
+            : (olderRuns.find(r => r.runId === targetRunId)?.data ?? data);
         const matchedCall = jumpTarget.call
           ? (ownerData.selectedCall?.id === jumpTarget.call ? ownerData.selectedCall : undefined) ??
             ownerData.calls.find(c => c.id === jumpTarget.call)
@@ -2944,9 +2761,15 @@ export function ShioriWorkbench({
     jumpTarget?.image,
     segments.length,
     data,
-    loadedOlderRuns,
+    olderRuns,
     loadingOlderRun,
     olderRunError,
+    feed,
+    loadOlderRunSegment,
+    openDockOnStage,
+    reportActiveSegment,
+    scrollToBottom,
+    setAtBottom,
   ]);
 
   // Keep scrolled to bottom when new blocks arrive while following
@@ -2954,93 +2777,134 @@ export function ShioriWorkbench({
     const el = streamRef.current;
     if (!el || !atBottom || feed.historical || isJumpingRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [segments.length, feed.blocks.length, loadedOlderRuns.length, atBottom, feed.historical]);
+    lastScrollTopRef.current = el.scrollTop;
+  }, [segments.length, feed.blocks.length, olderRuns.length, atBottom, feed.historical]);
 
-  const handleScroll = () => {
+  const handleScroll = useCallback(() => {
     const el = streamRef.current;
     if (!el) return;
+    const prevScrollTop = lastScrollTopRef.current;
+    const currentScrollTop = el.scrollTop;
+    lastScrollTopRef.current = currentScrollTop;
+
     if (Date.now() < programmaticScrollUntilRef.current) return;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+
+    const distance = el.scrollHeight - currentScrollTop - el.clientHeight;
     const nextAtBottom = distance < 48;
     setAtBottom(nextAtBottom);
 
     if (nextAtBottom) {
-      onActiveSegmentChange?.("");
-    } else if (onActiveSegmentChange) {
-      const containerTop = el.getBoundingClientRect().top;
-      const dividers = el.querySelectorAll<HTMLElement>("[data-session-divider]");
-      let currentAnchor: HTMLElement | null = null;
-      for (const div of dividers) {
-        if (div.getBoundingClientRect().top <= containerTop + 96) {
-          currentAnchor = div;
-        } else {
-          break;
+      reportActiveSegment("");
+    } else if (onActiveSegmentChange && scrollRafRef.current == null) {
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        const container = streamRef.current;
+        if (!container || atBottomRef.current) return;
+        const containerTop = container.getBoundingClientRect().top;
+        const dividers = container.querySelectorAll<HTMLElement>("[data-session-divider]");
+        let currentAnchor: HTMLElement | null = null;
+        for (const div of dividers) {
+          if (div.getBoundingClientRect().top <= containerTop + 96) {
+            currentAnchor = div;
+          } else {
+            break;
+          }
         }
-      }
-      if (!currentAnchor && dividers.length > 0) {
-        currentAnchor = dividers[0];
-      }
-      if (currentAnchor) {
-        const divRunId = currentAnchor.dataset.runId ?? "";
-        const divEpoch = currentAnchor.dataset.epoch ?? "";
-        if (divRunId && divRunId !== data.run) {
-          onActiveSegmentChange(divRunId);
-        } else if (divRunId === data.run && data.cycles.length > 1 && divEpoch) {
-          const isLatestCycle = data.cycles.at(-1)?.epoch === divEpoch;
-          onActiveSegmentChange(isLatestCycle ? "" : `${divRunId}#${divEpoch}`);
-        } else {
-          onActiveSegmentChange("");
+        if (!currentAnchor && dividers.length > 0) {
+          currentAnchor = dividers[0];
         }
-      }
+        if (currentAnchor) {
+          const divRunId = currentAnchor.dataset.runId ?? "";
+          const divEpoch = currentAnchor.dataset.epoch ?? "";
+          if (divRunId && divRunId !== data.run) {
+            reportActiveSegment(divRunId);
+          } else if (divRunId === data.run && data.cycles.length > 1 && divEpoch) {
+            const isLatestCycle = data.cycles.at(-1)?.epoch === divEpoch;
+            reportActiveSegment(isLatestCycle ? "" : `${divRunId}#${divEpoch}`);
+          } else {
+            reportActiveSegment("");
+          }
+        }
+      });
     }
 
-    if (el.scrollTop < 280 && !olderRunError && hasMoreUpwardHistory) {
-      loadNextUpwardHistory();
+    const scrollingUp = prevScrollTop === null || currentScrollTop < prevScrollTop;
+    if (scrollingUp && currentScrollTop < 280 && !olderRunError && hasMoreUpwardHistory) {
+      triggerUpwardHistory();
     }
+  }, [
+    data.run,
+    data.cycles,
+    olderRunError,
+    hasMoreUpwardHistory,
+    onActiveSegmentChange,
+    reportActiveSegment,
+    setAtBottom,
+    triggerUpwardHistory,
+  ]);
+
+  const inspectContextRef = useRef({
+    data,
+    olderRuns,
+    allCalls,
+    onSelectBlock,
+  });
+  inspectContextRef.current = {
+    data,
+    olderRuns,
+    allCalls,
+    onSelectBlock,
   };
 
-  const handleInspectBlock = (runId: string, block: ActivityBlock, siblingSteps: ActivityBlock[] = []) => {
-    const ownerCalls =
-      runId === data.run
-        ? data.calls
-        : (loadedOlderRuns.find(r => r.runId === runId)?.data.calls ?? allCalls);
-    const matchedCall = resolveCallForTurn(block, siblingSteps, ownerCalls);
-    const isDeselecting = inspectedTurn?.blockId === block.id;
-    setInspectedTurn(
-      isDeselecting
-        ? null
-        : {
-            runId,
-            blockId: block.id,
-            callId: matchedCall?.id ?? null,
-            imageId: null,
-            at: block.at,
-          },
-    );
-    if (!isDeselecting) openDockOnStage();
-    onSelectBlock?.(block);
-  };
+  const handleInspectBlock = useCallback(
+    (runId: string, block: ActivityBlock, siblingSteps: ActivityBlock[] = []) => {
+      const ctx = inspectContextRef.current;
+      const ownerCalls =
+        runId === ctx.data.run
+          ? ctx.data.calls
+          : (ctx.olderRuns.find(r => r.runId === runId)?.data.calls ?? ctx.allCalls);
+      const matchedCall = resolveCallForTurn(block, siblingSteps, ownerCalls);
+      let opened = false;
+      setInspectedTurn(prev => {
+        if (prev?.blockId === block.id) return null;
+        opened = true;
+        return {
+          runId,
+          blockId: block.id,
+          callId: matchedCall?.id ?? null,
+          imageId: null,
+          at: block.at,
+        };
+      });
+      if (opened) openDockOnStage();
+      ctx.onSelectBlock?.(block);
+    },
+    [openDockOnStage],
+  );
 
-  const handleInspectInput = (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => {
-    const isDeselecting =
-      inspectedTurn?.blockId === segId && inspectedTurn?.imageId === (imageId ?? null);
-    setInspectedTurn(
-      isDeselecting
-        ? null
-        : {
-            runId,
-            blockId: segId,
-            callId: call?.id ?? null,
-            imageId: imageId ?? null,
-            at: at ?? call?.at ?? data.updatedAt,
-          },
-    );
-    if (!isDeselecting) openDockOnStage();
-  };
+  const handleInspectInput = useCallback(
+    (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => {
+      const ctx = inspectContextRef.current;
+      let opened = false;
+      setInspectedTurn(prev => {
+        if (prev?.blockId === segId && prev?.imageId === (imageId ?? null)) return null;
+        opened = true;
+        return {
+          runId,
+          blockId: segId,
+          callId: call?.id ?? null,
+          imageId: imageId ?? null,
+          at: at ?? call?.at ?? ctx.data.updatedAt,
+        };
+      });
+      if (opened) openDockOnStage();
+    },
+    [openDockOnStage],
+  );
 
   const inspectedRunData =
     inspectedTurn && inspectedTurn.runId !== data.run
-      ? (loadedOlderRuns.find(r => r.runId === inspectedTurn.runId)?.data ?? data)
+      ? (olderRuns.find(r => r.runId === inspectedTurn.runId)?.data ?? data)
       : data;
   const inspectedCall = inspectedTurn?.callId
     ? (inspectedRunData.selectedCall?.id === inspectedTurn.callId
@@ -3064,74 +2928,41 @@ export function ShioriWorkbench({
     latestCycle?.startedAt && latestCycle?.endedAt
       ? Math.max(0, Math.round((Date.parse(latestCycle.endedAt) - Date.parse(latestCycle.startedAt)) / 1000))
       : null;
-  const statusAnchorMs = activeHostOverride
-    ? hostStatusOverride!.appliedAtMs
-    : Date.parse(data.updatedAt);
-  const updatedDeltaSec =
-    isLiveRun && isAuto && refresh && Number.isFinite(statusAnchorMs)
-      ? Math.max(0, Math.min(15, Math.floor((nowMs - statusAnchorMs) / 1000)))
-      : 0;
   const baseCycleElapsed =
     isAuto && activeMaxSeconds != null && typeof live?.remainingSeconds === "number"
       ? Math.max(0, activeMaxSeconds - live.remainingSeconds)
       : isAuto && latestCycle?.startedAt && Number.isFinite(Date.parse(latestCycle.startedAt))
         ? Math.max(0, Math.floor((statusAnchorMs - Date.parse(latestCycle.startedAt)) / 1000))
         : (latestCycleDurationSeconds ?? elapsedSeconds);
-  const cycleElapsedSeconds =
-    activeMaxSeconds != null
-      ? Math.min(activeMaxSeconds, baseCycleElapsed + updatedDeltaSec)
-      : baseCycleElapsed + updatedDeltaSec;
-  const liveRemainingSeconds =
-    isAuto && typeof live?.remainingSeconds === "number"
-      ? Math.max(0, Math.round(live.remainingSeconds) - updatedDeltaSec)
-      : isAuto && activeMaxSeconds != null
-        ? Math.max(0, Math.round(activeMaxSeconds - cycleElapsedSeconds))
-        : null;
-  const displayPhaseElapsedMs =
-    phaseElapsedMs != null ? phaseElapsedMs + updatedDeltaSec * 1000 : null;
-  const budgetRatio =
-    activeMaxSeconds != null && activeMaxSeconds > 0
-      ? Math.min(100, Math.round((cycleElapsedSeconds / activeMaxSeconds) * 100))
-      : 0;
+  const rawRemainingSeconds = typeof live?.remainingSeconds === "number" ? live.remainingSeconds : null;
+  const timerTickEnabled = Boolean(isLiveRun && isAuto && refresh);
 
-  const applyLiveStopTimer = async (seconds: number | null) => {
-    if (!project || !workspace) return;
-    const res = await sendRuntimeControl(project, workspace, {
-      action: "auto_budget",
-      seconds,
-      runId: data.run,
-      expectedEpoch: live?.epoch ?? undefined,
-    });
-    const record = asRecord(res);
-    const status = asRecord(record?.status) ?? (typeof record?.mode === "string" ? record : null);
-    if (status) {
-      setHostStatusOverride({
-        project,
-        run: data.run,
-        baseUpdatedAt: data.updatedAt,
-        appliedAtMs: Date.now(),
-        status,
-      });
-    }
-    onUpdated();
-  };
+  const liveTimerSpec = useMemo<LiveTimerSpec>(
+    () => ({
+      tickEnabled: timerTickEnabled,
+      statusAnchorMs,
+      activeMaxSeconds,
+      baseCycleElapsed,
+      rawRemainingSeconds,
+    }),
+    [timerTickEnabled, statusAnchorMs, activeMaxSeconds, baseCycleElapsed, rawRemainingSeconds],
+  );
 
-  const extendLiveStopTimer = async (deltaSeconds: number) => {
-    if (!project || !workspace) return;
-    let baseRemaining = liveRemainingSeconds ?? 0;
-    try {
-      const fresh = await sendRuntimeControl(project, workspace, { action: "status" });
-      const freshRec = asRecord(fresh);
-      const freshStatus =
-        asRecord(freshRec?.status) ?? (typeof freshRec?.mode === "string" ? freshRec : null);
-      if (typeof freshStatus?.remainingSeconds === "number") {
-        baseRemaining = Math.max(0, freshStatus.remainingSeconds);
-      }
-    } catch {
-      // Fall back to local remaining estimate if status read fails transiently
-    }
-    await applyLiveStopTimer(Math.max(60, Math.round(baseRemaining + deltaSeconds)));
-  };
+  const applyLiveStopTimer = useCallback(
+    async (seconds: number | null) => {
+      if (!project || !workspace) return;
+      await actions.setAutoStopTimer(seconds);
+    },
+    [project, workspace, actions],
+  );
+
+  const extendLiveStopTimer = useCallback(
+    async (deltaSeconds: number, currentRemainingSeconds = 0) => {
+      if (!project || !workspace) return;
+      await actions.extendAutoStopTimer(deltaSeconds, currentRemainingSeconds);
+    },
+    [project, workspace, actions],
+  );
 
   const stateTitle = !isLiveRun
     ? t("stateSnapshot")
@@ -3172,13 +3003,12 @@ export function ShioriWorkbench({
               <span className="codex-status-text">{stateTitle}</span>
             </span>
             {phaseLabel && (
-              <span
-                className="codex-phase-inline codex-live-phase"
-                title={`${phaseLabel}${displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}`}
-              >
-                {phaseLabel}
-                {displayPhaseElapsedMs != null ? ` ${Math.max(0, Math.round(displayPhaseElapsedMs / 1000))}s` : ""}
-              </span>
+              <LivePhaseInlineBadge
+                phaseLabel={phaseLabel}
+                phaseElapsedMs={phaseElapsedMs}
+                tickEnabled={timerTickEnabled}
+                statusAnchorMs={statusAnchorMs}
+              />
             )}
           </div>
 
@@ -3252,8 +3082,8 @@ export function ShioriWorkbench({
                     type="button"
                     className="codex-step-group-toggle"
                     onClick={() => {
-                      setOlderRunError(null);
-                      loadNextUpwardHistory();
+                      clearOlderRunError();
+                      triggerUpwardHistory();
                     }}
                   >
                     <span>
@@ -3270,7 +3100,7 @@ export function ShioriWorkbench({
               </div>
             ) : (
               !hasMoreUpwardHistory &&
-              (loadedOlderRuns.length > 0 || segments.length > 6) && (
+              (olderRuns.length > 0 || segments.length > 6) && (
                 <div className="codex-history-origin">
                   <span>{t("sessionBeginningReached")}</span>
                 </div>
@@ -3278,34 +3108,43 @@ export function ShioriWorkbench({
             )}
 
             {segments.length === 0 ? (
-              <div className="codex-empty-thread">
-                <Bot className="size-8 text-muted-foreground/60" aria-hidden="true" />
-                <h3>{t("emptyThreadTitle")}</h3>
-                <p>{t("emptyThreadDesc")}</p>
-                <div className="codex-starter-chips">
-                  <button
-                    type="button"
-                    className="codex-starter-chip"
-                    onClick={() => setWorkflowCommand({ mode: "start", prompt: t("presetExploreStartPrompt") })}
-                  >
-                    {t("presetExploreStart")}
-                  </button>
-                  <button
-                    type="button"
-                    className="codex-starter-chip"
-                    onClick={() => setWorkflowCommand({ mode: "steer", prompt: t("presetEvalPrompt") })}
-                  >
-                    {t("presetEval")}
-                  </button>
-                  <button
-                    type="button"
-                    className="codex-starter-chip"
-                    onClick={() => setWorkflowCommand({ mode: "steer", prompt: t("presetAdaptPrompt") })}
-                  >
-                    {t("presetAdapt")}
-                  </button>
+              feed.loading ? (
+                <div className="codex-load-older">
+                  <div className="codex-history-status" role="status">
+                    <span className="codex-thinking-dot" />
+                    <span>{t("loadingOlder")}</span>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className="codex-empty-thread">
+                  <Bot className="size-8 text-muted-foreground/60" aria-hidden="true" />
+                  <h3>{t("emptyThreadTitle")}</h3>
+                  <p>{t("emptyThreadDesc")}</p>
+                  <div className="codex-starter-chips">
+                    <button
+                      type="button"
+                      className="codex-starter-chip"
+                      onClick={() => setWorkflowCommand({ mode: "start", prompt: t("presetExploreStartPrompt") })}
+                    >
+                      {t("presetExploreStart")}
+                    </button>
+                    <button
+                      type="button"
+                      className="codex-starter-chip"
+                      onClick={() => setWorkflowCommand({ mode: "steer", prompt: t("presetEvalPrompt") })}
+                    >
+                      {t("presetEval")}
+                    </button>
+                    <button
+                      type="button"
+                      className="codex-starter-chip"
+                      onClick={() => setWorkflowCommand({ mode: "steer", prompt: t("presetAdaptPrompt") })}
+                    >
+                      {t("presetAdapt")}
+                    </button>
+                  </div>
+                </div>
+              )
             ) : (
               segments.map((seg, segIdx) => {
                 if (seg.kind === "session_divider") {
@@ -3495,6 +3334,7 @@ export function ShioriWorkbench({
                   return (
                     <CodexInputCard
                       key={seg.id}
+                      segId={seg.id}
                       project={project}
                       run={segRunId}
                       call={seg.call}
@@ -3502,35 +3342,22 @@ export function ShioriWorkbench({
                       bgBlock={seg.bgBlock}
                       at={seg.at}
                       isSelected={isInputSelected}
-                      onSelect={imageId => handleInspectInput(segRunId, seg.id, seg.call, imageId, seg.at)}
+                      onInspectInput={handleInspectInput}
                       onOpenReplayAt={onOpenReplayAt}
                     />
                   );
                 }
 
-                const paragraphs = seg.responseText
-                  ? seg.responseText.split(/\n{2,}/).filter(Boolean)
-                  : [];
-                const isLastSegment = segIdx === segments.length - 1;
-
                 return (
-                  <article key={seg.id} id={seg.responseBlock?.id} className="codex-turn-assistant">
-                    <CodexStepGroup
-                      steps={seg.steps}
-                      forceExpanded={showAllSteps}
-                      defaultOpen={paragraphs.length === 0 && isLastSegment}
-                      selectedBlock={activeBlockId}
-                      onSelect={step => handleInspectBlock(seg.runId || data.run, step, seg.steps)}
-                    />
-
-                    {paragraphs.length > 0 && (
-                      <div className="codex-assistant-prose">
-                        {paragraphs.map((para, idx) => (
-                          <p key={idx}>{renderInlineFormatting(para)}</p>
-                        ))}
-                      </div>
-                    )}
-                  </article>
+                  <CodexTurnAssistantRow
+                    key={seg.id}
+                    segment={seg}
+                    fallbackRunId={data.run}
+                    showAllSteps={showAllSteps}
+                    isLastSegment={segIdx === segments.length - 1}
+                    selectedStepId={activeBlockId}
+                    onInspectBlock={handleInspectBlock}
+                  />
                 );
               })
             )}
@@ -3564,25 +3391,13 @@ export function ShioriWorkbench({
           workspace={workspace}
           data={data}
           isLiveRun={isLiveRun}
-          hostStatusOverride={activeHostOverride}
-          onHostStatusChange={status =>
-            setHostStatusOverride({
-              project,
-              run: data.run,
-              baseUpdatedAt: data.updatedAt,
-              appliedAtMs: Date.now(),
-              status,
-            })
-          }
-          activeModelOverride={activeModelOverride}
-          onModelChange={nextModel =>
-            setModelOverride({
-              project,
-              baseServerModel: serverModel,
-              model: nextModel,
-            })
-          }
-          liveRemainingSeconds={liveRemainingSeconds}
+          sessionActions={actions}
+          hostStatusOverride={live as Record<string, unknown> | null}
+          activeModelOverride={activeModel}
+          activeServiceTierOverride={activeServiceTier}
+          activeEffortOverride={activeEffort}
+          submittingOverride={sessionSubmitting}
+          liveTimerSpec={liveTimerSpec}
           onApplyLiveTimer={applyLiveStopTimer}
           onExtendLiveTimer={extendLiveStopTimer}
           poolSnapshot={poolSnapshot}
@@ -3591,18 +3406,6 @@ export function ShioriWorkbench({
           onSelectReplyTarget={(event, autoResume) => {
             setReplyTarget(event);
             setReplyAutoResumeDefault(autoResume);
-          }}
-          onPoolMutated={(snapshot, hostStatus) => {
-            setPoolSnapshot(snapshot);
-            if (hostStatus) {
-              setHostStatusOverride({
-                project,
-                run: data.run,
-                baseUpdatedAt: data.updatedAt,
-                appliedAtMs: Date.now(),
-                status: hostStatus,
-              });
-            }
           }}
           externalMode={workflowCommand?.mode ?? null}
           externalDraft={workflowCommand?.prompt ?? null}
@@ -3728,51 +3531,15 @@ export function ShioriWorkbench({
             {/* 2. Session Runtime & Live Stop-Timer + OMP Telemetry */}
             {summary && (
               <div className="codex-dock-section">
-                <div className="codex-runtime-header shiori-budget-header">
-                  <h3 className="codex-dock-heading" title={t("telemetryCardTitle")}>
-                    {t("telemetryCardTitle")}
-                  </h3>
-                  <div className="codex-runtime-header-right">
-                    {isAuto && hostOnline ? (
-                      <>
-                        <span className="codex-runtime-elapsed">
-                          {t("runtimeElapsedPrefix").replace(
-                            "{elapsed}",
-                            formatDurationCompact(cycleElapsedSeconds),
-                          )}
-                        </span>
-                        <LiveStopTimerControl
-                          remainingSeconds={liveRemainingSeconds}
-                          placement="down"
-                          onApplyTimer={applyLiveStopTimer}
-                          onExtendTimer={extendLiveStopTimer}
-                        />
-                      </>
-                    ) : (
-                      <span
-                        className="codex-runtime-status-summary"
-                        title={`${formatDurationCompact(elapsedSeconds)} · ${stateTitle}`}
-                      >
-                        {formatDurationCompact(elapsedSeconds)} · {stateTitle}
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                {isAuto && activeMaxSeconds != null && liveRemainingSeconds != null && (
-                  <div
-                    className="shiori-budget-bar"
-                    role="progressbar"
-                    aria-valuenow={budgetRatio}
-                    aria-valuemin={0}
-                    aria-valuemax={100}
-                  >
-                    {Array.from({ length: BUDGET_BLOCKS }, (_, index) => {
-                      const lit = Math.round((budgetRatio / 100) * BUDGET_BLOCKS);
-                      return <i key={index} data-on={index < lit || undefined} data-head={(index === lit - 1 && lit < BUDGET_BLOCKS) || undefined} />;
-                    })}
-                  </div>
-                )}
+                <LiveRuntimeTelemetryHeader
+                  isAuto={isAuto}
+                  hostOnline={hostOnline}
+                  elapsedSeconds={elapsedSeconds}
+                  stateTitle={stateTitle}
+                  spec={liveTimerSpec}
+                  onApplyTimer={applyLiveStopTimer}
+                  onExtendTimer={extendLiveStopTimer}
+                />
 
                 <div className="codex-stat-cards">
                   <div className="codex-stat-card shiori-stat-card">

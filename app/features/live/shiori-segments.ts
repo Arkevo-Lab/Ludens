@@ -396,6 +396,8 @@ export interface BuildSegmentsOptions {
   prevEndedAt?: string | null;
   isLatestRun?: boolean;
   isAuto?: boolean;
+  /** True while the run's initial activity blocks are still in flight, suppressing premature orphan call cards. */
+  blocksLoading?: boolean;
 }
 
 /**
@@ -630,14 +632,17 @@ export function buildCodexSegments(
     blocks.map(b => b.trace?.modelCallId).filter((id): id is string => Boolean(id)),
   );
   const windowStartMs = blocks.length > 0 ? (Date.parse(blocks[0].at) || 0) - 5_000 : 0;
-  const orphanInputCalls = calls
-    .filter(
-      call =>
-        callHasExternalInput(call) &&
-        !referencedCallIds.has(call.id) &&
-        (blocks.length === 0 || (call.atMs || Date.parse(call.at) || 0) >= windowStartMs),
-    )
-    .sort((a, b) => (a.atMs || Date.parse(a.at) || 0) - (b.atMs || Date.parse(b.at) || 0));
+  const orphanInputCalls =
+    options.blocksLoading && blocks.length === 0
+      ? []
+      : calls
+          .filter(
+            call =>
+              callHasExternalInput(call) &&
+              !referencedCallIds.has(call.id) &&
+              (blocks.length === 0 || (call.atMs || Date.parse(call.at) || 0) >= windowStartMs),
+          )
+          .sort((a, b) => (a.atMs || Date.parse(a.at) || 0) - (b.atMs || Date.parse(b.at) || 0));
   let orphanIdx = 0;
 
   const emitCallInputCard = (call: Call) => {
@@ -871,4 +876,154 @@ export function buildCodexSegments(
     );
   }
   return segments;
+}
+
+function sameBlockRefOrRev(left: ActivityBlock | null | undefined, right: ActivityBlock | null | undefined): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.id === right.id && left.revision === right.revision && left.status === right.status && left.text === right.text;
+}
+
+function sameStepsArray(left: ActivityBlock[], right: ActivityBlock[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (!sameBlockRefOrRev(left[i], right[i])) return false;
+  }
+  return true;
+}
+
+function samePoolEventValue(left: PoolEvent | undefined, right: PoolEvent | undefined): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.id === right.id &&
+    left.seq === right.seq &&
+    left.status === right.status &&
+    left.handledAt === right.handledAt &&
+    left.handledBy === right.handledBy &&
+    left.text === right.text &&
+    left.title === right.title &&
+    left.pauseRequested === right.pauseRequested
+  );
+}
+
+function sameCallSummary(left: Call | undefined, right: Call | undefined): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return (
+    left.id === right.id &&
+    left.index === right.index &&
+    left.at === right.at &&
+    left.inputText === right.inputText &&
+    left.inputObservations.length === right.inputObservations.length &&
+    left.inputObservations.every((id, idx) => id === right.inputObservations[idx])
+  );
+}
+
+function sameObservationsList(left: Observation[], right: Observation[]): boolean {
+  if (left === right) return true;
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i++) {
+    if (left[i].id !== right[i].id || left[i].at !== right[i].at || left[i].mediaStorage !== right[i].mediaStorage) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Reconciles a freshly built `StreamSegment[]` against the previous array so that
+ * unchanged historical segments (and `turn.steps` arrays) preserve exact object identity
+ * across 2.5s live polls, allowing `React.memo` segment rows to skip re-rendering.
+ */
+export function reconcileSegments(previous: StreamSegment[], next: StreamSegment[]): StreamSegment[] {
+  if (previous.length === 0 || next.length === 0) return next;
+  const prevById = new Map<string, StreamSegment>();
+  for (const seg of previous) prevById.set(seg.id, seg);
+
+  let allIdentical = previous.length === next.length;
+  const reconciled = next.map((seg, index) => {
+    const prior = prevById.get(seg.id);
+    if (!prior || prior.kind !== seg.kind) {
+      allIdentical = false;
+      return seg;
+    }
+
+    let keepPrior = false;
+    switch (seg.kind) {
+      case "session_divider": {
+        const p = prior as Extract<StreamSegment, { kind: "session_divider" }>;
+        keepPrior =
+          p.runId === seg.runId &&
+          p.epoch === seg.epoch &&
+          p.cycleIndex === seg.cycleIndex &&
+          p.startedAt === seg.startedAt &&
+          p.endedAt === seg.endedAt &&
+          p.durationSeconds === seg.durationSeconds &&
+          p.maxSeconds === seg.maxSeconds &&
+          p.stopReason === seg.stopReason &&
+          p.gapSeconds === seg.gapSeconds &&
+          p.isActive === seg.isActive;
+        break;
+      }
+      case "user": {
+        const p = prior as Extract<StreamSegment, { kind: "user" }>;
+        keepPrior =
+          sameBlockRefOrRev(p.block, seg.block) &&
+          p.text === seg.text &&
+          p.mode === seg.mode &&
+          samePoolEventValue(p.poolEvent, seg.poolEvent);
+        break;
+      }
+      case "outbound_event": {
+        const p = prior as Extract<StreamSegment, { kind: "outbound_event" }>;
+        keepPrior = sameBlockRefOrRev(p.block, seg.block) && samePoolEventValue(p.event, seg.event);
+        break;
+      }
+      case "pool_receipt": {
+        const p = prior as Extract<StreamSegment, { kind: "pool_receipt" }>;
+        keepPrior =
+          sameBlockRefOrRev(p.block, seg.block) &&
+          p.actor === seg.actor &&
+          p.at === seg.at &&
+          p.ids.length === seg.ids.length &&
+          p.ids.every((id, i) => id === seg.ids[i]) &&
+          p.events.length === seg.events.length &&
+          p.events.every((ev, i) => samePoolEventValue(ev, seg.events[i]));
+        break;
+      }
+      case "input": {
+        const p = prior as Extract<StreamSegment, { kind: "input" }>;
+        keepPrior =
+          p.runId === seg.runId &&
+          p.at === seg.at &&
+          sameCallSummary(p.call, seg.call) &&
+          sameObservationsList(p.observations, seg.observations) &&
+          sameBlockRefOrRev(p.bgBlock, seg.bgBlock);
+        break;
+      }
+      case "turn": {
+        const p = prior as Extract<StreamSegment, { kind: "turn" }>;
+        const stepsUnchanged = sameStepsArray(p.steps, seg.steps);
+        const respUnchanged = sameBlockRefOrRev(p.responseBlock, seg.responseBlock) && p.responseText === seg.responseText;
+        if (p.runId === seg.runId && stepsUnchanged && respUnchanged) {
+          keepPrior = true;
+        } else if (stepsUnchanged && p.steps !== seg.steps) {
+          allIdentical = false;
+          return { ...seg, steps: p.steps };
+        }
+        break;
+      }
+    }
+
+    if (keepPrior) {
+      if (prior !== previous[index]) allIdentical = false;
+      return prior;
+    }
+    allIdentical = false;
+    return seg;
+  });
+
+  return allIdentical ? previous : reconciled;
 }

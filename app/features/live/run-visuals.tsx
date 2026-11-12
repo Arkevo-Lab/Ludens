@@ -455,8 +455,16 @@ export function ObservationPanel({
       )}
       <div className={"screen" + (priority && (!observation || !observation.mediaType.startsWith("image/") || observation.mediaStorage === "unrecorded") ? " screen-content" : "")}>
         {observation ? (
-          <ObservationMedia key={data.project + ":" + data.run} observation={observation} url={media(observation)}
-            alt={(showingInput ? t("panel.altInput") : t("panel.altSaved")) + " · " + observation.controller + " · " + observationTime(timestamp(observation), rootT)} />
+          <ObservationMedia
+            key={data.project + ":" + data.run}
+            observation={observation}
+            url={media(observation)}
+            prefetchUrls={inputs
+              .filter(item => item.id !== observation.id && item.mediaStorage !== "unrecorded" && item.mediaType.startsWith("image/"))
+              .slice(0, 6)
+              .map(media)}
+            alt={(showingInput ? t("panel.altInput") : t("panel.altSaved")) + " · " + observation.controller + " · " + observationTime(timestamp(observation), rootT)}
+          />
         ) : text ? (
           <pre className="observation-text">{text}</pre>
         ) : records.length ? (
