@@ -522,6 +522,9 @@
     cursor: pointer;
   }
   .model-picker-service-tier-option strong {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     color: var(--foreground);
     font-size: 11px;
     font-weight: 650;
@@ -538,6 +541,29 @@
   .model-picker-service-tier-option:disabled {
     cursor: not-allowed;
     opacity: 0.5;
+  }
+
+  .service-tier-badge {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--service-tier-color) 45%, transparent);
+    background: color-mix(in srgb, var(--service-tier-color) 14%, transparent);
+    color: var(--service-tier-color);
+    font: 650 10px/1.4 var(--font-sans, inherit);
+    white-space: nowrap;
+  }
+  .service-tier-badge[data-icon-only] {
+    padding: 2px;
+  }
+  .service-tier-badge[data-service-tier="priority"] {
+    --service-tier-color: #d97706;
+  }
+  .service-tier-badge[data-service-tier="ultrafast"] {
+    --service-tier-color: #c026d3;
   }
 
   .model-picker-footer {

@@ -39,7 +39,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ModelPickerDialog, type ModelServiceTier } from "@/components/model-picker-dialog";
+import { ModelPickerDialog, ServiceTierBadge, type ModelServiceTier } from "@/components/model-picker-dialog";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
@@ -570,6 +570,7 @@ export function ModelAndBudgetPanel({
                 className="font-mono text-sm sm:flex-1"
                 spellCheck={false}
               />
+              <ServiceTierBadge tier={serviceTier} className="self-start sm:self-center" />
               <Button
                 type="button"
                 variant="outline"
