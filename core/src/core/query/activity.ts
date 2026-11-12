@@ -526,19 +526,37 @@ function writeCachedBlock(
 async function runWithConcurrency<T>(
   items: T[],
   concurrency: number,
-  worker: (item: T) => Promise<void>,
+  worker: (item: T, batchSignal: AbortSignal) => Promise<void>,
+  parentSignal?: AbortSignal,
 ): Promise<void> {
   if (items.length === 0) return;
   let cursor = 0;
+  let firstError: unknown;
+  let failed = false;
+  const batchController = new AbortController();
+  const batchSignal = parentSignal
+    ? AbortSignal.any([parentSignal, batchController.signal])
+    : batchController.signal;
   const count = Math.min(concurrency, items.length);
-  await Promise.all(
+  await Promise.allSettled(
     Array.from({ length: count }, async () => {
-      while (cursor < items.length) {
+      while (!failed && !batchSignal.aborted && cursor < items.length) {
         const current = items[cursor++]!;
-        await worker(current);
+        try {
+          await worker(current, batchSignal);
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            firstError = error;
+            batchController.abort(error);
+          }
+          return;
+        }
       }
     }),
   );
+  if (failed) throw firstError;
+  parentSignal?.throwIfAborted();
 }
 
 function blockReader(index: LogIndex, signal?: AbortSignal) {
@@ -577,17 +595,20 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
     }
   };
 
-  const hydrateExactModelEntry = async (recipe: Extract<BlockRecipe, { kind: "model" }>) => {
+  const hydrateExactModelEntry = async (
+    recipe: Extract<BlockRecipe, { kind: "model" }>,
+    activeSignal: AbortSignal | undefined = signal,
+  ) => {
     const key = JSON.stringify(recipe);
     let entry = exactModelCache.get(key);
     if (!entry) {
-      entry = rememberExactModel(key, await modelBlocks(index, recipe, signal));
+      entry = rememberExactModel(key, await modelBlocks(index, recipe, activeSignal));
     }
     return entry;
   };
 
-  const hydrateOne = async (row: RecordPointer): Promise<LogBlock> => {
-    signal?.throwIfAborted();
+  const hydrateOne = async (row: RecordPointer, activeSignal: AbortSignal | undefined = signal): Promise<LogBlock> => {
+    activeSignal?.throwIfAborted();
     const hit = readCachedBlock(blockCache, row);
     if (hit) return hit;
 
@@ -623,7 +644,7 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
           streamOffset: latestOffset,
           eventCutoff: latestCutoff,
         };
-        const projectedEntry = await hydrateExactModelEntry(coalescedRecipe);
+        const projectedEntry = await hydrateExactModelEntry(coalescedRecipe, activeSignal);
         cacheVerifiedSiblingsOnce(projectedEntry);
         const candidate = projectedEntry.blocks.get(row.id);
         if (candidate && (!rowDigest || blockContentDigest(candidate) === rowDigest)) {
@@ -631,7 +652,7 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
         }
       }
       if (!block) {
-        const exactEntry = await hydrateExactModelEntry(recipe);
+        const exactEntry = await hydrateExactModelEntry(recipe, activeSignal);
         block = exactEntry.blocks.get(row.id);
       }
     }
@@ -706,8 +727,8 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
       }
     }
 
-    await runWithConcurrency([...latestModelGroups.values()], MODEL_HYDRATE_CONCURRENCY, async group => {
-      signal?.throwIfAborted();
+    await runWithConcurrency([...latestModelGroups.values()], MODEL_HYDRATE_CONCURRENCY, async (group, batchSignal) => {
+      batchSignal.throwIfAborted();
       const coalescedRecipe: Extract<BlockRecipe, { kind: "model" }> = {
         kind: "model",
         model: group.model,
@@ -715,7 +736,7 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
         streamOffset: group.maxStreamOffset,
         eventCutoff: group.maxEventCutoff,
       };
-      const projectedEntry = await hydrateExactModelEntry(coalescedRecipe);
+      const projectedEntry = await hydrateExactModelEntry(coalescedRecipe, batchSignal);
       cacheVerifiedSiblingsOnce(projectedEntry);
       const projectedMap = projectedEntry.blocks;
 
@@ -723,18 +744,18 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
         const rowDigest = typeof row.digest === "string" ? row.digest : undefined;
         let block = projectedMap.get(row.id);
         if (!block || (rowDigest && blockContentDigest(block) !== rowDigest)) {
-          const exactEntry = await hydrateExactModelEntry(recipe);
+          const exactEntry = await hydrateExactModelEntry(recipe, batchSignal);
           block = exactEntry.blocks.get(row.id);
         }
         if (!block) throw new Error(`活动来源无法重建：${row.id}`);
         writeCachedBlock(blockCache, row.id, row.revision, block, rowDigest);
         results[idx] = { ...block, createdRevision: row.createdRevision ?? row.revision, revision: row.revision };
       }
-    });
+    }, signal);
 
-    await runWithConcurrency([...historicalModelGroups.values()], MODEL_HYDRATE_CONCURRENCY, async group => {
-      signal?.throwIfAborted();
-      const exactEntry = await hydrateExactModelEntry(group.recipe);
+    await runWithConcurrency([...historicalModelGroups.values()], MODEL_HYDRATE_CONCURRENCY, async (group, batchSignal) => {
+      batchSignal.throwIfAborted();
+      const exactEntry = await hydrateExactModelEntry(group.recipe, batchSignal);
       const exactMap = exactEntry.blocks;
       for (const { idx, row } of group.members) {
         const rowDigest = typeof row.digest === "string" ? row.digest : undefined;
@@ -743,11 +764,11 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
         writeCachedBlock(blockCache, row.id, row.revision, block, rowDigest);
         results[idx] = { ...block, createdRevision: row.createdRevision ?? row.revision, revision: row.revision };
       }
-    });
+    }, signal);
 
-    await runWithConcurrency(directItems, DIRECT_HYDRATE_CONCURRENCY, async ({ idx, row }) => {
-      results[idx] = await hydrateOne(row);
-    });
+    await runWithConcurrency(directItems, DIRECT_HYDRATE_CONCURRENCY, async ({ idx, row }, batchSignal) => {
+      results[idx] = await hydrateOne(row, batchSignal);
+    }, signal);
 
     return results;
   };

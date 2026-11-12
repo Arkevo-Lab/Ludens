@@ -281,12 +281,13 @@ export function useLiveSession(options: {
       ? runs[earliestIdxInCatalog + 1]!
       : null;
 
-  // Strict chronological upward frontier: once `olderRuns` are prepended above `data.run`,
-  // upward scrolling at the top only pages `earliestOlderRun` or `nextOlderRun` (never mutating middle of stream).
+  // Chronological upward frontier: once `olderRuns` are prepended above `data.run`,
+  // upward scrolling at the top pages `earliestOlderRun` and `nextOlderRun` first (above viewport),
+  // then falls back to any remaining unloaded `feed.hasMore` gap in `data.run` left by a Quick-Jump.
   const hasMoreUpwardHistory = Boolean(
     olderRuns.length === 0
       ? feed.hasMore || nextOlderRun
-      : earliestOlderRun?.hasMore || nextOlderRun,
+      : earliestOlderRun?.hasMore || nextOlderRun || feed.hasMore,
   );
 
   const loadOlderRunSegment = useCallback(
@@ -328,6 +329,10 @@ export function useLiveSession(options: {
       }
       if (nextOlderRun) {
         void loadOlderRunSegment(undefined, { onBeforePrepend });
+        return;
+      }
+      if (feed.hasMore) {
+        void feed.earlier();
       }
     },
     [

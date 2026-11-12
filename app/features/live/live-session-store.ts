@@ -489,7 +489,8 @@ export class LiveSessionEngine {
     if (!run) {
       this.teardownStreamRequests();
       this.streamKey = "";
-      if (this.state.targetRun !== "" || this.state.loading) {
+      this.inFlightOlderCursorKey = null;
+      if (this.state.targetRun !== "" || this.state.loading || this.state.loadingOlderRun) {
         this.update(prev => ({
           ...prev,
           targetRun: "",
@@ -497,6 +498,8 @@ export class LiveSessionEngine {
           resetRevision,
           blocks: [],
           loading: false,
+          loadingOlder: false,
+          loadingOlderRun: false,
           error: "",
         }));
       }
@@ -532,9 +535,9 @@ export class LiveSessionEngine {
     this.teardownStreamRequests();
     this.completedBeforeCursors.clear();
     this.inFlightBeforeCursor = null;
+    this.inFlightOlderCursorKey = null;
     if (runChanged) {
       this.completedOlderBeforeCursors.clear();
-      this.inFlightOlderCursorKey = null;
     }
 
     this.update(prev => ({
@@ -552,13 +555,13 @@ export class LiveSessionEngine {
       total: 0,
       loading: true,
       loadingOlder: false,
+      loadingOlderRun: false,
       error: "",
       selected: undefined,
       selectionReady: false,
       ...(runChanged
         ? {
             olderRuns: [],
-            loadingOlderRun: false,
             olderRunError: null,
             optimisticHost: null,
           }
@@ -661,6 +664,10 @@ export class LiveSessionEngine {
         const hardReset = generationChanged || scopeChanged;
 
         if (hardReset) {
+          this.earlierController?.abort();
+          this.earlierController = null;
+          this.selectionController?.abort();
+          this.selectionController = null;
           this.completedBeforeCursors.clear();
           this.inFlightBeforeCursor = null;
         }
@@ -693,6 +700,8 @@ export class LiveSessionEngine {
                   historyFloorAt: null,
                   hasMore: false,
                   loading: true,
+                  loadingOlder: false,
+                  selectionReady: false,
                 }
               : {}),
             selected: nextSelected,
@@ -759,7 +768,9 @@ export class LiveSessionEngine {
         if (
           controller.signal.aborted ||
           token !== this.streamToken ||
-          this.selectedBlockId !== blockId
+          this.selectedBlockId !== blockId ||
+          !sameScope(this.state.scope, scope) ||
+          this.state.generation !== generation
         ) {
           return;
         }
@@ -780,7 +791,15 @@ export class LiveSessionEngine {
         }));
       })
       .catch(error => {
-        if (controller.signal.aborted || token !== this.streamToken || this.selectedBlockId !== blockId) return;
+        if (
+          controller.signal.aborted ||
+          token !== this.streamToken ||
+          this.selectedBlockId !== blockId ||
+          !sameScope(this.state.scope, scope) ||
+          this.state.generation !== generation
+        ) {
+          return;
+        }
         this.update(prev => ({ ...prev, selectionReady: true, error: String(error) }));
       });
   }
@@ -817,7 +836,14 @@ export class LiveSessionEngine {
 
     try {
       const result = await this.transport.requestActivity(params, controller.signal);
-      if (controller.signal.aborted || token !== this.streamToken) return;
+      if (
+        controller.signal.aborted ||
+        token !== this.streamToken ||
+        !sameScope(this.state.scope, expectedScope) ||
+        this.state.generation !== expectedGeneration
+      ) {
+        return;
+      }
       if (!sameScope(result.scope, expectedScope) || result.projection.generation !== expectedGeneration) {
         this.update(prev => ({ ...prev, loadingOlder: false, error: this.scopeChangedMessage }));
         return;
@@ -840,7 +866,14 @@ export class LiveSessionEngine {
         };
       });
     } catch (error) {
-      if (controller.signal.aborted || token !== this.streamToken) return;
+      if (
+        controller.signal.aborted ||
+        token !== this.streamToken ||
+        !sameScope(this.state.scope, expectedScope) ||
+        this.state.generation !== expectedGeneration
+      ) {
+        return;
+      }
       this.update(prev => ({ ...prev, loadingOlder: false, error: String(error) }));
     } finally {
       if (this.inFlightBeforeCursor === cursor) {
@@ -1394,16 +1427,19 @@ export class LiveSessionEngine {
   }): Promise<EventPoolMutatePayload> {
     const { workspace, run, baseUpdatedAt, baseServerModel, command, fromComposer = false, onUpdated } = options;
     const previousPool = this.state.poolSnapshot;
+    const optimisticAckIso = command.action === "ack" ? new Date().toISOString() : "";
+    const optimisticPriorById = new Map<string, PoolEvent>();
 
     // Optimistic Event Pool update for instant UI feedback on ack/withdraw/reply
     if (previousPool && command.action === "ack") {
       const ackSet = new Set(command.ids);
-      const nowIso = new Date().toISOString();
-      const nextEvents = previousPool.events.map(ev =>
-        ackSet.has(ev.id) && ev.status === "pending"
-          ? { ...ev, status: "handled" as const, handledAt: nowIso, handledBy: "human" as const }
-          : ev,
-      );
+      const nextEvents = previousPool.events.map(ev => {
+        if (ackSet.has(ev.id) && ev.status === "pending") {
+          optimisticPriorById.set(ev.id, ev);
+          return { ...ev, status: "handled" as const, handledAt: optimisticAckIso, handledBy: "human" as const };
+        }
+        return ev;
+      });
       this.update(prev => ({
         ...prev,
         poolSubmitting: true,
@@ -1438,8 +1474,39 @@ export class LiveSessionEngine {
       this.reconcileNow(onUpdated);
       return res;
     } catch (error) {
-      if (previousPool && command.action === "ack") {
-        this.update(prev => ({ ...prev, poolSnapshot: previousPool }));
+      if (optimisticPriorById.size > 0 && command.action === "ack") {
+        this.update(prev => {
+          const cur = prev.poolSnapshot;
+          if (!cur) return prev;
+          let revertedAny = false;
+          const revertedEvents = cur.events.map(ev => {
+            const prior = optimisticPriorById.get(ev.id);
+            if (
+              prior &&
+              ev.status === "handled" &&
+              ev.handledBy === "human" &&
+              ev.handledAt === optimisticAckIso
+            ) {
+              revertedAny = true;
+              return prior;
+            }
+            return ev;
+          });
+          if (!revertedAny) return prev;
+          return {
+            ...prev,
+            poolSnapshot: {
+              ...cur,
+              events: revertedEvents,
+              summary: {
+                ...cur.summary,
+                pendingInbound: revertedEvents.filter(e => e.direction === "inbound" && e.status === "pending").length,
+                pendingOutbound: revertedEvents.filter(e => e.direction === "outbound" && e.status === "pending").length,
+              },
+            },
+          };
+        });
+        this.poolPoller?.nudge();
       }
       throw error;
     } finally {

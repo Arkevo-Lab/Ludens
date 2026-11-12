@@ -2847,12 +2847,14 @@ export function ShioriWorkbench({
     data,
     olderRuns,
     allCalls,
+    inspectedTurn,
     onSelectBlock,
   });
   inspectContextRef.current = {
     data,
     olderRuns,
     allCalls,
+    inspectedTurn,
     onSelectBlock,
   };
 
@@ -2864,19 +2866,19 @@ export function ShioriWorkbench({
           ? ctx.data.calls
           : (ctx.olderRuns.find(r => r.runId === runId)?.data.calls ?? ctx.allCalls);
       const matchedCall = resolveCallForTurn(block, siblingSteps, ownerCalls);
-      let opened = false;
-      setInspectedTurn(prev => {
-        if (prev?.blockId === block.id) return null;
-        opened = true;
-        return {
-          runId,
-          blockId: block.id,
-          callId: matchedCall?.id ?? null,
-          imageId: null,
-          at: block.at,
-        };
-      });
-      if (opened) openDockOnStage();
+      const isDeselecting = ctx.inspectedTurn?.blockId === block.id;
+      setInspectedTurn(
+        isDeselecting
+          ? null
+          : {
+              runId,
+              blockId: block.id,
+              callId: matchedCall?.id ?? null,
+              imageId: null,
+              at: block.at,
+            },
+      );
+      if (!isDeselecting) openDockOnStage();
       ctx.onSelectBlock?.(block);
     },
     [openDockOnStage],
@@ -2885,19 +2887,20 @@ export function ShioriWorkbench({
   const handleInspectInput = useCallback(
     (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => {
       const ctx = inspectContextRef.current;
-      let opened = false;
-      setInspectedTurn(prev => {
-        if (prev?.blockId === segId && prev?.imageId === (imageId ?? null)) return null;
-        opened = true;
-        return {
-          runId,
-          blockId: segId,
-          callId: call?.id ?? null,
-          imageId: imageId ?? null,
-          at: at ?? call?.at ?? ctx.data.updatedAt,
-        };
-      });
-      if (opened) openDockOnStage();
+      const isDeselecting =
+        ctx.inspectedTurn?.blockId === segId && ctx.inspectedTurn?.imageId === (imageId ?? null);
+      setInspectedTurn(
+        isDeselecting
+          ? null
+          : {
+              runId,
+              blockId: segId,
+              callId: call?.id ?? null,
+              imageId: imageId ?? null,
+              at: at ?? call?.at ?? ctx.data.updatedAt,
+            },
+      );
+      if (!isDeselecting) openDockOnStage();
     },
     [openDockOnStage],
   );

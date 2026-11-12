@@ -179,6 +179,16 @@ export class LiveMediaCache {
     }
   }
 
+  /** Evicts a corrupt/undecodable entry so subsequent retries fetch cleanly from `/api/media`. */
+  invalidate(url: string, expectedObjectUrl?: string): void {
+    const entry = this.entries.get(url);
+    if (!entry) return;
+    if (expectedObjectUrl && entry.objectUrl !== expectedObjectUrl) return;
+    this.entries.delete(url);
+    this.totalBytes -= entry.byteLength;
+    this.revokeObjectUrl(entry.objectUrl);
+  }
+
   private touch(entry: CacheEntry): void {
     this.entries.delete(entry.url);
     this.entries.set(entry.url, entry);
@@ -202,7 +212,9 @@ export class LiveMediaCache {
   }
 
   private cancelRequest(req: InFlightRequest): void {
-    this.inFlight.delete(req.url);
+    if (this.inFlight.get(req.url) === req) {
+      this.inFlight.delete(req.url);
+    }
     if (!req.started) {
       const qIdx = this.queue.indexOf(req);
       if (qIdx >= 0) this.queue.splice(qIdx, 1);
@@ -222,7 +234,9 @@ export class LiveMediaCache {
     while (this.activeCount < this.maxConcurrent && this.queue.length > 0) {
       const next = this.queue.shift()!;
       if (next.waiters.size === 0 || next.controller.signal.aborted) {
-        this.inFlight.delete(next.url);
+        if (this.inFlight.get(next.url) === next) {
+          this.inFlight.delete(next.url);
+        }
         continue;
       }
       next.started = true;
@@ -254,7 +268,9 @@ export class LiveMediaCache {
       }
 
       const activeWaiters = [...req.waiters].filter(w => !w.settled && !w.signal?.aborted);
-      this.inFlight.delete(url);
+      if (this.inFlight.get(url) === req) {
+        this.inFlight.delete(url);
+      }
       for (const waiter of req.waiters) {
         if (waiter.signal) waiter.signal.removeEventListener("abort", waiter.onAbort);
       }
@@ -286,7 +302,9 @@ export class LiveMediaCache {
         waiter.resolve(targetEntry.objectUrl);
       }
     } catch (error) {
-      this.inFlight.delete(url);
+      if (this.inFlight.get(url) === req) {
+        this.inFlight.delete(url);
+      }
       const pending = [...req.waiters];
       req.waiters.clear();
       for (const waiter of pending) {
@@ -442,5 +460,11 @@ export function CachedObservationImg({
     height,
     className,
     decoding: "async",
+    onError: warmUrl
+      ? () => {
+          cache.invalidate(src, warmUrl);
+          onErrorRef.current?.();
+        }
+      : undefined,
   });
 }

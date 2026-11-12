@@ -1078,3 +1078,214 @@ test("mergeMonotonicBlocks keeps unfiltered monotonic cache pure and preserves u
   assert.equal(duplicate.changed, false);
   assert.strictEqual(duplicate.blocks, prepended.blocks);
 });
+
+test("hardReset generation rotation aborts stale upward history requests, and same-run reset clears loadingOlderRun", async () => {
+  let changesIdx = 0;
+  let resolveG1Earlier!: (page: ActivityResponse) => void;
+  let g1EarlierSignal!: AbortSignal;
+
+  const reader: ChangesReaderLike = {
+    read: async () => {
+      changesIdx += 1;
+      if (changesIdx === 1) {
+        return {
+          scope: SCOPE_RUN_2,
+          mode: "snapshot",
+          blocks: [makeBlock("g1-tail", 50, { revision: 5 })],
+          cursor: "cur-g1",
+          hasMore: false,
+          projection: makeProjection("gen-1", 5),
+          current: makeCurrent("run-2"),
+          acknowledge: () => {},
+        };
+      }
+      return {
+        scope: SCOPE_RUN_2,
+        mode: "snapshot",
+        blocks: [makeBlock("g2-fresh", 60, { revision: 1 })],
+        cursor: "cur-g2",
+        hasMore: false,
+        projection: makeProjection("gen-2", 1),
+        current: makeCurrent("run-2"),
+        acknowledge: () => {},
+      };
+    },
+  };
+
+  const engine = new LiveSessionEngine({
+    project: "diablo3",
+    transport: {
+      createChangesClient: () => reader,
+      requestActivity: (params, signal) => {
+        if (params.get("before") === "cursor-g1-before") {
+          g1EarlierSignal = signal;
+          return new Promise<ActivityResponse>(resolve => {
+            resolveG1Earlier = resolve;
+          });
+        }
+        if (params.get("run") === "run-1") {
+          return new Promise<ActivityResponse>(() => {});
+        }
+        const gen = changesIdx >= 2 ? "gen-2" : "gen-1";
+        return Promise.resolve({
+          scope: SCOPE_RUN_2,
+          mode: "history",
+          blocks:
+            gen === "gen-1"
+              ? [makeBlock("g1-tail", 50, { revision: 5 })]
+              : [makeBlock("g2-fresh", 60, { revision: 1 })],
+          before: gen === "gen-1" ? "cursor-g1-before" : null,
+          hasMore: gen === "gen-1",
+          total: 1,
+          projection: makeProjection(gen, gen === "gen-1" ? 5 : 1),
+          current: makeCurrent("run-2"),
+        });
+      },
+      readRun: () => new Promise<RunData>(() => {}),
+    },
+  });
+
+  engine.syncStream({ run: "run-2", epoch: "all", enabled: true, refresh: false });
+  await flushMicrotasks();
+  assert.equal(engine.getSnapshot().generation, "gen-1");
+
+  // Start upward pagination in gen-1, then rotate to gen-2 before G1 earlier resolves
+  const earlierPromise = engine.loadEarlierCurrentRun();
+  assert.equal(engine.getSnapshot().loadingOlder, true);
+  engine.reconcileNow();
+  await flushMicrotasks();
+
+  assert.equal(g1EarlierSignal.aborted, true, "hardReset must abort in-flight G1 earlier request");
+  resolveG1Earlier({
+    scope: SCOPE_RUN_2,
+    mode: "history",
+    blocks: [makeBlock("g1-stale-old", 10, { revision: 99 })],
+    before: "cursor-g1-older",
+    hasMore: true,
+    total: 2,
+    projection: makeProjection("gen-1", 99),
+    current: makeCurrent("run-2"),
+  });
+  await earlierPromise;
+  await flushMicrotasks();
+
+  assert.equal(engine.getSnapshot().generation, "gen-2");
+  assert.deepEqual(
+    engine.getSnapshot().blocks.map(b => b.id),
+    ["g2-fresh"],
+    "stale G1 upward page must never leak into G2",
+  );
+
+  // Start olderRun load, then reset same run via resetRevision -> loadingOlderRun must reset to false!
+  const runs: RunInfo[] = [
+    { id: "run-2", startedAt: "2026-11-12T10:00:00.000Z", model: "gpt-5.4", seconds: 1800, drivers: [] },
+    { id: "run-1", startedAt: "2026-11-12T09:00:00.000Z", model: "gpt-5.4", seconds: 1800, drivers: [] },
+  ];
+  void engine.loadOlderRuns({ currentRunId: "run-2", runs });
+  assert.equal(engine.getSnapshot().loadingOlderRun, true);
+
+  engine.syncStream({ run: "run-2", epoch: "all", enabled: true, refresh: false, resetRevision: 1 });
+  assert.equal(
+    engine.getSnapshot().loadingOlderRun,
+    false,
+    "same-run reset must clear loadingOlderRun after aborting olderRunController",
+  );
+  engine.dispose();
+});
+
+test("failed ACK rollback preserves concurrent Event Pool arrivals, and LiveMediaCache isolates re-queued flights", async () => {
+  const ev1 = makePoolEvent("ev-1", 1, "pending");
+  const ev2 = makePoolEvent("ev-2", 2, "pending");
+  let rejectAck!: (err: Error) => void;
+  let pollCount = 0;
+
+  const engine = new LiveSessionEngine({
+    project: "diablo3",
+    transport: {
+      fetchEventPool: async () => {
+        pollCount += 1;
+        return {
+          snapshot: pollCount === 1 ? makePoolSnapshot([ev1]) : makePoolSnapshot([ev1, ev2]),
+          hostOnline: true,
+        };
+      },
+      mutateEventPool: () =>
+        new Promise((_, reject) => {
+          rejectAck = reject;
+        }),
+    },
+  });
+
+  engine.syncEventPool({ workspace: "/ws/diablo3", isLiveRun: true, enabled: true, refresh: false });
+  await flushMicrotasks();
+  assert.equal(engine.getSnapshot().poolSnapshot?.events.length, 1);
+
+  const ackPromise = engine.mutatePool({
+    workspace: "/ws/diablo3",
+    run: "run-2",
+    baseUpdatedAt: "2026-11-12T10:05:00.000Z",
+    command: { action: "ack", ids: ["ev-1"] },
+  });
+  assert.equal(engine.getSnapshot().poolSnapshot?.events[0]?.status, "handled");
+
+  // Simulate background poll arriving with new event `ev-2` while ACK is still in flight
+  engine.syncEventPool({
+    workspace: "/ws/diablo3",
+    isLiveRun: true,
+    enabled: true,
+    refresh: false,
+    liveLatestSeq: 2,
+  });
+  await flushMicrotasks();
+
+  rejectAck(new Error("ACK failed"));
+  await assert.rejects(ackPromise, /ACK failed/);
+
+  const rolledBack = engine.getSnapshot().poolSnapshot!;
+  assert.deepEqual(
+    rolledBack.events.map(e => e.id),
+    ["ev-1", "ev-2"],
+    "failed ACK rollback must not clobber newer events delivered during flight",
+  );
+  engine.dispose();
+
+  // LiveMediaCache: cancelled request A finishing async catch after request B starts must NOT delete B from inFlight
+  let fetchCalls = 0;
+  let rejectFirstFetch!: (err: Error) => void;
+  let resolveSecondFetch!: (resp: Response) => void;
+  const cache = new LiveMediaCache({
+    fetchImpl: (() => {
+      fetchCalls += 1;
+      if (fetchCalls === 1) {
+        return new Promise<Response>((_, reject) => {
+          rejectFirstFetch = reject;
+        });
+      }
+      return new Promise<Response>(resolve => {
+        resolveSecondFetch = resolve;
+      });
+    }) as typeof fetch,
+    createObjectUrl: () => `blob:test-${fetchCalls}`,
+    revokeObjectUrl: () => {},
+  });
+
+  const c1 = new AbortController();
+  const p1 = cache.acquire("/api/media?img=1", c1.signal);
+  c1.abort();
+  await assert.rejects(p1);
+
+  // Immediately start B and C for same URL before A's underlying fetch promise rejects
+  const p2 = cache.acquire("/api/media?img=1");
+  rejectFirstFetch(new Error("aborted A"));
+  await flushMicrotasks();
+  const p3 = cache.acquire("/api/media?img=1");
+
+  assert.equal(fetchCalls, 2, "third subscriber must coalesce onto B instead of firing a duplicate fetch");
+  resolveSecondFetch(new Response(new Blob(["ok"], { type: "image/png" }), { status: 200 }));
+  const [l2, l3] = await Promise.all([p2, p3]);
+  assert.equal(l2.objectUrl, l3.objectUrl);
+  l2.release();
+  l3.release();
+  cache.invalidate("/api/media?img=1", l2.objectUrl);
+  assert.equal(cache.size, 0);
+});
