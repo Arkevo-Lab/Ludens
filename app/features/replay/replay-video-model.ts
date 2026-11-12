@@ -1,4 +1,5 @@
 import type { ReplayFrame } from "@/lib/replay-types";
+import { upperBoundFrame, type ReplayFrameIndex } from "@/features/replay/replay-model";
 
 export type VideoSource = NonNullable<ReplayFrame["media"][number]["video"]>;
 export const videoResourceKey = (source: VideoSource) => `${source.assetId}:${source.revision}`;
@@ -52,4 +53,24 @@ export function videoSyncState(state: { at: number; originAt: number; sampledAt:
     // React retains playback intent while the shared clock is frozen. Holding
     // the decoder too prevents it from running ahead and forcing a later resync.
     play: state.playing && !state.ended && !singleFrame && state.at < state.originAt + state.duration * 1000 && state.clockReady };
+}
+
+/**
+ * For each video slot on stage, the first source of a different segment within `horizonMs` ahead. Its URL is exactly
+ * what the slot will switch to, so the warmed decoder is reused at the boundary instead of starting cold.
+ */
+export function replayUpcomingVideos(index: ReplayFrameIndex, slots: { slot: string; capability: string; index: number; video: VideoSource }[],
+  at: number, horizonMs: number) {
+  const upcoming = new Map<string, VideoSource>();
+  for (const { slot, capability, index: mediaIndex, video } of slots) {
+    const frames = index.byCapability.get(capability) ?? [];
+    for (let i = upperBoundFrame(frames, at); i < frames.length && frames[i].at - at <= horizonMs; i++) {
+      const next = frames[i].media.find(media => media.index === mediaIndex)?.video;
+      if (next && next.assetId !== video.assetId) {
+        if (next.status === "ready" || next.streaming) upcoming.set(slot, next);
+        break;
+      }
+    }
+  }
+  return upcoming;
 }

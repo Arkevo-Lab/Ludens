@@ -72,8 +72,10 @@ function Surface({ source, at, sampledAt, playing, clockReady, speed, visible, c
     onWaiting={() => { waiting.current = true; sync(); }} onError={() => current && onError(source.url)} />;
 }
 
-export function ReplayVideo({ source, at, sampledAt, playing, clockReady, speed, slot, revision, onReady, label }: {
+export function ReplayVideo({ source, at, sampledAt, playing, clockReady, speed, slot, revision, onReady, label, upcoming }: {
   source: Source; at: number; sampledAt: number; playing: boolean; clockReady: boolean; speed: number; slot: string; revision: number; onReady: Ready; label: string;
+  /** Next segment of this slot: mounted paused and hidden so its metadata and first frame are decoded before the boundary. */
+  upcoming?: Source;
 }) {
   const t = useTranslations("replayVideo");
   const resource = useRef(source);
@@ -103,8 +105,9 @@ export function ReplayVideo({ source, at, sampledAt, playing, clockReady, speed,
     if (pending) onReady(slot, source.assetId, false);
   }, [pending, slot, source.assetId, onReady]);
   const playable = !error && !pending;
-  // At most two decoders per channel, including a segment transition.
+  // At most three decoders per channel: the frame still shown, the current segment, and the warmed next segment.
   const sources = [...(shown && (shown.url !== source.url || !playable) && !error ? [shown] : []), ...(playable ? [source] : [])];
+  if (upcoming && upcoming.assetId !== source.assetId && !sources.some(value => value.url === upcoming.url)) sources.push(upcoming);
   return <div className="replay-video-stack">
     {sources.map(value => <Surface key={value.url} source={value} at={at} sampledAt={sampledAt} playing={playing} clockReady={clockReady}
       speed={speed} revision={revision} current={playable && value.url === source.url} visible={shown?.url === value.url}
