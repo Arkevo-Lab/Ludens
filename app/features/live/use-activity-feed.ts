@@ -1,12 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
-  ACTIVITY_LIVE_SIZE, ACTIVITY_PAGE_SIZE, ACTIVITY_WINDOW_SIZE,
-  acceptsScope, activityScopeParams, mergeActivity, newerBlock, sameScope,
-  type ActivityBlock, type ActivityFilter, type ActivityScope,
+  ACTIVITY_LIVE_SIZE,
+  ACTIVITY_PAGE_SIZE,
+  ACTIVITY_WINDOW_SIZE,
+  acceptsScope,
+  activityScopeParams,
+  mergeActivity,
+  newerBlock,
+  sameScope,
+  type ActivityBlock,
+  type ActivityFilter,
+  type ActivityScope,
 } from "@/features/live/activity-feed-model";
-
+import { getLiveSessionEngine } from "@/features/live/live-session-store";
 import { ActivityChangesClient, requestActivity } from "@ludens/protocol/activity";
 import { ReadPoller } from "@/lib/read-poller";
 import { useTranslations } from "@/lib/locale";
@@ -32,36 +40,139 @@ interface FeedState {
   error: string;
 }
 
-const emptyState = (resetRevision = 0): FeedState => ({ resetRevision, loadedRevision: null, scope: null, generation: null, snapshot: 0,
-  blocks: [], selectionReady: false, before: null, historyFloorAt: null, hasMore: false, total: 0,
-  historical: false, loading: true, loadingOlder: false, error: "" });
+const emptyState = (resetRevision = 0): FeedState => ({
+  resetRevision,
+  loadedRevision: null,
+  scope: null,
+  generation: null,
+  snapshot: 0,
+  blocks: [],
+  selectionReady: false,
+  before: null,
+  historyFloorAt: null,
+  hasMore: false,
+  total: 0,
+  historical: false,
+  loading: true,
+  loadingOlder: false,
+  error: "",
+});
 
 const scopeParams = activityScopeParams;
 
-const CONTINUOUS_STREAM_MAX_BLOCKS = 6000;
-
 export function useActivityFeed(options: {
-  project: string; run: string; epoch?: string; enabled: boolean; refresh: boolean; selectedBlock?: string; archiveRevision?: number;
+  project: string;
+  run: string;
+  epoch?: string;
+  enabled: boolean;
+  refresh: boolean;
+  selectedBlock?: string;
+  archiveRevision?: number;
   /** A global return-to-current action clears every log filter and obtains a fresh snapshot. */
   resetRevision?: number;
   /** Keep live tail active while prepending older history in a unified continuous session stream. */
   continuousStream?: boolean;
 }) {
-  const { project, run, epoch, enabled, refresh, selectedBlock, archiveRevision, resetRevision = 0, continuousStream = false } = options;
+  const {
+    project,
+    run,
+    epoch,
+    enabled,
+    refresh,
+    selectedBlock,
+    archiveRevision,
+    resetRevision = 0,
+    continuousStream = false,
+  } = options;
   const t = useTranslations("activityFeed");
   const scopeChangedError = useRef(t("scopeChangedError"));
   scopeChangedError.current = t("scopeChangedError");
+
   const [filters, setFilters] = useState({ revision: resetRevision, filter: "all" as ActivityFilter, query: "" });
-  const activeFilters = filters.revision === resetRevision ? filters : { revision: resetRevision, filter: "all" as ActivityFilter, query: "" };
+  const activeFilters =
+    filters.revision === resetRevision ? filters : { revision: resetRevision, filter: "all" as ActivityFilter, query: "" };
   const { filter, query } = activeFilters;
   const [debounced, setDebounced] = useState({ revision: resetRevision, query: "" });
   const search = debounced.revision === resetRevision ? debounced.query : "";
-  const setFilter = (value: ActivityFilter) => setFilters(previous => ({
-    ...(previous.revision === resetRevision ? previous : { revision: resetRevision, filter: "all" as ActivityFilter, query: "" }), filter: value,
-  }));
-  const setQuery = (value: string) => setFilters(previous => ({
-    ...(previous.revision === resetRevision ? previous : { revision: resetRevision, filter: "all" as ActivityFilter, query: "" }), query: value,
-  }));
+
+  const setFilter = useCallback(
+    (value: ActivityFilter) =>
+      setFilters(previous => ({
+        ...(previous.revision === resetRevision
+          ? previous
+          : { revision: resetRevision, filter: "all" as ActivityFilter, query: "" }),
+        filter: value,
+      })),
+    [resetRevision],
+  );
+  const setQuery = useCallback(
+    (value: string) =>
+      setFilters(previous => ({
+        ...(previous.revision === resetRevision
+          ? previous
+          : { revision: resetRevision, filter: "all" as ActivityFilter, query: "" }),
+        query: value,
+      })),
+    [resetRevision],
+  );
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced({ revision: resetRevision, query: query.trim() }), 200);
+    return () => clearTimeout(timer);
+  }, [query, resetRevision]);
+
+  // Archive completion is automatic; defer it while viewing a paused snapshot.
+  const followedArchive = useRef(archiveRevision);
+  if (refresh) followedArchive.current = archiveRevision;
+  const activeArchiveRevision = followedArchive.current ?? 0;
+
+  // ── 1. Primary Unfiltered Continuous Live Session Store (Monotonic + Warm across View Switches) ──
+  const isFilteredMode = filter !== "all" || search !== "";
+  const useSessionEngine = continuousStream && !isFilteredMode;
+  const engine = useMemo(() => getLiveSessionEngine(project), [project]);
+  engine.setScopeChangedMessage(scopeChangedError.current);
+
+  const engineSnap = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+
+  useEffect(() => {
+    if (!continuousStream) return;
+    // Keep the monotonic session engine synced (pausing pollers cleanly when `enabled` is false or filtered mode is active,
+    // NEVER wiping cached blocks on view switch or search).
+    engine.syncStream({
+      run,
+      epoch,
+      enabled: enabled && !isFilteredMode,
+      refresh: refresh && !isFilteredMode,
+      archiveRevision: activeArchiveRevision,
+      resetRevision,
+      selectedBlock: !isFilteredMode ? selectedBlock : undefined,
+    });
+    return () => {
+      engine.syncStream({
+        run,
+        epoch,
+        enabled: false,
+        refresh: false,
+        archiveRevision: activeArchiveRevision,
+        resetRevision,
+        selectedBlock: undefined,
+      });
+    };
+  }, [
+    engine,
+    continuousStream,
+    run,
+    epoch,
+    enabled,
+    refresh,
+    isFilteredMode,
+    activeArchiveRevision,
+    resetRevision,
+    selectedBlock,
+  ]);
+
+  // ── 2. Isolated Bounded Server Search / Non-Continuous Stream State (never mutates `engine` cache) ──
+  const boundedEnabled = enabled && (!continuousStream || isFilteredMode);
   const [reload, setReload] = useState(0);
   const [state, setState] = useState<FeedState>(() => emptyState(resetRevision));
   const current = useRef(state);
@@ -75,24 +186,18 @@ export function useActivityFeed(options: {
   const poller = useRef<ReadPoller | null>(null);
   const automatic = useRef(refresh);
   automatic.current = refresh;
-  // Archive completion is automatic; defer it while viewing a paused snapshot.
-  const followedArchive = useRef(archiveRevision);
-  if (refresh) followedArchive.current = archiveRevision;
-  const activeArchiveRevision = followedArchive.current;
+
   const update = useCallback((change: (previous: FeedState) => FeedState) => {
     current.current = change(current.current);
     setState(current.current);
   }, []);
 
   useEffect(() => {
-    const timer = setTimeout(() => setDebounced({ revision: resetRevision, query: query.trim() }), 200);
-    return () => clearTimeout(timer);
-  }, [query, resetRevision]);
-
-  // This stream starts with only the selected run identity, independently of /api/run.
-  useEffect(() => {
+    if (!boundedEnabled || !project || !run) {
+      update(() => emptyState(resetRevision));
+      return;
+    }
     update(() => emptyState(resetRevision));
-    if (!enabled || !project || !run) return;
     const reader = new ActivityChangesClient({ project, run, epoch, limit: ACTIVITY_PAGE_SIZE });
     const active = new ReadPoller(async signal => {
       let more = false;
@@ -101,28 +206,38 @@ export function useActivityFeed(options: {
         if (signal.aborted) return 2500;
         more = result.hasMore;
         const previous = current.current;
-        const reset = result.mode === "snapshot" || !sameScope(previous.scope, result.scope)
-          || previous.generation !== result.projection.generation;
-        const mergeLimit = continuousStream
-          ? Math.min(CONTINUOUS_STREAM_MAX_BLOCKS, Math.max(ACTIVITY_WINDOW_SIZE, previous.blocks.length + result.blocks.length + 64))
-          : ACTIVITY_WINDOW_SIZE;
+        const reset =
+          result.mode === "snapshot" ||
+          !sameScope(previous.scope, result.scope) ||
+          previous.generation !== result.projection.generation;
         const merged = mergeActivity(reset ? [] : previous.blocks, result.blocks, {
-          ...criteria.current, append: reset || continuousStream || !previous.historical,
-          keep: !continuousStream && previous.historical && !reset ? "oldest" : "latest", limit: mergeLimit,
+          ...criteria.current,
+          append: reset || !previous.historical,
+          keep: previous.historical && !reset ? "oldest" : "latest",
+          limit: ACTIVITY_WINDOW_SIZE,
         });
-        update(value => ({ ...(reset ? emptyState(resetRevision) : value), scope: reset ? result.scope : value.scope,
-          generation: result.projection.generation, snapshot: value.snapshot + (reset ? 1 : 0),
-          blocks: merged, error: "",
-          ...(selection.current ? {
-            selected: result.blocks.filter(block => block.id === selection.current).reduce<ActivityBlock | undefined>(
-              (block, next) => newerBlock(block, next), reset ? undefined : value.selected),
-          } : {}),
+        update(value => ({
+          ...(reset ? emptyState(resetRevision) : value),
+          scope: reset ? result.scope : value.scope,
+          generation: result.projection.generation,
+          snapshot: value.snapshot + (reset ? 1 : 0),
+          blocks: merged,
+          error: "",
+          ...(selection.current
+            ? {
+                selected: result.blocks
+                  .filter(block => block.id === selection.current)
+                  .reduce<ActivityBlock | undefined>(
+                    (block, next) => newerBlock(block, next),
+                    reset ? undefined : value.selected,
+                  ),
+              }
+            : {}),
         }));
         result.acknowledge();
-        // Refresh the bounded latest page before its opaque history cursor becomes detached,
-        // unless continuousStream has already expanded earlier history in memory.
-        if (!reset && !previous.historical && !continuousStream && merged.length > ACTIVITY_LIVE_SIZE && !historyLoading.current)
+        if (!reset && !previous.historical && merged.length > ACTIVITY_LIVE_SIZE && !historyLoading.current) {
           setReload(value => value + 1);
+        }
       } catch (error) {
         if (!signal.aborted) update(value => ({ ...value, loading: false, error: String(error) }));
       }
@@ -137,90 +252,150 @@ export function useActivityFeed(options: {
       selectionRequest.current?.abort();
       historyLoading.current = false;
     };
-  }, [project, run, epoch, enabled, activeArchiveRevision, resetRevision, update]);
+  }, [project, run, epoch, boundedEnabled, activeArchiveRevision, resetRevision, update]);
 
-  useEffect(() => { poller.current?.setEnabled(refresh); }, [refresh]);
+  useEffect(() => {
+    poller.current?.setEnabled(boundedEnabled && refresh);
+  }, [boundedEnabled, refresh]);
 
   const scope = state.scope;
   const generation = state.generation;
 
-  // The server owns search and pagination. Only a bounded window stays in the browser.
   useEffect(() => {
-    if (!enabled || !scope || !acceptsScope(scope, project, run, epoch)
-      || !sameScope(scope, current.current.scope) || generation !== current.current.generation) return;
+    if (
+      !boundedEnabled ||
+      !scope ||
+      !acceptsScope(scope, project, run, epoch) ||
+      !sameScope(scope, current.current.scope) ||
+      generation !== current.current.generation
+    ) {
+      return;
+    }
     const controller = new AbortController();
     historyRequest.current?.abort();
     historyRequest.current = controller;
     historyLoading.current = true;
-    const isCurrentRequest = () => !controller.signal.aborted && historyRequest.current === controller
-      && sameScope(scope, current.current.scope) && generation === current.current.generation;
+    const isCurrentRequest = () =>
+      !controller.signal.aborted &&
+      historyRequest.current === controller &&
+      sameScope(scope, current.current.scope) &&
+      generation === current.current.generation;
     update(value => ({ ...value, loading: true, loadingOlder: false, error: "" }));
     const params = scopeParams(scope);
-    params.set("mode", "history"); params.set("kind", filter); params.set("q", search);
+    params.set("mode", "history");
+    params.set("kind", filter);
+    params.set("q", search);
     params.set("limit", String(ACTIVITY_PAGE_SIZE));
-    void requestActivity(params, controller.signal).then(result => {
-      if (!isCurrentRequest()) return;
-      if (!sameScope(result.scope, scope) || result.projection.generation !== generation) {
-        update(value => ({ ...value, loading: false, error: scopeChangedError.current }));
-        return;
-      }
-      update(value => ({ ...value, blocks: mergeActivity(result.blocks,
-        value.blocks.filter(block => block.revision > result.projection.revision || block.status === "running"), {
-          filter, query: search, append: true, keep: "latest", limit: ACTIVITY_WINDOW_SIZE,
-        }), before: result.before ?? null, historyFloorAt: result.blocks[0]?.at ?? null, hasMore: result.hasMore, total: result.total ?? 0,
-        historical: false, loading: false, loadedRevision: value.resetRevision, error: "" }));
-    }).catch(error => {
-      if (isCurrentRequest()) update(value => ({ ...value, loading: false, error: String(error) }));
-    }).finally(() => {
-      if (historyRequest.current === controller) historyLoading.current = false;
-    });
+    void requestActivity(params, controller.signal)
+      .then(result => {
+        if (!isCurrentRequest()) return;
+        if (!sameScope(result.scope, scope) || result.projection.generation !== generation) {
+          update(value => ({ ...value, loading: false, error: scopeChangedError.current }));
+          return;
+        }
+        update(value => ({
+          ...value,
+          blocks: mergeActivity(
+            result.blocks,
+            value.blocks.filter(
+              block => block.revision > result.projection.revision || block.status === "running",
+            ),
+            {
+              filter,
+              query: search,
+              append: true,
+              keep: "latest",
+              limit: ACTIVITY_WINDOW_SIZE,
+            },
+          ),
+          before: result.before ?? null,
+          historyFloorAt: result.blocks[0]?.at ?? null,
+          hasMore: result.hasMore,
+          total: result.total ?? 0,
+          historical: false,
+          loading: false,
+          loadedRevision: value.resetRevision,
+          error: "",
+        }));
+      })
+      .catch(error => {
+        if (isCurrentRequest()) update(value => ({ ...value, loading: false, error: String(error) }));
+      })
+      .finally(() => {
+        if (historyRequest.current === controller) historyLoading.current = false;
+      });
     return () => controller.abort();
-  }, [enabled, project, run, epoch, scope, generation, state.snapshot, filter, search, reload, update]);
+  }, [boundedEnabled, project, run, epoch, scope, generation, state.snapshot, filter, search, reload, update]);
 
   useEffect(() => {
+    if (!boundedEnabled) return;
     update(value => ({ ...value, selected: undefined, selectionReady: false }));
-    if (!enabled || !scope || !selectedBlock || !acceptsScope(scope, project, run, epoch)
-      || !sameScope(scope, current.current.scope) || generation !== current.current.generation) return;
+    if (
+      !scope ||
+      !selectedBlock ||
+      !acceptsScope(scope, project, run, epoch) ||
+      !sameScope(scope, current.current.scope) ||
+      generation !== current.current.generation
+    ) {
+      return;
+    }
     const controller = new AbortController();
     selectionRequest.current = controller;
-    const isCurrentRequest = () => !controller.signal.aborted && selectionRequest.current === controller
-      && sameScope(scope, current.current.scope) && generation === current.current.generation;
+    const isCurrentRequest = () =>
+      !controller.signal.aborted &&
+      selectionRequest.current === controller &&
+      sameScope(scope, current.current.scope) &&
+      generation === current.current.generation;
     const params = scopeParams(scope);
-    params.set("mode", "block"); params.set("id", selectedBlock);
-    void requestActivity(params, controller.signal).then(result => {
-      if (!isCurrentRequest()) return;
-      if (!sameScope(result.scope, scope) || result.projection.generation !== generation) {
-        update(value => ({ ...value, selectionReady: true, error: scopeChangedError.current }));
-        return;
-      }
-      update(value => ({ ...value, selected: result.blocks[0]
-        ? newerBlock(value.blocks.find(block => block.id === selectedBlock) ??
-          (value.selected?.id === selectedBlock ? value.selected : undefined), result.blocks[0]) : undefined,
-        selectionReady: true }));
-    }).catch(error => {
-      if (isCurrentRequest()) update(value => ({ ...value, selectionReady: true, error: String(error) }));
-    });
+    params.set("mode", "block");
+    params.set("id", selectedBlock);
+    void requestActivity(params, controller.signal)
+      .then(result => {
+        if (!isCurrentRequest()) return;
+        if (!sameScope(result.scope, scope) || result.projection.generation !== generation) {
+          update(value => ({ ...value, selectionReady: true, error: scopeChangedError.current }));
+          return;
+        }
+        update(value => ({
+          ...value,
+          selected: result.blocks[0]
+            ? newerBlock(
+                value.blocks.find(block => block.id === selectedBlock) ??
+                  (value.selected?.id === selectedBlock ? value.selected : undefined),
+                result.blocks[0],
+              )
+            : undefined,
+          selectionReady: true,
+        }));
+      })
+      .catch(error => {
+        if (isCurrentRequest()) update(value => ({ ...value, selectionReady: true, error: String(error) }));
+      });
     return () => {
       controller.abort();
       if (selectionRequest.current === controller) selectionRequest.current = null;
     };
-  }, [enabled, project, run, epoch, scope, generation, selectedBlock, update]);
+  }, [boundedEnabled, project, run, epoch, scope, generation, selectedBlock, update]);
 
-  const earlier = useCallback(async () => {
+  const boundedEarlier = useCallback(async () => {
     const previous = current.current;
     if (!previous.scope || !previous.before || historyLoading.current) return;
-    if (continuousStream && previous.blocks.length >= CONTINUOUS_STREAM_MAX_BLOCKS) {
-      update(value => ({ ...value, hasMore: false, before: null }));
-      return;
-    }
     const controller = new AbortController();
-    historyRequest.current?.abort(); historyRequest.current = controller; historyLoading.current = true;
-    const isCurrentRequest = () => !controller.signal.aborted && historyRequest.current === controller
-      && sameScope(previous.scope, current.current.scope) && previous.generation === current.current.generation;
+    historyRequest.current?.abort();
+    historyRequest.current = controller;
+    historyLoading.current = true;
+    const isCurrentRequest = () =>
+      !controller.signal.aborted &&
+      historyRequest.current === controller &&
+      sameScope(previous.scope, current.current.scope) &&
+      previous.generation === current.current.generation;
     update(value => ({ ...value, loadingOlder: true, error: "" }));
     const params = scopeParams(previous.scope);
-    params.set("mode", "history"); params.set("kind", filter); params.set("q", search);
-    params.set("before", previous.before); params.set("limit", String(ACTIVITY_PAGE_SIZE));
+    params.set("mode", "history");
+    params.set("kind", filter);
+    params.set("q", search);
+    params.set("before", previous.before);
+    params.set("limit", String(ACTIVITY_PAGE_SIZE));
     try {
       const result = await requestActivity(params, controller.signal);
       if (!isCurrentRequest()) return;
@@ -228,28 +403,83 @@ export function useActivityFeed(options: {
         update(value => ({ ...value, loadingOlder: false, error: scopeChangedError.current }));
         return;
       }
-      update(value => {
-        const nextLimit = continuousStream
-          ? Math.min(CONTINUOUS_STREAM_MAX_BLOCKS, Math.max(ACTIVITY_WINDOW_SIZE, value.blocks.length + result.blocks.length + 64))
-          : ACTIVITY_WINDOW_SIZE;
-        return { ...value, blocks: mergeActivity(value.blocks, result.blocks, {
-          filter, query: search, append: true, keep: continuousStream ? "latest" : "oldest", limit: nextLimit,
-        }), before: result.before ?? null, historyFloorAt: result.blocks[0]?.at ?? value.historyFloorAt,
-          hasMore: result.hasMore, total: result.total ?? value.total,
-          historical: continuousStream ? false : true, loadingOlder: false };
-      });
+      update(value => ({
+        ...value,
+        blocks: mergeActivity(value.blocks, result.blocks, {
+          filter,
+          query: search,
+          append: true,
+          keep: "oldest",
+          limit: ACTIVITY_WINDOW_SIZE,
+        }),
+        before: result.before ?? null,
+        historyFloorAt: result.blocks[0]?.at ?? value.historyFloorAt,
+        hasMore: result.hasMore,
+        total: result.total ?? value.total,
+        historical: true,
+        loadingOlder: false,
+      }));
     } catch (error) {
       if (isCurrentRequest()) update(value => ({ ...value, loadingOlder: false, error: String(error) }));
     } finally {
       if (historyRequest.current === controller) historyLoading.current = false;
     }
-  }, [continuousStream, filter, search, update]);
+  }, [filter, search, update]);
+
+  const sessionLatest = useCallback(() => {
+    engine.reconcileNow();
+  }, [engine]);
+
+  if (useSessionEngine) {
+    const targetMatches =
+      engineSnap.targetRun === run && (engineSnap.targetEpoch ?? "") === (epoch ?? "");
+    const currentRevision = engineSnap.resetRevision === resetRevision;
+    const valid =
+      targetMatches &&
+      currentRevision &&
+      Boolean(engineSnap.scope && acceptsScope(engineSnap.scope, project, run, epoch));
+    return {
+      resetRevision: engineSnap.resetRevision,
+      loadedRevision: targetMatches ? engineSnap.loadedRevision : null,
+      scope: targetMatches ? engineSnap.scope : null,
+      generation: targetMatches ? engineSnap.generation : null,
+      snapshot: engineSnap.snapshotCount,
+      blocks: valid ? engineSnap.blocks : [],
+      selected: valid ? engineSnap.selected : undefined,
+      selectionReady: valid ? engineSnap.selectionReady : false,
+      before: valid ? engineSnap.before : null,
+      historyFloorAt: valid ? engineSnap.historyFloorAt : null,
+      hasMore: valid ? engineSnap.hasMore : false,
+      total: valid ? engineSnap.total : 0,
+      historical: false,
+      loading: !run ? false : !targetMatches || !currentRevision || engineSnap.loading || (!valid && !engineSnap.error),
+      loadingOlder: targetMatches ? engineSnap.loadingOlder : false,
+      error: targetMatches && currentRevision ? engineSnap.error : "",
+      filter,
+      query,
+      setFilter,
+      setQuery,
+      earlier: engine.loadEarlierCurrentRun,
+      latest: sessionLatest,
+    };
+  }
 
   const currentRevision = state.resetRevision === resetRevision;
   const valid = currentRevision && scope && acceptsScope(scope, project, run, epoch);
-  return { ...state, loading: !currentRevision || state.loading || (!valid && !state.error),
-    error: currentRevision ? state.error : "", blocks: valid ? state.blocks : [], selected: valid ? state.selected : undefined,
-    filter, query, setFilter, setQuery, earlier, resetRevision, latest: () => setReload(value => value + 1) };
+  return {
+    ...state,
+    loading: !currentRevision || state.loading || (!valid && !state.error),
+    error: currentRevision ? state.error : "",
+    blocks: valid ? state.blocks : [],
+    selected: valid ? state.selected : undefined,
+    filter,
+    query,
+    setFilter,
+    setQuery,
+    earlier: boundedEarlier,
+    resetRevision,
+    latest: () => setReload(value => value + 1),
+  };
 }
 
 export type ActivityFeedData = ReturnType<typeof useActivityFeed>;
