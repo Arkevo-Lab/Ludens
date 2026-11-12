@@ -1,17 +1,26 @@
 "use client";
 
-import { ContextPicker, type ContextOption } from "@/features/workspaces/context-picker";
+import { ContextPicker, type ContextOption, type ContextPickerVariant } from "@/features/workspaces/context-picker";
 import { useTranslations } from "@/lib/locale";
 import { runWindowSummary } from "@/lib/run-identity";
 import type { RunData, RunInfo } from "@/lib/types";
 
-export function RunPicker({ runs, latest, cycles, quickJump, value, onChange }: {
+export function RunPicker({
+  runs,
+  latest,
+  cycles,
+  quickJump,
+  value,
+  onChange,
+  variant = "compact",
+}: {
   runs: RunInfo[];
   latest?: RunInfo;
   cycles?: RunData["cycles"];
   quickJump?: boolean;
   value: string;
   onChange(value: string): void;
+  variant?: ContextPickerVariant;
 }) {
   const t = useTranslations("runPicker");
   const dt = useTranslations("dashboard");
@@ -45,9 +54,14 @@ export function RunPicker({ runs, latest, cycles, quickJump, value, onChange }: 
     ? { id: selectedOption.identity ?? value, summary: selectedOption.label }
     : selectedRun ? runWindowSummary(selectedRun) : latestIdentity;
   const prefixLabel = quickJump ? t("quickJumpLabel") : dt("runHistoryLabel");
-  const triggerText = value ? `${prefixLabel} · ${selected?.summary ?? value}`
-    : latestIdentity ? `${latestLabel} · ${latestIdentity.summary ?? latestIdentity.id}` : latestLabel;
-  return <ContextPicker kind="run" options={options} value={value} onChange={onChange} label={prefixLabel} hideLabel
+  const triggerText = value
+    ? variant === "compact"
+      ? (selected?.summary ?? value)
+      : `${prefixLabel} · ${selected?.summary ?? value}`
+    : latestIdentity
+      ? `${latestLabel} · ${latestIdentity.summary ?? latestIdentity.id}`
+      : latestLabel;
+  return <ContextPicker kind="run" variant={variant} options={options} value={value} onChange={onChange} label={prefixLabel} hideLabel
     trigger={{ text: runs.length ? triggerText : t("empty"), title: selected?.id ?? t("empty"), hint: quickJump ? t("quickJumpHint") : (selected?.id ?? t("description")) }}
     copy={{ title: prefixLabel, description: quickJump ? t("quickJumpDescription") : t("description"), close: t("close"), current: t("current"), empty: t("empty") }} />;
 }

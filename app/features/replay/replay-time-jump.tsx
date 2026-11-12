@@ -16,6 +16,7 @@ export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number;
   const [draft, setDraft] = useState(elapsedInput);
   const [invalid, setInvalid] = useState(false);
   const [clamped, setClamped] = useState(false);
+  const groupRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -28,6 +29,14 @@ export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number;
       inputRef.current?.focus();
       inputRef.current?.select();
     });
+    const handlePointerDown = (event: MouseEvent) => {
+      if (groupRef.current && !groupRef.current.contains(event.target as Node)) {
+        setInvalid(false);
+        setEditing(false);
+      }
+    };
+    window.addEventListener("mousedown", handlePointerDown);
+    return () => window.removeEventListener("mousedown", handlePointerDown);
   }, [editing]);
 
   const displayElapsed =
@@ -35,93 +44,101 @@ export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number;
   const displayDuration =
     duration >= 3_600_000 ? replayElapsedInput(duration, "seconds") : replayDuration(duration);
 
-  if (!editing) {
-    return (
-      <div className="replay-timecode-group">
-        <button
-          type="button"
-          className="replay-timecode-trigger mono"
-          title={`${t("jumpLabel")} (${t("timeFormat")})`}
-          aria-label={`${t("jumpLabel")}: ${displayElapsed} / ${displayDuration}`}
-          onClick={() => {
-            setDraft(elapsedInput);
-            setInvalid(false);
-            setClamped(false);
-            setEditing(true);
-          }}
-        >
-          <strong>{displayElapsed}</strong>
-          <small>/ {displayDuration}</small>
-        </button>
-        {clamped && (
-          <span className="replay-jump-feedback" role="status">
-            {t("clampedTime").replace("{time}", replayElapsedInput(duration, "milliseconds"))}
-          </span>
-        )}
-      </div>
-    );
-  }
-
   return (
-    <form
-      className="replay-time-jump-inline"
-      onSubmit={event => {
-        event.preventDefault();
-        const target = parseReplayElapsed(draft);
-        if (target === null) {
-          setInvalid(true);
-          setClamped(false);
-          return;
-        }
-        const next = Math.min(duration, target);
-        setInvalid(false);
-        setClamped(target > duration);
-        setEditing(false);
-        setDraft(replayElapsedInput(next, "milliseconds"));
-        onJump(next);
-      }}
-    >
-      <Label htmlFor={id} className="sr-only">{t("jumpLabel")}</Label>
-      <Input
-        ref={inputRef}
-        id={id}
-        value={draft}
-        aria-invalid={invalid}
-        aria-describedby={invalid ? `${id}-hint` : undefined}
-        placeholder="00:00:00"
-        className="replay-time-jump-input h-6 w-28 px-2 py-0 font-mono text-xs tabular-nums"
-        spellCheck={false}
-        onChange={event => {
-          setInvalid(false);
-          setClamped(false);
-          setDraft(event.target.value);
-        }}
-        onKeyDown={event => {
-          if (event.key === "Escape") {
-            event.preventDefault();
+    <div ref={groupRef} className="replay-timecode-group">
+      <button
+        type="button"
+        className="replay-timecode-trigger mono"
+        data-active={editing ? "true" : undefined}
+        aria-expanded={editing}
+        title={`${t("jumpLabel")} (${t("timeFormat")})`}
+        aria-label={`${t("jumpLabel")}: ${displayElapsed} / ${displayDuration}`}
+        onClick={() => {
+          if (editing) {
             setInvalid(false);
             setEditing(false);
+            return;
           }
-        }}
-      />
-      <Button type="submit" variant="outline" size="xs">{t("jump")}</Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="xs"
-        aria-label={t("cancelJump")}
-        onClick={() => {
+          setDraft(elapsedInput);
           setInvalid(false);
-          setEditing(false);
+          setClamped(false);
+          setEditing(true);
         }}
       >
-        ×
-      </Button>
-      {invalid && (
-        <span id={`${id}-hint`} className="replay-jump-error" role="status">
-          {t("invalidTime")}
+        <strong>{displayElapsed}</strong>
+        <small>/ {displayDuration}</small>
+      </button>
+      {clamped && !editing && (
+        <span className="replay-jump-feedback" role="status">
+          {t("clampedTime").replace("{time}", replayElapsedInput(duration, "milliseconds"))}
         </span>
       )}
-    </form>
+      {editing && (
+        <form
+          className="replay-time-jump-popover"
+          onSubmit={event => {
+            event.preventDefault();
+            const target = parseReplayElapsed(draft);
+            if (target === null) {
+              setInvalid(true);
+              setClamped(false);
+              return;
+            }
+            const next = Math.min(duration, target);
+            setInvalid(false);
+            setClamped(target > duration);
+            setEditing(false);
+            setDraft(replayElapsedInput(next, "milliseconds"));
+            onJump(next);
+          }}
+        >
+          <div className="replay-time-jump-row">
+            <Label htmlFor={id} className="sr-only">{t("jumpLabel")}</Label>
+            <Input
+              ref={inputRef}
+              id={id}
+              value={draft}
+              aria-invalid={invalid}
+              aria-describedby={invalid ? `${id}-hint` : undefined}
+              placeholder="00:00:00"
+              className="replay-time-jump-input h-6 w-28 px-2 py-0 font-mono text-xs tabular-nums"
+              spellCheck={false}
+              onChange={event => {
+                setInvalid(false);
+                setClamped(false);
+                setDraft(event.target.value);
+              }}
+              onKeyDown={event => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setInvalid(false);
+                  setEditing(false);
+                }
+              }}
+            />
+            <Button type="submit" variant="outline" size="xs" className="h-6 px-2">{t("jump")}</Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="h-6 px-1.5"
+              aria-label={t("cancelJump")}
+              onClick={() => {
+                setInvalid(false);
+                setEditing(false);
+              }}
+            >
+              ×
+            </Button>
+          </div>
+          {invalid && (
+            <span id={`${id}-hint`} className="replay-jump-error" role="status">
+              {t("invalidTime")}
+            </span>
+          )}
+        </form>
+      )}
+    </div>
   );
 }

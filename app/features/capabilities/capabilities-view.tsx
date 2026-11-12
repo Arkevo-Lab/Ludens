@@ -9,6 +9,8 @@ import {
   BookOpen,
   Boxes,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Eye,
   FileCode2,
@@ -150,12 +152,16 @@ function TriadSummaryBar({
   summary,
   selectedStatus,
   onSelectStatus,
+  analyticsOpen,
+  onToggleAnalytics,
 }: {
   capabilities: CapabilityEntry[];
   envs: CapabilityEnvEntry[];
   summary: Record<CapabilityEvalStatus, number>;
   selectedStatus: CapabilityEvalStatus | "all";
   onSelectStatus(status: CapabilityEvalStatus | "all"): void;
+  analyticsOpen?: boolean;
+  onToggleAnalytics?(): void;
 }) {
   const t = useTranslations("capabilitiesView");
   const total = capabilities.length;
@@ -220,6 +226,23 @@ function TriadSummaryBar({
               </button>
             );
           })}
+          {onToggleAnalytics && (
+            <button
+              type="button"
+              className="triad-analytics-toggle"
+              aria-expanded={analyticsOpen}
+              data-capability-analytics-toggle
+              onClick={onToggleAnalytics}
+            >
+              <BarChart3 className="size-3.5 text-primary" aria-hidden="true" />
+              <span>{t(analyticsOpen ? "toggleAnalyticsHide" : "toggleAnalyticsShow")}</span>
+              {analyticsOpen ? (
+                <ChevronUp className="size-3.5" aria-hidden="true" />
+              ) : (
+                <ChevronDown className="size-3.5" aria-hidden="true" />
+              )}
+            </button>
+          )}
         </div>
       )}
     </section>
@@ -1041,9 +1064,17 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
   const capsLoad = useReadResource<CapabilitiesResult>(project && workspace ? "/api/capabilities?" + new URLSearchParams({ project, workspace }) : null, t("readFailed"));
   const caps = capsLoad.value;
   const [statusFilter, setStatusFilter] = useState<CapabilityEvalStatus | "all">("all");
+  const [analyticsOpen, setAnalyticsOpen] = useState(true);
+  const analyticsTouched = useRef(false);
   const [runningEvalTarget, setRunningEvalTarget] = useState<string | null>(null);
   const [evalRunNotice, setEvalRunNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const catalogFocus = useRetryFocus(!!catalogLoading, catalogError);
+
+  useEffect(() => {
+    if (!analyticsTouched.current && typeof window !== "undefined" && window.innerWidth < 1150) {
+      setAnalyticsOpen(false);
+    }
+  }, []);
   const links = { device: { doc: "tutorials/devices", label: "deviceGuide" }, workspace: { doc: "tutorials/workspace", label: "capabilityGuide" } };
   const workspaceItems = caps?.groups.find(group => group.id === "workspace")?.items ?? [];
   const runnableEvalCount = workspaceItems.filter(item => Boolean(item.evalId)).length;
@@ -1093,10 +1124,10 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
     }
   };
 
-  return <div ref={catalogFocus.target} className="grid min-w-0 grid-cols-1 gap-5" tabIndex={-1} role="region" aria-label={t("overviewLabel")} aria-busy={capsLoad.loading}>
+  return <div ref={catalogFocus.target} className="grid min-w-0 grid-cols-1 gap-4" tabIndex={-1} role="region" aria-label={t("overviewLabel")} aria-busy={capsLoad.loading}>
     {catalogError && <Alert variant="destructive"><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0 flex-1"><p>{t("catalogFailed")}</p><details className="mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{catalogError}</pre></details></div>
       <Button type="button" variant="outline" size="sm" aria-disabled={catalogLoading} className="aria-disabled:opacity-50" onClick={event => { if (!catalogLoading) { catalogFocus.remember(event.currentTarget); onRetryCatalog(); } }}>{t(catalogLoading ? "retrying" : "retryCatalog")}</Button></AlertDescription></Alert>}
-    {project && workspace && <div className="flex flex-wrap items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{t("readOnlyRefreshHint")}</p>
+    {project && workspace && <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{t("readOnlyRefreshHint")}</p>
       <Button type="button" size="sm" variant="outline" aria-disabled={capsLoad.loading} className="aria-disabled:opacity-50" onClick={() => { if (!capsLoad.loading) capsLoad.retry(); }}>{t(capsLoad.loading ? "retrying" : capsLoad.error ? "retryRead" : "refresh")}</Button></div>}
     {capsLoad.error && <Alert variant="destructive"><AlertDescription><p>{t("loadErrorTitle")}</p><details className="mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{capsLoad.error}</pre></details>{caps && <p className="mt-1">{t("showingCached")}</p>}</AlertDescription></Alert>}
     {!caps ? !ready || capsLoad.loading ? <Card><CardContent role="status"><h3 className="text-sm font-semibold">{t(!ready ? "loadingWorkspaces" : "loadingTitle")}</h3><p className="mt-2 text-sm text-muted-foreground">{t("loadingDesc")}</p></CardContent></Card>
@@ -1108,13 +1139,20 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
         summary={evalSummary}
         selectedStatus={statusFilter}
         onSelectStatus={setStatusFilter}
+        analyticsOpen={analyticsOpen}
+        onToggleAnalytics={() => {
+          analyticsTouched.current = true;
+          setAnalyticsOpen(current => !current);
+        }}
       />
 
-      <TriadAnalyticsDeck
-        capabilities={workspaceItems}
-        envs={envs}
-        summary={evalSummary}
-      />
+      {analyticsOpen && (
+        <TriadAnalyticsDeck
+          capabilities={workspaceItems}
+          envs={envs}
+          summary={evalSummary}
+        />
+      )}
 
       <Card className="min-w-0" data-capability-source="workspace">
         <CardContent className="min-w-0 space-y-4">
@@ -1228,7 +1266,7 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
 
 export function CapabilitiesView(props: WorkspaceCatalogProps) {
   const t = useTranslations("capabilitiesView");
-  return <div className="mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-6"><header className="space-y-2"><h1>{t("title")}</h1><p className="text-sm leading-relaxed text-muted-foreground">{t("description")}</p></header>
+  return <div className="mx-auto grid w-full min-w-0 max-w-6xl grid-cols-1 gap-4"><header className="space-y-1"><h1>{t("title")}</h1><p className="text-xs leading-relaxed text-muted-foreground sm:text-sm">{t("description")}</p></header>
     <WorkspaceCapabilities {...props} />
   </div>;
 }
