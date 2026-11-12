@@ -39,7 +39,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ModelPickerDialog } from "@/components/model-picker-dialog";
+import { ModelPickerDialog, type ModelServiceTier } from "@/components/model-picker-dialog";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
@@ -410,6 +410,7 @@ export function ModelAndBudgetPanel({
   const initial: WorkspaceConfigSummary = studio.config ?? {
     driver: "cua",
     model: studio.defaults.model ?? "openai-codex/gpt-6.1-sol",
+    serviceTier: studio.defaults.serviceTier,
     seconds: studio.defaults.seconds ?? 1800,
     requests: studio.defaults.requests ?? 1000,
     compactionThreshold: studio.defaults.compactionThreshold,
@@ -419,6 +420,7 @@ export function ModelAndBudgetPanel({
   };
 
   const [model, setModel] = useState(initial.model);
+  const [serviceTier, setServiceTier] = useState<ModelServiceTier | null>(initial.serviceTier ?? null);
   const [seconds, setSeconds] = useState(String(initial.seconds));
   const [requests, setRequests] = useState(String(initial.requests));
   const [compaction, setCompaction] = useState(
@@ -439,6 +441,7 @@ export function ModelAndBudgetPanel({
     const cfg = studio.config;
     if (!cfg) return;
     setModel(cfg.model);
+    setServiceTier(cfg.serviceTier ?? null);
     setSeconds(String(cfg.seconds));
     setRequests(String(cfg.requests));
     setCompaction(cfg.compactionThreshold !== undefined ? String(cfg.compactionThreshold) : "");
@@ -462,6 +465,7 @@ export function ModelAndBudgetPanel({
 
   const dirty =
     model.trim() !== initial.model ||
+    serviceTier !== (initial.serviceTier ?? null) ||
     seconds.trim() !== String(initial.seconds) ||
     requests.trim() !== String(initial.requests) ||
     (compaction.trim() === "" ? undefined : Number(compaction.trim())) !== initial.compactionThreshold ||
@@ -473,6 +477,7 @@ export function ModelAndBudgetPanel({
 
   const resetDraft = () => {
     setModel(initial.model);
+    setServiceTier(initial.serviceTier ?? null);
     setSeconds(String(initial.seconds));
     setRequests(String(initial.requests));
     setCompaction(initial.compactionThreshold !== undefined ? String(initial.compactionThreshold) : "");
@@ -499,6 +504,7 @@ export function ModelAndBudgetPanel({
           id: studio.id,
           patch: {
             model: model.trim(),
+            serviceTier,
             seconds: parsedSeconds,
             requests: parsedRequests,
             compactionThreshold: parsedCompaction,
@@ -557,6 +563,7 @@ export function ModelAndBudgetPanel({
                 value={model}
                 onChange={event => {
                   setModel(event.target.value);
+                  setServiceTier(null);
                   setSavedNotice(false);
                 }}
                 placeholder="openai-codex/gpt-6.1-sol"
@@ -580,10 +587,12 @@ export function ModelAndBudgetPanel({
               open={modelPickerOpen}
               onOpenChange={setModelPickerOpen}
               value={model}
+              serviceTier={serviceTier}
               projectId={studio.id}
               allowUnauthenticated={true}
-              onSelect={nextModel => {
+              onSelect={(nextModel, nextServiceTier) => {
                 setModel(nextModel);
+                setServiceTier(nextServiceTier);
                 setSavedNotice(false);
               }}
             />
@@ -596,6 +605,7 @@ export function ModelAndBudgetPanel({
                     type="button"
                     onClick={() => {
                       setModel(preset.id);
+                      setServiceTier(null);
                       setSavedNotice(false);
                     }}
                     className={

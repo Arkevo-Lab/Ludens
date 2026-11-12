@@ -14,6 +14,7 @@ import {
   filterAvailableModels,
   formatContextWindow,
   isModelSelectable,
+  serviceTierForModel,
   shortModelLabel,
   stepHighlightedIndex,
   type AvailableModelItem,
@@ -45,6 +46,7 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     contextWindow: 200_000,
     maxTokens: 32_000,
     authenticated: true,
+    supportedServiceTiers: [],
   },
   {
     fullId: "openai-codex/gpt-6.1-sol",
@@ -55,6 +57,7 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     contextWindow: 1_000_000,
     maxTokens: 64_000,
     authenticated: true,
+    supportedServiceTiers: ["priority", "ultrafast"],
   },
   {
     fullId: "openai-codex/gpt-5.4-mini",
@@ -65,6 +68,7 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     contextWindow: 128_000,
     maxTokens: 16_384,
     authenticated: true,
+    supportedServiceTiers: ["priority"],
   },
   {
     fullId: "google/gemini-3-pro",
@@ -75,6 +79,7 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     contextWindow: 1_048_576,
     maxTokens: 65_536,
     authenticated: false,
+    supportedServiceTiers: [],
   },
 ];
 
@@ -301,6 +306,11 @@ test("ModelPickerDialog helpers format context windows, filter catalog models, g
     "ArrowUp wraps to last selectable index",
   );
   assert.equal(stepHighlightedIndex(0, CATALOG_MODELS, 1, { disabled: true }), -1);
+
+  assert.equal(serviceTierForModel(CATALOG_MODELS[1], "ultrafast"), "ultrafast");
+  assert.equal(serviceTierForModel(CATALOG_MODELS[2], "ultrafast"), null, "Fast-only models drop Ultrafast");
+  assert.equal(serviceTierForModel(CATALOG_MODELS[2], "priority"), "priority");
+  assert.equal(serviceTierForModel(CATALOG_MODELS[0], "priority"), null, "Unsupported models use Standard");
 });
 
 test("ModelPickerDialog renders search input, provider tabs, capability badges, current badge, and lock banner", () => {

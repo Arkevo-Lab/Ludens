@@ -31,6 +31,8 @@ import {
 } from "@/components/ui/dialog";
 import { useTranslations } from "@/lib/locale";
 
+export type ModelServiceTier = "priority" | "ultrafast";
+
 export interface AvailableModelItem {
   fullId: string;
   provider: string;
@@ -40,20 +42,23 @@ export interface AvailableModelItem {
   contextWindow: number;
   maxTokens: number;
   authenticated: boolean;
+  supportedServiceTiers: ModelServiceTier[];
 }
 
 export interface AvailableModelsCatalog {
   models: AvailableModelItem[];
   providers: { id: string; count: number; authenticated: boolean }[];
   currentModel?: string | null;
+  currentServiceTier?: ModelServiceTier | null;
 }
 
 export interface ModelPickerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   value: string | null | undefined;
+  serviceTier?: ModelServiceTier | null;
   projectId?: string | null;
-  onSelect: (modelFullId: string) => Promise<void> | void;
+  onSelect: (modelFullId: string, serviceTier: ModelServiceTier | null) => Promise<void> | void;
   disabled?: boolean;
   disabledReason?: string;
   allowUnauthenticated?: boolean;
@@ -152,6 +157,13 @@ export function isModelSelectable(
   return true;
 }
 
+export function serviceTierForModel(
+  item: AvailableModelItem | null | undefined,
+  tier: ModelServiceTier | null | undefined,
+): ModelServiceTier | null {
+  return tier && item?.supportedServiceTiers.includes(tier) ? tier : null;
+}
+
 export function stepHighlightedIndex(
   current: number,
   items: readonly AvailableModelItem[],
@@ -175,6 +187,7 @@ export function ModelPickerDialog({
   open,
   onOpenChange,
   value,
+  serviceTier,
   projectId,
   onSelect,
   disabled = false,
@@ -200,6 +213,8 @@ export function ModelPickerDialog({
   const [selectedProvider, setSelectedProvider] = useState<string>("all");
   const [showUnauthenticated, setShowUnauthenticated] = useState<boolean>(allowUnauthenticated);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(0);
+  const [stagedModel, setStagedModel] = useState<string | null>(null);
+  const [stagedServiceTier, setStagedServiceTier] = useState<ModelServiceTier | null>(null);
 
   useEffect(() => {
     setShowUnauthenticated(allowUnauthenticated);
@@ -257,6 +272,15 @@ export function ModelPickerDialog({
   const allModels = catalog?.models ?? [];
   const normalizedValue = (value?.trim() || catalog?.currentModel?.trim() || "") || null;
 
+  useEffect(() => {
+    if (!open) return;
+    setStagedModel(normalizedValue);
+    setStagedServiceTier(serviceTier !== undefined ? serviceTier : catalog?.currentServiceTier ?? null);
+  }, [open, normalizedValue, serviceTier, catalog?.currentServiceTier]);
+
+  const stagedModelItem = allModels.find(item => item.fullId === stagedModel);
+  const effectiveStagedServiceTier = serviceTierForModel(stagedModelItem, stagedServiceTier);
+
   const unauthenticatedCount = useMemo(
     () => allModels.filter(item => !item.authenticated).length,
     [allModels],
@@ -301,8 +325,8 @@ export function ModelPickerDialog({
       setHighlightedIndex(-1);
       return;
     }
-    const currentIdx = normalizedValue
-      ? visibleModels.findIndex(item => item.fullId === normalizedValue)
+    const currentIdx = stagedModel
+      ? visibleModels.findIndex(item => item.fullId === stagedModel)
       : -1;
     if (
       currentIdx >= 0 &&
@@ -315,15 +339,23 @@ export function ModelPickerDialog({
       isModelSelectable(item, { disabled, allowUnauthenticated }),
     );
     setHighlightedIndex(firstSelectable);
-  }, [visibleModels, normalizedValue, disabled, allowUnauthenticated]);
+  }, [visibleModels, stagedModel, disabled, allowUnauthenticated]);
+
+  const stageSelection = useCallback((item: AvailableModelItem) => {
+    if (selectingId || !isModelSelectable(item, { disabled, allowUnauthenticated })) return;
+    setSelectError(null);
+    setStagedModel(item.fullId);
+    setStagedServiceTier(current => serviceTierForModel(item, current));
+  }, [selectingId, disabled, allowUnauthenticated]);
 
   const commitSelection = useCallback(
-    async (item: AvailableModelItem) => {
-      if (selectingId || !isModelSelectable(item, { disabled, allowUnauthenticated })) return;
+    async () => {
+      const item = stagedModelItem;
+      if (!item || selectingId || !isModelSelectable(item, { disabled, allowUnauthenticated })) return;
       setSelectError(null);
       setSelectingId(item.fullId);
       try {
-        await onSelect(item.fullId);
+        await onSelect(item.fullId, effectiveStagedServiceTier);
         onOpenChange(false);
       } catch (error) {
         setSelectError(error instanceof Error ? error.message : String(error));
@@ -331,11 +363,12 @@ export function ModelPickerDialog({
         setSelectingId(null);
       }
     },
-    [selectingId, disabled, allowUnauthenticated, onSelect, onOpenChange],
+    [stagedModelItem, effectiveStagedServiceTier, selectingId, disabled, allowUnauthenticated, onSelect, onOpenChange],
   );
 
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>) => {
     if (event.nativeEvent.isComposing) return;
+    if ((event.target as HTMLElement).closest("[data-service-tier], [data-model-picker-apply]")) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       const next = stepHighlightedIndex(highlightedIndex, visibleModels, 1, {
@@ -362,7 +395,7 @@ export function ModelPickerDialog({
       const target = highlightedIndex >= 0 ? visibleModels[highlightedIndex] : undefined;
       if (target && isModelSelectable(target, { disabled, allowUnauthenticated })) {
         event.preventDefault();
-        void commitSelection(target);
+        stageSelection(target);
       }
     }
   };
@@ -590,6 +623,7 @@ export function ModelPickerDialog({
           ) : (
             visibleModels.map((item, idx) => {
               const isCurrent = item.fullId === normalizedValue;
+              const isStaged = item.fullId === stagedModel;
               const isHighlighted = idx === highlightedIndex;
               const selectable = isModelSelectable(item, { disabled, allowUnauthenticated });
               const isSelecting = selectingId === item.fullId;
@@ -605,12 +639,13 @@ export function ModelPickerDialog({
                   }}
                   type="button"
                   role="option"
-                  aria-selected={isCurrent}
+                  aria-selected={isStaged}
                   aria-disabled={!selectable || Boolean(selectingId)}
                   disabled={!selectable || Boolean(selectingId)}
                   data-model-option={item.fullId}
                   data-provider={item.provider}
                   data-current={isCurrent ? "true" : undefined}
+                  data-staged={isStaged ? "true" : undefined}
                   data-highlighted={isHighlighted ? "true" : undefined}
                   data-authenticated={item.authenticated ? "true" : "false"}
                   className="model-picker-item"
@@ -618,7 +653,7 @@ export function ModelPickerDialog({
                   onMouseEnter={() => {
                     if (selectable) setHighlightedIndex(idx);
                   }}
-                  onClick={() => void commitSelection(item)}
+                  onClick={() => stageSelection(item)}
                 >
                   <div className="model-picker-item-left">
                     <div className="model-picker-item-title-row">
@@ -668,6 +703,61 @@ export function ModelPickerDialog({
           )}
         </div>
 
+        {stagedModelItem && stagedModelItem.supportedServiceTiers.length > 0 && (
+          <section className="model-picker-service-tier" aria-labelledby={`${listboxId}-service-tier`}>
+            <div className="model-picker-service-tier-heading">
+              <div>
+                <h3 id={`${listboxId}-service-tier`}>{t("serviceTierTitle")}</h3>
+                <p>{t("serviceTierHint")}</p>
+              </div>
+              <span className="model-picker-service-tier-model">{stagedModelItem.name || stagedModelItem.id}</span>
+            </div>
+            <div className="model-picker-service-tier-options" role="radiogroup" aria-label={t("serviceTierTitle")}>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={effectiveStagedServiceTier === null}
+                disabled={disabled || Boolean(selectingId)}
+                data-service-tier="standard"
+                className="model-picker-service-tier-option"
+                onClick={() => setStagedServiceTier(null)}
+              >
+                <strong>{t("serviceTierStandard")}</strong>
+                <span>{t("serviceTierStandardHint")}</span>
+              </button>
+              {stagedModelItem.supportedServiceTiers.includes("priority") && (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={effectiveStagedServiceTier === "priority"}
+                  disabled={disabled || Boolean(selectingId)}
+                  data-service-tier="priority"
+                  className="model-picker-service-tier-option"
+                  onClick={() => setStagedServiceTier("priority")}
+                >
+                  <strong>{t("serviceTierFast")}</strong>
+                  <span>{t("serviceTierFastHint")}</span>
+                </button>
+              )}
+              {stagedModelItem.supportedServiceTiers.includes("ultrafast") && (
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={effectiveStagedServiceTier === "ultrafast"}
+                  disabled={disabled || Boolean(selectingId)}
+                  data-service-tier="ultrafast"
+                  className="model-picker-service-tier-option"
+                  onClick={() => setStagedServiceTier("ultrafast")}
+                >
+                  <strong>{t("serviceTierUltra")}</strong>
+                  <span>{t("serviceTierUltraHint")}</span>
+                </button>
+              )}
+            </div>
+            <p className="model-picker-service-tier-cost">{t("serviceTierCostHint")}</p>
+          </section>
+        )}
+
         {/* Footer */}
         <footer className="model-picker-footer">
           <div className="model-picker-shortcuts" aria-hidden="true">
@@ -688,6 +778,16 @@ export function ModelPickerDialog({
                 .replace("{visible}", String(visibleModels.length))
                 .replace("{authenticated}", String(authenticatedCount))}
             </span>
+            <button
+              type="button"
+              className="model-picker-apply-btn"
+              data-model-picker-apply
+              disabled={disabled || !stagedModelItem || Boolean(selectingId)}
+              onClick={() => void commitSelection()}
+            >
+              {selectingId && <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />}
+              <span>{t(selectingId ? "applying" : "apply")}</span>
+            </button>
           </div>
         </footer>
     </>

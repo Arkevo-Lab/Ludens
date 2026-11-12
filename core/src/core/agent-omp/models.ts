@@ -1,8 +1,8 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { discoverAuthStorage, ModelRegistry, Settings, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
-import type { Model } from "@oh-my-pi/pi-ai";
-import { mergeConnectionConfig, readGlobalConfig, validateConnectionConfig, type ModelConnectionConfig } from "@ludens/protocol/ludens";
+import { serviceTierFamily, shouldSendServiceTier, type Model } from "@oh-my-pi/pi-ai";
+import { isOmpServiceTier, mergeConnectionConfig, readGlobalConfig, validateConnectionConfig, type ModelConnectionConfig, type OmpServiceTier } from "@ludens/protocol/ludens";
 import type { AvailableModelItem, AvailableModelsCatalog } from "../query/available-models";
 
 export type { AvailableModelItem, AvailableModelsCatalog };
@@ -10,9 +10,11 @@ export type { AvailableModelItem, AvailableModelsCatalog };
 export function ompSettingsOverrides(options: {
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
+  serviceTier?: OmpServiceTier | null;
 }): Record<string, unknown> {
   const connection = options.connection;
   return {
+    "tier.openai": options.serviceTier ?? "none",
     // Host invariant: fallback models may lack image input, and device control
     // plus run attribution require the selected model to stay sticky.
     "retry.modelFallback": false,
@@ -27,6 +29,15 @@ export function ompSettingsOverrides(options: {
     ...(connection?.imageUrls?.enabled === undefined ? {} : { "images.urls.enabled": connection.imageUrls.enabled }),
     ...(connection?.imageUrls?.backends === undefined ? {} : { "images.urls.backends": [...connection.imageUrls.backends] }),
   };
+}
+
+export function supportedOmpServiceTiers(model: Model): OmpServiceTier[] {
+  if (serviceTierFamily(model) !== "openai") return [];
+  return (["priority", "ultrafast"] as const).filter(tier => shouldSendServiceTier(tier, model));
+}
+
+export function effectiveOmpServiceTier(model: Model, tier: unknown): OmpServiceTier | null {
+  return serviceTierFamily(model) === "openai" && isOmpServiceTier(tier) && shouldSendServiceTier(tier, model) ? tier : null;
 }
 
 /** Resolve a `<provider>/<id>` selector to an image-capable OMP model carrying `imageCountBudget: Infinity`. */
@@ -50,6 +61,7 @@ export async function listAvailableOmpModels(options?: {
   workspace?: string;
   home?: string;
   currentModel?: string | null;
+  currentServiceTier?: OmpServiceTier | null;
   authStorage?: AuthStorage;
   modelRegistry?: ModelRegistry;
 }): Promise<AvailableModelsCatalog> {
@@ -105,6 +117,7 @@ export async function listAvailableOmpModels(options?: {
         contextWindow: model.contextWindow ?? 0,
         maxTokens: model.maxTokens ?? 0,
         authenticated,
+        supportedServiceTiers: supportedOmpServiceTiers(model),
       });
       const stat = providerStats.get(model.provider) ?? { count: 0, authenticated: false };
       stat.count += 1;
@@ -132,10 +145,21 @@ export async function listAvailableOmpModels(options?: {
         ? workspaceConfig.model.trim()
         : globalConfig?.defaults.model ?? "openai-codex/gpt-6.1-sol";
 
+    const configuredServiceTier = options && "currentServiceTier" in options
+      ? options.currentServiceTier
+      : isOmpServiceTier(workspaceConfig?.serviceTier)
+        ? workspaceConfig.serviceTier
+        : options?.workspace ? null : globalConfig?.defaults.serviceTier;
+    const currentModelEntry = models.find(item => item.fullId === resolvedCurrentModel);
+    const currentServiceTier = configuredServiceTier && currentModelEntry?.supportedServiceTiers.includes(configuredServiceTier)
+      ? configuredServiceTier
+      : null;
+
     return {
       models,
       providers,
       currentModel: resolvedCurrentModel,
+      currentServiceTier,
     };
   } finally {
     ownedAuth?.close();

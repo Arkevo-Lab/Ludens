@@ -180,15 +180,23 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
     return runtime.steer(message);
   }
   if (kind === "model") {
-    if (argv.length === 0) return { model: runtime.status().model };
+    if (argv.length === 0) return { model: runtime.status().model, serviceTier: runtime.status().serviceTier };
     if (epoch !== undefined) throw new Error("Control management belongs to the human, not an agent cycle");
     const status = runtime.status();
     if (request.runId && request.runId !== status.runId) throw new Error("STALE_RUN: refresh the host status before changing control");
     if (request.expectedEpoch !== undefined && request.expectedEpoch !== status.epoch) throw new Error("STALE_EPOCH: the control cycle changed");
-    if (argv.length !== 1 || !argv[0]?.trim() || argv[0].startsWith("--")) {
-      throw new Error("Usage: ludens model [<provider/id>]");
+    const selector = argv[0]?.trim();
+    let serviceTier: "priority" | "ultrafast" | null | undefined;
+    if (argv.length === 3 && argv[1] === "--service-tier") {
+      if (argv[2] === "none") serviceTier = null;
+      else if (argv[2] === "priority" || argv[2] === "ultrafast") serviceTier = argv[2];
+    } else if (argv.length === 1) {
+      serviceTier = undefined;
     }
-    return await runtime.setModel(argv[0].trim());
+    if (!selector || selector.startsWith("--") || (argv.length !== 1 && serviceTier === undefined)) {
+      throw new Error("Usage: ludens model [<provider/id>] [--service-tier none|priority|ultrafast]");
+    }
+    return await runtime.setModel(selector, serviceTier);
   }
   if (kind === "event") {
     const parsed = parseEventCommandArgs(argv);

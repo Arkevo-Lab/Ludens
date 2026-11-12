@@ -2232,8 +2232,19 @@
     "visionBadge": "Vision",
     "reasoningBadge": "Reasoning",
     "shortcutNavigate": "选择",
-    "shortcutSelect": "确认切换",
+    "shortcutSelect": "暂存选择",
     "shortcutClose": "关闭",
-    "modelsCount": "显示 {visible} 个模型 · {authenticated} 个已就绪"
+    "modelsCount": "显示 {visible} 个模型 · {authenticated} 个已就绪",
+    "serviceTierTitle": "服务档位",
+    "serviceTierHint": "可选项由当前选中的模型能力决定。",
+    "serviceTierStandard": "Standard",
+    "serviceTierStandardHint": "默认处理",
+    "serviceTierFast": "Fast",
+    "serviceTierFastHint": "更低延迟",
+    "serviceTierUltra": "Ultra",
+    "serviceTierUltraHint": "最低延迟",
+    "serviceTierCostHint": "Fast 与 Ultra 属于付费加速档位，可能增加用量费用。",
+    "apply": "应用",
+    "applying": "应用中…"
   }
 }

@@ -2232,8 +2232,19 @@
     "visionBadge": "Vision",
     "reasoningBadge": "Reasoning",
     "shortcutNavigate": "navigate",
-    "shortcutSelect": "select",
+    "shortcutSelect": "stage",
     "shortcutClose": "close",
-    "modelsCount": "{visible} shown · {authenticated} ready"
+    "modelsCount": "{visible} shown · {authenticated} ready",
+    "serviceTierTitle": "Serving tier",
+    "serviceTierHint": "Options are discovered for the selected model.",
+    "serviceTierStandard": "Standard",
+    "serviceTierStandardHint": "Default processing",
+    "serviceTierFast": "Fast",
+    "serviceTierFastHint": "Lower latency",
+    "serviceTierUltra": "Ultra",
+    "serviceTierUltraHint": "Lowest latency",
+    "serviceTierCostHint": "Fast and Ultra are premium tiers and may increase usage charges.",
+    "apply": "Apply",
+    "applying": "Applying…"
   }
 }
