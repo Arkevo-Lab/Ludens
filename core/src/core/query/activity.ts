@@ -257,6 +257,10 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
       : (poolItem.kind === "help_request" ? "Help Request" : "Notice");
     return { id: blockId, kind: "text" as const, at: event.at, title, ...provenance(event), status: "complete" as const };
   }
+  if (event.type === "pool_event" && data?.action === "handled") {
+    return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`,
+      kind: "system" as const, at: event.at, title: "pool_receipt", ...provenance(event), status: "complete" as const };
+  }
   return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`, kind: system ? "system" : "diagnostic",
     at: event.at, title: event.type, ...provenance(event), status: failed ? "error" : "complete",
     ...(raised ? { outcome: "raised" as const } : {}) };
@@ -335,6 +339,23 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
         });
         continue;
       }
+    }
+    if (event.type === "pool_event" && data?.action === "handled") {
+      const actor = data.actor === "human" ? "human" : "shiori";
+      const ids = Array.isArray(data.ids) ? data.ids.filter((id: unknown): id is string => typeof id === "string") : [];
+      const items = Array.isArray(data.events) ? data.events as Record<string, unknown>[] : [];
+      const label = (item: Record<string, unknown>) => `#${item.seq ?? item.id}`;
+      const preview = (item: Record<string, unknown>) => {
+        const raw = String(item.title || item.text || "").replace(/\s+/g, " ").trim();
+        return raw.length > 80 ? `${raw.slice(0, 80)}…` : raw;
+      };
+      const refs = items.length ? items : ids.map((id): Record<string, unknown> => ({ id }));
+      const text = actor === "shiori"
+        ? refs.map(item => `Shiori read ${label(item)}${preview(item) ? `: ${preview(item)}` : ""}`).join("\n")
+        : refs.map(item => `Human ${item.direction === "inbound" ? "withdrew" : "handled"} ${label(item)}`).join("\n");
+      blocks.set(header.id, { ...header, text: text || `${actor} handled`,
+        data: { role: "pool_receipt", action: "handled", actor, ids, events: items } });
+      continue;
     }
     if (event.type === "control_budget") {
       blocks.set(header.id, { ...header,
@@ -506,9 +527,9 @@ export function activityProgress(index: LogIndex) {
 export async function createActivityReducer(index: LogIndex, options: {
   cold?: boolean; signal?: AbortSignal; streamLimits?: ReadonlyMap<string, number>;
 } = {}) {
-  if (index.meta("activitySemantics") !== "9") {
+  if (index.meta("activitySemantics") !== "10") {
     index.resetActivity(); index.resetStores(["activity-model-ends", "activity-deliveries"]);
-    index.setMeta("activitySemantics", "9"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
+    index.setMeta("activitySemantics", "10"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
   }
   let position = Number(index.meta("activityPosition") ?? 0);
   const current = new Map<string, CurrentState>();
