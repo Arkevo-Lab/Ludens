@@ -15,9 +15,11 @@ import {
   Cpu,
   Eye,
   KeyRound,
+  Gauge,
   Loader2,
   Lock,
   RefreshCw,
+  Rocket,
   Search,
   Sparkles,
   X,
@@ -162,6 +164,33 @@ export function serviceTierForModel(
   tier: ModelServiceTier | null | undefined,
 ): ModelServiceTier | null {
   return tier && item?.supportedServiceTiers.includes(tier) ? tier : null;
+}
+
+/** Marker for a premium serving tier; renders nothing for Standard. `iconOnly` keeps the label for assistive tech and tooltip only. */
+export function ServiceTierBadge({
+  tier,
+  iconOnly = false,
+  className,
+}: {
+  tier: ModelServiceTier | null | undefined;
+  iconOnly?: boolean;
+  className?: string;
+}) {
+  const t = useTranslations("modelPicker");
+  if (!tier) return null;
+  const Icon = tier === "ultrafast" ? Rocket : Gauge;
+  const label = t(tier === "ultrafast" ? "serviceTierUltra" : "serviceTierFast");
+  return (
+    <span
+      className={["service-tier-badge", className].filter(Boolean).join(" ")}
+      data-service-tier={tier}
+      data-icon-only={iconOnly || undefined}
+      title={label}
+    >
+      <Icon className="size-3 shrink-0" aria-hidden="true" />
+      <span className={iconOnly ? "sr-only" : undefined}>{label}</span>
+    </span>
+  );
 }
 
 export function stepHighlightedIndex(
@@ -735,7 +764,7 @@ export function ModelPickerDialog({
                   className="model-picker-service-tier-option"
                   onClick={() => setStagedServiceTier("priority")}
                 >
-                  <strong>{t("serviceTierFast")}</strong>
+                  <strong><Gauge className="size-3" aria-hidden="true" />{t("serviceTierFast")}</strong>
                   <span>{t("serviceTierFastHint")}</span>
                 </button>
               )}
@@ -749,7 +778,7 @@ export function ModelPickerDialog({
                   className="model-picker-service-tier-option"
                   onClick={() => setStagedServiceTier("ultrafast")}
                 >
-                  <strong>{t("serviceTierUltra")}</strong>
+                  <strong><Rocket className="size-3" aria-hidden="true" />{t("serviceTierUltra")}</strong>
                   <span>{t("serviceTierUltraHint")}</span>
                 </button>
               )}

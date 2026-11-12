@@ -40,6 +40,21 @@ export function effectiveOmpServiceTier(model: Model, tier: unknown): OmpService
   return serviceTierFamily(model) === "openai" && isOmpServiceTier(tier) && shouldSendServiceTier(tier, model) ? tier : null;
 }
 
+/**
+ * Build the host's OMP model registry. Supplying our own registry makes the OMP
+ * SDK skip its background discovery, and credential-scoped cache hydration
+ * never restores the Codex `/models` row, whose per-model `service_tiers` gate
+ * `ultrafast`. Load only that row: a fresh cache is reused, a stale one is
+ * refetched, other providers are untouched, and discovery failures leave the
+ * bundled catalog in place.
+ */
+export async function createOmpModelRegistry(authStorage: AuthStorage, settings: Settings): Promise<ModelRegistry> {
+  const registry = new ModelRegistry(authStorage, undefined, { settings });
+  await registry.hydrateCredentialScopedModelCaches().catch(() => {});
+  await registry.refreshDiscoverableProviders(["openai-codex"], "online-if-uncached").catch(() => {});
+  return registry;
+}
+
 /** Resolve a `<provider>/<id>` selector to an image-capable OMP model carrying `imageCountBudget: Infinity`. */
 export function resolveOmpImageModel(modelRegistry: ModelRegistry, selector: string): Model {
   const trimmed = selector.trim();
@@ -93,8 +108,7 @@ export async function listAvailableOmpModels(options?: {
         settings,
         cwd: options?.workspace ?? process.cwd(),
       }));
-      registry = new ModelRegistry(authStorage, undefined, { settings });
-      await registry.hydrateCredentialScopedModelCaches().catch(() => {});
+      registry = await createOmpModelRegistry(authStorage, settings);
     }
 
     const availableKeys = new Set(registry.getAvailable().map(model => `${model.provider}/${model.id}`));

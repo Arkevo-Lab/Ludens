@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Bot, Cable, CheckCircle2, Cpu, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
-import { ModelPickerDialog, type ModelServiceTier } from "@/components/model-picker-dialog";
+import { ModelPickerDialog, ServiceTierBadge, type ModelServiceTier } from "@/components/model-picker-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
@@ -294,6 +294,7 @@ export function GlobalDefaultsCard() {
                 className="font-mono text-sm sm:flex-1"
                 spellCheck={false}
               />
+              <ServiceTierBadge tier={draft.serviceTier} className="self-start sm:self-center" />
               <Button
                 type="button"
                 variant="outline"

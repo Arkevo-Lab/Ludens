@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
 import { PixelMark } from "@/components/ui/pixel-mark";
-import { ModelPickerDialog, shortModelLabel, type ModelServiceTier } from "@/components/model-picker-dialog";
+import { ModelPickerDialog, ServiceTierBadge, shortModelLabel, type ModelServiceTier } from "@/components/model-picker-dialog";
 import { useTranslations } from "@/lib/locale";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
@@ -1867,6 +1867,7 @@ export function ShioriComposer({
             >
               <Cpu className="size-3.5 shrink-0 opacity-80" aria-hidden="true" />
               <span className="codex-model-pill-text">{modelShort}</span>
+              <ServiceTierBadge tier={activeServiceTier} iconOnly />
               {canSwitchModel ? (
                 <ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden="true" />
               ) : (

@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { createAgentSession, discoverAuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
+import { createAgentSession, discoverAuthStorage, SessionManager, Settings, type AgentSession, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import type { Model } from "@oh-my-pi/pi-ai";
 import { isOmpServiceTier, mergeConnectionConfig, readGlobalConfig, validateConnectionConfig, type ModelConnectionConfig, type OmpServiceTier } from "@ludens/protocol/ludens";
 import type { AgentRunner } from "../shiori/runtime.ts";
@@ -12,6 +12,7 @@ import type { EventLog } from "../storage/events.ts";
 import { installCompactionHttpTrace, ModelTrace } from "./trace.ts";
 import { SHIORI_SOURCE } from "./shiori.ts";
 import {
+  createOmpModelRegistry,
   listAvailableOmpModels,
   ompSettingsOverrides,
   resolveOmpImageModel,
@@ -119,8 +120,7 @@ export async function createOmpAgent(options: {
   let manager: SessionManager | undefined;
   let initializedSession: AgentSession | undefined;
   try {
-    const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-    await modelRegistry.hydrateCredentialScopedModelCaches().catch(() => {});
+    const modelRegistry = await createOmpModelRegistry(authStorage, settings);
     const model = resolveOmpImageModel(modelRegistry, options.model);
     let activeModel = `${model.provider}/${model.id}`;
     let activeServiceTier = effectiveOmpServiceTier(model, configuredServiceTier);
