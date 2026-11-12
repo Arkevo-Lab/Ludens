@@ -2078,7 +2078,10 @@
     "poolLifecycleAwaitingShiori": "Queued for next round",
     "poolLifecycleAwaitingHuman": "Waiting for human response",
     "poolLifecycleElapsed": "{duration}",
-    "poolLocateInStreamBtn": "Locate in stream ↗"
+    "poolLocateInStreamBtn": "Locate in stream ↗",
+    "poolBodyExpand": "Show more",
+    "poolBodyCollapse": "Show less",
+    "poolSearchClear": "Clear filter"
   },
   "workspaceStudio": {
     "title": "Workspace Config & Runtime Studio",

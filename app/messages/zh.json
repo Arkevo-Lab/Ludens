@@ -2078,7 +2078,10 @@
     "poolLifecycleAwaitingShiori": "等待下一轮读取",
     "poolLifecycleAwaitingHuman": "等待人工响应",
     "poolLifecycleElapsed": "{duration}",
-    "poolLocateInStreamBtn": "定位到会话流 ↗"
+    "poolLocateInStreamBtn": "定位到会话流 ↗",
+    "poolBodyExpand": "展开全文",
+    "poolBodyCollapse": "收起",
+    "poolSearchClear": "清除筛选"
   },
   "workspaceStudio": {
     "title": "工作区配置与运行工作台",

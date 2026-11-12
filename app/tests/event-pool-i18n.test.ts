@@ -20,6 +20,7 @@ const POOL_KEYS = [
   "poolLifecycleEmitted", "poolLifecycleRead", "poolLifecycleResolved", "poolLifecycleWithdrawn",
   "poolLifecycleAwaitingShiori", "poolLifecycleAwaitingHuman", "poolLifecycleElapsed",
   "poolLocateInStreamBtn",
+  "poolBodyExpand", "poolBodyCollapse", "poolSearchClear",
 ];
 
 function paths(node: unknown, prefix = ""): string[] {
@@ -34,7 +35,7 @@ test("en.json and zh.json have identical key sets", () => {
 });
 
 test("Event Pool UX keys exist, are non-empty, and keep placeholders", () => {
-  assert.equal(POOL_KEYS.length, 42);
+  assert.equal(POOL_KEYS.length, 45);
   const e = en.shioriCockpit as Record<string, unknown>;
   const z = zh.shioriCockpit as Record<string, unknown>;
   for (const key of POOL_KEYS) {
@@ -44,6 +45,6 @@ test("Event Pool UX keys exist, are non-empty, and keep placeholders", () => {
     assert.deepEqual(tokens(e[key] as string), tokens(z[key] as string), `placeholders ${key}`);
   }
   const ek = Object.keys(e);
-  assert.deepEqual(ek.slice(-42), POOL_KEYS);
-  assert.deepEqual(Object.keys(z).slice(-42), POOL_KEYS);
+  assert.deepEqual(ek.slice(-45), POOL_KEYS);
+  assert.deepEqual(Object.keys(z).slice(-45), POOL_KEYS);
 });
