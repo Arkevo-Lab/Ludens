@@ -112,6 +112,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 - **Shiori 工具**：`event_pool({ action: "read" | "ack" | "emit" })`。`read` 返回待处理的入站消息/回复（全部或指定 `ids`；`includeHandled` 可读历史），默认将其标记已读，`ack: false` 则在忙碌时暂缓；`ack` 显式将入站事件标记为已处理；`emit` 发布出站 `help_request`（默认）或 `notice`。`pause` 默认为 `false`，保持游戏异步进行；只有 `pause: true`——仅用于彻底受阻的智能体——会以 `awaiting human` 停止自动循环并交还设备控制权，直到人类恢复。
 - **轮首摘要**：`before_agent_start` 仅在 `pendingInbound > 0` 时追加紧凑的入站摘要：每条包含 `id`、`seq`、`kind`、可选 `title` 与 72 字符单行预览。事件池空闲时不追加任何字节，从而保留 provider 前缀 KV 缓存；完整正文通过 `event_pool({ action: "read" })` 按需拉取。
 - **界面**：Web 控制台通过 `GET/POST /api/event-pool` 读写同一存储，驱动出站托盘、会话流卡片、标题栏待处理徽章与回复输入框。CLI 与控制台是对同一加锁文件的对等写入方。
+- **双时序投影与全览**：每个生命周期投影为两条流消息。消息 1（人工消息或 `outbound_event` 卡片）严格锚定在 `createdAt`（`T_send` / `T_emit`），绝不追加到流尾。消息 2（`pool_receipt`）由 `pool_event` 的 `action: "handled"` 投影而来，锚定在 `handledAt`（`T_read`）。人工可通过 `ack` 与 `actor: "human"` 撤回未读的待处理入站消息，显示为已撤回而非已读取。Live 工作台右侧检查器坞在 `Stage & Telemetry` 与 `Event Pool` 分段头之间切换；专用的事件池全览列出留存事件，线程头快捷入口可打开它，每条事件的定位到会话流操作会跳转到其流内位置。
 
 紧急的轮内打断仍然使用 `ludens steer <message>`，它直接排队进入正在运行的智能体，而不进入事件池。
 
