@@ -21,7 +21,7 @@ import {
   resolveCaptionStyle,
   resolveMacTitlebarDoubleClickAction,
 } from './window-chrome.js'
-import { loadWindowState, saveWindowState, type SavedWindowState } from './window-state.js'
+import { loadWindowState, saveWindowState, saveWindowStateSync, type SavedWindowState } from './window-state.js'
 
 const { values } = parseArgs({ args: process.argv.slice(2), options: {
   workspace: { type: 'string' }, dashboard: { type: 'string' }, profile: { type: 'string' },
@@ -100,6 +100,7 @@ if (values.help) {
         preloadPath: join(here, 'preload.cjs'),
         bounds: persistedState,
       }))
+      owner.setMaxListeners(24)
       owner.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       const navigation = (event: Electron.Event, url: string) => { if (!isDashboardUrl(url, dashboard.origin)) event.preventDefault() }
       owner.webContents.on('will-navigate', navigation)
@@ -154,7 +155,10 @@ if (values.help) {
       }
       app.on('before-quit', () => {
         const next = captureWindowState()
-        if (next) void saveWindowState(windowStatePath, next).catch(() => {})
+        if (!next) return
+        try {
+          saveWindowStateSync(windowStatePath, next)
+        } catch {}
       })
 
       const syncWin32OverlayFocus = () => {
@@ -189,12 +193,26 @@ if (values.help) {
           publishWindowState()
         }
       })
+      const showOfflineWaitingPage = async () => {
+        if (!owner || owner.isDestroyed() || quitting) return
+        const offline = buildOfflineWaitingHtml({
+          locale: app.getLocale(),
+          platform: process.platform,
+          dashboardOrigin: dashboard.origin,
+          retryUrl: dashboardTarget,
+        })
+        await owner.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offline)}`).catch(() => {})
+      }
+
       owner.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
         // Aborted/superseded navigation and subresources must not replace a healthy page.
         if (!isMainFrame || code === -3 || !isDashboardUrl(url, dashboard.origin)) return
         dashboardTarget = url
         dashboardReady = false
         console.error(`[ludens-pet] dashboard load failed: ${description} (${code})`)
+        if (!loadingDashboard && !quitting) {
+          void showOfflineWaitingPage()
+        }
       })
       owner.webContents.on('render-process-gone', (_event, details) => {
         dashboardReady = false
@@ -359,14 +377,7 @@ if (values.help) {
         } catch (error) {
           const failure = error as { code?: string; errno?: number }
           if (failure.code === 'ERR_ABORTED' || failure.errno === -3) return
-          if (owner && !owner.isDestroyed() && !quitting) {
-            const offline = buildOfflineWaitingHtml({
-              locale: app.getLocale(),
-              platform: process.platform,
-              dashboardOrigin: dashboard.origin,
-            })
-            await owner.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(offline)}`).catch(() => {})
-          }
+          await showOfflineWaitingPage()
         } finally { loadingDashboard = false }
       }
       retryDashboard = () => { void loadDashboard() }

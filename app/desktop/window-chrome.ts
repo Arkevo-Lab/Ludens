@@ -28,6 +28,7 @@ export interface OfflineWaitingHtmlInput {
   locale?: string
   platform: NodeJS.Platform | string
   dashboardOrigin: string
+  retryUrl?: string
 }
 
 export function normalizeDesktopPlatform(platform: NodeJS.Platform | string): DesktopPlatform {
@@ -114,6 +115,7 @@ export function buildOfflineWaitingHtml(input: OfflineWaitingHtmlInput): string 
   const isZh = (input.locale ?? 'zh').toLowerCase().startsWith('zh')
   const lang = isZh ? 'zh' : 'en'
   const safeOrigin = escapeHtml(input.dashboardOrigin)
+  const safeRetryUrl = escapeHtml(input.retryUrl ?? input.dashboardOrigin)
   const titlebarPadding = platform === 'darwin'
     ? 'padding-left: 78px; padding-right: 16px;'
     : platform === 'win32'
@@ -124,7 +126,7 @@ export function buildOfflineWaitingHtml(input: OfflineWaitingHtmlInput): string 
 <html lang="${lang}">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <title>Ludens · Reconnecting</title>
 <style>
   :root { color-scheme: dark; }
@@ -211,7 +213,9 @@ export function buildOfflineWaitingHtml(input: OfflineWaitingHtmlInput): string 
   }
   .retry-btn {
     -webkit-app-region: no-drag;
-    appearance: none;
+    display: inline-flex;
+    align-items: center;
+    text-decoration: none;
     border: 1px solid rgba(255, 79, 31, 0.45);
     background: rgba(255, 79, 31, 0.14);
     color: #ffd7cc;
@@ -242,7 +246,7 @@ export function buildOfflineWaitingHtml(input: OfflineWaitingHtmlInput): string 
       <p>Ludens is reconnecting to the local dashboard. This window will open automatically once the service is ready.</p>
       <div class="origin">${safeOrigin}</div>
       <div class="actions">
-        <button type="button" class="retry-btn" onclick="location.reload()">立即重试 / Retry now</button>
+        <a class="retry-btn" href="${safeRetryUrl}">立即重试 / Retry now</a>
         <span class="hint">Auto-retry every 5s</span>
       </div>
     </section>

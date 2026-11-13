@@ -250,6 +250,11 @@ h3 {
   background: color-mix(in srgb, var(--bg) 92%, transparent);
   backdrop-filter: blur(10px);
 }
+@media (max-width: 680px) {
+  .web-collapsed-shell-bar {
+    display: none;
+  }
+}
 .web-collapsed-brand {
   display: inline-flex;
   align-items: center;

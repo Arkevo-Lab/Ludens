@@ -93,6 +93,7 @@ describe('window-chrome', () => {
       locale: 'zh-CN',
       platform: 'darwin',
       dashboardOrigin: 'http://127.0.0.1:3015',
+      retryUrl: 'http://127.0.0.1:3015/?view=live',
     })
     expect(macHtml).toContain('#090a0d')
     expect(macHtml).toContain('#ff4f1f')
@@ -100,7 +101,7 @@ describe('window-chrome', () => {
     expect(macHtml).toContain('-webkit-app-region: no-drag')
     expect(macHtml).toContain('padding-left: 78px')
     expect(macHtml).toContain('立即重试 / Retry now')
-    expect(macHtml).toContain('location.reload()')
+    expect(macHtml).toContain('href="http://127.0.0.1:3015/?view=live"')
     expect(macHtml).toContain('http://127.0.0.1:3015')
 
     const winHtml = buildOfflineWaitingHtml({

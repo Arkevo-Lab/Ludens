@@ -9,6 +9,7 @@ import {
   defaultWindowState,
   loadWindowState,
   saveWindowState,
+  saveWindowStateSync,
   type DisplayArea,
 } from './window-state.js'
 
@@ -111,5 +112,44 @@ describe('window-state', () => {
   it('returns default state when window-state.json is missing', () => {
     const loaded = loadWindowState('/nonexistent/path/window-state.json', [primary])
     expect(loaded).toEqual(defaultWindowState(primary))
+  })
+
+  it('serializes concurrent async saves and supports synchronous quit save', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ludens-win-state-race-'))
+    tempDirs.push(dir)
+    const filePath = join(dir, 'window-state.json')
+
+    await Promise.all([
+      saveWindowState(filePath, { x: 10, y: 10, width: 1000, height: 700, maximized: false, fullScreen: false }),
+      saveWindowState(filePath, { x: 20, y: 20, width: 1100, height: 740, maximized: false, fullScreen: false }),
+      saveWindowState(filePath, { x: 30, y: 30, width: 1240, height: 820, maximized: true, fullScreen: false }),
+    ])
+
+    expect(loadWindowState(filePath, [primary])).toEqual({
+      x: 30,
+      y: 30,
+      width: 1240,
+      height: 820,
+      maximized: true,
+      fullScreen: false,
+    })
+
+    saveWindowStateSync(filePath, {
+      x: 80,
+      y: 60,
+      width: 1360,
+      height: 880,
+      maximized: false,
+      fullScreen: true,
+    })
+
+    expect(loadWindowState(filePath, [primary])).toEqual({
+      x: 80,
+      y: 60,
+      width: 1360,
+      height: 880,
+      maximized: false,
+      fullScreen: true,
+    })
   })
 })

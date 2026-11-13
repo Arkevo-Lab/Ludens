@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
@@ -142,9 +142,33 @@ export function loadWindowState(filePath: string, workAreas: readonly DisplayAre
   }
 }
 
+const saveQueues = new Map<string, Promise<void>>()
+let saveSequence = 0
+
+export function saveWindowStateSync(filePath: string, state: SavedWindowState): void {
+  mkdirSync(dirname(filePath), { recursive: true })
+  const tmpPath = `${filePath}.${process.pid}.${++saveSequence}.sync.tmp`
+  writeFileSync(tmpPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
+  renameSync(tmpPath, filePath)
+}
+
 export async function saveWindowState(filePath: string, state: SavedWindowState): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true })
-  const tmpPath = `${filePath}.tmp`
-  await writeFile(tmpPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8')
-  await rename(tmpPath, filePath)
+  const previous = saveQueues.get(filePath) ?? Promise.resolve()
+  const payload = `${JSON.stringify(state, null, 2)}\n`
+  const next = previous
+    .catch(() => {})
+    .then(async () => {
+      await mkdir(dirname(filePath), { recursive: true })
+      const tmpPath = `${filePath}.${process.pid}.${++saveSequence}.tmp`
+      await writeFile(tmpPath, payload, 'utf8')
+      await rename(tmpPath, filePath)
+    })
+  saveQueues.set(filePath, next)
+  try {
+    await next
+  } finally {
+    if (saveQueues.get(filePath) === next) {
+      saveQueues.delete(filePath)
+    }
+  }
 }

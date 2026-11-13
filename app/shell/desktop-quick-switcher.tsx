@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useId,
   useMemo,
@@ -140,20 +141,21 @@ export function DesktopQuickSwitcher({
   const { t: rootT } = useLocale();
   const t = useTranslations("desktopChrome");
   const dialogId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
 
-  const close = () => {
+  const close = useCallback(() => {
     onOpenChange(false);
     requestAnimationFrame(() => {
       if (previousFocusRef.current?.isConnected) {
         previousFocusRef.current.focus();
       }
     });
-  };
+  }, [onOpenChange]);
 
   useEffect(() => {
     if (!open) return;
@@ -166,8 +168,20 @@ export function DesktopQuickSwitcher({
     const frame = requestAnimationFrame(() => {
       inputRef.current?.focus();
     });
-    return () => cancelAnimationFrame(frame);
-  }, [open]);
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+      }
+    };
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", onDocumentKeyDown);
+    };
+  }, [open, close]);
 
   const allItems = useMemo<QuickSwitcherItem[]>(() => {
     const items: QuickSwitcherItem[] = [];
@@ -329,6 +343,37 @@ export function DesktopQuickSwitcher({
   });
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+
+    if (event.key === "Tab" && dialogRef.current) {
+      const focusables = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>(
+          'input:not([disabled]), button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      );
+      if (focusables.length > 0) {
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement;
+        if (
+          event.shiftKey &&
+          (active === first || !dialogRef.current.contains(active))
+        ) {
+          event.preventDefault();
+          last.focus();
+          return;
+        }
+        if (
+          !event.shiftKey &&
+          (active === last || !dialogRef.current.contains(active))
+        ) {
+          event.preventDefault();
+          first.focus();
+          return;
+        }
+      }
+    }
+
     if (event.key === "Escape") {
       event.preventDefault();
       event.stopPropagation();
@@ -348,21 +393,17 @@ export function DesktopQuickSwitcher({
       );
       return;
     }
-    if (event.key === "Home") {
-      event.preventDefault();
-      setActiveIndex(0);
+    if (event.key === "Home" && event.target === inputRef.current) {
       return;
     }
-    if (event.key === "End") {
-      event.preventDefault();
-      setActiveIndex(filteredItems.length - 1);
+    if (event.key === "End" && event.target === inputRef.current) {
       return;
     }
-    if (event.key === "Enter") {
+    if (event.key === "Enter" && event.target === inputRef.current) {
       event.preventDefault();
       const target = filteredItems[clampedIndex];
       if (target) {
-        onOpenChange(false);
+        close();
         target.onSelect();
       }
     }
@@ -377,6 +418,7 @@ export function DesktopQuickSwitcher({
       }}
     >
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={t("switcherTitle")}
