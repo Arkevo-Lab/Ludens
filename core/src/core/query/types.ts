@@ -46,12 +46,44 @@ export interface RunInfo {
   startedAt?: string;
   endedAt?: string;
 }
+export type ServiceLaunchOrigin = "app" | "cli";
+
+export interface DeviceContentionConflict {
+  holderProjectId: string;
+  holderWorkspaceName?: string;
+  deviceKey: string;
+  deviceLabel?: string;
+  holderMode: string;
+  holderOrigin?: ServiceLaunchOrigin;
+}
+
+export interface ProjectCoreSummary {
+  online: boolean;
+  pid?: number;
+  mode?: string;
+  consolidating?: boolean;
+  launchedBy?: ServiceLaunchOrigin;
+  appInstanceId?: string;
+  pendingOutbound?: number;
+  runId?: string;
+  model?: string | null;
+}
+
+export interface ProjectWorkspaceDefaults {
+  model?: string | null;
+  serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
+  maxSeconds?: number | null;
+}
+
 export interface Project {
   id: string;
   name?: string;
   available?: boolean;
   workspace?: string;
   runs: RunInfo[];
+  core?: ProjectCoreSummary;
+  defaults?: ProjectWorkspaceDefaults;
 }
 export interface Observation {
   id: string;
@@ -186,6 +218,9 @@ export interface LiveStatus {
   thinking: boolean;
   maxSeconds?: number | null;
   remainingSeconds?: number | null;
+  launchedBy?: ServiceLaunchOrigin;
+  coreOffline?: boolean;
+  spawned?: boolean;
 }
 export interface LivePhase {
   kind:
