@@ -1,4 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import {
+  DESKTOP_TITLEBAR_HEIGHT,
+  normalizeDesktopPlatform,
+  resolveCaptionStyle,
+} from './window-chrome.js'
 
 function on(channel: string, callback: (value: any) => void) {
   const listener = (_event: Electron.IpcRendererEvent, value: unknown) => callback(value)
@@ -6,7 +11,14 @@ function on(channel: string, callback: (value: any) => void) {
   return () => ipcRenderer.removeListener(channel, listener)
 }
 
-// Narrow Pet settings and activity IPC bridge; no general filesystem access.
+const platform = normalizeDesktopPlatform(process.platform)
+const initialState = {
+  platform,
+  captionStyle: resolveCaptionStyle(platform),
+  titlebarHeight: DESKTOP_TITLEBAR_HEIGHT,
+} as const
+
+// Narrow Pet settings, activity, and window-chrome IPC bridge; no general filesystem access.
 contextBridge.exposeInMainWorld('ludens', {
   companion: {
     getSound: () => ipcRenderer.invoke('ludens:companion:sound:get'),
@@ -35,6 +47,22 @@ contextBridge.exposeInMainWorld('ludens', {
         return () => { active = false; unsubscribe() }
       },
     },
+  },
+  window: {
+    platform,
+    initialState,
+    getState: () => ipcRenderer.invoke('ludens:window:get-state'),
+    onState: (callback: (state: unknown) => void) => on('ludens:window:state', callback),
+    onCommand: (callback: (command: unknown) => void) => on('ludens:window:command', callback),
+    minimize: () => ipcRenderer.invoke('ludens:window:minimize'),
+    toggleMaximize: () => ipcRenderer.invoke('ludens:window:toggle-maximize'),
+    close: () => ipcRenderer.invoke('ludens:window:close'),
+    handleTitlebarDoubleClick: () => ipcRenderer.invoke('ludens:window:titlebar-double-click'),
+    goBack: () => ipcRenderer.invoke('ludens:window:go-back'),
+    goForward: () => ipcRenderer.invoke('ludens:window:go-forward'),
+    reload: () => ipcRenderer.invoke('ludens:window:reload'),
+    setOverlayTheme: (options: { color: string; symbolColor: string; height?: number }) =>
+      ipcRenderer.invoke('ludens:window:set-overlay-theme', options),
   },
 })
 contextBridge.exposeInMainWorld('ludensPet', {

@@ -17,8 +17,15 @@ Browser-first Next.js 16 observability and control console for Ludens workspaces
 ```sh
 cd app && npm run dev        # Start local web console on http://127.0.0.1:3015
 cd app && npm run typecheck  # Next.js route typegen + web & desktop tsc
-cd app && bun test           # Run console test suite
+cd app && npm test           # Run console & desktop test suites
 ```
+
+## Desktop Chrome & Launch
+
+- **Unified 38px Titlebar**: Frameless `#090a0d` desktop window across macOS (`titleBarStyle: "hiddenInset"`, centered traffic lights) and Windows 10/11 (`titleBarStyle: "hidden"` with native Window Controls Overlay and no legacy in-window menu bar).
+- **Window State & Shortcuts**: Persists bounds/maximized/fullscreen state in `window-state.json` with multi-display clamping; supports `Cmd/Ctrl+B` (toggle sidebar), `Cmd/Ctrl+K` (quick switcher), and `Cmd/Ctrl+[` / `]` (back/forward).
+- **Windows Launch**: Use `app/bin/ludens-app.cmd` on Windows (or `app/bin/ludens-app` on macOS/Linux).
+- **Browser Preview**: Append `?desktopPreview=darwin` or `?desktopPreview=win32` to `http://127.0.0.1:3015` to preview desktop titlebar chrome in any browser.
 
 ## Documentation
 
