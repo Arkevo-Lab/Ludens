@@ -1002,7 +1002,7 @@ export function BasewareView({
         </div>
 
         {/* Right 5 Cols: Contextual Machine & Daemon Inspector */}
-        <div className="min-w-0 lg:sticky lg:top-4 lg:col-span-5" data-baseware-section="controllers-catalog">
+        <div className="min-w-0 lg:sticky lg:top-[calc(1rem+var(--shell-topbar-height,0px))] lg:col-span-5" data-baseware-section="controllers-catalog">
           <Card className="min-w-0" data-capability-source="device">
             <CardContent className="min-w-0 space-y-4 p-4">
               {/* Inspector Mode Switcher */}

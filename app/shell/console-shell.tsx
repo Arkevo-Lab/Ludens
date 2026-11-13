@@ -1,6 +1,6 @@
 "use client";
-import { useRef, useState, type ComponentProps, type ComponentType, type ReactNode } from "react";
-import { MenuIcon } from "lucide-react";
+import { useRef, useState, type CSSProperties, type ComponentProps, type ComponentType, type ReactNode } from "react";
+import { MenuIcon, PanelLeft, Search } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { PixelMark } from "@/components/ui/pixel-mark";
@@ -10,6 +10,9 @@ import { ShioriWorkbench } from "@/features/live/shiori-cockpit";
 import { EventPoolOverviewPanel } from "@/features/live/event-pool-panel";
 import { WorkspaceStudioView } from "@/features/workspaces/workspace-studio-view";
 import { ConsoleSidebar } from "@/shell/console-sidebar";
+import { DesktopQuickSwitcher } from "@/shell/desktop-quick-switcher";
+import { DesktopTitlebar } from "@/shell/desktop-titlebar";
+import { formatDesktopShortcut, useDesktopWindow } from "@/shell/use-desktop-window";
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
 import { RunPicker } from "@/features/workspaces/run-picker";
 import { DesktopBridge } from "@/features/pet/desktop-bridge";
@@ -45,8 +48,15 @@ const SlottedRunAnalysis = RunAnalysis as ComponentType<
 export default function ConsoleShell() {
   const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, staleStatus, phase, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, closeCreateIntent, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, activeLiveSegment, setActiveLiveSegment, jumpToLiveSegment, clearLiveJumpTarget} = useDashboardController();
   const st = useTranslations("consoleSidebar");
+  const ct = useTranslations("desktopChrome");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
+  const desktop = useDesktopWindow({
+    search,
+    onNavigate: navigateUrl,
+    mobileNavOpen,
+    onMobileNavOpenChange: setMobileNavOpen,
+  });
   const openReplayAtFrame = (frame: { run?: string; at?: number; record: string; sequence: number }) => {
     navigate({
       view: "replay",
@@ -156,20 +166,44 @@ export default function ConsoleShell() {
       }}
     />
   ) : null;
+  const expandSidebarTitle = ct("toggleSidebarHint")
+    .replace("{action}", ct("expandSidebar"))
+    .replace("{shortcut}", formatDesktopShortcut(desktop.platform, "B"));
+  const quickSwitcherTitle = ct("quickSwitcherHint").replace(
+    "{shortcut}",
+    formatDesktopShortcut(desktop.platform, "K"),
+  );
   const mobileNavButton = (
-    <Button
-      ref={mobileNavTriggerRef}
-      type="button"
-      variant="ghost"
-      size="icon-sm"
-      className="mobile-nav-trigger min-[681px]:hidden"
-      aria-expanded={mobileNavOpen}
-      aria-label={st(mobileNavOpen ? "menuClose" : "menuOpen")}
-      title={st(mobileNavOpen ? "menuClose" : "menuOpen")}
-      onClick={() => setMobileNavOpen(open => !open)}
-    >
-      <MenuIcon className="size-4" aria-hidden="true" />
-    </Button>
+    <>
+      {!desktop.active && (
+        <Button
+          ref={mobileNavTriggerRef}
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="mobile-nav-trigger min-[681px]:hidden"
+          aria-expanded={mobileNavOpen}
+          aria-label={st(mobileNavOpen ? "menuClose" : "menuOpen")}
+          title={st(mobileNavOpen ? "menuClose" : "menuOpen")}
+          onClick={() => setMobileNavOpen(open => !open)}
+        >
+          <MenuIcon className="size-4" aria-hidden="true" />
+        </Button>
+      )}
+      {!desktop.active && desktop.sidebarCollapsed && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className="web-sidebar-expand-trigger max-[680px]:hidden"
+          aria-label={ct("expandSidebar")}
+          title={expandSidebarTitle}
+          onClick={desktop.toggleSidebar}
+        >
+          <PanelLeft className="size-4" aria-hidden="true" />
+        </Button>
+      )}
+    </>
   );
   const perfHandoverSlot = data && (auto || stopping) ? (
     <Button
@@ -187,31 +221,127 @@ export default function ConsoleShell() {
   const hasWorkbenchHeader =
     (view === "replay" && entry === "ready") ||
     ((view === "live" || view === "perf") && entry === "ready" && Boolean(data));
+  const hasContextualBarPicker = Boolean(runControls && entry === "ready" && contextualRunPicker);
+  const activeWorkspaceLabel = workspaceScopedView ? workspaceName(project) : "";
   return (
-    <div className="console-shell">
-      <DesktopBridge onNavigate={navigateUrl} />
-      <ConsoleSidebar
-        view={view}
-        viewLink={viewLink}
-        onNavigate={navigateUrl}
-        workspaceSlot={workspaceSlot}
-        mobileOpen={mobileNavOpen}
-        onMobileOpenChange={setMobileNavOpen}
-        mobileTriggerRef={mobileNavTriggerRef}
+    <div
+      className="desktop-shell-root"
+      data-desktop-chrome={desktop.active ? "true" : undefined}
+      data-desktop-platform={desktop.active ? desktop.platform : undefined}
+      style={{ "--shell-topbar-height": `${desktop.layout.topbarHeightPx}px` } as CSSProperties}
+    >
+      <DesktopTitlebar
+        active={desktop.active}
+        platform={desktop.platform}
+        captionStyle={desktop.captionStyle}
+        titlebarHeight={desktop.titlebarHeight}
+        maximized={desktop.maximized}
+        fullScreen={desktop.fullScreen}
+        focused={desktop.focused}
+        isPreview={desktop.isPreview}
+        hasNativeMacTrafficLights={desktop.hasNativeMacTrafficLights}
+        sidebarCollapsed={desktop.sidebarCollapsed}
+        mobileNavOpen={mobileNavOpen}
+        workspaceTitle={activeWorkspaceLabel || undefined}
+        viewTitle={t(`nav.${view}`)}
+        canGoBack={desktop.canGoBack}
+        canGoForward={desktop.canGoForward}
+        companionAvailable={desktop.companionAvailable}
+        companionVisible={desktop.companionVisible}
+        onToggleSidebar={desktop.toggleSidebar}
+        onGoBack={() => void desktop.goBack()}
+        onGoForward={() => void desktop.goForward()}
+        onOpenQuickSwitcher={() => desktop.setQuickSwitcherOpen(true)}
+        onReload={() => void desktop.reload()}
+        onToggleCompanion={() => void desktop.toggleCompanion()}
+        onMinimize={() => void desktop.minimize()}
+        onToggleMaximize={() => void desktop.toggleMaximize()}
+        onTogglePreviewFullScreen={desktop.togglePreviewFullScreen}
+        onClose={() => void desktop.close()}
+        onTitlebarDoubleClick={() => void desktop.handleTitlebarDoubleClick()}
+        onSelectPreviewPlatform={desktop.setPreviewPlatform}
       />
-      <div className="console-main">
-        {!hasWorkbenchHeader && (
-          <header className="mobile-shell-bar">
-            {mobileNavButton}
-            <span className="mobile-shell-brand">
-              <PixelMark />
-              <strong>{t(`nav.${view}`)}</strong>
-            </span>
-            {runControls && entry === "ready" && contextualRunPicker ? (
-              <div className="mobile-shell-actions">{contextualRunPicker}</div>
-            ) : null}
-          </header>
-        )}
+      <div
+        className="console-shell"
+        data-sidebar-collapsed={desktop.sidebarCollapsed ? "true" : undefined}
+        data-desktop-chrome={desktop.active ? "true" : undefined}
+      >
+        <DesktopBridge onNavigate={navigateUrl} />
+        <ConsoleSidebar
+          view={view}
+          viewLink={viewLink}
+          onNavigate={navigateUrl}
+          workspaceSlot={workspaceSlot}
+          mobileOpen={mobileNavOpen}
+          onMobileOpenChange={setMobileNavOpen}
+          mobileTriggerRef={mobileNavTriggerRef}
+          collapsed={desktop.sidebarCollapsed}
+          onToggleCollapse={desktop.toggleSidebar}
+          collapseShortcut={formatDesktopShortcut(desktop.platform, "B")}
+          desktopChrome={desktop.active}
+        />
+        <div className="console-main">
+          {!hasWorkbenchHeader && (!desktop.active || hasContextualBarPicker) && (
+            <header className="mobile-shell-bar">
+              {!desktop.active && (
+                <Button
+                  ref={mobileNavTriggerRef}
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="mobile-nav-trigger min-[681px]:hidden"
+                  aria-expanded={mobileNavOpen}
+                  aria-label={st(mobileNavOpen ? "menuClose" : "menuOpen")}
+                  title={st(mobileNavOpen ? "menuClose" : "menuOpen")}
+                  onClick={() => setMobileNavOpen(open => !open)}
+                >
+                  <MenuIcon className="size-4" aria-hidden="true" />
+                </Button>
+              )}
+              {!desktop.active && (
+                <span className="mobile-shell-brand">
+                  <PixelMark />
+                  <strong>{t(`nav.${view}`)}</strong>
+                </span>
+              )}
+              {hasContextualBarPicker ? (
+                <div className="mobile-shell-actions">{contextualRunPicker}</div>
+              ) : null}
+            </header>
+          )}
+          {!hasWorkbenchHeader && !desktop.active && desktop.sidebarCollapsed && (
+            <header className="web-collapsed-shell-bar max-[680px]:hidden">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                aria-label={ct("expandSidebar")}
+                title={expandSidebarTitle}
+                onClick={desktop.toggleSidebar}
+              >
+                <PanelLeft className="size-4" aria-hidden="true" />
+              </Button>
+              <span className="web-collapsed-brand">
+                <PixelMark size={16} />
+                <span>Ludens</span>
+                <span className="desktop-breadcrumb-sep" aria-hidden="true">/</span>
+                <strong>{t(`nav.${view}`)}</strong>
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                {hasContextualBarPicker ? contextualRunPicker : null}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={ct("quickSwitcher")}
+                  title={quickSwitcherTitle}
+                  onClick={() => desktop.setQuickSwitcherOpen(true)}
+                >
+                  <Search className="size-4" aria-hidden="true" />
+                </Button>
+              </div>
+            </header>
+          )}
         <main ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
           tabIndex={runControls ? -1 : undefined} aria-label={runControls ? t(`views.${view}.title`) : undefined}
           className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : view === "replay" && entry === "ready" ? " replay-page" : view === "perf" ? " perf-page" : "")}>
@@ -694,6 +824,46 @@ export default function ConsoleShell() {
           )}
         </main>
       </div>
+      </div>
+      <DesktopQuickSwitcher
+        open={desktop.quickSwitcherOpen}
+        onOpenChange={desktop.setQuickSwitcherOpen}
+        platform={desktop.platform}
+        projects={projects}
+        currentProject={selection.project}
+        currentView={view}
+        viewLink={viewLink}
+        onNavigate={url => {
+          setMobileNavOpen(false);
+          navigateUrl(url);
+        }}
+        onSelectWorkspace={id => {
+          setMobileNavOpen(false);
+          navigate({
+            view: "live",
+            project: id,
+            workspace: null,
+            run: null,
+            epoch: null,
+            beforeCall: null,
+            call: null,
+            block: null,
+            image: null,
+            at: null,
+            ...replayEvidencePatch(null),
+          });
+        }}
+        sidebarCollapsed={desktop.sidebarCollapsed}
+        onToggleSidebar={desktop.toggleSidebar}
+        canGoBack={desktop.canGoBack}
+        canGoForward={desktop.canGoForward}
+        onGoBack={() => void desktop.goBack()}
+        onGoForward={() => void desktop.goForward()}
+        onReload={() => void desktop.reload()}
+        companionAvailable={desktop.companionAvailable}
+        companionVisible={desktop.companionVisible}
+        onToggleCompanion={() => void desktop.toggleCompanion()}
+      />
     </div>
   );
 

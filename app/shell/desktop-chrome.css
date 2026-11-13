@@ -1,0 +1,622 @@
+@layer components {
+/* ── Antigravity-Inspired Cross-Platform 38px Desktop Chrome ── */
+
+.desktop-titlebar {
+  position: sticky;
+  top: 0;
+  z-index: 60;
+  display: flex;
+  align-items: stretch;
+  width: 100%;
+  height: var(--shell-topbar-height, 38px);
+  min-height: var(--shell-topbar-height, 38px);
+  max-height: var(--shell-topbar-height, 38px);
+  background: var(--bg);
+  color: var(--text);
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--font-sans);
+}
+
+/* Windows 11 DWM dark window subtle 1px top highlight when unmaximized */
+.desktop-titlebar[data-platform="win32"][data-maximized="false"][data-fullscreen="false"]::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.065);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* Left Cell: Pixel-aligned with 220px ConsoleSidebar when expanded */
+.desktop-titlebar-left {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: var(--shell-sidebar-width, 220px);
+  flex: 0 0 var(--shell-sidebar-width, 220px);
+  padding-right: 8px;
+  background: var(--sidebar);
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid transparent;
+  -webkit-app-region: drag;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+/* Collapsed sidebar or <=680px narrow drawer: left cell melts seamlessly into main titlebar,
+   keeping identical left padding so icon buttons NEVER jump even 1px! */
+.desktop-titlebar[data-sidebar-collapsed="true"] .desktop-titlebar-left {
+  width: auto;
+  flex: 0 0 auto;
+  background: var(--bg);
+  border-right-color: transparent;
+  border-bottom-color: var(--line);
+}
+
+@media (max-width: 680px) {
+  .desktop-titlebar .desktop-titlebar-left {
+    width: auto;
+    flex: 0 0 auto;
+    background: var(--bg);
+    border-right-color: transparent;
+    border-bottom-color: var(--line);
+  }
+}
+
+/* Preview-only macOS Sequoia traffic light stand-ins (never rendered when native AppKit traffic lights exist) */
+.desktop-preview-traffic-lights {
+  position: absolute;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-preview-dot {
+  width: 12px;
+  height: 12px;
+  padding: 0;
+  border-radius: 999px;
+  border: 0.5px solid rgba(0, 0, 0, 0.25);
+  display: inline-block;
+  transition: filter 120ms ease, background-color 140ms ease;
+}
+
+.desktop-preview-dot.close {
+  background: #ff5f57;
+}
+.desktop-preview-dot.minimize {
+  background: #febc2e;
+}
+.desktop-preview-dot.zoom {
+  background: #28c840;
+}
+
+.desktop-titlebar[data-focused="false"] .desktop-preview-dot {
+  background: #353a45;
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.desktop-preview-traffic-lights:hover .desktop-preview-dot.close {
+  background: #ff5f57;
+}
+.desktop-preview-traffic-lights:hover .desktop-preview-dot.minimize {
+  background: #febc2e;
+}
+.desktop-preview-traffic-lights:hover .desktop-preview-dot.zoom {
+  background: #28c840;
+}
+
+/* Leading PixelMark on Windows / Linux */
+.desktop-titlebar-app-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-right: 6px;
+  color: var(--text);
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.desktop-titlebar-nav-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-chrome-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: #aeb5c4;
+  transition: background-color 120ms ease, color 120ms ease, opacity 140ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-chrome-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.065);
+  color: var(--text);
+}
+
+.desktop-chrome-icon-btn:active:not(:disabled) {
+  background: rgba(255, 255, 255, 0.095);
+}
+
+.desktop-chrome-icon-btn[data-active="true"] {
+  color: #d6dbe6;
+}
+
+.desktop-chrome-icon-btn:disabled {
+  opacity: 0.28;
+  cursor: default;
+}
+
+.desktop-chrome-icon-btn:focus-visible {
+  outline: 1.5px solid var(--gold);
+  outline-offset: 1px;
+}
+
+/* Right Cell: Main Draggable Workspace Header */
+.desktop-titlebar-main {
+  flex: 1 1 0%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  -webkit-app-region: drag;
+}
+
+.desktop-titlebar-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding-left: 12px;
+  font-size: 12.5px;
+  line-height: 1;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.desktop-breadcrumb-product {
+  color: var(--muted-foreground);
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.desktop-breadcrumb-sep {
+  color: var(--subtle);
+  font-size: 11.5px;
+  flex-shrink: 0;
+}
+
+.desktop-breadcrumb-workspace {
+  color: var(--muted-foreground);
+  font-weight: 500;
+  min-width: 0;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desktop-breadcrumb-view {
+  color: #dfe3ec;
+  font-weight: 500;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Native macOS Sequoia / Windows 11 unfocused titlebar dimming */
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-nav-group,
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-breadcrumb,
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-tools,
+.desktop-titlebar[data-focused="false"] .desktop-win-controls,
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-app-icon {
+  opacity: 0.62;
+}
+
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-nav-group:hover,
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-tools:hover,
+.desktop-titlebar[data-focused="false"] .desktop-win-controls:hover {
+  opacity: 1;
+}
+
+.desktop-titlebar-right {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  flex-shrink: 0;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-titlebar-tools {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-right: 8px;
+  transition: opacity 150ms ease;
+}
+
+/* Companion Pet quick toggle capsule */
+.desktop-pet-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 23px;
+  padding: 0 8.5px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-inset);
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+}
+
+.desktop-pet-pill:hover {
+  border-color: #2f3646;
+  color: var(--text);
+  background: #0e1117;
+}
+
+.desktop-pet-pill[data-visible="true"] {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--sage) 32%, var(--line));
+}
+
+.desktop-pet-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--subtle);
+  flex-shrink: 0;
+}
+
+.desktop-pet-pill[data-visible="true"] .desktop-pet-dot {
+  background: var(--sage);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--sage) 22%, transparent);
+}
+
+/* Browser Preview OS Switcher Capsule [macOS | Windows | ×] */
+.desktop-preview-switcher {
+  display: inline-flex;
+  align-items: center;
+  height: 23px;
+  padding: 1px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-inset);
+  gap: 1px;
+}
+
+.desktop-preview-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 19px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.desktop-preview-btn:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.desktop-preview-btn[data-active="true"] {
+  background: #1a1f2b;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.desktop-preview-btn.exit {
+  padding: 0 5.5px;
+  font-size: 12px;
+  color: var(--subtle);
+}
+
+.desktop-preview-btn.exit:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+}
+
+/* Real Windows Electron WCO Safe Area (preserves native Win11 Snap Layouts flyout) */
+.desktop-wco-spacer {
+  width: max(
+    138px,
+    calc(
+      100vw - env(titlebar-area-x, 0px) -
+        env(titlebar-area-width, calc(100vw - 138px))
+    )
+  );
+  height: 100%;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+/* Custom Windows 11 Fluent 46x38px Caption Controls (`?desktopPreview=win32` / custom frame) */
+.desktop-win-controls {
+  display: inline-flex;
+  align-items: stretch;
+  height: 100%;
+  margin-left: 2px;
+  transition: opacity 150ms ease;
+}
+
+.desktop-win-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #cfd5e2;
+  transition: background-color 100ms ease, color 100ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-win-btn:hover {
+  background: rgba(255, 255, 255, 0.065);
+  color: #ffffff;
+}
+
+.desktop-win-btn:active {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.desktop-win-btn.close:hover {
+  background: #c42b1c;
+  color: #ffffff;
+}
+
+.desktop-win-btn.close:active {
+  background: #b02618;
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.desktop-win-btn:focus-visible {
+  outline: 1.5px solid var(--gold);
+  outline-offset: -2px;
+}
+
+@media (max-width: 560px) {
+  .desktop-breadcrumb-product,
+  .desktop-breadcrumb-product + .desktop-breadcrumb-sep {
+    display: none;
+  }
+  .desktop-breadcrumb-workspace {
+    max-width: 110px;
+  }
+}
+
+/* ── Desktop Quick Switcher (`⌘K` / `Ctrl+K`) ── */
+
+.desktop-qs-backdrop {
+  position: fixed;
+  inset: var(--shell-topbar-height, 0px) 0 0 0;
+  z-index: 85;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: min(11vh, 76px) 16px 24px;
+  background: rgba(4, 5, 8, 0.62);
+  backdrop-filter: blur(4px);
+}
+
+.desktop-qs-dialog {
+  width: min(560px, 100%);
+  max-height: min(480px, calc(100dvh - var(--shell-topbar-height, 0px) - 48px));
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #242a38;
+  border-radius: 10px;
+  background: #0e1117;
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.68),
+    0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  overflow: hidden;
+}
+
+.desktop-qs-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 46px;
+  min-height: 46px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: #0b0d12;
+}
+
+.desktop-qs-search-icon {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.desktop-qs-input {
+  flex: 1 1 0%;
+  min-width: 0;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-size: 13.5px;
+  outline: none !important;
+}
+
+.desktop-qs-input::placeholder {
+  color: var(--subtle);
+}
+
+.desktop-qs-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px;
+}
+
+.desktop-qs-group + .desktop-qs-group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.desktop-qs-group-label {
+  padding: 4px 10px 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--subtle);
+}
+
+.desktop-qs-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  text-align: left;
+  transition: background-color 80ms ease, color 80ms ease;
+}
+
+.desktop-qs-item[data-active="true"] {
+  background: #181d28;
+  color: var(--text);
+}
+
+.desktop-qs-item-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex: 1 1 0%;
+}
+
+.desktop-qs-item-icon {
+  color: var(--muted-foreground);
+  flex-shrink: 0;
+}
+
+.desktop-qs-item[data-active="true"] .desktop-qs-item-icon {
+  color: var(--gold);
+}
+
+.desktop-qs-item-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desktop-qs-item-subtitle {
+  font-size: 11.5px;
+  color: var(--subtle);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.desktop-qs-item-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.desktop-qs-badge {
+  padding: 1.5px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--gold) 36%, var(--line));
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.desktop-qs-kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 5px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: var(--surface-inset);
+  color: var(--muted-foreground);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1;
+}
+
+.desktop-qs-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--muted-foreground);
+  font-size: 13px;
+}
+
+.desktop-qs-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 14px;
+  border-top: 1px solid var(--line);
+  background: #0b0d12;
+  color: var(--subtle);
+  font-size: 11px;
+}
+
+.desktop-qs-hints {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.desktop-qs-hints > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+}
