@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Bot, Cable, CheckCircle2, Cpu, Monitor, RotateCcw, Save, SlidersHorizontal } from "lucide-react";
+import { Bot, Cable, Cpu, Monitor, SlidersHorizontal } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
 import {
@@ -11,134 +11,84 @@ import {
   type ModelEffort,
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  SettingsRow,
+  SettingsSaveBar,
+  SettingsSection,
+  SettingsWorkspaceLayout,
+  type SettingsCategoryItem,
+} from "@/components/ui/settings-primitives";
 import { Switch } from "@/components/ui/switch";
 import { useLocale, useTranslations } from "@/lib/locale";
 import type { Project } from "@/lib/types";
 import type { GlobalDefaultsResult, WorkspaceSettings } from "@/lib/workspaces";
 import type { PetFollow } from "@/features/pet/pet-follow";
 
-type SettingsSectionId = "settings-console" | "settings-defaults" | "settings-connection" | "settings-pet";
+type SettingsCategoryId = "general" | "defaults" | "transport" | "pet";
 
 export function SettingsView({ follow, projects }: { follow: PetFollow; projects: Project[] }) {
   const { locale, setLocale } = useLocale();
   const t = useTranslations("settings");
+  const vt = useTranslations("views.settings");
   const languageId = useId();
-  const [activeSection, setActiveSection] = useState<SettingsSectionId>("settings-console");
-  const sections: { id: SettingsSectionId; label: string; icon: typeof Monitor }[] = [
-    { id: "settings-console", label: t("sections.console"), icon: Monitor },
-    { id: "settings-defaults", label: t("sections.defaults"), icon: SlidersHorizontal },
-    { id: "settings-connection", label: t("sections.connection"), icon: Cable },
-    { id: "settings-pet", label: t("sections.pet"), icon: Bot },
+  const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>("general");
+
+  const categories: SettingsCategoryItem[] = [
+    { id: "general", label: t("categories.general"), icon: <Monitor aria-hidden="true" className="size-4" /> },
+    { id: "defaults", label: t("categories.defaults"), icon: <SlidersHorizontal aria-hidden="true" className="size-4" /> },
+    { id: "transport", label: t("categories.transport"), icon: <Cable aria-hidden="true" className="size-4" /> },
+    { id: "pet", label: t("categories.pet"), icon: <Bot aria-hidden="true" className="size-4" /> },
   ];
 
-  useEffect(() => {
-    if (typeof IntersectionObserver === "undefined") return;
-    const ids: SettingsSectionId[] = ["settings-console", "settings-defaults", "settings-connection", "settings-pet"];
-    const elements = ids
-      .map(sectionId => document.getElementById(sectionId))
-      .filter((element): element is HTMLElement => element !== null);
-    if (!elements.length) return;
-    const observer = new IntersectionObserver(
-      entries => {
-        const visible = entries
-          .filter(entry => entry.isIntersecting)
-          .sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top);
-        if (visible[0]?.target.id) {
-          setActiveSection(visible[0].target.id as SettingsSectionId);
-        }
-      },
-      { rootMargin: "-72px 0px -65% 0px", threshold: [0, 0.15] },
-    );
-    for (const element of elements) observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-
   return (
-    <section className="settings-page mx-auto grid w-full max-w-5xl gap-5">
-      <nav
-        aria-label={t("sectionsNavLabel")}
-        data-settings-jump-nav
-        className="sticky top-[var(--shell-topbar-height,0px)] z-20 flex items-center gap-1.5 overflow-x-auto rounded-lg border border-border/80 bg-background/90 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/75"
-      >
-        {sections.map(section => {
-          const Icon = section.icon;
-          const active = activeSection === section.id;
-          return (
-            <a
-              key={section.id}
-              href={`#${section.id}`}
-              aria-current={active ? "true" : undefined}
-              onClick={event => {
-                event.preventDefault();
-                setActiveSection(section.id);
-                document.getElementById(section.id)?.scrollIntoView({ behavior: "smooth", block: "start" });
-              }}
-              className={
-                "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-xs font-medium whitespace-nowrap transition-colors " +
-                (active
-                  ? "border-[color-mix(in_srgb,var(--gold)_45%,var(--border))] bg-[var(--surface-inset)] text-foreground shadow-xs"
-                  : "border-transparent text-muted-foreground hover:bg-[var(--surface-inset)]/60 hover:text-foreground")
-              }
-            >
-              <Icon className={"size-3.5 shrink-0 " + (active ? "text-[var(--gold)]" : "")} aria-hidden="true" />
-              <span>{section.label}</span>
-            </a>
-          );
-        })}
-      </nav>
-      <div id="settings-console" className="min-w-0 scroll-mt-16">
-        <Card>
-          <CardHeader className="flex flex-row items-start gap-3.5">
-            <div className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--surface-inset)] text-[var(--gold)]">
-              <Monitor aria-hidden="true" className="size-4" />
-            </div>
-            <div className="space-y-1">
-              <CardTitle role="heading" aria-level={2}>{t("consoleTitle")}</CardTitle>
-              <CardDescription>{t("consoleDescription")}</CardDescription>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex flex-wrap items-center justify-between gap-4 border-t pt-4">
-              <div className="min-w-0 space-y-1">
-                <Label htmlFor={languageId}>{t("language")}</Label>
-                <p id={`${languageId}-hint`} className="text-xs text-muted-foreground">{t("languageDescription")}</p>
-              </div>
+    <SettingsWorkspaceLayout
+      navLabel={t("sectionsNavLabel")}
+      categories={categories}
+      activeCategory={activeCategory}
+      onCategoryChange={id => setActiveCategory(id as SettingsCategoryId)}
+      title={vt("title")}
+      subtitle={vt("description")}
+      headingLevel={1}
+      className="settings-page mx-auto w-full max-w-5xl"
+    >
+      {activeCategory === "general" && (
+        <SettingsSection title={t("generalTitle")} description={t("generalDescription")}>
+          <SettingsRow
+            label={t("language")}
+            htmlFor={languageId}
+            description={t("languageDescription")}
+            descriptionId={`${languageId}-hint`}
+            control={
               <NativeSelect
                 id={languageId}
                 value={locale}
                 onChange={event => setLocale(event.target.value === "zh" ? "zh" : "en")}
                 aria-describedby={`${languageId}-hint`}
-                wrapperClassName="w-full min-[480px]:w-48"
+                wrapperClassName="w-full sm:w-48"
                 className="w-full"
               >
                 <NativeSelectOption value="en">{t("languageEnglish")}</NativeSelectOption>
                 <NativeSelectOption value="zh">{t("languageChinese")}</NativeSelectOption>
               </NativeSelect>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-      <div id="settings-defaults" className="min-w-0 scroll-mt-16">
-        <GlobalDefaultsCard />
-      </div>
-      <div id="settings-connection" className="min-w-0 scroll-mt-16">
-        <ConnectionSettings projects={projects} />
-      </div>
-      <div id="settings-pet" className="min-w-0 scroll-mt-16">
-        <PetSettings follow={follow} projects={projects} />
-      </div>
-    </section>
+            }
+          />
+        </SettingsSection>
+      )}
+      {activeCategory === "defaults" && <GlobalDefaultsCard />}
+      {activeCategory === "transport" && <ConnectionSettings projects={projects} />}
+      {activeCategory === "pet" && <PetSettings follow={follow} projects={projects} />}
+    </SettingsWorkspaceLayout>
   );
 }
 
 export function GlobalDefaultsCard() {
   const t = useTranslations("settings.globalDefaults");
+  const st = useTranslations("settings");
+  const ct = useTranslations("connectionSettings");
   const modelId = useId();
   const secondsId = useId();
   const requestsId = useId();
@@ -261,39 +211,26 @@ export function GlobalDefaultsCard() {
   };
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-start gap-3.5">
-        <div className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--surface-inset)] text-[var(--gold)]">
-          <SlidersHorizontal aria-hidden="true" className="size-4" />
-        </div>
-        <div className="space-y-1">
-          <CardTitle role="heading" aria-level={2}>{t("title")}</CardTitle>
-          <CardDescription>{t("description")}</CardDescription>
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {readError && (
-          <Alert variant="destructive">
-            <AlertDescription className="text-xs">{readError}</AlertDescription>
-          </Alert>
-        )}
-        {writeError && (
-          <Alert variant="destructive">
-            <AlertDescription className="text-xs">{writeError}</AlertDescription>
-          </Alert>
-        )}
-        {savedNotice && (
-          <Alert className="border-success/35 bg-success/5">
-            <CheckCircle2 className="text-success" />
-            <AlertTitle>{t("savedTitle")}</AlertTitle>
-            <AlertDescription className="text-xs">{t("savedHint")}</AlertDescription>
-          </Alert>
-        )}
+    <div className="grid min-w-0 gap-4">
+      {readError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">{readError}</AlertDescription>
+        </Alert>
+      )}
+      {writeError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">{writeError}</AlertDescription>
+        </Alert>
+      )}
 
-        <div className="grid gap-4 border-t pt-4 sm:grid-cols-2">
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label htmlFor={modelId}>{t("modelLabel")}</Label>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+      <SettingsSection title={st("defaultsSectionTitle")}>
+        <SettingsRow
+          label={st("defaultsModelLabel")}
+          htmlFor={modelId}
+          description={st("defaultsModelHint")}
+          stacked
+          control={
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
               <Input
                 id={modelId}
                 disabled={loading || saving}
@@ -311,46 +248,33 @@ export function GlobalDefaultsCard() {
                 className="font-mono text-sm sm:flex-1"
                 spellCheck={false}
               />
-              <ModelEffortBadge effort={draft.effort} className="self-start sm:self-center" />
-              <ServiceTierBadge
-                tier={draft.serviceTier}
-                showStandard={Boolean(draft.model.trim())}
-                className="self-start sm:self-center"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0"
-                disabled={loading || saving}
-                data-browse-models="global-defaults"
-                onClick={() => setModelPickerOpen(true)}
-              >
-                <Cpu className="size-3.5" aria-hidden="true" />
-                {t("browseModels")}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <ModelEffortBadge effort={draft.effort} />
+                <ServiceTierBadge
+                  tier={draft.serviceTier}
+                  showStandard={Boolean(draft.model.trim())}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  disabled={loading || saving}
+                  data-browse-models="global-defaults"
+                  onClick={() => setModelPickerOpen(true)}
+                >
+                  <Cpu className="size-3.5" aria-hidden="true" />
+                  {t("browseModels")}
+                </Button>
+              </div>
             </div>
-            <p className="text-xs text-muted-foreground">{t("modelHint")}</p>
-            <ModelPickerDialog
-              open={modelPickerOpen}
-              onOpenChange={setModelPickerOpen}
-              value={draft.model}
-              serviceTier={draft.serviceTier}
-              effort={draft.effort}
-              allowUnauthenticated={true}
-              onSelect={(nextModel, nextServiceTier, nextEffort) => {
-                setDraft(current => ({
-                  ...current,
-                  model: nextModel,
-                  serviceTier: nextServiceTier,
-                  effort: nextEffort,
-                }));
-                setSavedNotice(false);
-              }}
-            />
-          </div>
+          }
+        />
 
-          <div className="space-y-1.5">
-            <Label htmlFor={secondsId}>{t("secondsLabel")}</Label>
+        <SettingsRow
+          label={st("defaultsSecondsLabel")}
+          htmlFor={secondsId}
+          control={
             <Input
               id={secondsId}
               type="number"
@@ -362,12 +286,15 @@ export function GlobalDefaultsCard() {
                 setSavedNotice(false);
               }}
               placeholder="1800"
-              className="font-mono text-sm"
+              className="w-full font-mono text-sm sm:w-36"
             />
-          </div>
+          }
+        />
 
-          <div className="space-y-1.5">
-            <Label htmlFor={requestsId}>{t("requestsLabel")}</Label>
+        <SettingsRow
+          label={st("defaultsRequestsLabel")}
+          htmlFor={requestsId}
+          control={
             <Input
               id={requestsId}
               type="number"
@@ -379,12 +306,15 @@ export function GlobalDefaultsCard() {
                 setSavedNotice(false);
               }}
               placeholder="1000"
-              className="font-mono text-sm"
+              className="w-full font-mono text-sm sm:w-36"
             />
-          </div>
+          }
+        />
 
-          <div className="space-y-1.5">
-            <Label htmlFor={compactionId}>{t("compactionLabel")}</Label>
+        <SettingsRow
+          label={st("defaultsCompactionLabel")}
+          htmlFor={compactionId}
+          control={
             <Input
               id={compactionId}
               type="number"
@@ -396,17 +326,16 @@ export function GlobalDefaultsCard() {
                 setSavedNotice(false);
               }}
               placeholder={t("compactionPlaceholder")}
-              className="font-mono text-sm"
+              className="w-full font-mono text-sm sm:w-52"
             />
-          </div>
+          }
+        />
 
-          <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-[var(--surface-inset)] p-3">
-            <div className="space-y-0.5">
-              <Label htmlFor="global-default-pet-switch" className="text-xs font-semibold">
-                {t("petLabel")}
-              </Label>
-              <p className="text-[11px] text-muted-foreground">{t("petHint")}</p>
-            </div>
+        <SettingsRow
+          label={st("defaultsPetLabel")}
+          htmlFor="global-default-pet-switch"
+          description={st("defaultsPetHint")}
+          control={
             <Switch
               id="global-default-pet-switch"
               disabled={loading || saving}
@@ -416,40 +345,43 @@ export function GlobalDefaultsCard() {
                 setSavedNotice(false);
               }}
             />
-          </div>
-        </div>
+          }
+        />
+      </SettingsSection>
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
-          <p className="text-xs text-muted-foreground">
-            {dirty ? t("unsaved") : t("synced")}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!dirty || saving}
-              onClick={() => {
-                setDraft(saved);
-                setWriteError(null);
-                setSavedNotice(false);
-              }}
-            >
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              {t("discard")}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!dirty || saving}
-              onClick={() => void saveDefaults()}
-            >
-              <Save className="size-3.5" aria-hidden="true" />
-              {t(saving ? "saving" : "save")}
-            </Button>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+      <SettingsSaveBar
+        dirty={dirty}
+        statusText={dirty ? t("unsaved") : savedNotice ? t("savedHint") : ct("noChanges")}
+        discardLabel={t("discard")}
+        onDiscard={() => {
+          setDraft(saved);
+          setWriteError(null);
+          setSavedNotice(false);
+        }}
+        saveLabel={t("save")}
+        savingLabel={t("saving")}
+        saving={saving}
+        disabled={loading}
+        onSave={() => void saveDefaults()}
+      />
+
+      <ModelPickerDialog
+        open={modelPickerOpen}
+        onOpenChange={setModelPickerOpen}
+        value={draft.model}
+        serviceTier={draft.serviceTier}
+        effort={draft.effort}
+        allowUnauthenticated={true}
+        onSelect={(nextModel, nextServiceTier, nextEffort) => {
+          setDraft(current => ({
+            ...current,
+            model: nextModel,
+            serviceTier: nextServiceTier,
+            effort: nextEffort,
+          }));
+          setSavedNotice(false);
+        }}
+      />
+    </div>
   );
 }
