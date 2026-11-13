@@ -35,6 +35,8 @@ import type {
   basewareOverview,
   upsertBasewareMachine,
   removeBasewareMachine,
+  registerBasewareDriver,
+  removeBasewareDriver,
   updateWorkspaceMachines,
   controlWorkspaceService,
   probeBasewareMachine,
@@ -57,8 +59,10 @@ export interface DashboardMethods {
   removeWorkspace: { args: [id: unknown]; result: Awaited<ReturnType<typeof removeWorkspace>> };
   createWorkspace: { args: [input: unknown]; result: Awaited<ReturnType<typeof createWorkspace>> };
   basewareOverview: { args: [workspaceId?: unknown]; result: Awaited<ReturnType<typeof basewareOverview>> };
-  upsertBasewareMachine: { args: [input: unknown]; result: Awaited<ReturnType<typeof upsertBasewareMachine>> };
+  upsertBasewareMachine: { args: [input: unknown, options?: { workspaceId?: unknown; bindMode?: unknown }]; result: Awaited<ReturnType<typeof upsertBasewareMachine>> };
   removeBasewareMachine: { args: [id: unknown]; result: Awaited<ReturnType<typeof removeBasewareMachine>> };
+  registerBasewareDriver: { args: [input: unknown]; result: Awaited<ReturnType<typeof registerBasewareDriver>> };
+  removeBasewareDriver: { args: [input: unknown]; result: Awaited<ReturnType<typeof removeBasewareDriver>> };
   updateWorkspaceMachines: { args: [id: unknown, input: unknown]; result: Awaited<ReturnType<typeof updateWorkspaceMachines>> };
   controlWorkspaceMachine: { args: [id: unknown, input: unknown]; result: WorkspaceBasewareSnapshot };
   probeBasewareMachine: { args: [input: unknown]; result: Awaited<ReturnType<typeof probeBasewareMachine>> };

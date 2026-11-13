@@ -46,10 +46,10 @@ Rather than binding to a single static host, Ludens manages a persistent **contr
    ludens machine connect gba-mgba-2
    ludens machine disconnect gba-mgba-2
    ```
-2. **Manage nodes in the Console (`?view=baseware`)**:
-   - Open the **Baseware** view to inspect all registered machines in the left-hand node list (`data-baseware-section="machine-pool"`).
-   - Click **+ Add Node** (`data-baseware-add-machine`) to add an mGBA preset or custom `ws` / `tcp` / `unix` endpoint.
-   - Select any machine to view its 3-tab detail pane (**Node Control & Controller Interfaces**, **Connection Config**, **Local Baseware Daemon**), and use **Set as Primary (`use`)**, **Also Mount (`connect`)**, or **Disconnect (`disconnect`)** with 1 click.
+2. **Manage drivers & nodes in the Console (`?view=baseware`)**:
+   - Open the **Baseware** view to inspect built-in drivers, globally registered entries in `~/.ludens/drivers.json`, and workspace/cache-discovered packages in the **Driver Library** (`data-baseware-section="driver-library"`), with **registration state** separated from **workspace usage state**. Use **Add Driver** (`data-baseware-add-driver`) or card actions (**Register Driver**, **+ Create Node**) to verify manifests and prefill machine creation.
+   - In the left-hand **Controlled Nodes** list (`data-baseware-section="machine-pool"`), inspect both globally registered machines and workspace-inline endpoints (`workspace-default`, promotable via **Save to Global Pool…**), with orthogonal badges for **global registration**, **workspace addition** (`Primary`, `Added to Workspace`, `Not Added Here`), and **live mount status**.
+   - Click **New Machine** (`data-baseware-add-machine`) to prefill from any driver template or configure custom transports, and inspect controller interfaces and live Baseware daemon leases in the sticky right-hand inspector (`data-baseware-section="controllers-catalog"`).
 3. **Target specific devices from Python (`ludens_tools`)**:
    ```python
    import ludens_tools

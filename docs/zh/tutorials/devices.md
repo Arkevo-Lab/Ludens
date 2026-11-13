@@ -46,10 +46,10 @@ Ludens 不再局限于绑定单一静态地址，而是在 `~/.ludens/machines.j
    ludens machine connect gba-mgba-2
    ludens machine disconnect gba-mgba-2
    ```
-2. **在管理台（`?view=baseware`）中管理节点**：
-   - 打开 **Baseware** 视图，在左侧受控节点池列表（`data-baseware-section="machine-pool"`）中查看全部已注册节点及其在线探活状态。
-   - 点击 **+ 新增节点**（`data-baseware-add-machine`）即可一键填入 mGBA 预设或自定义 `ws` / `tcp` / `unix` 端点。
-   - 选中任意节点后，右侧详情面板提供三个标签页（**节点操控与控制器接口**、**连接参数配置**、**本机 Baseware 守护进程**），支持一键执行 **设为主控 (`use`)**、**并发挂载 (`connect`)** 或 **断开连接 (`disconnect`)**。
+2. **在管理台（`?view=baseware`）中管理驱动与节点**：
+   - 打开 **Baseware** 视图，在顶部的**驱动库**（`data-baseware-section="driver-library"`）查看所有内置、已在 `~/.ludens/drivers.json` 注册，以及从工作区或缓存自动发现的驱动包（**注册状态**与**当前使用状态**相互独立展示）；点击 **+ 添加驱动包**（`data-baseware-add-driver`）可校验并纳入全局驱动库，点击未注册驱动卡片上的**纳入驱动库**或 **+ 用此驱动建节点** 即可就地完成注册或预填建模。
+   - 在左侧受控节点列表（`data-baseware-section="machine-pool"`）中查看已注册节点和工作区 `ludens.json` 隐式直连节点（`workspace-default`，点击**纳入全局节点池…**即可转为持久化全局节点），并区分查看**全局注册**、**工作区添加**（`★ 当前主控` / `✓ 已添加到工作区` / `未添加到工作区`）与**实时挂载**状态。
+   - 点击 **+ 新建受控节点**（`data-baseware-add-machine`）从驱动库模板预填或自定义端点，或在选中节点后在右侧检视栏中查看控制器接口目录与实时 Baseware 守护进程租约。
 3. **在 Python (`ludens_tools`) 中定向操控指定设备**：
    ```python
    import ludens_tools

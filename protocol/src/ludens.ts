@@ -22,6 +22,24 @@ export {
 } from "./connection";
 import { validateConnectionConfig, type ModelConnectionConfig } from "./connection";
 export {
+  DRIVER_ID_PATTERN,
+  BUILTIN_CUA_DRIVER_SPEC,
+  BUILTIN_CUA_DRIVER,
+  validDriverId,
+  driverRegistryKey,
+  validateRegisteredDriverSpec,
+  type RegisteredDriverSpec,
+  type DriversRegistryFile,
+} from "./drivers";
+import {
+  BUILTIN_CUA_DRIVER_SPEC,
+  validDriverId,
+  driverRegistryKey,
+  validateRegisteredDriverSpec,
+  type RegisteredDriverSpec,
+  type DriversRegistryFile,
+} from "./drivers";
+export {
   MACHINE_TRANSPORT_KINDS,
   BUILTIN_LOCAL_DESKTOP_MACHINE,
   validMachineId,
@@ -353,6 +371,9 @@ export async function upsertMachineConfig(
   home = ludensHome(),
 ): Promise<MachinesRegistryFile> {
   const spec = validateMachineSpec(input);
+  if (spec.id === "workspace-default") {
+    throw new Error('The synthetic machine ID "workspace-default" is reserved for workspace-inline configs');
+  }
   return withStateLock(join(home, "machines.json.lock"), async () => {
     const current = await readMachinesConfig(home);
     const nextList = current.machines.filter(item => item.id !== spec.id);
@@ -381,6 +402,69 @@ export async function removeMachineConfig(
     const nextList = current.machines.filter(item => item.id !== id);
     const validated = validateMachinesRegistry({ version: 1, machines: nextList });
     await atomicJson(join(home, "machines.json"), validated);
+    return { removed, registry: validated };
+  });
+}
+
+function validateDriversRegistry(value: unknown): DriversRegistryFile {
+  if (!object(value) || value.version !== 1 || !Array.isArray(value.drivers)) {
+    throw new Error("drivers.json must contain version: 1 and drivers array");
+  }
+  const byKey = new Map<string, RegisteredDriverSpec>();
+  for (const item of value.drivers) {
+    const validated = validateRegisteredDriverSpec(item);
+    byKey.set(driverRegistryKey(validated.id, validated.spec), validated);
+  }
+  return { version: 1, drivers: [...byKey.values()] };
+}
+
+export async function readDriversConfig(home = ludensHome()): Promise<DriversRegistryFile> {
+  try {
+    return validateDriversRegistry(JSON.parse(await readFile(join(home, "drivers.json"), "utf8")));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    return { version: 1, drivers: [] };
+  }
+}
+
+export async function upsertDriverConfig(
+  input: unknown,
+  home = ludensHome(),
+): Promise<DriversRegistryFile> {
+  const spec = validateRegisteredDriverSpec(input);
+  const key = driverRegistryKey(spec.id, spec.spec);
+  return withStateLock(join(home, "drivers.json.lock"), async () => {
+    const current = await readDriversConfig(home);
+    const nextList = current.drivers.filter(item => driverRegistryKey(item.id, item.spec) !== key);
+    nextList.push({
+      ...spec,
+      updatedAt: new Date().toISOString(),
+    });
+    const validated = validateDriversRegistry({ version: 1, drivers: nextList });
+    await atomicJson(join(home, "drivers.json"), validated);
+    return validated;
+  });
+}
+
+export async function removeDriverConfig(
+  target: { id: unknown; spec?: unknown },
+  home = ludensHome(),
+): Promise<{ removed: RegisteredDriverSpec[]; registry: DriversRegistryFile }> {
+  if (!validDriverId(target.id)) throw new Error("Invalid driver ID");
+  const specText = typeof target.spec === "string" && target.spec.trim() ? target.spec.trim() : undefined;
+  if (target.id === "cua" && (!specText || specText === BUILTIN_CUA_DRIVER_SPEC)) {
+    throw new Error("The built-in cua driver cannot be unregistered");
+  }
+  return withStateLock(join(home, "drivers.json.lock"), async () => {
+    const current = await readDriversConfig(home);
+    const matches = (item: RegisteredDriverSpec) =>
+      specText
+        ? driverRegistryKey(item.id, item.spec) === driverRegistryKey(target.id as string, specText)
+        : item.id === target.id;
+    const removed = current.drivers.filter(matches);
+    const nextList = current.drivers.filter(item => !matches(item));
+    const validated = validateDriversRegistry({ version: 1, drivers: nextList });
+    await atomicJson(join(home, "drivers.json"), validated);
     return { removed, registry: validated };
   });
 }

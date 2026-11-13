@@ -7,6 +7,7 @@
   "exports": {
     "./activity": "./src/activity.ts",
     "./connection": "./src/connection.ts",
+    "./drivers": "./src/drivers.ts",
     "./event-pool": "./src/event-pool.ts",
     "./event-sources": "./src/event-sources.ts",
     "./log-archive": "./src/log-archive.ts",

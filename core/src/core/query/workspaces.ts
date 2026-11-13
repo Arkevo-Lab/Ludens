@@ -4,6 +4,7 @@ import { open, readdir, readFile, realpath, rename, stat, unlink, writeFile } fr
 import { createConnection } from "node:net";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repoRoot } from "./repo";
+import { discoverDriver } from "./drivers";
 import { jobStateFilePath, jobTargetLabel, ludensSocketPath, readBackgroundJobState } from "../../daemon/background-jobs";
 import {
   readGlobalConfig,
@@ -16,9 +17,16 @@ import {
   readMachinesConfig,
   upsertMachineConfig,
   removeMachineConfig,
+  readDriversConfig,
+  upsertDriverConfig,
+  removeDriverConfig,
   validateWorkspaceMachinesBinding,
   validateMachineSpec,
   BUILTIN_LOCAL_DESKTOP_MACHINE,
+  BUILTIN_CUA_DRIVER,
+  BUILTIN_CUA_DRIVER_SPEC,
+  driverRegistryKey,
+  validDriverId,
   validateConnectionConfig,
   isOmpEffort,
   isOmpServiceTier,
@@ -26,6 +34,8 @@ import {
   type BasewareMachineSpec,
   type WorkspaceMachinesBinding,
   type MachineTransportConfig,
+  type MachineTransportKind,
+  type RegisteredDriverSpec,
   type LudensConfig,
   type ModelConnectionConfig,
   type OmpEffort,
@@ -83,11 +93,29 @@ export interface WorkspaceServicesSnapshot {
   jobs: WorkspaceServiceJobSnapshot[];
 }
 
-export interface CachedDriverEntry {
-  driverId: string;
-  cacheKey: string;
+export type DriverRegistrationStatus = "builtin" | "registered" | "unregistered";
+export type DriverSourceKind = "builtin" | "file" | "github" | "npm" | "cache" | "unknown";
+
+export interface BasewareDriverOverviewItem {
+  key: string;
+  id: string;
   spec: string;
-  path: string;
+  sourceKind: DriverSourceKind;
+  registrationStatus: DriverRegistrationStatus;
+  available: boolean;
+  localPath?: string;
+  cacheKey?: string;
+  packageName?: string;
+  name?: string;
+  version?: string;
+  description?: string;
+  transport?: MachineTransportKind;
+  defaultPort?: number;
+  needsGame?: boolean;
+  launchHint?: string;
+  usedByMachineIds: string[];
+  usedByWorkspaceIds: string[];
+  usedByCurrentWorkspace: boolean;
   updatedAt: string;
 }
 
@@ -128,7 +156,7 @@ export interface WorkspaceBasewareSnapshot {
     basewareJob: WorkspaceServiceJobSnapshot | null;
   };
   machines: BasewareMachineRuntimeStatus[];
-  cachedDrivers: CachedDriverEntry[];
+  drivers: BasewareDriverOverviewItem[];
 }
 
 export interface WorkspaceSessionEntry {
@@ -451,57 +479,268 @@ async function inspectWorkspaceServices(workspacePath: string, home: string): Pr
   return { hostSocket, hostSocketExists, jobs };
 }
 
+interface CachedDriverEntry {
+  driverId: string;
+  cacheKey: string;
+  spec: string;
+  path: string;
+  updatedAt: string;
+}
+
+function normalizeCachedIdentityToSpec(raw: string): string {
+  const trimmed = raw.trim();
+  const ghHttps = /^github:https:([^#]+)(#.*)?$/.exec(trimmed);
+  if (ghHttps) {
+    const repo = ghHttps[1]!.replace(/\.git$/, "");
+    return `https://github.com/${repo}.git${ghHttps[2] ?? ""}`;
+  }
+  const ghSsh = /^github:ssh:([^#]+)(#.*)?$/.exec(trimmed);
+  if (ghSsh) {
+    const repo = ghSsh[1]!.replace(/\.git$/, "");
+    return `git@github.com:${repo}.git${ghSsh[2] ?? ""}`;
+  }
+  if (trimmed.startsWith("npm:")) {
+    return trimmed.slice(4);
+  }
+  return trimmed;
+}
+
 async function listCachedDrivers(home: string): Promise<CachedDriverEntry[]> {
   const root = join(home, "cache", "drivers");
   const drivers = await readdir(root, { withFileTypes: true }).catch(() => []);
-  const cached = await Promise.all(drivers.filter(entry => entry.isDirectory()).map(async driver => {
-    const caches = await readdir(join(root, driver.name), { withFileTypes: true }).catch(() => []);
-    const entries = await Promise.all(caches.filter(entry => entry.isDirectory()).map(async (cache): Promise<CachedDriverEntry | null> => {
-      const path = join(root, driver.name, cache.name);
-      const complete = join(path, ".complete");
-      try {
-        const [spec, info] = await Promise.all([readFile(complete, "utf8"), stat(complete)]);
-        return { driverId: driver.name, cacheKey: cache.name, spec: spec.trim(), path, updatedAt: info.mtime.toISOString() };
-      } catch {
-        return null;
-      }
-    }));
-    return entries.filter((entry): entry is CachedDriverEntry => entry !== null);
-  }));
+  const cached = await Promise.all(
+    drivers
+      .filter(entry => entry.isDirectory() && entry.name !== "discover")
+      .map(async driver => {
+        const caches = await readdir(join(root, driver.name), { withFileTypes: true }).catch(() => []);
+        const entries = await Promise.all(caches.filter(entry => entry.isDirectory()).map(async (cache): Promise<CachedDriverEntry | null> => {
+          const path = join(root, driver.name, cache.name);
+          const complete = join(path, ".complete");
+          try {
+            const [rawSpec, info] = await Promise.all([readFile(complete, "utf8"), stat(complete)]);
+            const spec = normalizeCachedIdentityToSpec(rawSpec);
+            if (!spec) return null;
+            return { driverId: driver.name, cacheKey: cache.name, spec, path, updatedAt: info.mtime.toISOString() };
+          } catch {
+            return null;
+          }
+        }));
+        return entries.filter((entry): entry is CachedDriverEntry => entry !== null);
+      }),
+  );
   return cached.flat().sort((a, b) => a.driverId.localeCompare(b.driverId) || a.cacheKey.localeCompare(b.cacheKey));
+}
+
+function normalizeDriverPackageForWorkspace(workspacePath: string | null | undefined, spec: string | undefined): string | undefined {
+  if (typeof spec !== "string") return undefined;
+  const trimmed = spec.trim();
+  if (!trimmed) return undefined;
+  if (trimmed.startsWith("file:")) {
+    const rawPath = trimmed.slice(5).trim();
+    if (!rawPath) return trimmed;
+    const resolved = isAbsolute(rawPath)
+      ? resolve(rawPath)
+      : workspacePath
+        ? resolve(workspacePath, rawPath)
+        : rawPath;
+    return `file:${resolved}`;
+  }
+  return trimmed;
+}
+
+function classifyDriverSourceKind(spec: string, fromCache = false): DriverSourceKind {
+  const trimmed = spec.trim();
+  if (trimmed === BUILTIN_CUA_DRIVER_SPEC) return "builtin";
+  if (trimmed.startsWith("file:")) return "file";
+  if (
+    trimmed.startsWith("github:")
+    || /^https?:\/\/github\.com\//i.test(trimmed)
+    || /^git@github\.com:/i.test(trimmed)
+  ) {
+    return "github";
+  }
+  if (trimmed.startsWith("npm:") || /^(@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+(@[^\s/@]+)?$/.test(trimmed)) {
+    return "npm";
+  }
+  return fromCache ? "cache" : "unknown";
+}
+
+interface LocalDriverPackageMeta {
+  available: boolean;
+  localPath?: string;
+  packageName?: string;
+  version?: string;
+  description?: string;
+}
+
+async function readPackageJsonSummary(directory: string): Promise<{ packageName?: string; version?: string; description?: string }> {
+  try {
+    const parsed = JSON.parse(await readFile(join(directory, "package.json"), "utf8")) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return {
+      ...(typeof parsed.name === "string" && parsed.name.trim() ? { packageName: parsed.name.trim() } : {}),
+      ...(typeof parsed.version === "string" && parsed.version.trim() ? { version: parsed.version.trim() } : {}),
+      ...(typeof parsed.description === "string" && parsed.description.trim() ? { description: parsed.description.trim() } : {}),
+    };
+  } catch {
+    return {};
+  }
+}
+
+async function inspectLocalDriverMetadata(spec: string, cachePath?: string): Promise<LocalDriverPackageMeta> {
+  if (spec === BUILTIN_CUA_DRIVER_SPEC) {
+    return { available: true };
+  }
+  if (spec.startsWith("file:")) {
+    const rawPath = spec.slice(5).trim();
+    if (!rawPath) return { available: false };
+    try {
+      const targetPath = await realpath(rawPath).catch(() => resolve(rawPath));
+      const info = await stat(targetPath);
+      const pkgDir = info.isDirectory() ? targetPath : resolve(targetPath, "..");
+      const meta = await readPackageJsonSummary(pkgDir);
+      return {
+        available: true,
+        localPath: targetPath,
+        ...meta,
+      };
+    } catch {
+      return {
+        available: false,
+        localPath: rawPath,
+      };
+    }
+  }
+  if (cachePath) {
+    const githubMeta = await readPackageJsonSummary(join(cachePath, "package"));
+    return {
+      available: true,
+      localPath: cachePath,
+      ...githubMeta,
+    };
+  }
+  return { available: true };
+}
+
+function normalizedDriverSpec(id: string, spec?: string, workspacePath?: string | null): string {
+  const normalizedPkg = normalizeDriverPackageForWorkspace(workspacePath, spec);
+  if (normalizedPkg) return normalizedPkg;
+  if (id === "cua") return BUILTIN_CUA_DRIVER_SPEC;
+  return `driver:${id}`;
+}
+
+function matchGlobalMachine(
+  cfg: WorkspaceConfigSummary | null | undefined,
+  registryMachines: BasewareMachineSpec[],
+  workspacePath?: string | null,
+): BasewareMachineSpec | null {
+  if (!cfg) return registryMachines.find(machine => machine.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id) ?? null;
+  if (cfg.driver === "cua" && !cfg.driverPackage && !cfg.cuaCommand && cfg.port === undefined) {
+    return registryMachines.find(machine => machine.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id) ?? null;
+  }
+  const normalizedPkg = normalizeDriverPackageForWorkspace(workspacePath, cfg.driverPackage);
+  if (cfg.port !== undefined) {
+    const byPort = registryMachines.find(machine =>
+      machine.driver === cfg.driver
+      && machine.transport.kind === "bridge"
+      && machine.transport.port === cfg.port
+      && (!normalizedPkg
+        || !machine.driverPackage
+        || normalizeDriverPackageForWorkspace(workspacePath, machine.driverPackage) === normalizedPkg),
+    );
+    if (byPort) return byPort;
+    return null;
+  }
+  if (cfg.cuaCommand) {
+    const byCommand = registryMachines.find(machine =>
+      machine.driver === cfg.driver
+      && machine.transport.kind === "stdio"
+      && machine.transport.command === cfg.cuaCommand,
+    );
+    if (byCommand) return byCommand;
+    return null;
+  }
+  return registryMachines.find(machine =>
+    machine.driver === cfg.driver
+    && (!normalizedPkg
+      || !machine.driverPackage
+      || normalizeDriverPackageForWorkspace(workspacePath, machine.driverPackage) === normalizedPkg),
+  ) ?? null;
+}
+
+function synthesizeImplicitMachine(
+  workspaceEntry: { id: string; name: string; workspace: string; updatedAt: string },
+  cfg: WorkspaceConfigSummary | null | undefined,
+  registryMachines: BasewareMachineSpec[],
+): BasewareMachineSpec | null {
+  if (!cfg) return null;
+  const matched = matchGlobalMachine(cfg, registryMachines, workspaceEntry.workspace);
+  if (matched) return null;
+
+  const validRegistryIds = new Set(registryMachines.map(machine => machine.id));
+  const explicitBinding = cfg.machines;
+  if (explicitBinding) {
+    const referencesInline = explicitBinding.active === "workspace-default"
+      || explicitBinding.allowed.includes("workspace-default");
+    const hasAnyValidGlobal = explicitBinding.allowed.some(id => id !== "workspace-default" && validRegistryIds.has(id));
+    if (!referencesInline && hasAnyValidGlobal) {
+      return null;
+    }
+  }
+
+  const normalizedPkg = normalizeDriverPackageForWorkspace(workspaceEntry.workspace, cfg.driverPackage);
+  const transport: MachineTransportConfig = cfg.port !== undefined
+    ? {
+        kind: "bridge",
+        host: "127.0.0.1",
+        port: cfg.port,
+        ...(cfg.game ? { game: cfg.game, managed: true } : {}),
+      }
+    : {
+        kind: "stdio",
+        command: cfg.cuaCommand || (cfg.driver === "cua" ? "cua-driver" : cfg.driver),
+      };
+
+  return {
+    id: "workspace-default",
+    name: `${workspaceEntry.name} (${cfg.driver})`,
+    driver: cfg.driver,
+    ...(normalizedPkg ? { driverPackage: normalizedPkg } : {}),
+    transport,
+    description: "Workspace inline endpoint declared in ludens.json (not yet registered in ~/.ludens/machines.json)",
+    updatedAt: workspaceEntry.updatedAt,
+  };
 }
 
 function resolveEffectiveBinding(
   cfg: WorkspaceConfigSummary | null | undefined,
   registryMachines: BasewareMachineSpec[],
+  workspaceEntry?: { id: string; name: string; workspace: string; updatedAt: string } | null,
+  implicitMachine: BasewareMachineSpec | null = null,
 ): WorkspaceMachinesBinding {
   const validIds = new Set(registryMachines.map(machine => machine.id));
-  const matchedId = cfg?.driver === "cua"
-    ? BUILTIN_LOCAL_DESKTOP_MACHINE.id
-    : registryMachines.find(machine => machine.driver === cfg?.driver
-        && cfg?.port !== undefined
-        && machine.transport.kind === "bridge"
-        && machine.transport.port === cfg.port)?.id
-      ?? registryMachines.find(machine => machine.driver === cfg?.driver)?.id
-      ?? BUILTIN_LOCAL_DESKTOP_MACHINE.id;
+  if (implicitMachine) validIds.add(implicitMachine.id);
+  const matchedGlobal = matchGlobalMachine(cfg, registryMachines, workspaceEntry?.workspace);
+  const defaultTargetId = matchedGlobal?.id ?? (implicitMachine ? implicitMachine.id : BUILTIN_LOCAL_DESKTOP_MACHINE.id);
+
   const allowed = Array.from(new Set((cfg?.machines?.allowed ?? [])
-    .map(id => id === "workspace-default" ? matchedId : id)
+    .map(id => id === "workspace-default" ? defaultTargetId : id)
     .filter(id => validIds.has(id))));
   if (allowed.length === 0) {
-    allowed.push(...Array.from(new Set([matchedId, BUILTIN_LOCAL_DESKTOP_MACHINE.id])));
+    allowed.push(defaultTargetId);
   }
   const configuredActive = cfg?.machines?.active;
-  const active = configuredActive && configuredActive !== "workspace-default" && allowed.includes(configuredActive)
-    ? configuredActive
-    : configuredActive === "workspace-default" && allowed.includes(matchedId)
-      ? matchedId
-      : allowed[0] ?? BUILTIN_LOCAL_DESKTOP_MACHINE.id;
+  const resolvedConfiguredActive = configuredActive === "workspace-default" ? defaultTargetId : configuredActive;
+  const active = resolvedConfiguredActive && allowed.includes(resolvedConfiguredActive)
+    ? resolvedConfiguredActive
+    : allowed[0] ?? defaultTargetId;
   return { active, allowed };
 }
 
 export async function basewareOverview(workspaceId?: unknown, home = globalHome): Promise<WorkspaceBasewareSnapshot> {
-  const [registry, workspaces, cachedDrivers] = await Promise.all([
+  const [registry, driverRegistry, workspaces, cachedDrivers] = await Promise.all([
     readMachinesConfig(home),
+    readDriversConfig(home),
     listRegisteredWorkspaces(home),
     listCachedDrivers(home),
   ]);
@@ -513,18 +752,151 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
   const candidate = selectedId ? workspaces.find(item => item.id === selectedId) : undefined;
   const entry = candidate?.available ? candidate : undefined;
   const cfg = entry ? configs.get(entry.id) : null;
-  const implicitMachine: BasewareMachineSpec | null = null;
-  const binding = resolveEffectiveBinding(cfg, registry.machines);
+  const implicitMachine = entry ? synthesizeImplicitMachine(entry, cfg, registry.machines) : null;
+  const binding = resolveEffectiveBinding(cfg, registry.machines, entry ?? null, implicitMachine);
+  const allMachinesForLookup = implicitMachine ? [implicitMachine, ...registry.machines] : registry.machines;
   const activeMachine = binding.active
-    ? registry.machines.find(machine => machine.id === binding.active) ?? null
+    ? allMachinesForLookup.find(machine => machine.id === binding.active) ?? null
     : null;
+  const workspaceBindings = new Map<string, WorkspaceMachinesBinding>();
+  for (const workspace of workspaces) {
+    const wsCfg = configs.get(workspace.id);
+    const wsImplicit = workspace.available ? synthesizeImplicitMachine(workspace, wsCfg, registry.machines) : null;
+    workspaceBindings.set(
+      workspace.id,
+      resolveEffectiveBinding(wsCfg, registry.machines, workspace, wsImplicit),
+    );
+  }
   const usedBy = (machineId: string) => workspaces.filter(workspace =>
-    resolveEffectiveBinding(configs.get(workspace.id), registry.machines).allowed.includes(machineId),
+    workspaceBindings.get(workspace.id)?.allowed.includes(machineId) ?? false,
   ).map(workspace => workspace.id);
   const machines: BasewareMachineRuntimeStatus[] = registry.machines.map(machine => ({
     ...machine,
     usedByWorkspaceIds: usedBy(machine.id),
   }));
+
+  // Build unified driver catalog merging built-in cua, registered drivers.json,
+  // workspace/machine references, and cached driver packages.
+  interface DriverSeed {
+    key: string;
+    id: string;
+    spec: string;
+    registered?: RegisteredDriverSpec;
+    cached?: CachedDriverEntry;
+    builtin?: boolean;
+    machineIds: Set<string>;
+    workspaceIds: Set<string>;
+  }
+  const seeds = new Map<string, DriverSeed>();
+  const ensureSeed = (id: string, spec: string): DriverSeed => {
+    const key = driverRegistryKey(id, spec);
+    let existing = seeds.get(key);
+    if (!existing) {
+      existing = {
+        key,
+        id,
+        spec,
+        machineIds: new Set<string>(),
+        workspaceIds: new Set<string>(),
+      };
+      seeds.set(key, existing);
+    }
+    return existing;
+  };
+
+  {
+    const cua = ensureSeed(BUILTIN_CUA_DRIVER.id, BUILTIN_CUA_DRIVER.spec);
+    cua.builtin = true;
+    cua.registered = BUILTIN_CUA_DRIVER;
+  }
+
+  for (const registered of driverRegistry.drivers) {
+    const seed = ensureSeed(registered.id, registered.spec);
+    seed.registered = registered;
+  }
+
+  for (const cached of cachedDrivers) {
+    const cleanSpec = cached.spec.startsWith("npm:") || cached.spec.startsWith("github:") || cached.spec.startsWith("file:")
+      ? cached.spec
+      : cached.spec;
+    const matchedRegistered = [...seeds.values()].find(item =>
+      item.id === cached.driverId && (item.spec === cleanSpec || item.spec === cached.spec),
+    );
+    const seed = matchedRegistered ?? ensureSeed(cached.driverId, cleanSpec);
+    seed.cached = cached;
+  }
+
+  for (const machine of registry.machines) {
+    const spec = normalizedDriverSpec(machine.driver, machine.driverPackage);
+    const seed = ensureSeed(machine.driver, spec);
+    seed.machineIds.add(machine.id);
+    for (const wsId of usedBy(machine.id)) {
+      seed.workspaceIds.add(wsId);
+    }
+  }
+
+  for (const workspace of workspaces) {
+    const wsCfg = configs.get(workspace.id);
+    if (!wsCfg) continue;
+    const spec = normalizedDriverSpec(wsCfg.driver, wsCfg.driverPackage, workspace.workspace);
+    const seed = ensureSeed(wsCfg.driver, spec);
+    seed.workspaceIds.add(workspace.id);
+    if (entry?.id === workspace.id && implicitMachine && implicitMachine.driver === wsCfg.driver) {
+      seed.machineIds.add(implicitMachine.id);
+    }
+  }
+
+  const driversRaw: BasewareDriverOverviewItem[] = await Promise.all(
+    [...seeds.values()].map(async (seed): Promise<BasewareDriverOverviewItem> => {
+      const localMeta = await inspectLocalDriverMetadata(seed.spec, seed.cached?.path);
+      const registrationStatus: DriverRegistrationStatus = seed.builtin
+        ? "builtin"
+        : seed.registered
+          ? "registered"
+          : "unregistered";
+      const sourceKind = seed.builtin
+        ? "builtin"
+        : classifyDriverSourceKind(seed.spec, Boolean(seed.cached));
+      return {
+        key: seed.key,
+        id: seed.id,
+        spec: seed.spec,
+        sourceKind,
+        registrationStatus,
+        available: localMeta.available,
+        ...(localMeta.localPath ? { localPath: localMeta.localPath } : {}),
+        ...(seed.cached?.cacheKey ? { cacheKey: seed.cached.cacheKey } : {}),
+        ...(localMeta.packageName ? { packageName: localMeta.packageName } : {}),
+        ...(seed.registered?.name
+          ? { name: seed.registered.name }
+          : localMeta.packageName
+            ? { name: localMeta.packageName }
+            : {}),
+        ...(seed.registered?.version || localMeta.version
+          ? { version: seed.registered?.version ?? localMeta.version }
+          : {}),
+        ...(seed.registered?.description || localMeta.description
+          ? { description: seed.registered?.description ?? localMeta.description }
+          : {}),
+        ...(seed.registered?.transport ? { transport: seed.registered.transport } : {}),
+        ...(seed.registered?.defaultPort !== undefined ? { defaultPort: seed.registered.defaultPort } : {}),
+        ...(seed.registered?.needsGame !== undefined ? { needsGame: seed.registered.needsGame } : {}),
+        ...(seed.registered?.launchHint ? { launchHint: seed.registered.launchHint } : {}),
+        usedByMachineIds: [...seed.machineIds],
+        usedByWorkspaceIds: [...seed.workspaceIds],
+        usedByCurrentWorkspace: Boolean(entry && seed.workspaceIds.has(entry.id)),
+        updatedAt: seed.registered?.updatedAt ?? seed.cached?.updatedAt ?? BUILTIN_CUA_DRIVER.updatedAt,
+      };
+    }),
+  );
+
+  const rankStatus = (item: BasewareDriverOverviewItem) =>
+    item.usedByCurrentWorkspace ? 0 : item.registrationStatus === "registered" ? 1 : item.registrationStatus === "unregistered" ? 2 : 3;
+  const drivers = driversRaw.sort((a, b) =>
+    rankStatus(a) - rankStatus(b)
+    || a.id.localeCompare(b.id)
+    || a.spec.localeCompare(b.spec),
+  );
 
   let daemon: WorkspaceBasewareSnapshot["daemon"] = {
     hostSocket: null,
@@ -583,14 +955,159 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
     activeMachine,
     daemon,
     machines,
-    cachedDrivers,
+    drivers,
   };
 }
 
-export async function upsertBasewareMachine(input: unknown, home = globalHome): Promise<{ machine: BasewareMachineSpec; machines: BasewareMachineSpec[] }> {
+export async function registerBasewareDriver(
+  input: unknown,
+  signal?: AbortSignal,
+  home = globalHome,
+): Promise<{ driver: RegisteredDriverSpec; snapshot: WorkspaceBasewareSnapshot }> {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw Object.assign(new Error("注册驱动参数必须是对象"), { status: 400 });
+  }
+  const { spec, workspaceId } = input as Record<string, unknown>;
+  if (typeof spec !== "string" || !spec.trim()) {
+    throw Object.assign(new Error("请输入 driver 包地址（npm 名、github:org/repo#rev 或 file: 路径）"), { status: 400 });
+  }
+  const discovered = await discoverDriver(spec, signal);
+  const localMeta = await inspectLocalDriverMetadata(discovered.spec);
+  const entry: RegisteredDriverSpec = {
+    id: discovered.id,
+    spec: discovered.spec,
+    ...(localMeta.packageName ? { name: localMeta.packageName } : {}),
+    ...(discovered.version ? { version: discovered.version } : {}),
+    ...(localMeta.description ? { description: localMeta.description } : {}),
+    ...(discovered.transport && ["stdio", "bridge", "ssh", "http", "sse"].includes(discovered.transport)
+      ? { transport: discovered.transport as MachineTransportKind }
+      : {}),
+    ...(discovered.defaultPort !== undefined ? { defaultPort: discovered.defaultPort } : {}),
+    ...(discovered.needsGame !== undefined ? { needsGame: discovered.needsGame } : {}),
+    ...(discovered.launchHint ? { launchHint: discovered.launchHint } : {}),
+    updatedAt: new Date().toISOString(),
+  };
+  const registry = await upsertDriverConfig(entry, home);
+  const saved = registry.drivers.find(
+    item => driverRegistryKey(item.id, item.spec) === driverRegistryKey(entry.id, entry.spec),
+  )!;
+  clearCatalogCache();
+  return {
+    driver: saved,
+    snapshot: await basewareOverview(typeof workspaceId === "string" ? workspaceId : undefined, home),
+  };
+}
+
+export async function removeBasewareDriver(
+  input: unknown,
+  home = globalHome,
+): Promise<{ removed: RegisteredDriverSpec[]; snapshot: WorkspaceBasewareSnapshot }> {
+  if (typeof input === "string") {
+    const res = await removeDriverConfig({ id: input }, home);
+    clearCatalogCache();
+    return { removed: res.removed, snapshot: await basewareOverview(undefined, home) };
+  }
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw Object.assign(new Error("移除驱动参数无效"), { status: 400 });
+  }
+  const { id, spec, workspaceId } = input as Record<string, unknown>;
+  if (!validDriverId(id)) {
+    throw Object.assign(new Error("无效的驱动 ID"), { status: 400 });
+  }
+  const res = await removeDriverConfig({ id, spec }, home);
+  clearCatalogCache();
+  return {
+    removed: res.removed,
+    snapshot: await basewareOverview(typeof workspaceId === "string" ? workspaceId : undefined, home),
+  };
+}
+
+export async function upsertBasewareMachine(
+  input: unknown,
+  home = globalHome,
+  options?: { workspaceId?: unknown; bindMode?: unknown },
+): Promise<{ machine: BasewareMachineSpec; machines: BasewareMachineSpec[]; snapshot?: WorkspaceBasewareSnapshot }> {
   const registry = await upsertMachineConfig(input, home);
   const spec = validateMachineSpec(input);
-  return { machine: registry.machines.find(machine => machine.id === spec.id)!, machines: registry.machines };
+  const machine = registry.machines.find(item => item.id === spec.id)!;
+
+  const workspaceId = typeof options?.workspaceId === "string" && options.workspaceId.trim()
+    ? options.workspaceId.trim()
+    : null;
+  const bindMode = options?.bindMode === "primary" || options?.bindMode === "allowed"
+    ? options.bindMode
+    : null;
+
+  if (workspaceId && bindMode) {
+    let workspacePath: string | undefined;
+    let promotedSameInlineEndpoint = false;
+    await withWorkspaceRegistrationLock(home, workspaceId, async () => {
+      const entry = await registeredWorkspace(workspaceId, home);
+      workspacePath = entry.workspace;
+      const configPath = join(entry.workspace, "ludens.json");
+      const raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
+      if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("ludens.json 必须是 JSON 对象");
+      const summary = await readWorkspaceConfigSummary(entry.workspace);
+      const implicit = synthesizeImplicitMachine(entry, summary, registry.machines);
+      const current = resolveEffectiveBinding(summary, registry.machines, entry, implicit);
+
+      if (bindMode === "primary") {
+        promotedSameInlineEndpoint = Boolean(
+          implicit
+          && implicit.driver === spec.driver
+          && JSON.stringify(implicit.transport) === JSON.stringify(spec.transport),
+        );
+        const nextAllowed = current.allowed.filter(id => id !== "workspace-default");
+        if (!nextAllowed.includes(spec.id)) nextAllowed.push(spec.id);
+        const next = { ...raw, machines: { active: spec.id, allowed: nextAllowed } };
+        const temporary = `${configPath}.${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+          await rename(temporary, configPath);
+        } finally {
+          await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
+        }
+      } else {
+        const nextAllowed = [...current.allowed];
+        if (!nextAllowed.includes(spec.id)) nextAllowed.push(spec.id);
+        const nextActive = current.active && nextAllowed.includes(current.active)
+          ? current.active
+          : nextAllowed[0] ?? spec.id;
+        const next = { ...raw, machines: { active: nextActive, allowed: nextAllowed } };
+        const temporary = `${configPath}.${randomUUID()}.tmp`;
+        try {
+          await writeFile(temporary, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+          await rename(temporary, configPath);
+        } finally {
+          await unlink(temporary).catch(error => { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; });
+        }
+      }
+    });
+    clearCatalogCache();
+    if (bindMode === "primary" && workspacePath && !promotedSameInlineEndpoint) {
+      try {
+        const socket = await probeBasewareSocket(workspacePath);
+        if (socket) {
+          const client = await BasewareClient.connect(socket);
+          try {
+            await client.request({ kind: "machines", action: "use", id: spec.id });
+          } finally {
+            client.close();
+          }
+        }
+      } catch {
+        // Configuration persistence succeeds even when Baseware is busy or offline.
+      }
+    }
+    return {
+      machine,
+      machines: registry.machines,
+      snapshot: await basewareOverview(workspaceId, home),
+    };
+  }
+
+  clearCatalogCache();
+  return { machine, machines: registry.machines };
 }
 
 export async function removeBasewareMachine(id: unknown, home = globalHome): Promise<{ removed: BasewareMachineSpec | null; machines: BasewareMachineSpec[] }> {
@@ -656,10 +1173,13 @@ export async function controlWorkspaceMachine(
   }
   if (typeof machineId !== "string" || !machineId.trim()) throw new Error("请选择受控节点");
   const registry = await readMachinesConfig(home);
-  if (!registry.machines.some(machine => machine.id === machineId)) throw new Error(`Unknown machine: ${machineId}`);
   const entry = await registeredWorkspace(id, home);
   const workspace = entry.workspace;
-  const current = resolveEffectiveBinding(await readWorkspaceConfigSummary(workspace), registry.machines);
+  const cfg = await readWorkspaceConfigSummary(workspace);
+  const implicitMachine = synthesizeImplicitMachine(entry, cfg, registry.machines);
+  const machineExists = registry.machines.some(machine => machine.id === machineId) || implicitMachine?.id === machineId;
+  if (!machineExists) throw new Error(`Unknown machine: ${machineId}`);
+  const current = resolveEffectiveBinding(cfg, registry.machines, entry, implicitMachine);
   let active = current.active;
   const allowed = [...current.allowed];
   const persist = async () => {
@@ -683,11 +1203,13 @@ export async function controlWorkspaceMachine(
       if (!allowed.includes(machineId)) allowed.push(machineId);
       active = machineId;
       await persist();
-      const socket = await probeBasewareSocket(workspace);
-      if (socket) {
-        const client = await BasewareClient.connect(socket);
-        try { await client.request({ kind: "machines", action: "use", id: machineId }); }
-        finally { client.close(); }
+      if (machineId !== "workspace-default") {
+        const socket = await probeBasewareSocket(workspace);
+        if (socket) {
+          const client = await BasewareClient.connect(socket);
+          try { await client.request({ kind: "machines", action: "use", id: machineId }); }
+          finally { client.close(); }
+        }
       }
       break;
     }
@@ -708,17 +1230,22 @@ export async function controlWorkspaceMachine(
         if (socket) {
           const client = await BasewareClient.connect(socket);
           try {
-            if (active !== previousActive && active) {
+            if (active !== previousActive && active && active !== "workspace-default") {
               await client.request({ kind: "machines", action: "use", id: active });
             }
-            try { await client.request({ kind: "machines", action: "disconnect", id: machineId }); }
-            catch { /* The machine may not be mounted. */ }
+            if (machineId !== "workspace-default") {
+              try { await client.request({ kind: "machines", action: "disconnect", id: machineId }); }
+              catch { /* The machine may not be mounted. */ }
+            }
           } finally { client.close(); }
         }
       }
       break;
     }
     case "mount": {
+      if (machineId === "workspace-default") {
+        throw new Error("工作区直连节点请先「纳入全局节点池」后再执行并发挂载");
+      }
       if (!allowed.includes(machineId)) {
         allowed.push(machineId);
         await persist();
@@ -731,6 +1258,9 @@ export async function controlWorkspaceMachine(
       break;
     }
     case "unmount": {
+      if (machineId === "workspace-default") {
+        throw new Error("工作区直连节点不支持单独卸载，请先纳入全局节点池或直接停止工作区服务");
+      }
       const socket = await probeBasewareSocket(workspace);
       if (!socket) throw new Error("当前工作区 Baseware 尚未启动");
       const client = await BasewareClient.connect(socket);
@@ -742,7 +1272,7 @@ export async function controlWorkspaceMachine(
       const socket = await probeBasewareSocket(workspace);
       if (!socket) throw new Error("当前工作区 Baseware 尚未启动");
       const client = await BasewareClient.connect(socket);
-      try { await client.request({ kind: "reconnect", id: machineId }); }
+      try { await client.request({ kind: "reconnect", ...(machineId === "workspace-default" ? {} : { id: machineId }) }); }
       finally { client.close(); }
       break;
     }
@@ -1302,9 +1832,23 @@ export async function createWorkspace(input: unknown, signal?: AbortSignal, home
   const errors: Buffer[] = [];
   let bytes = 0, failure: unknown, terminating = false;
   let forced: ReturnType<typeof setTimeout> | undefined;
-  const kill = (signal: NodeJS.Signals) => {
-    if (child.pid) try { process.kill(-child.pid, signal); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+  const kill = (sig: NodeJS.Signals) => {
+    if (!child.pid) return;
+    if (process.platform !== "win32") {
+      try {
+        process.kill(-child.pid, sig);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ESRCH") return;
+        if (code !== "EPERM") throw error;
+      }
+    }
+    try { process.kill(child.pid, sig); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ESRCH" && code !== "EPERM") throw error;
+    }
   };
   const stop = (reason: unknown) => {
     if (terminating) return;
