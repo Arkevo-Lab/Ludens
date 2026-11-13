@@ -16,10 +16,15 @@ export const blockLabels: Record<LogBlock["kind"], string> = {
 };
 export const printable = (value: unknown): string =>
   typeof value === "string" ? value : (JSON.stringify(value, null, 2) ?? "");
+const searchTextMemo = new WeakMap<LogBlock, string>();
 export function activitySearchText(block: LogBlock): string {
-  return [block.title, block.text, blockLabels[block.kind],
+  const cached = searchTextMemo.get(block);
+  if (cached !== undefined) return cached;
+  const computed = [block.title, block.text, blockLabels[block.kind],
     block.source?.component, block.source?.implementation, printable(block.tool), printable(block.trace), block.id]
     .filter(Boolean).join("\n").toLocaleLowerCase();
+  searchTextMemo.set(block, computed);
+  return computed;
 }
 
 export interface LogBlock {
@@ -373,10 +378,14 @@ const TOOL_EVENTS = ["tool_start", "tool_update", "tool_end", "exec", "exec_resu
 type BlockRecipe = { kind: "event"; position: number }
   | { kind: "model"; model: string; anchorPosition: number; streamOffset: number; eventCutoff: number }
   | { kind: "python"; position: number; summary: PythonSummary; exceptionPosition?: number };
+function blockContentDigest(block: LogBlock): string {
+  const { createdRevision: _created, revision: _revision, ...content } = block;
+  return createHash("sha256").update(JSON.stringify(content)).digest("hex");
+}
+
 async function saveBlock(index: LogIndex, block: LogBlock, recipe: BlockRecipe, cold = false) {
   const store = index.store("blocks"), prior = store.meta(block.id);
-  const { createdRevision: _created, revision: _revision, ...content } = block;
-  const digest = recipe.kind === "event" ? undefined : createHash("sha256").update(JSON.stringify(content)).digest("hex");
+  const digest = recipe.kind === "event" ? undefined : blockContentDigest(block);
   if (prior && (recipe.kind === "event" || prior.digest === digest)) return;
   const revision = cold && prior ? Number(prior.revision) : index.revision + 1;
   const createdRevision = prior ? Number(prior.createdRevision ?? prior.revision) : revision;
@@ -384,6 +393,9 @@ async function saveBlock(index: LogIndex, block: LogBlock, recipe: BlockRecipe, 
     status: block.status, ...(recipe.kind === "python" ? { updatedAt: block.updatedAt } : {}),
     ...(createdRevision !== revision ? { createdRevision } : {}), revision, ...(digest ? { digest } : {}) });
   index.setMeta("revision", Math.max(index.revision, revision));
+  if (recipe.kind !== "event" && block.kind !== "diagnostic") {
+    writeCachedBlock(getIndexBlockCache(index), block.id, revision, block, digest);
+  }
 }
 
 /** Parse a byte range into one model's live parser; no completed stream body is persisted. */
@@ -411,7 +423,7 @@ async function parseStreamRange(index: LogIndex, model: string, anchor: Event, s
 async function overlayModel(index: LogIndex, recipe: Extract<BlockRecipe, { kind: "model" }>,
   projected: LogBlock[], signal?: AbortSignal) {
   const blocks = new Map(projected.map(block => [block.id, { ...block }])), events: Event[] = [];
-  let position = 0;
+  let position = Math.max(0, recipe.anchorPosition - 1);
   for (;;) {
     const page = await index.queryEvents({ model: recipe.model, afterPosition: position,
       beforePosition: recipe.eventCutoff + 1, types: TOOL_EVENTS, signal });
@@ -431,17 +443,183 @@ async function modelBlocks(index: LogIndex, recipe: Extract<BlockRecipe, { kind:
   return overlayModel(index, recipe, advanceStream([], recipe.model, anchor, state), signal);
 }
 
+interface CachedBlockEntry {
+  block: LogBlock;
+  bytes: number;
+  digest?: string;
+}
+
+interface IndexBlockCache {
+  generation: string;
+  entries: Map<string, CachedBlockEntry>;
+  bytes: number;
+}
+
+const BLOCK_CACHE_MAX_BYTES = 24 * 1024 * 1024;
+const BLOCK_CACHE_MAX_ENTRIES = 8192;
+const BLOCK_ENTRY_MAX_BYTES = 4 * 1024 * 1024;
+const SIBLING_PRECACHE_MAX_BLOCKS = 128;
+const MODEL_HYDRATE_CONCURRENCY = 4;
+const DIRECT_HYDRATE_CONCURRENCY = 8;
+const indexBlockCaches = new WeakMap<LogIndex, IndexBlockCache>();
+
+function getIndexBlockCache(index: LogIndex): IndexBlockCache {
+  const generation = index.meta("activityGeneration") ?? index.generation;
+  let cache = indexBlockCaches.get(index);
+  if (!cache || cache.generation !== generation) {
+    cache = { generation, entries: new Map(), bytes: 0 };
+    indexBlockCaches.set(index, cache);
+  }
+  return cache;
+}
+
+function blockCacheKey(id: string, revision: unknown): string {
+  return `${id}@${String(revision ?? 0)}`;
+}
+
+function readCachedBlock(cache: IndexBlockCache, row: RecordPointer): LogBlock | undefined {
+  if (row.revision === undefined || row.revision === null) return undefined;
+  const key = blockCacheKey(row.id, row.revision);
+  const entry = cache.entries.get(key);
+  if (!entry) return undefined;
+  const rowDigest = typeof row.digest === "string" ? row.digest : undefined;
+  if (entry.digest !== rowDigest) {
+    cache.bytes -= entry.bytes;
+    cache.entries.delete(key);
+    return undefined;
+  }
+  cache.entries.delete(key);
+  cache.entries.set(key, entry);
+  return { ...entry.block, createdRevision: row.createdRevision ?? row.revision, revision: row.revision };
+}
+
+function writeCachedBlock(
+  cache: IndexBlockCache,
+  id: string,
+  revision: unknown,
+  block: LogBlock,
+  digest?: string,
+): void {
+  if (revision === undefined || revision === null) return;
+  const { createdRevision: _created, revision: _revision, ...content } = block;
+  const serialized = JSON.stringify(content);
+  const weight = Buffer.byteLength(serialized);
+  if (weight > BLOCK_ENTRY_MAX_BYTES) return;
+  const key = blockCacheKey(id, revision);
+  const existing = cache.entries.get(key);
+  if (existing) {
+    cache.bytes -= existing.bytes;
+    cache.entries.delete(key);
+  }
+  while (
+    (cache.bytes + weight > BLOCK_CACHE_MAX_BYTES || cache.entries.size >= BLOCK_CACHE_MAX_ENTRIES) &&
+    cache.entries.size > 0
+  ) {
+    const oldestKey = cache.entries.keys().next().value!;
+    cache.bytes -= cache.entries.get(oldestKey)!.bytes;
+    cache.entries.delete(oldestKey);
+  }
+  cache.entries.set(key, { block: content as LogBlock, bytes: weight, digest });
+  cache.bytes += weight;
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, batchSignal: AbortSignal) => Promise<void>,
+  parentSignal?: AbortSignal,
+): Promise<void> {
+  if (items.length === 0) return;
+  let cursor = 0;
+  let firstError: unknown;
+  let failed = false;
+  const batchController = new AbortController();
+  const batchSignal = parentSignal
+    ? AbortSignal.any([parentSignal, batchController.signal])
+    : batchController.signal;
+  const count = Math.min(concurrency, items.length);
+  await Promise.allSettled(
+    Array.from({ length: count }, async () => {
+      while (!failed && !batchSignal.aborted && cursor < items.length) {
+        const current = items[cursor++]!;
+        try {
+          await worker(current, batchSignal);
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            firstError = error;
+            batchController.abort(error);
+          }
+          return;
+        }
+      }
+    }),
+  );
+  if (failed) throw firstError;
+  parentSignal?.throwIfAborted();
+}
+
 function blockReader(index: LogIndex, signal?: AbortSignal) {
-  const cached = new Map<string, { blocks: Map<string, LogBlock>; bytes: number }>();
-  let bytes = 0;
-  return async (row: RecordPointer): Promise<LogBlock> => {
-    signal?.throwIfAborted();
+  const blockCache = getIndexBlockCache(index);
+  const store = index.store("blocks");
+  const streamsStore = index.store("streams");
+  const exactModelCache = new Map<string, { blocks: Map<string, LogBlock>; bytes: number; siblingsCached: boolean }>();
+  let exactBytes = 0;
+
+  const rememberExactModel = (key: string, blocks: LogBlock[]) => {
+    const weight = Buffer.byteLength(JSON.stringify(blocks));
+    const entry = { blocks: new Map(blocks.map(value => [value.id, value])), bytes: weight, siblingsCached: false };
+    if (weight <= 8 * 1024 * 1024) {
+      while (exactBytes + weight > 8 * 1024 * 1024 && exactModelCache.size) {
+        const first = exactModelCache.keys().next().value!;
+        exactBytes -= exactModelCache.get(first)!.bytes;
+        exactModelCache.delete(first);
+      }
+      exactModelCache.set(key, entry);
+      exactBytes += weight;
+    }
+    return entry;
+  };
+
+  const cacheVerifiedSiblingsOnce = (entry: { blocks: Map<string, LogBlock>; siblingsCached: boolean }) => {
+    if (entry.siblingsCached) return;
+    entry.siblingsCached = true;
+    if (entry.blocks.size > SIBLING_PRECACHE_MAX_BLOCKS) return;
+    for (const candidate of entry.blocks.values()) {
+      const siblingMeta = store.meta(candidate.id);
+      if (!siblingMeta || (siblingMeta.recipe as BlockRecipe | undefined)?.kind !== "model") continue;
+      if (typeof siblingMeta.digest !== "string") continue;
+      if (blockContentDigest(candidate) === siblingMeta.digest) {
+        writeCachedBlock(blockCache, candidate.id, siblingMeta.revision, candidate, siblingMeta.digest);
+      }
+    }
+  };
+
+  const hydrateExactModelEntry = async (
+    recipe: Extract<BlockRecipe, { kind: "model" }>,
+    activeSignal: AbortSignal | undefined = signal,
+  ) => {
+    const key = JSON.stringify(recipe);
+    let entry = exactModelCache.get(key);
+    if (!entry) {
+      entry = rememberExactModel(key, await modelBlocks(index, recipe, activeSignal));
+    }
+    return entry;
+  };
+
+  const hydrateOne = async (row: RecordPointer, activeSignal: AbortSignal | undefined = signal): Promise<LogBlock> => {
+    activeSignal?.throwIfAborted();
+    const hit = readCachedBlock(blockCache, row);
+    if (hit) return hit;
+
     const recipe = row.recipe as BlockRecipe;
+    const rowDigest = typeof row.digest === "string" ? row.digest : undefined;
     let block: LogBlock | undefined;
     if (recipe.kind === "event") {
       const event = await index.readEvent(recipe.position);
       if (!event) throw new Error("活动来源事件不存在");
-      const blocks = new Map<string, LogBlock>(); await overlayEvents(index.path, [event], blocks, undefined, index.archiveWorkspace);
+      const blocks = new Map<string, LogBlock>();
+      await overlayEvents(index.path, [event], blocks, undefined, index.archiveWorkspace);
       block = blocks.get(row.id);
     } else if (recipe.kind === "python") {
       const event = await index.readEvent(recipe.position);
@@ -453,22 +631,149 @@ function blockReader(index: LogIndex, signal?: AbortSignal) {
       }
       block = pythonSummaryBlock(event, row.id, summary, row.updatedAt);
     } else {
-      const key = JSON.stringify(recipe); let entry = cached.get(key);
-      if (!entry) {
-        const blocks = await modelBlocks(index, recipe, signal), weight = Buffer.byteLength(JSON.stringify(blocks));
-        entry = { blocks: new Map(blocks.map(value => [value.id, value])), bytes: weight };
-        if (weight <= 8 * 1024 * 1024) {
-          while (bytes + weight > 8 * 1024 * 1024 && cached.size) {
-            const first = cached.keys().next().value!; bytes -= cached.get(first)!.bytes; cached.delete(first);
-          }
-          cached.set(key, entry); bytes += weight;
+      const latestMeta = store.meta(row.id);
+      const isCurrentLatest = latestMeta !== undefined && latestMeta.revision === row.revision;
+      if (isCurrentLatest) {
+        const streamMeta = streamsStore.meta(recipe.model);
+        const latestOffset = Math.max(recipe.streamOffset, Number(streamMeta?.offset ?? recipe.streamOffset));
+        const latestCutoff = Math.max(recipe.eventCutoff, Number(index.meta("activityPosition") ?? recipe.eventCutoff));
+        const coalescedRecipe: Extract<BlockRecipe, { kind: "model" }> = {
+          kind: "model",
+          model: recipe.model,
+          anchorPosition: recipe.anchorPosition,
+          streamOffset: latestOffset,
+          eventCutoff: latestCutoff,
+        };
+        const projectedEntry = await hydrateExactModelEntry(coalescedRecipe, activeSignal);
+        cacheVerifiedSiblingsOnce(projectedEntry);
+        const candidate = projectedEntry.blocks.get(row.id);
+        if (candidate && (!rowDigest || blockContentDigest(candidate) === rowDigest)) {
+          block = candidate;
         }
       }
-      block = entry.blocks.get(row.id);
+      if (!block) {
+        const exactEntry = await hydrateExactModelEntry(recipe, activeSignal);
+        block = exactEntry.blocks.get(row.id);
+      }
     }
     if (!block) throw new Error(`活动来源无法重建：${row.id}`);
+    writeCachedBlock(blockCache, row.id, row.revision, block, rowDigest);
     return { ...block, createdRevision: row.createdRevision ?? row.revision, revision: row.revision };
   };
+
+  const hydrateBatch = async (items: RecordPointer[]): Promise<LogBlock[]> => {
+    if (items.length === 0) return [];
+    const results = new Array<LogBlock>(items.length);
+    const directItems: Array<{ idx: number; row: RecordPointer }> = [];
+    const latestModelGroups = new Map<
+      string,
+      {
+        model: string;
+        anchorPosition: number;
+        maxStreamOffset: number;
+        maxEventCutoff: number;
+        members: Array<{ idx: number; row: RecordPointer; recipe: Extract<BlockRecipe, { kind: "model" }> }>;
+      }
+    >();
+    const historicalModelGroups = new Map<
+      string,
+      {
+        recipe: Extract<BlockRecipe, { kind: "model" }>;
+        members: Array<{ idx: number; row: RecordPointer }>;
+      }
+    >();
+
+    for (let idx = 0; idx < items.length; idx++) {
+      signal?.throwIfAborted();
+      const row = items[idx]!;
+      const hit = readCachedBlock(blockCache, row);
+      if (hit) {
+        results[idx] = hit;
+        continue;
+      }
+      const recipe = row.recipe as BlockRecipe;
+      if (recipe.kind !== "model") {
+        directItems.push({ idx, row });
+        continue;
+      }
+      // Guardrail: ONLY coalesce cutoff across current latest pointers; historical pointers in `store.versions()` stay exact.
+      const latestMeta = store.meta(row.id);
+      const isCurrentLatest = latestMeta !== undefined && latestMeta.revision === row.revision;
+      if (isCurrentLatest) {
+        const groupKey = `${recipe.model}\0${recipe.anchorPosition}`;
+        let group = latestModelGroups.get(groupKey);
+        if (!group) {
+          group = {
+            model: recipe.model,
+            anchorPosition: recipe.anchorPosition,
+            maxStreamOffset: recipe.streamOffset,
+            maxEventCutoff: recipe.eventCutoff,
+            members: [],
+          };
+          latestModelGroups.set(groupKey, group);
+        } else {
+          if (recipe.streamOffset > group.maxStreamOffset) group.maxStreamOffset = recipe.streamOffset;
+          if (recipe.eventCutoff > group.maxEventCutoff) group.maxEventCutoff = recipe.eventCutoff;
+        }
+        group.members.push({ idx, row, recipe });
+      } else {
+        const exactKey = `${recipe.model}\0${recipe.anchorPosition}\0${recipe.streamOffset}\0${recipe.eventCutoff}`;
+        let group = historicalModelGroups.get(exactKey);
+        if (!group) {
+          group = { recipe, members: [] };
+          historicalModelGroups.set(exactKey, group);
+        }
+        group.members.push({ idx, row });
+      }
+    }
+
+    await runWithConcurrency([...latestModelGroups.values()], MODEL_HYDRATE_CONCURRENCY, async (group, batchSignal) => {
+      batchSignal.throwIfAborted();
+      const coalescedRecipe: Extract<BlockRecipe, { kind: "model" }> = {
+        kind: "model",
+        model: group.model,
+        anchorPosition: group.anchorPosition,
+        streamOffset: group.maxStreamOffset,
+        eventCutoff: group.maxEventCutoff,
+      };
+      const projectedEntry = await hydrateExactModelEntry(coalescedRecipe, batchSignal);
+      cacheVerifiedSiblingsOnce(projectedEntry);
+      const projectedMap = projectedEntry.blocks;
+
+      for (const { idx, row, recipe } of group.members) {
+        const rowDigest = typeof row.digest === "string" ? row.digest : undefined;
+        let block = projectedMap.get(row.id);
+        if (!block || (rowDigest && blockContentDigest(block) !== rowDigest)) {
+          const exactEntry = await hydrateExactModelEntry(recipe, batchSignal);
+          block = exactEntry.blocks.get(row.id);
+        }
+        if (!block) throw new Error(`活动来源无法重建：${row.id}`);
+        writeCachedBlock(blockCache, row.id, row.revision, block, rowDigest);
+        results[idx] = { ...block, createdRevision: row.createdRevision ?? row.revision, revision: row.revision };
+      }
+    }, signal);
+
+    await runWithConcurrency([...historicalModelGroups.values()], MODEL_HYDRATE_CONCURRENCY, async (group, batchSignal) => {
+      batchSignal.throwIfAborted();
+      const exactEntry = await hydrateExactModelEntry(group.recipe, batchSignal);
+      const exactMap = exactEntry.blocks;
+      for (const { idx, row } of group.members) {
+        const rowDigest = typeof row.digest === "string" ? row.digest : undefined;
+        const block = exactMap.get(row.id);
+        if (!block) throw new Error(`活动来源无法重建：${row.id}`);
+        writeCachedBlock(blockCache, row.id, row.revision, block, rowDigest);
+        results[idx] = { ...block, createdRevision: row.createdRevision ?? row.revision, revision: row.revision };
+      }
+    }, signal);
+
+    await runWithConcurrency(directItems, DIRECT_HYDRATE_CONCURRENCY, async ({ idx, row }, batchSignal) => {
+      results[idx] = await hydrateOne(row, batchSignal);
+    }, signal);
+
+    return results;
+  };
+
+  return Object.assign(hydrateOne, { batch: hydrateBatch });
 }
 
 interface CurrentState {
@@ -724,7 +1029,7 @@ export async function queryActivity(index: LogIndex, scope: ActivityScope, query
     generatedAt: new Date().toISOString(), durationMs: 0,
     blockCount: store.count(epochFilter), revision: head, generation };
   const hydrate = blockReader(index, signal);
-  const read = async (items: RecordPointer[]) => { const blocks: LogBlock[] = []; for (const item of items) blocks.push(await hydrate(item)); return blocks; };
+  const read = (items: RecordPointer[]) => hydrate.batch(items);
   let examined = 0;
   const yieldRead = async () => {
     await new Promise<void>(resolve => setImmediate(resolve));

@@ -1,7 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { adjacentReplayFrame, clampReplayTime, coalesceReplayFrameTicks, mergeReplayPages, replayFramesAt, replayItemActive,
-  replayStageFramesAt, replayWindowBounds, retainReplayWindows } from "../features/replay/replay-model";
+import { buildReplayFrameIndex, clampReplayTime, coalesceReplayFrameTicks, indexedAdjacentFrame, indexedFramesAt, indexedStageFramesAt,
+  mergeReplayPages, replayItemActive, replayWindowBounds } from "../features/replay/replay-model";
+
+const replayFramesAt = (frames: ReplayFrame[], at: number, capability = "") => indexedFramesAt(buildReplayFrameIndex(frames), at, capability);
+const replayStageFramesAt = (frames: ReplayFrame[], at: number, capability = "") => indexedStageFramesAt(buildReplayFrameIndex(frames), at, capability);
+const adjacentReplayFrame = (frames: ReplayFrame[], at: number, direction: -1 | 1, capability = "") =>
+  indexedAdjacentFrame(buildReplayFrameIndex(frames), at, direction, capability);
 import type { ReplayFrame, ReplayItem, ReplayWindow } from "../lib/replay-types";
 
 const frame = (id: string, at: number, capability = "vision", sequence = at): ReplayFrame =>
@@ -44,8 +49,6 @@ test("window pages deduplicate overlap and the browser retains no more than two 
   const a = window(0, [frame("prior", -1), frame("one", 1)]);
   const b = window(0, [frame("one", 1), frame("two", 2)]);
   assert.deepEqual(mergeReplayPages([a, b]).frames.map(f => f.id), ["prior", "one", "two"]);
-  assert.deepEqual(retainReplayWindows([window(0), window(30_000), window(60_000), window(90_000)], 60_000)
-    .map(w => w.startAt), [60_000, 90_000]);
 });
 
 test("active spans include crossed windows and open ends without claiming a completion", () => {

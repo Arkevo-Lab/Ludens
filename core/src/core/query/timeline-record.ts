@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { open, readdir, readFile, realpath } from "node:fs/promises";
+import { open, readdir, readFile, realpath, stat, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import type { VideoFrameReference } from "@ludens/protocol/timeline-media";
 
@@ -57,6 +57,12 @@ export interface TimelineSegment {
   maximum?: { recordedAt: string; sequence: number };
 }
 
+/** Parsed .meta.json cache keyed by root + name, validated by mtime and size so a rewritten tail is re-read. */
+const segmentMetaCache = new Map<string, { mtimeMs: number; size: number; segment: TimelineSegment }>();
+
+/** Latest pointer per capabilityHash over a whole segment, keyed so any metadata change misses. */
+const segmentSummaries = new Map<string, Map<string, TimelinePointer>>();
+
 /** Only the small committed segment summaries are read here; frame payloads stay on disk. */
 export async function timelineSegments(root: string, signal?: AbortSignal): Promise<TimelineSegment[]> {
   let names: string[];
@@ -66,12 +72,22 @@ export async function timelineSegments(root: string, signal?: AbortSignal): Prom
   for (const name of names) {
     signal?.throwIfAborted();
     if (!name.endsWith(".meta.json")) continue;
-    const meta = JSON.parse(await readFile(await timelinePath(root, `segments/${name}`), { encoding: "utf8", signal }));
-    if (![meta.firstSequence, meta.lastSequence, meta.count].every(Number.isSafeInteger)
-      || meta.firstSequence < 1 || meta.count < 0 || meta.lastSequence - meta.firstSequence + 1 !== meta.count)
-      throw new Error("时空轴分段索引无效");
-    segments.push({ stem: name.slice(0, -10), firstSequence: meta.firstSequence, lastSequence: meta.lastSequence,
-      count: meta.count, minimum: meta.minimum, maximum: meta.maximum });
+    const path = await timelinePath(root, `segments/${name}`);
+    const { mtimeMs, size } = await stat(path);
+    const cacheKey = `${root}\0${name}`;
+    const cached = segmentMetaCache.get(cacheKey);
+    if (cached && cached.mtimeMs === mtimeMs && cached.size === size) segments.push(cached.segment);
+    else {
+      const meta = JSON.parse(await readFile(path, { encoding: "utf8", signal }));
+      if (![meta.firstSequence, meta.lastSequence, meta.count].every(Number.isSafeInteger)
+        || meta.firstSequence < 1 || meta.count < 0 || meta.lastSequence - meta.firstSequence + 1 !== meta.count)
+        throw new Error("时空轴分段索引无效");
+      const segment = { stem: name.slice(0, -10), firstSequence: meta.firstSequence, lastSequence: meta.lastSequence,
+        count: meta.count, minimum: meta.minimum, maximum: meta.maximum };
+      if (segmentMetaCache.size >= 1024) segmentMetaCache.delete(segmentMetaCache.keys().next().value!);
+      segmentMetaCache.set(cacheKey, { mtimeMs, size, segment });
+      segments.push(segment);
+    }
   }
   return segments.sort((a, b) => a.firstSequence - b.firstSequence);
 }
@@ -143,30 +159,51 @@ export async function* timelinePointers(root: string, afterSequence = 0, selecti
 export async function readTimelinePayload(pointer: TimelinePointer, signal?: AbortSignal): Promise<StoredTimelineRecord> {
   signal?.throwIfAborted();
   const handle = await open(pointer.file, "r");
-  try {
-    if (!Number.isSafeInteger(pointer.offset + pointer.length) || pointer.offset + pointer.length > (await handle.stat()).size)
-      throw new Error("时空轴记录索引不完整");
-    const bytes = Buffer.alloc(pointer.length);
-    let offset = 0;
-    while (offset < bytes.length) {
-      signal?.throwIfAborted();
-      const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, pointer.offset + offset);
-      if (!bytesRead) throw new Error("时空轴记录读取不完整");
-      offset += bytesRead;
-    }
-    const record = JSON.parse(bytes.toString("utf8")) as StoredTimelineRecord;
-    const shortHash = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 32);
-    if (record.sequence !== pointer.sequence || typeof record.id !== "string" || typeof record.capability !== "string"
-      || shortHash(record.id) !== pointer.recordHash || shortHash(record.capability) !== pointer.capabilityHash
-      || Math.abs(Date.parse(record.recordedAt) - pointer.at) > 0.01)
-      throw new Error("时空轴记录引用不匹配");
-    return record;
-  } finally { await handle.close(); }
+  try { return await readTimelinePayloadFrom(handle, (await handle.stat()).size, pointer, signal); }
+  finally { await handle.close(); }
+}
+
+async function readTimelinePayloadFrom(handle: FileHandle, size: number, pointer: TimelinePointer, signal?: AbortSignal): Promise<StoredTimelineRecord> {
+  signal?.throwIfAborted();
+  if (!Number.isSafeInteger(pointer.offset + pointer.length) || pointer.offset + pointer.length > size)
+    throw new Error("时空轴记录索引不完整");
+  const bytes = Buffer.alloc(pointer.length);
+  let offset = 0;
+  while (offset < bytes.length) {
+    signal?.throwIfAborted();
+    const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, pointer.offset + offset);
+    if (!bytesRead) throw new Error("时空轴记录读取不完整");
+    offset += bytesRead;
+  }
+  const record = JSON.parse(bytes.toString("utf8")) as StoredTimelineRecord;
+  const shortHash = (text: string) => createHash("sha256").update(text).digest("hex").slice(0, 32);
+  if (record.sequence !== pointer.sequence || typeof record.id !== "string" || typeof record.capability !== "string"
+    || shortHash(record.id) !== pointer.recordHash || shortHash(record.capability) !== pointer.capabilityHash
+    || Math.abs(Date.parse(record.recordedAt) - pointer.at) > 0.01)
+    throw new Error("时空轴记录引用不匹配");
+  return record;
 }
 
 export type TimelineCursor = [at: number, sequence: number];
 const comparePoint = (a: TimelineCursor, b: TimelineCursor) => a[0] - b[0] || a[1] - b[1];
 const point = (value: TimelinePointer): TimelineCursor => [value.at, value.sequence];
+/** Latest pointer per capabilityHash over one whole segment, cached per (root, stem, index file stat). */
+async function segmentSummary(root: string, segment: TimelineSegment, signal?: AbortSignal) {
+  const idxPath = await timelinePath(root, `segments/${segment.stem}.idx`);
+  const { mtimeMs, size } = await stat(idxPath);
+  const key = `${root}\0${segment.stem}\0${segment.firstSequence}\0${segment.lastSequence}\0${segment.count}\0${mtimeMs}\0${size}`;
+  const cached = segmentSummaries.get(key);
+  if (cached) return cached;
+  const latest = new Map<string, TimelinePointer>();
+  for await (const entry of timelinePointers(root, 0, { segments: [segment], signal }))
+    if (!latest.has(entry.capabilityHash) || comparePoint(point(entry), point(latest.get(entry.capabilityHash)!)) > 0)
+      latest.set(entry.capabilityHash, entry);
+  if (segmentSummaries.size >= 256) segmentSummaries.delete(segmentSummaries.keys().next().value!);
+  segmentSummaries.set(key, latest);
+  return latest;
+}
+
+const MAX_OPEN_PAYLOAD_FILES = 8;
 
 /** Select one bounded page from the existing binary indexes; never build a frame projection. */
 export async function timelineWindow(root: string, options: {
@@ -179,44 +216,97 @@ export async function timelineWindow(root: string, options: {
   const candidates: TimelinePointer[] = [];
   const previous = new Map<string, StoredTimelineRecord>();
   const excluded = new Set<number>();
-  // Channels may be sparse, or interleaved with a different run. Check each candidate's
-  // original run identity, then continue backwards only for channels whose candidate was rejected.
-  if ((!options.after || options.after[0] < low) && low > options.scopeStart) {
-    for (;;) {
+  const payloadFiles = new Map<string, { handle: FileHandle; size: number }>();
+  const payload = async (pointer: TimelinePointer) => {
+    let cached = payloadFiles.get(pointer.file);
+    if (cached) {
+      payloadFiles.delete(pointer.file);
+      payloadFiles.set(pointer.file, cached);
+    } else {
+      if (payloadFiles.size >= MAX_OPEN_PAYLOAD_FILES) {
+        const [oldestKey, oldest] = payloadFiles.entries().next().value!;
+        payloadFiles.delete(oldestKey);
+        await oldest.handle.close();
+      }
+      const handle = await open(pointer.file, "r");
+      try {
+        cached = { handle, size: (await handle.stat()).size };
+        payloadFiles.set(pointer.file, cached);
+      } catch (error) {
+        await handle.close();
+        throw error;
+      }
+    }
+    return readTimelinePayloadFrom(cached.handle, cached.size, pointer, options.signal);
+  };
+  try {
+    // Channels may be sparse, or interleaved with a different run. Check each candidate's
+    // original run identity, then continue backwards only for channels whose candidate was rejected.
+    if ((!options.after || options.after[0] < low) && low > options.scopeStart) {
       const latest = new Map<string, TimelinePointer>();
-      for await (const entry of timelinePointers(root, 0, { segments, maxSequence, start: options.scopeStart,
-        end: low - 1, signal: options.signal })) {
-        if (previous.has(entry.capabilityHash) || excluded.has(entry.sequence)) continue;
+      const merge = (entry: TimelinePointer) => {
+        if (previous.has(entry.capabilityHash)) return;
         const old = latest.get(entry.capabilityHash);
         if (!old || comparePoint(point(entry), point(old)) > 0) latest.set(entry.capabilityHash, entry);
+      };
+      // Walk newest first; a whole-segment summary is valid only when the segment lies
+      // entirely inside [scopeStart, low-1] and below maxSequence, otherwise scan its index.
+      for (const segment of [...segments].reverse()) {
+        options.signal?.throwIfAborted();
+        if (segment.firstSequence > maxSequence
+          || (segment.minimum && Date.parse(segment.minimum.recordedAt) > low - 1)
+          || (segment.maximum && Date.parse(segment.maximum.recordedAt) < options.scopeStart)) continue;
+        if (excluded.size === 0 && segment.minimum && segment.maximum
+          && Date.parse(segment.maximum.recordedAt) <= low - 1 && Date.parse(segment.minimum.recordedAt) >= options.scopeStart
+          && segment.lastSequence <= maxSequence) {
+          for (const entry of (await segmentSummary(root, segment, options.signal)).values()) merge(entry);
+        } else {
+          for await (const entry of timelinePointers(root, 0, { segments: [segment], maxSequence, start: options.scopeStart,
+            end: low - 1, signal: options.signal })) {
+            if (!excluded.has(entry.sequence)) merge(entry);
+          }
+        }
       }
-      if (!latest.size) break;
-      let rejected = false;
-      for (const [hash, entry] of latest) {
-        const record = await readTimelinePayload(entry, options.signal);
-        if (record.runId === options.run) previous.set(hash, record);
-        else { excluded.add(entry.sequence); rejected = true; }
+      // Once a sequence is excluded, summaries can no longer represent the per-sequence
+      // skips, so later iterations fall back to the original full linear scan.
+      for (;;) {
+        if (!latest.size) break;
+        let rejected = false;
+        for (const [hash, entry] of latest) {
+          const record = await payload(entry);
+          if (record.runId === options.run) previous.set(hash, record);
+          else { excluded.add(entry.sequence); rejected = true; }
+        }
+        if (!rejected) break;
+        latest.clear();
+        for await (const entry of timelinePointers(root, 0, { segments, maxSequence, start: options.scopeStart,
+          end: low - 1, signal: options.signal })) {
+          if (previous.has(entry.capabilityHash) || excluded.has(entry.sequence)) continue;
+          const old = latest.get(entry.capabilityHash);
+          if (!old || comparePoint(point(entry), point(old)) > 0) latest.set(entry.capabilityHash, entry);
+        }
       }
-      if (!rejected) break;
     }
+    for await (const entry of timelinePointers(root, 0, { segments, maxSequence, start: low, end: high, signal: options.signal })) {
+      if (options.after && comparePoint(point(entry), options.after) <= 0) continue;
+      let lo = 0, hi = candidates.length;
+      while (lo < hi) { const mid = (lo + hi) >>> 1; if (comparePoint(point(candidates[mid]), point(entry)) < 0) lo = mid + 1; else hi = mid; }
+      candidates.splice(lo, 0, entry);
+      if (candidates.length > options.limit + 1) candidates.pop();
+    }
+    const selected = candidates.slice(0, options.limit), records = [...previous.values()].filter(record =>
+      !options.after || comparePoint([Date.parse(record.recordedAt), record.sequence], options.after) > 0);
+    for (const entry of selected) {
+      const record = await payload(entry);
+      if (record.runId === options.run) records.push(record);
+    }
+    records.sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt) || a.sequence - b.sequence);
+    const page = records.slice(0, options.limit);
+    const next = records.length > options.limit
+      ? [Date.parse(page.at(-1)!.recordedAt), page.at(-1)!.sequence] as TimelineCursor
+      : candidates.length > options.limit ? point(selected.at(-1)!) : undefined;
+    return { records: page, maxSequence, ...(next ? { next } : {}) };
+  } finally {
+    for (const { handle } of payloadFiles.values()) await handle.close();
   }
-  for await (const entry of timelinePointers(root, 0, { segments, maxSequence, start: low, end: high, signal: options.signal })) {
-    if (options.after && comparePoint(point(entry), options.after) <= 0) continue;
-    let lo = 0, hi = candidates.length;
-    while (lo < hi) { const mid = (lo + hi) >>> 1; if (comparePoint(point(candidates[mid]), point(entry)) < 0) lo = mid + 1; else hi = mid; }
-    candidates.splice(lo, 0, entry);
-    if (candidates.length > options.limit + 1) candidates.pop();
-  }
-  const selected = candidates.slice(0, options.limit), records = [...previous.values()].filter(record =>
-    !options.after || comparePoint([Date.parse(record.recordedAt), record.sequence], options.after) > 0);
-  for (const entry of selected) {
-    const record = await readTimelinePayload(entry, options.signal);
-    if (record.runId === options.run) records.push(record);
-  }
-  records.sort((a, b) => Date.parse(a.recordedAt) - Date.parse(b.recordedAt) || a.sequence - b.sequence);
-  const page = records.slice(0, options.limit);
-  const next = records.length > options.limit
-    ? [Date.parse(page.at(-1)!.recordedAt), page.at(-1)!.sequence] as TimelineCursor
-    : candidates.length > options.limit ? point(selected.at(-1)!) : undefined;
-  return { records: page, maxSequence, ...(next ? { next } : {}) };
 }

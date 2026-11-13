@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { useLocale, useTranslations } from "@/lib/locale";
 import type { Observation } from "@/lib/types";
 import { mediaFailureMessage } from "@/features/live/observation-model";
+import { CachedObservationImg } from "@/features/live/live-media-cache";
 import { useBufferedMedia } from "@/features/live/use-buffered-media";
 import { useRetryFocus } from "@/components/use-retry-focus";
 
@@ -90,12 +91,12 @@ function MediaFailure({ url }: { url: string }) {
   return <span>{mediaFailureMessage(status ?? 0, t)}</span>;
 }
 
-function BufferedObservationImage({ url, alt }: { url: string; alt: string }) {
+function BufferedObservationImage({ url, alt, prefetchUrls = [] }: { url: string; alt: string; prefetchUrls?: string[] }) {
   const t = useTranslations("runVisuals"), { t: rootT } = useLocale();
   const [revision, setRevision] = useState(0);
   const target = useMemo(() => ({ key: url, value: alt, urls: [url] }), [url, alt]);
   // Rebuilding this viewer's buffer drops a failed same-URL entry and releases its resources.
-  const { displayed, pending } = useBufferedMedia("observation:" + revision, target);
+  const { displayed, pending } = useBufferedMedia("observation:" + revision, target, prefetchUrls);
   const image = displayed?.images.get(displayed.key);
   const error = !pending && image?.error ? mediaFailureMessage(image.httpStatus ?? 0, rootT) : undefined;
   return <MediaRecovery key={url} kind="image" pending={pending} error={error} onRetry={() => setRevision(value => value + 1)}>
@@ -132,16 +133,16 @@ function AudioObservation({ url, alt }: { url: string; alt: string }) {
   </MediaRecovery>;
 }
 
-export function ObservationMedia({ observation, url, alt = "", thumbnail = false }: {
-  observation: Observation; url: string; alt?: string; thumbnail?: boolean;
+export function ObservationMedia({ observation, url, alt = "", thumbnail = false, prefetchUrls }: {
+  observation: Observation; url: string; alt?: string; thumbnail?: boolean; prefetchUrls?: string[];
 }) {
   const t = useTranslations("runVisuals");
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   if (observation.mediaStorage === "unrecorded") return <span>{t("media.unrecorded")}</span>;
   if (observation.mediaType.startsWith("image/")) {
-    if (!thumbnail) return <BufferedObservationImage url={url} alt={alt} />;
+    if (!thumbnail) return <BufferedObservationImage url={url} alt={alt} prefetchUrls={prefetchUrls} />;
     return failedUrl === url ? <span role="status"><MediaFailure key={url} url={url} /></span>
-      : <img src={url} alt={alt} onError={() => setFailedUrl(url)} />;
+      : <CachedObservationImg src={url} alt={alt} onError={() => setFailedUrl(url)} />;
   }
   if (thumbnail) return <span>{observation.mediaType.startsWith("audio/") ? t("media.audio") : t("media.text")}</span>;
   if (observation.mediaType.startsWith("audio/")) return <AudioObservation key={url} url={url} alt={alt} />;
