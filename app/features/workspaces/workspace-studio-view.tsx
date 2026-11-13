@@ -1515,7 +1515,7 @@ export function ServicesAndShioriPanel({
             <SingleLineTruncate
               mono
               text={studio.shiori.currentSessionFile ?? t("shioriSection.freshOnNextStart")}
-              className="max-w-xs text-xs text-muted-foreground sm:max-w-md"
+              className="max-w-full text-xs text-muted-foreground"
             />
           }
         />

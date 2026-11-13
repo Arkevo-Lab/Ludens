@@ -170,7 +170,9 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    max-inline-size: 100%;
+    min-inline-size: 0;
   }
 
   .settings-workspace-body {
@@ -223,7 +225,9 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 0.5rem;
-    flex-shrink: 0;
+    flex: 0 1 auto;
+    max-inline-size: 100%;
+    min-inline-size: 0;
   }
 
   .settings-rows {
@@ -240,6 +244,7 @@
 
   .settings-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     align-items: safe center;
     justify-content: space-between;
@@ -249,8 +254,10 @@
   }
 
   .settings-row-info {
-    flex: 1 1 0%;
+    flex: 1 1 14rem;
     min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
     display: flex;
     flex-direction: column;
     gap: 0.2rem;
@@ -269,6 +276,9 @@
     font-weight: 500;
     line-height: 1.4;
     color: var(--foreground);
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
   }
 
   .settings-row-meta {
@@ -282,11 +292,15 @@
     font-size: 0.75rem;
     line-height: 1.45;
     color: var(--muted-foreground);
+    min-inline-size: 0;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
   }
 
   .settings-row-control {
     flex: 0 1 auto;
     min-inline-size: 0;
+    max-inline-size: 100%;
     display: flex;
     align-items: center;
     justify-content: flex-end;
