@@ -23,7 +23,6 @@ import {
   CornerUpLeft,
   Cpu,
   FileText,
-  HardDrive,
   Inbox,
   Infinity as InfinityIcon,
   Lock,
@@ -32,13 +31,13 @@ import {
   Plus,
   RefreshCw,
   RotateCcw,
-  SlidersHorizontal,
   Square,
   X,
   Zap,
 } from "lucide-react";
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
 import { summarizePoolEventPreview } from "@ludens/protocol/event-pool";
+import { DeviceContentionDialog } from "@/components/device-contention-dialog";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import {
   ModelEffortBadge,
@@ -50,13 +49,13 @@ import {
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
 import { useTranslations } from "@/lib/locale";
-import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
 import { CachedObservationImg } from "@/features/live/live-media-cache";
 import {
   getLiveSessionEngine,
+  isDeviceBusyError,
   type EventPoolCommand,
   type RuntimeControlCommand,
 } from "@/features/live/live-session-store";
@@ -1181,6 +1180,8 @@ export function ShioriComposer({
   activeServiceTierOverride,
   activeEffortOverride,
   submittingOverride,
+  spawningCore = false,
+  preemptSuccessSeq = 0,
   onModelChange,
   liveRemainingSeconds,
   liveTimerSpec,
@@ -1209,6 +1210,8 @@ export function ShioriComposer({
   activeServiceTierOverride?: ModelServiceTier | null;
   activeEffortOverride?: ModelEffort | null;
   submittingOverride?: boolean;
+  spawningCore?: boolean;
+  preemptSuccessSeq?: number;
   onModelChange?: (model: string) => void;
   liveRemainingSeconds?: number | null;
   liveTimerSpec?: LiveTimerSpec | null;
@@ -1264,6 +1267,7 @@ export function ShioriComposer({
   const submitting = Boolean(localSubmitting || submittingOverride);
   const [error, setError] = useState<string | null>(null);
   const [lastSent, setLastSent] = useState<string | null>(null);
+  const pendingContentionDraftRef = useRef<{ clearDraft: boolean; feedback: string } | null>(null);
   const [localModelOverride, setLocalModelOverride] = useState<{
     project: string;
     baseServerModel: string | null;
@@ -1306,6 +1310,16 @@ export function ShioriComposer({
     return () => clearTimeout(timer);
   }, [modelLockNotice]);
 
+  useEffect(() => {
+    if (!preemptSuccessSeq || !pendingContentionDraftRef.current) return;
+    const pending = pendingContentionDraftRef.current;
+    pendingContentionDraftRef.current = null;
+    if (pending.clearDraft) setDraft("");
+    onSelectReplyTarget?.(null);
+    setError(null);
+    setLastSent(pending.feedback);
+  }, [preemptSuccessSeq, onSelectReplyTarget]);
+
   const updateDurationSeconds = (next: number | null) => {
     setDurationSeconds(next);
     setDurationMenuOpen(false);
@@ -1335,6 +1349,7 @@ export function ShioriComposer({
     serviceTier?: ModelServiceTier | null;
     effort?: ModelEffort | null;
     hostOffline?: boolean;
+    coreOffline?: boolean;
   }) | null;
   const control = data.lastControl as (RunData["lastControl"] & {
     model?: string | null;
@@ -1346,9 +1361,9 @@ export function ShioriComposer({
   const consolidating = Boolean(effectiveHost?.consolidating ?? control?.consolidating);
   const thinking = Boolean(effectiveHost?.thinking ?? control?.thinking);
   const isAuto = runtimeMode === "auto";
-  const isSyntheticOffline = Boolean(effectiveHost?.hostOffline);
+  const isSyntheticOffline = Boolean(effectiveHost?.coreOffline ?? effectiveHost?.hostOffline);
   const hostOnline = Boolean(isLiveRun && ((!isSyntheticOffline && effectiveHost) || data.controlAllowed));
-  const canResumeFromReply = Boolean(hostOnline && !isAuto && !consolidating);
+  const canResumeFromReply = Boolean(!isAuto && !consolidating);
   const canSwitchModel = canSwitchShioriModel({
     isLiveRun,
     hostOnline,
@@ -1423,7 +1438,7 @@ export function ShioriComposer({
 
   const validModes: ComposerMode[] = isAuto
     ? ["event", "steer"]
-    : hostOnline && !consolidating
+    : !consolidating
       ? ["start", "event"]
       : ["event", "start"];
 
@@ -1433,7 +1448,7 @@ export function ShioriComposer({
       ? selectedTab
       : isAuto
         ? "event"
-        : hostOnline && !consolidating
+        : !consolidating
           ? "start"
           : "event";
 
@@ -1579,6 +1594,7 @@ export function ShioriComposer({
             });
         applyHostStatusObject(res.hostStatus);
         onPoolMutated?.(res.snapshot, res.hostStatus);
+        pendingContentionDraftRef.current = null;
         if (!overrideText) setDraft("");
         onSelectReplyTarget?.(null);
         setLastSent(res.hostOnline ? text : `${t("poolOfflineQueuedFeedback")} · ${text}`);
@@ -1596,6 +1612,7 @@ export function ShioriComposer({
               expectedEpoch: effectiveHost?.epoch ?? null,
               message: text,
               fallbackSeconds: durationSeconds,
+              mightSpawnCore: !hostOnline,
               onUpdated,
             });
         if (fellBackToAutoOn) setSelectedTab(null);
@@ -1611,21 +1628,30 @@ export function ShioriComposer({
               run: data.run,
               baseUpdatedAt: data.updatedAt,
               baseServerModel: serverModel,
+              mightSpawnCore: !hostOnline,
               command: {
                 action: "auto_on",
                 ...(text ? { message: text } : {}),
                 seconds: durationSeconds,
-                runId: data.run,
+                ...(data.run ? { runId: data.run } : {}),
                 expectedEpoch: effectiveHost?.epoch ?? null,
               },
               onUpdated,
             });
         applyHostStatusObject(status);
       }
+      pendingContentionDraftRef.current = null;
       if (!overrideText) setDraft("");
       setLastSent(text || t("resumedDefaultPrompt"));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (isDeviceBusyError(cause)) {
+        pendingContentionDraftRef.current = {
+          clearDraft: !overrideText,
+          feedback: text || t("resumedDefaultPrompt"),
+        };
+      } else {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
       setLocalSubmitting(false);
     }
@@ -1651,7 +1677,9 @@ export function ShioriComposer({
       applyHostStatusObject(status);
       setLastSent(feedbackLabel);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      if (!isDeviceBusyError(cause)) {
+        setError(cause instanceof Error ? cause.message : String(cause));
+      }
     } finally {
       setLocalSubmitting(false);
     }
@@ -2156,13 +2184,19 @@ export function ShioriComposer({
           {error}
         </p>
       )}
-      {!error && modelLockNotice && (
+      {!error && spawningCore && (
+        <p className="codex-composer-feedback" role="status" data-live-spawning-core="">
+          <RefreshCw className="inline size-3 animate-spin mr-1.5" aria-hidden="true" />
+          {t("spawningCoreStatus")}
+        </p>
+      )}
+      {!error && !spawningCore && modelLockNotice && (
         <p className="codex-composer-feedback codex-composer-feedback-warn" role="status">
           <Lock className="inline size-3 -translate-y-[1px] mr-1" aria-hidden="true" />
           {modelLockNotice}
         </p>
       )}
-      {!error && !modelLockNotice && lastSent && (
+      {!error && !spawningCore && !modelLockNotice && lastSent && (
         <p className="codex-composer-feedback" role="status">
           ✓ {t("sentFeedback")}: <code>{lastSent.length > 72 ? `${lastSent.slice(0, 72)}…` : lastSent}</code>
         </p>
@@ -2209,6 +2243,8 @@ export interface ShioriWorkbenchProps {
   selectedBlock?: string;
   onSelectBlock?: (block: ActivityBlock) => void;
   onUpdated(): void;
+  onRunSpawned?: (runId: string) => void;
+  onSwitchWorkspace?: (projectId: string) => void;
   onOpenPerf(): void;
   onOpenCaps(): void;
   onOpenReplay?(): void;
@@ -2248,6 +2284,8 @@ export function ShioriWorkbench({
   selectedBlock,
   onSelectBlock,
   onUpdated,
+  onRunSpawned,
+  onSwitchWorkspace,
   onOpenPerf: _onOpenPerf,
   onOpenCaps: _onOpenCaps,
   onOpenReplay: _onOpenReplay,
@@ -2270,6 +2308,7 @@ export function ShioriWorkbench({
     refresh,
     olderRunLoadFailedText: t("olderRunLoadFailed"),
     onUpdated,
+    onRunSpawned,
   });
   const {
     data,
@@ -2284,6 +2323,12 @@ export function ShioriWorkbench({
     activeEffort,
     submitting: sessionSubmitting,
     poolSubmitting,
+    spawningCore,
+    pendingContention,
+    preemptError,
+    preemptSuccessSeq,
+    confirmPreempt,
+    dismissContention,
     poolSnapshot,
     poolEventsById,
     resolveLivePoolEvent,
@@ -2414,7 +2459,7 @@ export function ShioriWorkbench({
   }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt]);
 
   const canMutatePool = Boolean(isLiveRun && project && workspace);
-  const canResumeAuto = hostOnline && !isAuto && !consolidating;
+  const canResumeAuto = !isAuto && !consolidating;
   const lastJumpedSeqRef = useRef<number | null>(null);
 
   const reportActiveSegment = useCallback(
@@ -2965,38 +3010,39 @@ export function ShioriWorkbench({
     },
   });
 
-  const navigateConsoleLink = useCallback(
-    (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
-      if (!isPlainNavigationClick(event) || typeof window === "undefined") return;
-      event.preventDefault();
-      const url = new URL(href, window.location.href);
-      if (url.origin !== window.location.origin) return;
-      const next = url.pathname + url.search;
+  const handleSwitchToHolder = useCallback(
+    (holderProjectId: string) => {
+      if (onSwitchWorkspace) {
+        onSwitchWorkspace(holderProjectId);
+        return;
+      }
+      if (typeof window === "undefined") return;
+      const next = `/?view=live&project=${encodeURIComponent(holderProjectId)}`;
       if (next === window.location.pathname + window.location.search) return;
       window.history.pushState(null, "", next);
       window.dispatchEvent(new PopStateEvent("popstate"));
     },
-    [],
+    [onSwitchWorkspace],
   );
 
-  const basewareHref = project
-    ? `/?view=baseware&project=${encodeURIComponent(project)}`
-    : null;
-  const studioHref = project
-    ? `/?view=perception&project=${encodeURIComponent(project)}`
-    : null;
-
+  const isSpawningCore = Boolean(spawningCore || workspaceService.pendingOperation === "up");
   const stateTitle = !isLiveRun
     ? t("stateSnapshot")
-    : !hostOnline
-      ? t("stateStandby")
-      : consolidating
-        ? t("stateConsolidating")
-        : isAuto
-          ? thinking
-            ? t("stateAutoThinking")
-            : t("stateAutoIdle")
-          : t("stateManual");
+    : isSpawningCore
+      ? t("spawningCoreStatus")
+      : !hostOnline
+        ? t("stateCoreOffline")
+        : consolidating
+          ? t("stateConsolidating")
+          : isAuto
+            ? thinking
+              ? t("stateAutoThinking")
+              : t("stateAutoIdle")
+            : t("stateManual");
+  const statePillTitle =
+    hostOnline && live?.launchedBy
+      ? `${stateTitle} · ${t(live.launchedBy === "cli" ? "coreOriginCli" : "coreOriginApp")}`
+      : stateTitle;
 
   return (
     <div className="codex-workbench" data-dock-open={dockOpen || undefined}>
@@ -3014,12 +3060,13 @@ export function ShioriWorkbench({
             <span
               className="codex-status-pill"
               data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}
-              title={stateTitle}
+              data-spawning-core={isSpawningCore ? "true" : undefined}
+              title={statePillTitle}
             >
               <PixelMark
                 size={14}
                 className="codex-status-mark"
-                state={!isLiveRun ? "idle" : !hostOnline ? "waiting" : consolidating || (isAuto && thinking) ? "reasoning" : "idle"}
+                state={!isLiveRun ? "idle" : isSpawningCore || consolidating || (isAuto && thinking) ? "reasoning" : !hostOnline ? "waiting" : "idle"}
                 filled={hostOnline && !isAuto}
               />
               <span className="codex-status-text">{stateTitle}</span>
@@ -3115,92 +3162,28 @@ export function ShioriWorkbench({
           </div>
         </header>
 
-        {/* First-Class Workspace Service Bar when Host is offline or a service operation reports an issue */}
-        {isLiveRun && project && (!hostOnline || workspaceService.error) && (
-          <div
-            className="codex-host-offline-bar"
-            data-live-host-offline={!hostOnline ? "true" : undefined}
-            data-has-error={workspaceService.error ? "true" : undefined}
-          >
-            {!hostOnline && (
-              <div className="codex-host-offline-row">
-                <div className="codex-host-offline-copy">
-                  <span
-                    className="codex-host-offline-dot"
-                    data-busy={workspaceService.pendingOperation === "up" ? "true" : undefined}
-                    aria-hidden="true"
-                  />
-                  <div className="codex-host-offline-text">
-                    <strong>{t("hostOfflineTitle")}</strong>
-                    <span>{t("hostOfflineDesc")}</span>
-                  </div>
+        {/* Workspace Service Error Alert (Codex-style clean header when Core is idle/offline without errors) */}
+        {isLiveRun && project && workspaceService.error && (
+          <div className="codex-host-offline-bar" data-has-error="true">
+            <div className="codex-host-offline-error" role="alert" data-live-service-error="">
+              <div className="codex-host-offline-error-head">
+                <div className="codex-host-offline-error-title">
+                  <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+                  <strong>{t("hostStartFailedTitle")}</strong>
+                  <span className="codex-host-offline-error-hint">{t("hostStartFailedHint")}</span>
                 </div>
-                <div className="codex-host-offline-actions">
-                  <button
-                    type="button"
-                    className="codex-host-start-btn"
-                    disabled={workspaceService.busy}
-                    onClick={() => void workspaceService.startWorkspace()}
-                    data-live-start-workspace=""
-                  >
-                    {workspaceService.pendingOperation === "up" ? (
-                      <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
-                    ) : (
-                      <Play className="size-3.5 fill-current shrink-0" aria-hidden="true" />
-                    )}
-                    <span>
-                      {t(
-                        workspaceService.pendingOperation === "up"
-                          ? "startingWorkspaceBtn"
-                          : "startWorkspaceBtn",
-                      )}
-                    </span>
-                  </button>
-                  {basewareHref && (
-                    <a
-                      href={basewareHref}
-                      className="codex-host-link-btn"
-                      onClick={event => navigateConsoleLink(event, basewareHref)}
-                    >
-                      <HardDrive className="size-3.5 shrink-0" aria-hidden="true" />
-                      <span>{t("openBasewareLink")}</span>
-                    </a>
-                  )}
-                  {studioHref && (
-                    <a
-                      href={studioHref}
-                      className="codex-host-link-btn"
-                      onClick={event => navigateConsoleLink(event, studioHref)}
-                    >
-                      <SlidersHorizontal className="size-3.5 shrink-0" aria-hidden="true" />
-                      <span>{t("openStudioLink")}</span>
-                    </a>
-                  )}
-                </div>
+                <button
+                  type="button"
+                  className="codex-host-error-dismiss"
+                  aria-label={t("dismissServiceError")}
+                  title={t("dismissServiceError")}
+                  onClick={workspaceService.clearError}
+                >
+                  <X className="size-3.5" aria-hidden="true" />
+                </button>
               </div>
-            )}
-
-            {workspaceService.error && (
-              <div className="codex-host-offline-error" role="alert" data-live-service-error="">
-                <div className="codex-host-offline-error-head">
-                  <div className="codex-host-offline-error-title">
-                    <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
-                    <strong>{t("hostStartFailedTitle")}</strong>
-                    <span className="codex-host-offline-error-hint">{t("hostStartFailedHint")}</span>
-                  </div>
-                  <button
-                    type="button"
-                    className="codex-host-error-dismiss"
-                    aria-label={t("dismissServiceError")}
-                    title={t("dismissServiceError")}
-                    onClick={workspaceService.clearError}
-                  >
-                    <X className="size-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-                <pre className="codex-host-offline-error-pre">{workspaceService.error}</pre>
-              </div>
-            )}
+              <pre className="codex-host-offline-error-pre">{workspaceService.error}</pre>
+            </div>
           </div>
         )}
 
@@ -3269,21 +3252,36 @@ export function ShioriWorkbench({
                     <button
                       type="button"
                       className="codex-starter-chip"
-                      onClick={() => setWorkflowCommand({ mode: "start", prompt: t("presetExploreStartPrompt") })}
+                      onClick={() =>
+                        setWorkflowCommand({
+                          mode: !isAuto && !consolidating ? "start" : "steer",
+                          prompt: t("presetExploreStartPrompt"),
+                        })
+                      }
                     >
                       {t("presetExploreStart")}
                     </button>
                     <button
                       type="button"
                       className="codex-starter-chip"
-                      onClick={() => setWorkflowCommand({ mode: "steer", prompt: t("presetEvalPrompt") })}
+                      onClick={() =>
+                        setWorkflowCommand({
+                          mode: !isAuto && !consolidating ? "start" : "steer",
+                          prompt: t("presetEvalPrompt"),
+                        })
+                      }
                     >
                       {t("presetEval")}
                     </button>
                     <button
                       type="button"
                       className="codex-starter-chip"
-                      onClick={() => setWorkflowCommand({ mode: "steer", prompt: t("presetAdaptPrompt") })}
+                      onClick={() =>
+                        setWorkflowCommand({
+                          mode: !isAuto && !consolidating ? "start" : "steer",
+                          prompt: t("presetAdaptPrompt"),
+                        })
+                      }
                     >
                       {t("presetAdapt")}
                     </button>
@@ -3429,7 +3427,7 @@ export function ShioriWorkbench({
                           <button
                             type="button"
                             className="codex-pool-btn"
-                            data-variant={hostOnline && !isAuto && !consolidating ? undefined : "primary"}
+                            data-variant={canResumeAuto ? undefined : "primary"}
                             onClick={() => {
                               setReplyTarget(liveEvent);
                               setReplyAutoResumeDefault(false);
@@ -3438,7 +3436,7 @@ export function ShioriWorkbench({
                             <CornerUpLeft className="size-3" aria-hidden="true" />
                             <span>{t("poolReplyBtn")}</span>
                           </button>
-                          {hostOnline && !isAuto && !consolidating && (
+                          {canResumeAuto && (
                             <button
                               type="button"
                               className="codex-pool-btn"
@@ -3567,6 +3565,8 @@ export function ShioriWorkbench({
           activeServiceTierOverride={activeServiceTier}
           activeEffortOverride={activeEffort}
           submittingOverride={sessionSubmitting}
+          spawningCore={spawningCore}
+          preemptSuccessSeq={preemptSuccessSeq}
           liveTimerSpec={liveTimerSpec}
           onApplyLiveTimer={applyLiveStopTimer}
           onExtendLiveTimer={extendLiveStopTimer}
@@ -3775,7 +3775,7 @@ export function ShioriWorkbench({
                     </div>
                     <div className="codex-provenance-row">
                       <dt>{t("provRun")}</dt>
-                      <dd className="font-mono">{data.run}</dd>
+                      <dd className="font-mono">{data.run || "—"}</dd>
                     </div>
                     <div className="codex-provenance-row">
                       <dt>{t("provEpoch")}</dt>
@@ -3858,6 +3858,14 @@ export function ShioriWorkbench({
           </div>
         </aside>
       )}
+      <DeviceContentionDialog
+        conflict={pendingContention}
+        busy={spawningCore || sessionSubmitting}
+        error={preemptError}
+        onConfirmPreempt={confirmPreempt}
+        onDismiss={dismissContention}
+        onSwitchToHolder={handleSwitchToHolder}
+      />
     </div>
   );
 }
