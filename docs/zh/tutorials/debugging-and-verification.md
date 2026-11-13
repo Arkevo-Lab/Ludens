@@ -18,9 +18,9 @@
 | 组件目录 | 包级命令 | 专用命令与入口 |
 | --- | --- | --- |
 | `baseware` | `typecheck`、`test` | `baseware`：运行设备服务 CLI。 |
-| `core` | `typecheck`：检查 TypeScript 与 Python；`test`：运行两种语言的默认测试集。 | `typescript:typecheck`、`python:typecheck`：单独检查对应语言；`typescript:test`、`python:test`：单独运行对应语言测试；`omp:test:transport`：运行 OMP WebSocket 传输恢复测试；`perf`：运行子系统性能基线（`control-handoff`、`perception-lifecycle`、`video-storage`）；`ludens`：运行 Host CLI。 |
-| `app` | `dev`、`build`、`start`、`test`、`typecheck` | `build:check`：校验现有生产构建与当前源码指纹是否一致；`perf`：在合成运行上执行 `index-memory` 基线（冷构建与查询的内存/延迟预算）。 |
-| `app`（desktop） | `desktop:build`：使用 esbuild 生成 Electron 产物；`desktop:start`、`desktop:test`、`desktop:typecheck` | `pet:preview`：桌宠交互预览；`pet:smoke`：桌宠交互冒烟测试。两者都会先执行 `desktop:build`。 |
+| `core` | `typecheck`：检查 TypeScript 与 Python；`test`：运行两种语言的默认测试集。 | `typescript:typecheck`、`python:typecheck`：单独检查对应语言；`typescript:test`、`python:test`：单独运行对应语言测试；`omp:test:transport`：运行 OMP WebSocket 传输恢复测试；`perf`：运行子系统性能基线（`control-handoff`、`perception-lifecycle`、`video-storage`）；`ludens`：运行 Host 与统一 `app-server` CLI（`ludens app-server` / `ludens serve`）。 |
+| `app` | `dev`：Next HMR 代理 + 自动拉起后台 `ludens app-server`；`build`：生成静态导出产物 `app/out`；`start`：启动 `ludens app-server`；`test`、`typecheck` | `build:check`：校验现有 `app/out` 静态构建产物与当前源码指纹是否一致；`perf`：在合成运行上执行 `index-memory` 基线（冷构建与查询的内存/延迟预算）。 |
+| `app`（desktop） | `desktop:build`：使用 esbuild 生成 Electron 产物；`desktop:start`、`desktop:test`、`desktop:typecheck` | `desktop:dist`：通过 `electron-builder` 打包原生桌面安装程序（macOS `.dmg` / Windows NSIS `.exe`）；`pet:preview`：桌宠交互预览；`pet:smoke`：桌宠交互冒烟测试。`pet:preview` 与 `pet:smoke` 都会先执行 `desktop:build`。 |
 
 ## 独立组件与控制台
 
@@ -49,22 +49,22 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 仅开发或查看前端界面时无需启动模型与模拟器，空日志目录也可直接运行：
 
 ```sh
-# Dev mode (frontend HMR; restart the process after editing lib/ or worker/)
+# Dev mode (自动拉起后台 ludens app-server + Next dev 代理 /api/* 前端 HMR)
 (cd app && npm run dev)
 
-# Prod mode (the mode ludens up uses for managed startup)
+# Prod mode (由 ludens app-server 直接承载静态导出 app/out，生产态零 Next.js 服务端进程)
 (cd app && npm run build && npm run start)
 ```
 
-`ludens up` 需要新启动 Dashboard 时，会在拉起设备前调用 `npm run build:check` 校验构建产物与当前源码指纹；若未构建或源码已更新，会提示先执行 `npm run build`。如果已有 Dashboard API 可用，`ludens up` 会直接复用，不检查或热更新该进程的构建。更新生产控制台时需重新构建并重启 Dashboard；仅停止或重启 Dashboard 不会停止正在运行的 Host、Baseware 与模拟器。
+`ludens up` 需要新启动共享 `ludens app-server` 时，会在拉起设备前调用 `npm run build:check` 校验 `app/out` 静态构建产物与当前源码指纹；若未构建或源码已更新，会提示先执行 `npm run build`。如果 `:3015` 上已有可用的 `app-server` API，`ludens up` 会直接复用，不检查或热更新该进程的静态产物。更新生产控制台时需重新构建 `app/out` 并重启 `app-server`；仅停止或重启独立 `app-server` 不会停止已由 CLI 脱离终端运行的 Host、Baseware 与模拟器。
 
 打开浏览器访问 `http://127.0.0.1:3015` 即可使用控制台。侧栏按作用域分段：**工作区**段展示当前工作区的运行信息，**全局**段放不依赖具体运行的页面，**开发者**段放原理展示工具；运行/周期选择器与实时刷新开关只出现在需要运行上下文的页面头部。
 
-- **运行与回放（`?view=live` / `?view=replay`）**：实时查看模型推理流、工具调用、设备输入与感知画面，或在历史时间轴上同步回放采样帧与事件。归档 worker、冷索引构建子进程与内存预算详见 [消费与指标解释](../reference/logging.md#消费与指标解释)。
+- **运行与回放（`?view=live` / `?view=replay`）**：实时查看模型推理流、工具调用、设备输入与感知画面，在页内一键启停或重载工作区后台服务（`useWorkspaceService`），或在历史时间轴上同步回放采样帧与事件。归档 worker、冷索引构建子进程与内存预算详见 [消费与指标解释](../reference/logging.md#消费与指标解释)。
 - **运行性能（`?view=perf`）**：查看当前所选运行的单次请求传输等待、缓存命中率与显式调用链剖析（`RunAnalysis`）。
 - **能力目录（`?view=caps`）**：静态展示当前选中工作区的设备目录快照（`baseware.json`）与 Python `@capability` 声明（含 `@eval_capability` 状态与指标），并显示宿主连接状态。
-- **感知配置（`?view=perception`）**：配置所选工作区的热窗口秒数、视频分段时长与停采空闲收尾秒数（写入 `.ludens/settings.json`，执行 `ludens perception reload` 后生效）。
-- **工作区管理（`?view=workspaces`）**：创建新工作区（名称与可选目录）、登记已有目录、只移除索引，以及设置默认父目录；读取同一 `LUDENS_HOME` 下的配置与 `registry/<id>.json`。
+- **感知配置（`?view=perception`）**：配置所选工作区的模型与预算、后台服务（`up` / `reload` / `down`）、热窗口秒数、视频分段时长与停采空闲收尾秒数（写入 `.ludens/settings.json`，执行 `ludens perception reload` 后生效）。
+- **工作区管理（`?view=workspaces`）**：一键启动工作区、创建新工作区（名称与可选目录）、登记已有目录、只移除索引，以及设置默认父目录；读取同一 `LUDENS_HOME` 下的配置与 `registry/<id>.json`。
 - **站内文档（`?view=docs`）**：直接在控制台内浏览 `tutorials/`、`reference/` 与 `insights/`，支持跨篇与章节锚点跳转。
 - **全局设置（`?view=settings`）**：集中 Ludens Pet 陪伴偏好（跟随、气泡、声音）等不依赖具体运行的设置；工作区自身的设置在各自页面。
 - **开发者面板（`?view=dev`）**：原理展示工具容器，目前有 Loop 注入实验台（`?view=dev&panel=loop`），模拟一次接管的上下文构成并对照已删除的批次末注入通道，详见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
@@ -73,19 +73,19 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 
 工作区页面把**新建工作区**和**添加已有工作区**放在列表旁。桌面控制只需填写文件夹名称；社区驱动需显式验证驱动包，这可能下载包并安装依赖，其 manifest 决定驱动 ID 及可填写的可选字段。**位置与高级选项**可指定完整目录，预览位置和文件夹名称会反映这个实际目标。
 
-创建只初始化文件，不会启动 AI。完成提示提供**打开工作区**、可复制的 `ludens --workspace '…' up` 命令及启动指南。新工作区在第一次运行前也会出现在运行和回放页的选择器中，并显示下一步提示，不会一直停留在加载状态。
+创建只初始化文件，不会自动启动 AI。完成提示提供**启动并打开**、**打开工作区**、可复制的 `ludens --workspace '…' up` 命令及启动指南；工作区列表卡片同样提供一键**启动工作区**按钮。新工作区在第一次运行前也会出现在运行和回放页的选择器中，并在运行页优先呈现带内联诊断反馈的**启动工作区**主按钮，不会停留在加载态或强制用户先打开终端。
 
 **目录可访问**只表示能读取工作区身份，不代表服务正在运行。**从列表移除**会保留文件和服务，先清除仅指向该工作区的桌宠关注目标，再移除登记。若目标清理失败，登记仍保留。**撤销**使用实际移除的登记信息重新添加目录，不会恢复桌宠关注；不可访问的目录需先恢复连接，才能登记成功。目录移动或断开连接时，可重新连接磁盘或使用**添加新位置**。修改**默认存放位置**只影响以后新建的工作区。
 
 ### 3. Ludens Pet 桌面伴侣
 
-这是可选组件，网页控制台不依赖 Electron。完成 [可选桌宠安装](quickstart.md#可选桌宠) 并启动 Dashboard 后，在仓库根目录运行 `app/bin/ludens-app --show-window`（Windows 下运行 `app\bin\ludens-app.cmd --show-window`）可单独启动桌面端；主窗口采用 `#090a0d` 无边框 38px 一体化顶栏（macOS `hiddenInset` / Windows `titleBarOverlay` 且移除传统菜单栏），在 `window-state.json` 中持久化窗口位置、最大化与全屏状态，并支持 `Cmd/Ctrl+B`（折叠侧栏）与 `Cmd/Ctrl+K`（快速跳转）。也可在普通浏览器中通过 `?desktopPreview=darwin` 或 `?desktopPreview=win32` 预览桌面端顶栏外观。其主窗口加载同一份 Dashboard 控制台，桌宠角色（卢登斯）与气泡消费同一套增量活动日志。通过 `ludens up` 管理桌宠时，在新工作区的 `ludens init` 命令中追加 `--pet`，或在已有 `ludens.json` 设置 `pet: true`。`ludens up --pet` / `--no-pet` 可临时覆盖配置，两者互斥且不写回文件；`--no-pet` 不会关闭已运行的共享桌宠。
+网页控制台可在普通浏览器中直接运行，不依赖 Electron；而 **Ludens 桌面端**（`ludens-app`）则是将主控制台窗口、系统托盘与 **Ludens Pet** 桌宠伴侣融为一体的自包含一等宿主。完成 [可选桌宠安装](quickstart.md#可选桌宠)（执行 `(cd app && npm run build && npm run desktop:build)`，或通过 `npm run desktop:dist` 打包安装程序）后，直接在仓库根目录运行 `app/bin/ludens-app --show-window`（Windows 下运行 `app\bin\ludens-app.cmd --show-window`）即可独立启动——**无需预先手动启动 Dashboard 服务**。在未传入 `--dashboard` 时，`AppServerHost` 会自动拉起并监管 `ludens app-server --port 0 --parent-watchdog --static-dir <app/out>`，支持直接在桌面端界面内新建并一键**启动 / 重载 / 停止**工作区。主窗口采用 `#090a0d` 无边框 38px 一体化顶栏（macOS `hiddenInset` / Windows `titleBarOverlay` 且移除传统菜单栏），在 `window-state.json` 中持久化窗口位置、最大化与全屏状态，并支持 `Cmd/Ctrl+B`（折叠侧栏）与 `Cmd/Ctrl+K`（快速跳转）。也可在普通浏览器中通过 `?desktopPreview=darwin` 或 `?desktopPreview=win32` 预览桌面端顶栏外观。主窗口直接加载由受管 `app-server` 承载的静态控制台，桌宠角色（卢登斯）与气泡消费同一套增量活动日志。若通过无头 CLI `ludens up` 挂载桌宠，可在新工作区的 `ludens init` 命令中追加 `--pet`，或在已有 `ludens.json` 设置 `pet: true`（`ludens up --pet` / `--no-pet` 仅临时覆盖当次启动且不写回文件，`--no-pet` 不会关闭已运行的桌面端）。
 
 - **工作区跟随**：在工作区页面使用**设为关注目标**，或在设置中选择**已保存的工作区**。选择保存在 `$LUDENS_HOME/pet/target.json`；**桌面端状态**独立显示 Ludens Pet 是否已连接并应用选择。浏览其他工作区或历史记录不会更改此选择。桌宠未连接或目录不可用时，仍会显示已保存的选择。保存响应无法确认时，请先重新读取已保存目标，再进行其他更改；该恢复操作不会重复保存。 心跳保存在 `$LUDENS_HOME/pet/consumer.json`。桌宠使用 `.ludens/workspace.json` 中的稳定 ID，工作区移动并重新登记后仍保留同一身份。
 - **语言与游戏**：设置中的语言同时应用于控制台、原生菜单、桌宠台词、日志控件和游戏。桌宠启动时使用已保存语言或操作系统语言，随后跟随 Dashboard 恢复的偏好。右键桌宠选择**玩一会儿 · 接星星**开始 20 秒一局，接到 10 颗星星即获胜，按 Esc 可退出。主动启动游戏时会聚焦桌宠，从托盘启动也一样，因此可立即按 Esc 退出；普通活动通知不会抢占焦点。实时日志到来时会立即结束本局并接管气泡。最佳成绩仅保留在当前桌宠进程中。
 - **简略通知**：脱敏后的通知保留通用状态标题；语言渲染不会根据保留的连接 ID 推断运行已结束或正在等待 AI 接管。
-- **启动参数**：`--workspace PATH`（或 `LUDENS_WORKSPACE`）指定首次默认工作区，`--dashboard URL` 指定控制台地址，`--profile PATH` 指定独立偏好目录（默认 `$LUDENS_HOME/pet/profile/`），`LUDENS_DISABLE_COMPANION=1` 可禁用桌宠挂件。未设置 `LUDENS_HOME` 时使用 `~/.ludens`，所有组件需使用同一 home。关闭主窗口仅隐藏到托盘，双击桌宠或通过系统托盘菜单可重新唤出，选择 Quit 才彻底退出进程。
-- **构建同步**：当修改了 Dashboard 供桌宠消费的共享日志客户端代码时，需重新执行 `(cd app && npm run desktop:build)` 并重启 Electron 主进程。
+- **启动参数与退出／关闭生命周期**：`--workspace PATH`（或 `LUDENS_WORKSPACE`）指定首次默认工作区，`--dashboard URL` 连接外部 `app-server` 而不拉起内置实例，`--profile PATH` 指定独立偏好目录（默认 `$LUDENS_HOME/pet/profile/`），`LUDENS_DISABLE_COMPANION=1` 可禁用桌宠挂件。未设置 `LUDENS_HOME` 时使用 `~/.ludens`，所有组件需使用同一 home。点击主窗口关闭按钮（`×`）仅隐藏到系统托盘并保持 **Ludens Pet** 与运行中工作区在线（双击桌宠或通过托盘菜单可重新唤出主窗口）；显式选择 **Quit**（`⌘Q` / 托盘 **Quit**）才会彻底退出进程，并干净关闭受监管的 `ludens app-server` 及全部受管游戏 AI 子进程（`--parent-watchdog` 同时通过父进程 `stdin` EOF 在宿主异常终止时自动回收子进程）。
+- **构建同步**：当修改了控制台前端或桌面端代码时，重新执行 `(cd app && npm run build && npm run desktop:build)`（打包分发安装程序则执行 `npm run desktop:dist`）并重启 Electron 应用。
 
 ## 验证
 

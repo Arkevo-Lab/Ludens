@@ -7,29 +7,31 @@ Ludens（RSA，Recursive Self-Adaptation）将设备驱动、Agent 执行运行�
 | 组件 | 进程形态与核心职责 |
 | --- | --- |
 | `baseware/` | **独立设备服务**：加载内置或外部 Driver，提供统一 Controller 能力目录、控制权租约（`epoch`）仲裁、输入取消与设备事实日志，对外暴露 CLI、TS/Python API 与 MCP 接口。 |
-| `core/` | **自适应 Harness**（`@ludens/core`）：管理工作区配置与生命周期、能力发现与路由、常驻感知与动作（`perception.py`）Python 子进程、工作区内生的能力评估（`ludens eval`）以及运行日志归档。 |
+| `core/` | **自适应 Harness 与统一 App-Server**（`@ludens/core`）：管理工作区配置与生命周期、纯 TypeScript 跨平台 `WorkspaceSupervisor`、能力发现与路由、常驻感知与动作（`perception.py`）Python 子进程、工作区内生的能力评估（`ludens eval`）、运行日志归档，以及本地 HTTP `/api/*` 与静态前端承载服务（`ludens app-server` / `ludens serve`）。 |
 | **Shiori** | **唯一执行内核（职责名）**：由 Ludens Host Runtime 实现，统一管控控制周期、时间/请求预算、信号取消与退出清理。Agent 模式挂载 **OMP 18.18.8**；普通评测程序、Verifier 与 Metric 共用同一生命周期而不启动模型。 |
-| `app/` | **本地控制台服务（`@ludens/app`，Web）**：通过独立 Node Worker 构建与查询日志索引，提供实时活动流、时空轴视频回放、运行统计、文档浏览、能力目录与人工交还入口。 |
-| `app/desktop/` | **可选桌面伴侣（Ludens Pet）**：Electron 桌面壳，主窗口复用同一 Dashboard 视图，原生透明桌宠窗口与音频引擎增量消费同一套活动日志。 |
+| `app/` | **静态控制台构建产物（`@ludens/app`，`app/out`）**：纯静态 React/Next 导出包，生产态直接由 `ludens app-server` 承载（零 Next.js 服务端进程；开发态 `npm run dev` 将 `/api/*` 代理至后台 `ludens app-server` 以获得前端 HMR），提供实时活动流、一键工作区启停控件（`useWorkspaceService`）、时空轴视频回放、运行统计、文档浏览、能力目录与人工交还入口。 |
+| `app/desktop/` | **一等 Ludens 桌面端与桌宠伴侣（`ludens-app`）**：自包含 Electron 宿主（`AppServerHost`），启动时自动拉起并监管 `ludens app-server --port 0 --parent-watchdog --static-dir <app/out>`；主窗口承载完整控制台，同时驱动原生透明 **Ludens Pet** 桌宠窗口与系统托盘；点击窗口关闭按钮（`×`）仅隐藏至托盘与桌宠，显式退出（`⌘Q` / 托盘 **Quit** / 父进程 `stdin` EOF 监听）时干净终止 `app-server` 及其监管的全部游戏 AI 子进程。 |
 
 ```mermaid
 flowchart LR
-    O[Operator] --> H[Ludens Host / Shiori: OMP]
+    O[Operator] --> D[Ludens Desktop App / Static Console]
+    D --> Srv[ludens app-server: /api/* + WorkspaceSupervisor]
+    Srv --> H[Ludens Host / Shiori: OMP]
     H --> P[Workspace resident Perception-and-Action State Machine]
     H --> S[OMP native bash / background jobs]
     S --> C[Ludens unified Controller entry]
     P --> C
     C --> B[Baseware service]
-    B --> D[Driver]
-    D --> E[Emulator / desktop / device]
+    B --> Dvr[Driver]
+    Dvr --> E[Emulator / desktop / device]
     H --> L[workspace/logs & .ludens]
     B --> L
-    L --> R[Dashboard archive reader Worker]
-    R --> V[Dashboard page / Electron main window]
-    R --> A[Ludens Pet desktop-pet incremental bubbles]
+    L --> R[Core query Worker & cold-index Builder]
+    R --> Srv
+    Srv --> A[Ludens Pet desktop-pet incremental bubbles]
 ```
 
-各组件拥有独立的 `package.json` / `pyproject.toml` 与锁文件。Ludens Harness 仅依赖 Baseware 的客户端与类型契约，不直接导入任何具体 Driver 实现；`ludens up` 按工作区配置与驱动 Manifest 编排本机进程。
+各组件拥有独立的 `package.json` / `pyproject.toml` 与锁文件。Ludens Harness 仅依赖 Baseware 的客户端与类型契约，不直接导入任何具体 Driver 实现；`ludens app-server`（响应前端 `workspaceServiceControl`）与无头 `ludens up` 共用 `core/src/daemon/` 中的纯 TypeScript `WorkspaceSupervisor` 编排本机进程，不再依赖 Python 后台启动脚本。
 
 ## 源码目录与分层
 
@@ -42,9 +44,9 @@ flowchart LR
 | `core/src/core/storage/` | **工作区与事实存储**：`.ludens/` 身份与状态、`logs/<run-id>/` 事件流与归档。 |
 | `core/src/core/subsystems/` | **工作区常驻与设备子系统**：Python 感知/动作 Worker、`@capability` 发现、Baseware 设备会话。 |
 | `core/src/core/agent-omp/` | **OMP AgentRunner 实现**：OMP 会话组装、Ludens 扩展与模型 Trace 记录，通过窄接口 `ExtensionHost` 暴露宿主能力。 |
-| `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、冷构建、活动/回放/遥测投影，供 Dashboard 与 Ludens Pet 消费。 |
-| `core/src/daemon/`、`core/src/perf/`、`core/src/cli/` | **外壳层**：Unix Socket RPC 守护进程与服务编排、子系统性能基线（`perf`）、纯 CLI 前端。 |
-| `app/shell/` + `app/features/` + `app/perf/` | **控制台视图与应用性能基线**（循环工作台位于 `shell/`，`index-memory` 基线位于 `perf/`）：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
+| `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、原生 TypeScript Worker 与冷构建子进程、活动/回放/遥测投影，供 `app-server` 与 Ludens Pet 消费。 |
+| `core/src/server/`、`core/src/daemon/`、`core/src/perf/`、`core/src/cli/` | **外壳层**：统一 `ludens app-server`（`/api/*` 路由、静态 `app/out` 承载、`--parent-watchdog`）、Unix Socket RPC 守护进程与纯 TS `WorkspaceSupervisor`、子系统性能基线（`perf`）、无头 CLI 前端。 |
+| `app/shell/` + `app/features/` + `app/lib/` + `app/perf/` | **静态控制台视图、交互 Hook 与性能基线**（循环工作台位于 `shell/`，统一生命周期封装 `useWorkspaceService` 位于 `lib/`，`index-memory` 基线位于 `perf/`）：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
 
 
 ## 设备与统一能力
@@ -119,13 +121,13 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 ## 可核查的运行事实
 
 - **多源事实解耦**：Baseware 独立持久化设备控制与执行事实（`logs/baseware/`），Ludens 记录模型调用、工具执行、能力调用与感知交付（`logs/<run-id>/`），Shiori 挂载局部 OpenTelemetry provider 记录 `agentLoop` 遥测。
-- **Dashboard 隔离读取**：Dashboard 将归档解析与索引维护放在独立的 Node Worker 线程中，冷历史目录由限流为全局单实例的临时 Builder 子进程构建并原子发布至 `.dashboard-index/`；Next.js 路由与 Ludens Pet 仅通过有界 RPC 读取投影结果。详见 [日志与调用链](logging.md#消费与指标解释)。
+- **Dashboard 隔离读取**：`ludens app-server` 将归档解析与索引维护放在独立的 Worker 线程（`core/src/core/query/`）中，冷历史目录由限流为全局单实例的临时 Builder 子进程构建并原子发布至 `.dashboard-index/`；`core/src/server/` 中的 `/api/*` 路由与 Ludens Pet 仅通过有界 RPC 读取投影结果，生产态不运行任何 Next.js 服务端进程。详见 [日志与调用链](logging.md#消费与指标解释)。
 
 ## TypeScript 与 Python
 
 Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python/ludens_tools/`）共同组成：
 
-- **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、跨进程 RPC 与 CLI 编排。
+- **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、统一 `ludens app-server`（`/api/*` + 静态前端承载）、纯 TS 跨平台 `WorkspaceSupervisor`（含 `--parent-watchdog` 父进程生命周期回收）、跨进程 RPC 与 CLI 编排。
 - **Python 侧**：负责 `@capability` 静态发现与动态执行、统一常驻 `Perception` 状态机、PyAV 视频段编码与冷帧按需解码。常驻感知通过媒体流引用（`_StreamMediaRef`）直接从磁盘摄取 Baseware 缓冲的原始字节，省去跨进程内联 Base64 往返，自动将设备观测 `sources` 时空溯源绑定至时间线记录，并通过 `ifNoneMatchSequence` 对未发生帧变化的最新帧 `Client().observe()` 轮询执行零编码短路。视频编解码直接在常驻感知进程内完成，不额外引入独立的流媒体服务。
 
 ## 能力持久化边界

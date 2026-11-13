@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
+import { open, readdir, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { createConnection } from "node:net";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repoRoot } from "./repo";
@@ -394,12 +394,28 @@ async function runCommandShort(
 }
 
 async function readLogTail(logPath: string, maxLines = 24): Promise<string[]> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    const text = await readFile(logPath, "utf8");
+    handle = await open(logPath, "r");
+    const info = await handle.stat();
+    if (!info.isFile() || info.size <= 0) return [];
+    const maxBytes = 65_536;
+    const startOffset = Math.max(0, info.size - maxBytes);
+    const byteLength = info.size - startOffset;
+    const buffer = Buffer.allocUnsafe(byteLength);
+    const { bytesRead } = await handle.read(buffer, 0, byteLength, startOffset);
+    if (bytesRead <= 0) return [];
+    let text = buffer.subarray(0, bytesRead).toString("utf8");
+    if (startOffset > 0) {
+      const firstNewline = text.indexOf("\n");
+      if (firstNewline >= 0) text = text.slice(firstNewline + 1);
+    }
     const lines = text.split(/\r?\n/).filter(line => line.trim().length > 0);
     return lines.slice(-maxLines);
   } catch {
     return [];
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }
 
@@ -744,17 +760,72 @@ export interface WorkspaceServiceControlResult {
   studio: WorkspaceStudioSnapshot;
 }
 
-/** Start, stop, or reload a workspace's background services through the ludens CLI. */
+export interface WorkspaceSupervisorActionOutcome {
+  status: unknown;
+  notes: string[];
+}
+
+export interface WorkspaceSupervisorLike {
+  up(workspacePath: string, options?: { workspaceId?: string }): Promise<WorkspaceSupervisorActionOutcome>;
+  down(workspacePath: string, options?: { keepEmulator?: boolean }): Promise<WorkspaceSupervisorActionOutcome>;
+  reload(workspacePath: string, options?: { workspaceId?: string }): Promise<WorkspaceSupervisorActionOutcome>;
+}
+
+const activeSupervisorKey = Symbol.for("ludens.appServer.workspaceSupervisor");
+
+export function setActiveWorkspaceSupervisor(supervisor: WorkspaceSupervisorLike | null): void {
+  if (supervisor) {
+    (globalThis as Record<symbol, unknown>)[activeSupervisorKey] = supervisor;
+  } else {
+    delete (globalThis as Record<symbol, unknown>)[activeSupervisorKey];
+  }
+}
+
+export function getActiveWorkspaceSupervisor(): WorkspaceSupervisorLike | null {
+  return ((globalThis as Record<symbol, unknown>)[activeSupervisorKey] as WorkspaceSupervisorLike | undefined) ?? null;
+}
+
+/** Start, stop, or reload a workspace's background services through WorkspaceSupervisor or the ludens CLI. */
 export async function controlWorkspaceService(
   id: unknown,
   input: unknown,
   home = globalHome,
+  supervisor: WorkspaceSupervisorLike | null = getActiveWorkspaceSupervisor(),
 ): Promise<WorkspaceServiceControlResult> {
   if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("后台服务操作必须是对象");
   const { operation } = input as Record<string, unknown>;
   if (operation !== "up" && operation !== "down" && operation !== "reload") throw new Error("不支持的后台服务操作");
   const entry = await registeredWorkspace(id, home);
+
+  if (supervisor) {
+    let code = 0;
+    let stdout = "";
+    let stderr = "";
+    try {
+      const result =
+        operation === "up"
+          ? await supervisor.up(entry.workspace, { workspaceId: entry.id })
+          : operation === "down"
+            ? await supervisor.down(entry.workspace, { keepEmulator: false })
+            : await supervisor.reload(entry.workspace, { workspaceId: entry.id });
+      stdout = JSON.stringify(result.status, null, 2);
+      if (result.notes.length) stderr = result.notes.join("\n");
+    } catch (error) {
+      code = 1;
+      stderr = error instanceof Error ? error.message : String(error);
+    }
+    clearCatalogCache();
+    return {
+      ok: code === 0,
+      operation,
+      exitCode: code,
+      stdout: stdout.trim(),
+      stderr: stderr.trim(),
+      studio: await workspaceStudio(id, home),
+    };
+  }
+
   const ludensBin = join(repoRoot, "core/bin/ludens");
   const envHome = ["env", `LUDENS_HOME=${resolve(home)}`];
   let code: number;

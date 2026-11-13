@@ -3,6 +3,8 @@ node_modules/
 dist/
 dist-ssr/
 .next/
+/app/out/
+/app/release/
 *.tsbuildinfo
 coverage/
 test-results/

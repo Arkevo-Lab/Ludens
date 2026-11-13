@@ -1,6 +1,6 @@
 # Install & workspace lifecycle
 
-This guide covers installing the Ludens components, configuring the Python runtime, and managing the day-to-day workspace lifecycle with `ludens init / up / auto / down`. For emulator and desktop driver setup, see [Devices & driver setup](devices.md); for single-component foreground debugging, package script conventions, and tests, see [Console debugging & verification](debugging-and-verification.md).
+This guide covers installing the Ludens components, configuring the Python runtime, launching the **Ludens Desktop App** or unified `ludens app-server`, and managing the day-to-day workspace lifecycle from the UI or with `ludens init / up / auto / down`. For emulator and desktop driver setup, see [Devices & driver setup](devices.md); for single-component foreground debugging, package script conventions, and tests, see [Console debugging & verification](debugging-and-verification.md).
 
 Unless a `cd` into the target workspace is shown explicitly, run all commands from the repository root. The global application directory defaults to `~/.ludens`; set `LUDENS_HOME` to an absolute path to override it. Workspaces can live anywhere and keep their configuration, sessions, recordings, and history together. The source repository holds no runtime state; keep ROMs, firmware, keys, and game saves outside it too.
 
@@ -14,17 +14,17 @@ Unless a `cd` into the target workspace is shown explicitly, run all commands fr
 
 ### 2. Install core components
 
-Install the JavaScript workspaces once from the repository root using the root `bun.lock`, then build the web Dashboard. Bun automatically applies the OMP dependency patches under [core/patches/](../../../core/patches/) per the root `package.json`. The Ludens Python runtime keeps its separate `uv.lock`; the optional pet shares the `app` workspace install. Do not run `npm ci` in `app`: npm selects the root workspace, which uses Bun rather than an npm lockfile.
+Install the JavaScript workspaces once from the repository root using the root `bun.lock`, then build the static web console export (`app/out`). Bun automatically applies the OMP dependency patches under [core/patches/](../../../core/patches/) per the root `package.json`. The Ludens Python runtime keeps its separate `uv.lock`; the desktop app and pet share the `app` workspace install. Do not run `npm ci` in `app`: npm selects the root workspace, which uses Bun rather than an npm lockfile.
 
 ```sh
 bun install --frozen-lockfile
 uv sync --project core/python --frozen
 (cd app && npm run build)
 
-export PATH="$PWD/baseware/bin:$PWD/core/bin:$PATH"
+export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 ```
 
-`export PATH` only affects the current terminal; configure your shell profile in new terminals or use the absolute `baseware/bin/baseware` and `core/bin/ludens` paths.
+`export PATH` only affects the current terminal; configure your shell profile in new terminals or use the absolute `baseware/bin/baseware`, `core/bin/ludens`, and `app/bin/ludens-app` paths. In production, `@ludens/core`'s `ludens app-server` (alias `ludens serve`) serves both `/api/*` and `app/out` directly with zero Next.js server runtime.
 
 ### 3. Python runtime resolution
 
@@ -38,21 +38,23 @@ The framework picks a Python interpreter with this priority:
 
 The OMP native shell injects `LUDENS_PYTHON` automatically. To reuse `ludens_tools` and the framework dependencies in workspace scripts, call `"$LUDENS_PYTHON" script.py`; running a bare `python3` follows the user's login shell and is not equivalent to the framework virtualenv. If you point `LUDENS_PYTHON` at an external training environment (e.g. a conda/venv with PyTorch), pre-install the `core/python` package and its dependencies there.
 
-`ludens up` preserves the `LUDENS_PYTHON` from the current environment when creating new background services. If services are already running, changing the terminal environment does not update them; stop and restart the relevant services before the new interpreter takes effect. After completing the installation above (and the optional pet below, if needed), prepare the target emulator or desktop driver via [Devices & driver setup](devices.md), then return to [Starting and stopping workspaces](#starting-and-stopping-workspaces).
+`ludens up` and UI service starts preserve the `LUDENS_PYTHON` from the host environment when creating new background services. If services are already running, changing the terminal environment does not update them; stop and restart the relevant services before the new interpreter takes effect. After completing the installation above (and the desktop app / pet build below, if needed), prepare the target emulator or desktop driver via [Devices & driver setup](devices.md), then return to [Starting and stopping workspaces](#starting-and-stopping-workspaces).
 
 ## Optional pet
 
-The Dashboard is served in a browser by default — no Electron install is needed to run games or view the console. For Ludens Pet, build the Electron desktop shell from the repository root:
+The console runs in any browser via `ludens app-server` — no Electron install is needed for web-only workflows. To use the self-contained **Ludens Desktop App** (main console window + system tray + **Ludens Pet** desktop companion), build the Electron desktop shell from the repository root (and optionally package native macOS `.dmg` or Windows NSIS `.exe` installers via `desktop:dist`):
 
 ```sh
 (cd app && npm run desktop:build)
+app/bin/ludens-app --show-window
+
+# Optional: build a redistributable native installer (.dmg / .exe)
+(cd app && npm run desktop:dist)
 ```
 
-When creating a workspace, append `--pet` to the chosen `ludens init --name <name> --driver ...` command to explicitly enable the pet. For an existing workspace, set `"pet": true` in `ludens.json`; it starts on the next `ludens up`. An explicit `pet: true` already in the file stays enabled. Setting `"pet": false` keeps later starts on the web console only.
+When launched without an explicit `--dashboard <url>`, `ludens-app` acts as a first-class host: it automatically spawns and supervises `ludens app-server --port 0 --parent-watchdog` in the background, so you can create, configure, and **Start / Reload / Stop** workspaces directly from the app UI without opening a terminal or running `ludens up` first. Closing the main window (`×`) hides to the system tray and keeps **Ludens Pet** and running workspaces alive; choosing **Quit** (`⌘Q` or tray **Quit**) cleanly shuts down `ludens app-server` and tears down all supervised game AI child processes (`stdin` EOF `--parent-watchdog` ensures clean teardown even if the parent crashes).
 
-You can also use `ludens up --pet` or `ludens up --no-pet` to override just the current start without writing back to `ludens.json`; the two flags are mutually exclusive. Neither `pet: false` nor `--no-pet` shuts down an already-running shared pet — quit it from its tray menu.
-
-The pet needs a working Dashboard and shares the same console and logs as the browser. By default `dashboard: true` starts the Dashboard on demand; with `false` you must start it yourself. For standalone startup or debugging, see [Ludens Pet desktop companion](debugging-and-verification.md#3-ludens-pet-desktop-companion).
+When orchestrating from the headless CLI instead, append `--pet` to `ludens init --name <name> --driver ...` or set `"pet": true` in `ludens.json` so `ludens up` attaches a shared desktop companion to the local `app-server`. You can also pass `ludens up --pet` or `ludens up --no-pet` to override just the current start without writing back to `ludens.json` (the two flags are mutually exclusive; neither `pet: false` nor `--no-pet` shuts down an already-running desktop app — quit it from its tray menu). For standalone flags or pet smoke tests, see [Ludens Pet desktop companion](debugging-and-verification.md#3-ludens-pet-desktop-companion).
 
 ## Starting and stopping workspaces
 
@@ -82,8 +84,9 @@ Quick reference for common workspace and control commands:
 | `ludens config [show]` · `ludens config set <workspaceRoot\|defaults.field> <value>` | Reads global configuration or sets the parent directory and defaults for future workspaces. |
 | `ludens workspace open <path>` · `ludens workspace list` | Registers an existing workspace or lists registrations in the current global home. |
 | `ludens workspace forget <id>` | Removes only the index entry; it does not delete files, sessions, or logs, or stop services. |
-| `ludens up --dry-run` | Validates the config and prints the full process start plan without starting services; the Dashboard build check only runs on a real `ludens up` when a new Dashboard is needed. |
-| `ludens up [--pet / --no-pet]` | Starts or reuses the emulator, Baseware, Host, and Dashboard on demand; enables the pet per the `pet` setting, or override just this start with the mutually exclusive `--pet` / `--no-pet` without writing back to the config. A newly started Host is in `manual` mode; reusing an already-`auto` Host continues its control cycle. Repeating `up` does not hot-reload an edited `ludens.json`, and reusing an existing Dashboard does not hot-update its build. |
+| `ludens app-server [--port <n>] [--host <addr>] [--static-dir <dir>] [--parent-watchdog]` | Starts the unified `@ludens/core` HTTP server (`ludens serve` alias, default `127.0.0.1:3015`) serving `/api/*`, `WorkspaceSupervisor`, and the static console bundle (`app/out`); pass `--port 0` for an ephemeral port and `--parent-watchdog` to exit and clean up supervised child processes when `stdin` closes. |
+| `ludens up --dry-run` | Validates the config and prints the full process start plan without starting services; the static console build check only runs on a real `ludens up` when a new `app-server` is needed. |
+| `ludens up [--pet / --no-pet]` | Starts or reuses the emulator, Baseware, Host, and `ludens app-server` on demand via the pure-TS `WorkspaceSupervisor`; enables the pet per the `pet` setting, or override just this start with the mutually exclusive `--pet` / `--no-pet` without writing back to the config. A newly started Host is in `manual` mode; reusing an already-`auto` Host continues its control cycle. Repeating `up` does not hot-reload an edited `ludens.json`, and reusing an existing `app-server` does not hot-update its static bundle. |
 | `ludens services` | Shows the PID, status, and latest exit code of the managed background jobs bound to the current workspace. |
 | `ludens auto on [--message 'text'] [--seconds <n>]` | Starts a new control cycle (new `epoch`, resetting request budgets) and issues inference to the model. When `--seconds <n>` is omitted, the cycle runs continuously without a time limit until manually stopped (`auto off`); passing `--seconds <n>` bounds the takeover to `<n>` seconds. `--message` is attached once on the first round of that takeover only, never re-injected in later rounds. |
 | `ludens auto timer <seconds\|off>` | Sets, extends, or clears (`off`) the auto-stop countdown on the active control cycle in place, without minting a new `epoch` or releasing device controllers. |
@@ -156,4 +159,4 @@ Import only brings in sessions, session selection, and skill version snapshots; 
 ### 3. Session resumption & background service directories
 
 - **Session resumption**: workspace OMP sessions live in `.ludens/shiori/sessions/`, with the current resume pointer at `.ludens/shiori/current-session.json`. Restarting Host resumes the original session by default and opens a new `logs/<run-id>/` directory. Foreground `ludens run` accepts `--new-session` to start a fresh context (keeping workspace files), or `--resume /absolute/path/to/session.jsonl` to switch to a given historical session of the same workspace.
-- **Background service logs**: [launch-background.py](../../../core/scripts/launch-background.py) writes stdio logs (`<name>.log`) and detached job state (`<name>.job.json`) for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (job label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. Background services detach from the terminal without boot-time autostart or crash-loop restarts; check `ludens services` and the corresponding logs first when troubleshooting.
+- **Background service logs**: the pure-TypeScript supervisor in [core/src/daemon/](../../../core/src/daemon/) writes stdio logs (`<name>.log`) and cross-platform job state (`<name>.job.json`, no Python launcher script required) for workspace-managed processes to `<workspace>/logs/background/`. Shared Ludens Pet logs live in `$LUDENS_HOME/pet/background/` (job label `dev.ludens.pet`) and preferences in `$LUDENS_HOME/pet/profile/`. Standalone Baseware without `--data-dir` uses `$LUDENS_HOME/logs/baseware/<socket-name>/`; workspace orchestration explicitly uses `<workspace>/logs/baseware/`. CLI-detached background services survive terminal close without boot-time autostart or crash-loop restarts, whereas services supervised by an owning `ludens-app` (`--parent-watchdog`) are torn down cleanly when the desktop app quits; check `ludens services` (or **Config & Studio → Services & Session**) and the corresponding logs first when troubleshooting.

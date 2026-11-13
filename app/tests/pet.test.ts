@@ -10,7 +10,7 @@ import { petStatus, petStatusKey, type PetState } from "../lib/pet";
 import { catalog } from "../lib/data";
 import { registerFixture } from "./fixtures/registry";
 import { withPetTargetLock, withWorkspaceRegistrationLock } from "@ludens/protocol/ludens";
-import { DashboardWorker } from "../lib/dashboard-worker";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 
 const consumerInput = () => ({
   instanceId: "desktop", pid: process.pid, revision: null, workspace: null,

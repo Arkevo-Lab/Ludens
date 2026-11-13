@@ -10,7 +10,7 @@ import { parseConfig, launchPlan, WorkspaceLauncher } from "../daemon/launcher.t
 
 export const WORKSPACE_HELP = `Workspace startup:
 ludens init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]
-ludens up [--dry-run] [--pet | --no-pet]
+ludens up [--dry-run] [--dashboard | --no-dashboard] [--pet | --no-pet]
 ludens services
 ludens down [--keep-emulator] [--dashboard] [--pet]
 
@@ -36,9 +36,10 @@ export async function workspaceCommand(command: string, args: string[], selected
     driver: { type: "string" }, "driver-package": { type: "string" }, game: { type: "string" },
     "cua-command": { type: "string" }, seconds: { type: "string" }, requests: { type: "string" }, model: { type: "string" },
     name: { type: "string" }, workspace: { type: "string" }, pet: { type: "boolean" }, "no-pet": { type: "boolean" },
-  } : command === "up" ? { "dry-run": { type: "boolean" }, pet: { type: "boolean" }, "no-pet": { type: "boolean" } }
+  } : command === "up" ? { "dry-run": { type: "boolean" }, dashboard: { type: "boolean" }, "no-dashboard": { type: "boolean" }, pet: { type: "boolean" }, "no-pet": { type: "boolean" } }
     : command === "down" ? { dashboard: { type: "boolean" }, pet: { type: "boolean" }, "keep-emulator": { type: "boolean" } } : {} });
   if (values.pet && values["no-pet"]) throw new Error("Choose either --pet or --no-pet");
+  if (values.dashboard && values["no-dashboard"]) throw new Error("Choose either --dashboard or --no-dashboard");
   if (command === "init") {
     const global = await readGlobalConfig();
     if (values.name !== undefined && (typeof values.name !== "string" || !values.name.trim() || /[\\/\x00]/.test(values.name) || [".", ".."].includes(values.name))) {
@@ -89,6 +90,7 @@ export async function workspaceCommand(command: string, args: string[], selected
   let manifest = await resolveDriver(raw.driver, raw.driverPackage, defaultDriverCacheRoot());
   const config = parseConfig(raw, manifest);
   if (command === "up" && (values.pet || values["no-pet"])) config.pet = Boolean(values.pet);
+  if (command === "up" && (values.dashboard || values["no-dashboard"])) config.dashboard = Boolean(values.dashboard);
   let activeMachine: BasewareMachineSpec | undefined;
   if (command === "up" && config.machines?.active && config.machines.active !== "workspace-default") {
     const registry = await readMachinesConfig();
@@ -109,7 +111,7 @@ export async function workspaceCommand(command: string, args: string[], selected
       : config.game;
     const required = [
       ...(managedGame && manifest.launchCommand ? [resolve(workspace, managedGame)] : []),
-      ...(config.dashboard ? [join(repo, "app/node_modules/next/package.json")] : []),
+      ...(config.dashboard ? [join(repo, "app/package.json")] : []),
       ...(config.pet ? [join(repo, "app/dist/electron/main.js"), join(repo, "app/node_modules/electron/package.json")] : []),
     ];
     for (const path of required) if (!await Bun.file(path).exists()) throw new Error(`Missing ${path}. Install/build the components as described in README.md.`);

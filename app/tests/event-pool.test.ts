@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WorkspaceEventPool } from "@ludens/core/core/storage/event-pool";
-import { DashboardWorker } from "../lib/dashboard-worker";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 import {
   buildCodexSegments,
   mergePoolSnapshotSegments,

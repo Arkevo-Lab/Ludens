@@ -7,29 +7,31 @@ Ludens (RSA, Recursive Self-Adaptation) decouples device drivers, the Agent exec
 | Component | Process Shape and Core Responsibilities |
 | --- | --- |
 | `baseware/` | **Standalone device service**: loads built-in or external Drivers, provides a unified Controller capability catalog, control-lease (`epoch`) arbitration, input cancellation, and device fact logs; exposed via CLI, TS/Python APIs, and MCP. |
-| `core/` | **Adaptive Harness** (`@ludens/core`): manages workspace configuration and lifecycle, capability discovery and routing, resident perception-and-action (`perception.py`) Python subprocess, workspace-native capability evaluation (`ludens eval`), and run-log archiving. |
+| `core/` | **Adaptive Harness & Unified App-Server** (`@ludens/core`): manages workspace configuration and lifecycle, pure-TypeScript cross-platform `WorkspaceSupervisor`, capability discovery and routing, resident perception-and-action (`perception.py`) Python subprocess, workspace-native capability evaluation (`ludens eval`), run-log archiving, and the local HTTP `/api/*` + static frontend server (`ludens app-server` / `ludens serve`). |
 | **Shiori** | **Sole execution kernel (role name)**: implemented by the Ludens Host Runtime; uniformly governs control cycles, time/request budgets, signal cancellation, and exit cleanup. Agent mode mounts **OMP 18.18.8**; plain evaluation programs, Verifiers, and Metrics share the same lifecycle without starting a model. |
-| `app/` | **Local console service (`@ludens/app`, web)**: builds and queries log indexes through a dedicated Node Worker, serving realtime activity streams, spacetime video replay, run statistics, doc browsing, the capability catalog, and human-handover entry points. |
-| `app/desktop/` | **Optional desktop companion (Ludens Pet)**: Electron desktop shell; the main window reuses the same Dashboard view, while the native transparent pet window and audio engine incrementally consume the same activity log. |
+| `app/` | **Static web console bundle (`@ludens/app`, `app/out`)**: static React/Next export served directly by `ludens app-server` in production (zero Next.js server runtime; `npm run dev` proxies `/api/*` to a background `ludens app-server` for HMR), providing realtime activity streams, 1-click workspace lifecycle controls (`useWorkspaceService`), spacetime video replay, run statistics, doc browsing, the capability catalog, and human-handover entry points. |
+| `app/desktop/` | **First-class Ludens Desktop App & Companion (`ludens-app`)**: self-contained Electron host (`AppServerHost`) that automatically spawns and supervises `ludens app-server --port 0 --parent-watchdog --static-dir <app/out>`, loads the console in its main window, runs the transparent **Ludens Pet** companion and system tray, hides to Tray + Pet when closing the window (`×`), and cleanly tears down `app-server` and all supervised game AI processes on Quit (`⌘Q` / tray **Quit** / `stdin` EOF watchdog). |
 
 ```mermaid
 flowchart LR
-    O[Operator] --> H[Ludens Host / Shiori: OMP]
+    O[Operator] --> D[Ludens Desktop App / Static Console]
+    D --> Srv[ludens app-server: /api/* + WorkspaceSupervisor]
+    Srv --> H[Ludens Host / Shiori: OMP]
     H --> P[Workspace resident Perception-and-Action State Machine]
     H --> S[OMP native bash / background jobs]
     S --> C[Ludens unified Controller entry]
     P --> C
     C --> B[Baseware service]
-    B --> D[Driver]
-    D --> E[Emulator / desktop / device]
+    B --> Dvr[Driver]
+    Dvr --> E[Emulator / desktop / device]
     H --> L[workspace/logs & .ludens]
     B --> L
-    L --> R[Dashboard archive reader Worker]
-    R --> V[Dashboard page / Electron main window]
-    R --> A[Ludens Pet desktop-pet incremental bubbles]
+    L --> R[Core query Worker & cold-index Builder]
+    R --> Srv
+    Srv --> A[Ludens Pet desktop-pet incremental bubbles]
 ```
 
-Each component has its own `package.json` / `pyproject.toml` and lockfile. The Ludens Harness depends only on Baseware's client and type contracts and never imports any concrete Driver implementation directly; `ludens up` orchestrates local processes from the workspace configuration and driver manifests.
+Each component has its own `package.json` / `pyproject.toml` and lockfile. The Ludens Harness depends only on Baseware's client and type contracts and never imports any concrete Driver implementation directly; `ludens app-server` (via UI `workspaceServiceControl`) and `ludens up` share the same pure-TypeScript `WorkspaceSupervisor` in `core/src/daemon/` to orchestrate local processes without Python background-launcher scripts.
 
 ## Source Layout and Layering
 
@@ -42,9 +44,9 @@ The repository is organized as a Bun workspace with `@ludens/protocol` as the ze
 | `core/src/core/storage/` | **Workspace and fact storage**: `.ludens/` identity and state, `logs/<run-id>/` event streams and archives. |
 | `core/src/core/subsystems/` | **Workspace resident and device subsystems**: Python perception/action workers, `@capability` discovery, Baseware device sessions. |
 | `core/src/core/agent-omp/` | **OMP AgentRunner implementation**: OMP session assembly, the Ludens extension, and model-trace recording behind a narrow `ExtensionHost` interface. |
-| `core/src/core/query/` | **Query and projection engine**: log/run/operation indexes, cold builds, activity/replay/telemetry projections consumed by the Dashboard and Ludens Pet. |
-| `core/src/daemon/`, `core/src/perf/`, `core/src/cli/` | **Surfaces**: Unix Socket RPC daemon and service launcher, subsystem performance baselines (`perf`), and the pure CLI front end. |
-| `app/shell/` + `app/features/` + `app/perf/` | **Console views and app perf** (loop workbench in `shell/`, `index-memory` baseline in `perf/`): the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `app/components/ui/`. |
+| `core/src/core/query/` | **Query and projection engine**: log/run/operation indexes, native TypeScript Worker & cold-build subprocesses, activity/replay/telemetry projections consumed by `app-server` and Ludens Pet. |
+| `core/src/server/`, `core/src/daemon/`, `core/src/perf/`, `core/src/cli/` | **Surfaces**: unified `ludens app-server` (`/api/*` routes, static `app/out` server, `--parent-watchdog`), Unix Socket RPC daemon and pure-TS `WorkspaceSupervisor`, subsystem performance baselines (`perf`), and the headless CLI front end. |
+| `app/shell/` + `app/features/` + `app/lib/` + `app/perf/` | **Static console views, lifecycle hooks, and app perf** (loop workbench in `shell/`, unified `useWorkspaceService` hook in `lib/`, `index-memory` baseline in `perf/`): the shell (`console-shell`, sidebar, selection context) plus vertical feature slices (`live`, `replay`, `capabilities`, `workspaces`, `pet`, `docs`) over shared primitives in `app/components/ui/`. |
 
 
 ## Devices and Unified Capabilities
@@ -119,13 +121,13 @@ Urgent mid-turn interruption remains `ludens steer <message>`, which queues stra
 ## Verifiable Run Facts
 
 - **Decoupled multi-source facts**: Baseware independently persists device control and execution facts (`logs/baseware/`), Ludens records model calls, tool executions, capability invocations, and perception deliveries (`logs/<run-id>/`), and Shiori mounts a scoped OpenTelemetry provider recording `agentLoop` telemetry.
-- **Isolated Dashboard reads**: the Dashboard keeps archive parsing and index maintenance in a dedicated Node Worker thread; cold history directories are built by a globally-single-instance throttled temporary Builder subprocess and atomically published to `.dashboard-index/`; Next.js routes and Ludens Pet only read projected results over bounded RPC. See [Logging and Call Chains](logging.md#consumption-and-metric-interpretation).
+- **Isolated Dashboard reads**: `ludens app-server` keeps archive parsing and index maintenance in a dedicated Worker thread (`core/src/core/query/`); cold history directories are built by a globally-single-instance throttled temporary Builder subprocess and atomically published to `.dashboard-index/`; `/api/*` handlers in `core/src/server/` and Ludens Pet only read projected results over bounded RPC, with zero Next.js server runtime in production. See [Logging and Call Chains](logging.md#consumption-and-metric-interpretation).
 
 ## TypeScript and Python
 
 Ludens consists of a TypeScript host (`core/src/`) plus a Python toolkit (`core/python/ludens_tools/`):
 
-- **TypeScript side**: owns the Shiori runtime, control leases, OMP session extensions, cross-process RPC, and CLI orchestration.
+- **TypeScript side**: owns the Shiori runtime, control leases, OMP session extensions, unified `ludens app-server` (`/api/*` + static UI), pure-TS cross-platform `WorkspaceSupervisor` (`--parent-watchdog` lifecycle cleanup), cross-process RPC, and CLI orchestration.
 - **Python side**: owns `@capability` static discovery and dynamic execution, the unified resident `Perception` state machine, PyAV video-segment encoding, and on-demand cold-frame decoding. Continuous perception ingests Baseware's spooled media references (`_StreamMediaRef`) directly from disk without inline Base64 IPC round-trips, automatically binds device observation `sources` provenance onto the timeline record, and short-circuits unchanged latest-frame `Client().observe()` polls via `ifNoneMatchSequence`. Video encode/decode happens inside the resident perception process without introducing a separate streaming service.
 
 ## Capability Persistence Boundaries

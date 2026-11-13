@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { defaultSocket } from "@ludens/baseware/address";
 import {
   isOmpEffort,
@@ -17,6 +18,13 @@ import {
   type WorkspaceMachinesBinding,
 } from "@ludens/protocol/machines";
 import { jobStateFilePath, jobTargetLabel } from "./background-jobs.ts";
+import {
+  probeBackgroundJob,
+  startBackgroundJob,
+  stopBackgroundJob,
+  type BackgroundJobProbe,
+  type StartBackgroundJobOptions,
+} from "./process-manager.ts";
 
 export interface DriverManifest {
   id: string;
@@ -98,7 +106,7 @@ export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchCo
   return result;
 }
 
-type ServiceName = "emulator" | "baseware" | "host" | "dashboard" | "pet";
+export type ServiceName = "emulator" | "baseware" | "host" | "dashboard" | "pet";
 export interface LaunchPlan {
   workspace: string;
   config: LaunchConfig;
@@ -118,7 +126,7 @@ export interface LaunchPlan {
 export async function launchPlan(
   config: LaunchConfig,
   workspace: string,
-  repo = resolve(import.meta.dir, "../../.."),
+  repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
   socket?: string,
   manifest?: DriverManifest,
   activeMachine?: BasewareMachineSpec,
@@ -201,7 +209,7 @@ export async function launchPlan(
   return {
     workspace, config, manifest, ...(activeMachine ? { activeMachine } : {}), dashboardUrl: "http://127.0.0.1:3015", background, sharedPet,
     dashboardCheck: ["npm", "--prefix", join(repo, "app"), "run", "build:check"],
-    launcher: join(repo, "core/scripts/launch-background.py"), ludens, baseware, basewareSocket,
+    launcher: join(repo, "core/src/daemon/process-manager.ts"), ludens, baseware, basewareSocket,
     commands: {
       ...(emulatorCmd ? { emulator: emulatorCmd } : {}),
       baseware: [baseware, "serve", "--driver", effectiveDriver,
@@ -215,7 +223,7 @@ export async function launchPlan(
           ? ["--compaction-threshold", String(config.compactionThreshold)] : []),
         "--diagnostics", config.logging.diagnostics,
       ],
-      ...(config.dashboard ? { dashboard: ["npm", "--prefix", join(repo, "app"), "run", "start"] } : {}),
+      ...(config.dashboard ? { dashboard: [ludens, "app-server", "--port", "3015", "--static-dir", join(repo, "app/out")] } : {}),
       ...(config.pet ? { pet: petLaunchCommand(repo, workspace) } : {}),
     },
   };
@@ -238,6 +246,7 @@ type CommandResult = { code: number; stdout: string; stderr: string };
 type HostStatus = { runId: string; mode: string; connected: boolean; thinking: boolean; consolidating: boolean; maxSeconds: number };
 type BasewareStatus = { serviceId: string; mode: string; connected: boolean; epoch: string | null };
 type Job = { target: string; registered: boolean; pid: number | null; state: string | null; lastExitCode: number | null };
+
 export interface LaunchIO {
   run(argv: string[], cwd: string): Promise<CommandResult>;
   dashboardReady(url: string): Promise<boolean>;
@@ -245,60 +254,73 @@ export interface LaunchIO {
   sleep(): Promise<void>;
   now(): number;
   note(message: string): void;
+  jobStatus?(stateFile: string): Promise<BackgroundJobProbe>;
+  stopJob?(stateFile: string): Promise<void>;
+  startJob?(options: StartBackgroundJobOptions): Promise<void>;
 }
 
-const systemIO: LaunchIO = {
-  async run(argv, cwd) {
-    const env = { ...process.env };
-    // Workspace selection must not inherit a previous agent shell's address or lease.
-    for (const key of Object.keys(env)) {
-      if (key.startsWith("BASEWARE_") || ["LUDENS_SOCKET", "LUDENS_WORKSPACE"].includes(key)) delete env[key];
-    }
-    let command = [...argv];
-    if (command[0] === "env") {
-      let idx = 1;
-      while (idx < command.length && command[idx]!.includes("=") && !command[idx]!.startsWith("=")) {
-        const eq = command[idx]!.indexOf("=");
-        env[command[idx]!.slice(0, eq)] = command[idx]!.slice(eq + 1);
-        idx++;
+export function createSystemLaunchIO(options: { env?: NodeJS.ProcessEnv; note?: (message: string) => void } = {}): LaunchIO {
+  const baseEnv = options.env ?? process.env;
+  const effectiveHome = baseEnv.LUDENS_HOME ? resolve(baseEnv.LUDENS_HOME) : ludensHome();
+  return {
+    async run(argv, cwd) {
+      const env = { ...baseEnv };
+      // Workspace selection must not inherit a previous agent shell's address or lease.
+      for (const key of Object.keys(env)) {
+        if (key.startsWith("BASEWARE_") || ["LUDENS_SOCKET", "LUDENS_WORKSPACE"].includes(key)) delete env[key];
       }
-      command = command.slice(idx);
-    }
-    if (command[0] === "python3" && !Bun.which("python3", { PATH: env.PATH })) {
-      command[0] = Bun.which("python", { PATH: env.PATH }) ?? "python3";
-    }
-    let child: ReturnType<typeof Bun.spawn>;
-    try {
-      child = Bun.spawn(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-    } catch (error) {
-      return { code: 127, stdout: "", stderr: String(error) };
-    }
-    const timer = setTimeout(() => child.kill(), 10_000);
-    try {
-      const [code, stdout, stderr] = await Promise.all([
-        child.exited,
-        new Response(child.stdout as ReadableStream).text(),
-        new Response(child.stderr as ReadableStream).text(),
-      ]);
-      return { code, stdout, stderr };
-    } finally { clearTimeout(timer); }
-  },
-  async dashboardReady(url) {
-    try {
-      const response = await fetch(`${url}/api/catalog`, { signal: AbortSignal.timeout(2000) });
-      if (!response.ok || !Array.isArray(await response.json())) return false;
-      const settings = await fetch(`${url}/api/workspaces`, { signal: AbortSignal.timeout(2000) });
-      return settings.ok && (await settings.json()).home === ludensHome();
-    } catch { return false; }
-  },
-  async petReady(url) {
-    try {
-      const response = await fetch(`${url}/api/pet`, { signal: AbortSignal.timeout(10_000) });
-      return response.ok && (await response.json()).connected === true;
-    } catch { return false; }
-  },
-  sleep: () => Bun.sleep(500), now: Date.now, note: message => console.error(message),
-};
+      let command = [...argv];
+      if (command[0] === "env") {
+        let idx = 1;
+        while (idx < command.length && command[idx]!.includes("=") && !command[idx]!.startsWith("=")) {
+          const eq = command[idx]!.indexOf("=");
+          env[command[idx]!.slice(0, eq)] = command[idx]!.slice(eq + 1);
+          idx++;
+        }
+        command = command.slice(idx);
+      }
+      let child: ReturnType<typeof Bun.spawn>;
+      try {
+        child = Bun.spawn(command, { cwd, env, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+      } catch (error) {
+        return { code: 127, stdout: "", stderr: String(error) };
+      }
+      const timer = setTimeout(() => child.kill(), 10_000);
+      try {
+        const [code, stdout, stderr] = await Promise.all([
+          child.exited,
+          new Response(child.stdout as ReadableStream).text(),
+          new Response(child.stderr as ReadableStream).text(),
+        ]);
+        return { code, stdout, stderr };
+      } finally { clearTimeout(timer); }
+    },
+    async dashboardReady(url) {
+      try {
+        const response = await fetch(`${url}/api/catalog`, { signal: AbortSignal.timeout(2000) });
+        if (!response.ok || !Array.isArray(await response.json())) return false;
+        const settings = await fetch(`${url}/api/workspaces`, { signal: AbortSignal.timeout(2000) });
+        return settings.ok && (await settings.json()).home === effectiveHome;
+      } catch { return false; }
+    },
+    async petReady(url) {
+      try {
+        const response = await fetch(`${url}/api/pet`, { signal: AbortSignal.timeout(10_000) });
+        return response.ok && (await response.json()).connected === true;
+      } catch { return false; }
+    },
+    sleep: () => Bun.sleep(500),
+    now: Date.now,
+    note: options.note ?? (message => console.error(message)),
+    jobStatus: stateFile => probeBackgroundJob(stateFile),
+    stopJob: stateFile => stopBackgroundJob(stateFile),
+    async startJob(jobOptions) {
+      await startBackgroundJob({ ...jobOptions, env: jobOptions.env ?? baseEnv });
+    },
+  };
+}
+
+const systemIO: LaunchIO = createSystemLaunchIO();
 
 function parseSsPids(stdout: string, port: number, state: "LISTEN" | "ESTAB"): number[] {
   const pids = new Set<number>();
@@ -327,7 +349,12 @@ function parseNetstatPids(stdout: string, port: number, state: "LISTENING" | "ES
   return [...pids];
 }
 
-// Thin cross-platform orchestration over the CLI and detached background job script (no auto-restart loop).
+export interface UpOptions {
+  includeDashboard?: boolean;
+  includePet?: boolean;
+}
+
+// Thin cross-platform orchestration over the CLI and pure-TS background process manager (no auto-restart loop).
 export class WorkspaceLauncher {
   constructor(readonly plan: LaunchPlan, private io: LaunchIO = systemIO) {}
 
@@ -343,8 +370,9 @@ export class WorkspaceLauncher {
   async job(name: ServiceName): Promise<Job> {
     const hash = createHash("sha256").update(this.plan.workspace).digest("hex").slice(0, 16);
     const target = jobTargetLabel(hash, name);
-    const result = await this.checked(["python3", this.plan.launcher, "--status", this.stateFile(name)]);
-    const parsed = JSON.parse(result.stdout) as { registered: boolean; pid: number | null; state: string | null; lastExitCode: number | null };
+    const parsed = this.io.jobStatus
+      ? await this.io.jobStatus(this.stateFile(name))
+      : JSON.parse((await this.checked([process.execPath, this.plan.launcher, "--status", this.stateFile(name)])).stdout) as BackgroundJobProbe;
     return {
       target,
       registered: Boolean(parsed.registered),
@@ -381,7 +409,11 @@ export class WorkspaceLauncher {
     throw new Error(`Timed out waiting for ${description}. Check ${this.plan.background}; use ludens services to inspect remaining processes.`);
   }
   private async stopJob(name: ServiceName) {
-    await this.checked(["python3", this.plan.launcher, "--stop", this.stateFile(name)]);
+    if (this.io.stopJob) {
+      await this.io.stopJob(this.stateFile(name));
+      return;
+    }
+    await this.checked([process.execPath, this.plan.launcher, "--stop", this.stateFile(name)]);
   }
   private async ensure(name: ServiceName) {
     const job = await this.job(name);
@@ -389,9 +421,20 @@ export class WorkspaceLauncher {
     // Remove only this managed service's stopped registration before starting fresh.
     if (job.registered) await this.stopJob(name);
     this.io.note(`Starting ${name}; log: ${this.log(name)}`);
-    await this.checked(["python3", this.plan.launcher,
+    const command = this.plan.commands[name]!;
+    const cwd = name === "pet" ? this.plan.sharedPet.cwd : this.plan.workspace;
+    if (this.io.startJob) {
+      await this.io.startJob({
+        name,
+        command,
+        cwd,
+        ...(name === "pet" ? { label: "dev.ludens.pet", logDir: this.plan.sharedPet.background } : { logDir: this.plan.background }),
+      });
+      return;
+    }
+    await this.checked([process.execPath, this.plan.launcher,
       ...(name === "pet" ? ["--label", "dev.ludens.pet", "--log-dir", this.plan.sharedPet.background] : []),
-      name, ...this.plan.commands[name]!], name === "pet" ? this.plan.sharedPet.cwd : this.plan.workspace);
+      name, ...command], cwd);
   }
   private async alive(name: ServiceName) {
     const job = await this.job(name);
@@ -462,10 +505,12 @@ export class WorkspaceLauncher {
     const running = await this.run(["pgrep", "-f", `^${literalExecutable}([[:space:]]|$)`]);
     return running.code === 0;
   }
-  async up() {
+  async up(options?: UpOptions) {
+    const wantDashboard = options?.includeDashboard ?? this.plan.config.dashboard;
+    const wantPet = options?.includePet ?? this.plan.config.pet;
     // Fail before launching the device when the permanent Dashboard would run stale code.
-    let dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
-    if (this.plan.config.dashboard && !dashboard) {
+    let dashboard = (wantDashboard || wantPet) ? await this.io.dashboardReady(this.plan.dashboardUrl) : false;
+    if (wantDashboard && !dashboard) {
       const build = await this.run(this.plan.dashboardCheck);
       if (build.code !== 0) throw new Error(build.stderr || build.stdout || "Build the Dashboard before starting it.");
       if ((await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied by a Dashboard with a different Ludens home or an unready service. Stop that Dashboard before switching global homes.");
@@ -535,8 +580,10 @@ export class WorkspaceLauncher {
     } else this.io.note(`Reusing host ${host.runId}; running settings are unchanged.`);
     if (!host.connected) throw new Error("Host is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
 
-    dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
-    if (this.plan.config.dashboard && !dashboard) {
+    if (wantDashboard || wantPet) {
+      dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
+    }
+    if (wantDashboard && !dashboard) {
       if (!(await this.job("dashboard")).pid && (await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied but the Ludens Dashboard API is not ready; inspect that service before retrying.");
       await this.ensure("dashboard");
       dashboard = await this.waitFor("Dashboard API", async () => {
@@ -545,7 +592,7 @@ export class WorkspaceLauncher {
         return false;
       });
     }
-    if (this.plan.config.pet) {
+    if (wantPet) {
       if (!dashboard) throw new Error("Pet needs the Dashboard. Enable dashboard in ludens.json or start it separately.");
       if (await this.io.petReady(this.plan.dashboardUrl)) this.io.note("Reusing Ludens Pet's connected desktop instance.");
       else {

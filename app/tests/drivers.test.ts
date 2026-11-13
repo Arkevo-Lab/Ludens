@@ -3,8 +3,7 @@ import assert from "node:assert/strict";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DashboardWorker, dashboardWorker } from "../lib/dashboard-worker";
-import * as route from "../app/api/drivers/discover/route";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 
 async function waitFor(check: () => Promise<boolean>) {
   const deadline = Date.now() + 5000;
@@ -36,33 +35,6 @@ test("discoverDriver accepts a valid file package and rejects invalid specs thro
   } finally {
     await worker.close(); await rm(root, { recursive: true, force: true });
   }
-});
-
-test("driver discovery requires an explicit same-origin POST and a string spec", async () => {
-  const root = await mkdtemp(join(tmpdir(), "dashboard-discover-route-"));
-  const driver = join(root, "driver.ts"), imported = join(root, "imported");
-  await writeFile(driver, `await Bun.write(${JSON.stringify(imported)}, "imported"); export default { id: "route-fixture", version: "1", load() { throw new Error("must not call load"); } };`);
-  const request = (body: unknown, origin?: string) => new Request("http://localhost:3015/api/drivers/discover", {
-    method: "POST", headers: { host: "localhost:3015", "content-type": "application/json", ...(origin ? { origin } : {}) },
-    body: JSON.stringify(body),
-  });
-  try {
-    assert.equal("GET" in route, false);
-    for (const origin of [undefined, "https://untrusted.test"]) {
-      const response = await route.POST(request({ spec: `file:${driver}` }, origin));
-      assert.equal(response.status, 400);
-      assert.match((await response.json()).error, /同源/);
-    }
-    await assert.rejects(access(imported));
-    for (const body of [null, [], { spec: 42 }]) {
-      assert.equal((await route.POST(request(body, "http://localhost:3015"))).status, 400);
-    }
-    await assert.rejects(access(imported));
-    const response = await route.POST(request({ spec: `file:${driver}` }, "http://localhost:3015"));
-    assert.equal(response.status, 200);
-    assert.equal((await response.json()).spec, `file:${driver}`);
-    await access(imported);
-  } finally { await dashboardWorker().close(); await rm(root, { recursive: true, force: true }); }
 });
 
 for (const mode of ["request cancellation", "worker shutdown", "successful import"] as const) {

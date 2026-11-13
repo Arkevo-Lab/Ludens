@@ -504,7 +504,7 @@ test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100p
     /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(370px,\s*calc\(100vw\s*-\s*48px\)\);/,
   );
   assert.match(activityCss, /\.codex-runtime-header,\s*\.shiori-budget-header\s*\{[^}]*flex-wrap:\s*nowrap;/);
-  assert.match(activityCss, /\.codex-scroll-bottom-btn\s*\{[^}]*bottom:\s*8px;/);
+  assert.match(activityCss, /\.codex-follow-pill\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*10px;/);
 
   assert.match(
     observationCss,

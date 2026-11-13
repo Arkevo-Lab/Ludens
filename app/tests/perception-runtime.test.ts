@@ -5,11 +5,10 @@ import { mkdtemp, mkdir, readFile, realpath, readdir, rename, rm, symlink, write
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { perceptionRuntime, perceptionSettings, updatePerceptionSettings } from "../lib/perception-config";
-import { DashboardWorker } from "../lib/dashboard-worker";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { registerWorkspace } from "@ludens/protocol/ludens";
 import { registerFixture } from "./fixtures/registry";
-import { GET } from "../app/api/perception-config/runtime/route";
 
 const values = { hotSeconds: 90.5, videoSegmentSeconds: 7200, videoIdleSeconds: 4 };
 const ready = () => ({ state: "ready", generation: "generation-1", pid: 1234, sampleHz: 30,
@@ -155,13 +154,4 @@ test("all perception operations reject stale canonical paths even when the old p
     ]) await assert.rejects(work(), { code: "WORKSPACE_SCOPE_REQUIRED", status: 400 });
     assert.deepEqual(f.requests, []);
   } finally { await f.cleanup(); }
-});
-
-test("runtime endpoint rejects nonlocal reads before contacting a host", async () => {
-  const response = await GET(new Request("http://untrusted.test/api/perception-config/runtime?project=selected", {
-    headers: { host: "untrusted.test" },
-  }));
-  assert.equal(response.status, 400);
-  assert.match((await response.json()).error, /本地/);
-  assert.equal(response.headers.get("cache-control"), "no-store");
 });

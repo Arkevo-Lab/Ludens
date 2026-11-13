@@ -1,7 +1,7 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { getLogIndex, indexStorageRoot, type LogIndex } from "./log-index";
 import { archiveBudget } from "./archive-budget";
@@ -9,6 +9,8 @@ import { verifySources } from "./cold-source";
 import type { ArchiveBuildState, BuilderReply, BuilderRequest, CapturedSource } from "./cold-build-protocol";
 import { repoRoot } from "./repo";
 export type { ArchiveBuildState } from "./cold-build-protocol";
+
+const defaultColdBuilderEntry = fileURLToPath(new URL("./cold-builder.ts", import.meta.url));
 
 type Job = { path: string; root: string; workspace?: string | null; state: ArchiveBuildState;
   abort: AbortController; child?: ChildProcess; done?: Promise<void> };
@@ -31,6 +33,27 @@ function saved(root: string): ArchiveBuildState | null {
   return state;
 }
 
+function isBuilderPidAlive(pid: unknown): pid is number {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EPERM") return false;
+  }
+  if (process.platform !== "win32") {
+    const probe = spawnSync("ps", ["-p", String(pid), "-o", "stat="], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 500,
+    });
+    if (probe.status === 0) {
+      const stat = probe.stdout.trim();
+      if (!stat || stat.startsWith("Z")) return false;
+    }
+  }
+  return true;
+}
+
 /** One finite child at a time. HTTP requests observe this work; they do not own it. */
 export class ArchiveBuildManager {
   private jobs = new Map<string, Job>();
@@ -43,6 +66,7 @@ export class ArchiveBuildManager {
     if (job) return { ...job.state };
     const root = indexStorageRoot(index.path), state = saved(root);
     if (state && !terminal(state)) {
+      if (isBuilderPidAlive(state.pid)) return { ...state };
       // The previous manager is gone. Never silently resume an interrupted build.
       state.state = "failed"; state.error = "上次目录构建被中断，请重试"; delete state.pid;
       if (activeGeneration(root) === state.id) {
@@ -73,7 +97,7 @@ export class ArchiveBuildManager {
     if (!previous && options.buildId) throw conflict("构建已变化，请刷新状态后再操作");
     const job = this.jobs.get(index.path);
     if (options.action === "retry") {
-      if (job) throw conflict("目录仍在构建，请先取消或等待完成");
+      if (job || (previous && !terminal(previous))) throw conflict("目录仍在构建，请先取消或等待完成");
       return this.enqueue(index);
     }
     if (!job) return previous;
@@ -107,10 +131,22 @@ export class ArchiveBuildManager {
   }
   private async child(job: Job, directory: string): Promise<{ source: CapturedSource; value: Partial<ArchiveBuildState> }> {
     const env = this.options.env ?? process.env, budget = archiveBudget(env);
-    // The tsx loader and worker entry stay inside app; anchor them to the repository root.
-    const entry = this.options.entry ?? join(repoRoot, "app/worker/cold-builder.mjs");
+    const entry = this.options.entry ?? defaultColdBuilderEntry;
+    const spawnArgs = process.versions.bun || !entry.endsWith(".ts")
+      ? [`--max-old-space-size=${budget.builderHeapMiB}`, entry]
+      : (() => {
+          const appPkg = join(repoRoot, "app/package.json");
+          const reqAnchor = existsSync(appPkg) ? pathToFileURL(appPkg).href : import.meta.url;
+          const evalCode = [
+            `const { createRequire } = require("node:module");`,
+            `const { pathToFileURL } = require("node:url");`,
+            `const req = createRequire(${JSON.stringify(reqAnchor)});`,
+            `req("tsx/cjs/api").require(${JSON.stringify(entry)}, pathToFileURL(${JSON.stringify(entry)}).href);`,
+          ].join("\n");
+          return [`--max-old-space-size=${budget.builderHeapMiB}`, "-e", evalCode];
+        })();
     // Plain spawn: bundlers must not try to resolve the entry as a module import.
-    const child = spawn(process.execPath, [`--max-old-space-size=${budget.builderHeapMiB}`, entry], {
+    const child = spawn(process.execPath, spawnArgs, {
       env, stdio: ["ignore", "ignore", "pipe", "ipc"] });
     job.child = child; job.state.pid = child.pid; save(job.root, job.state);
     return new Promise((resolve, reject) => {

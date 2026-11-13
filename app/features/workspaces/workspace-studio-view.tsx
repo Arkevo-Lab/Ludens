@@ -47,6 +47,7 @@ import {
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
 import { LoopLab } from "@/shell/loop-lab";
@@ -207,6 +208,16 @@ export function WorkspaceStudioView({
   const hostJob = studio?.services.jobs.find(item => item.name === "host");
   const basewareJob = studio?.services.jobs.find(item => item.name === "baseware");
   const emulatorJob = studio?.services.jobs.find(item => item.name === "emulator");
+  const workspaceRunning = Boolean(hostJob?.pid || basewareJob?.pid);
+
+  const service = useWorkspaceService({
+    workspaceId: target?.id,
+    fallbackError: t("operationFailed"),
+    onStudioSnapshot: next => setStudio(next),
+    onSuccess: () => {
+      onRetryCatalog();
+    },
+  });
 
   return (
     <section className="mx-auto grid w-full max-w-6xl gap-5" aria-label={t("title")}>
@@ -265,6 +276,57 @@ export function WorkspaceStudioView({
               )}
             </div>
           )}
+          {studio && target && (
+            !workspaceRunning ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={service.busy}
+                onClick={() => void service.startWorkspace()}
+                data-studio-header-service="up"
+              >
+                {service.pendingOperation === "up" ? (
+                  <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                ) : (
+                  <Play className="size-3.5 fill-current" aria-hidden="true" />
+                )}
+                {t(service.pendingOperation === "up" ? "startingWorkspace" : "startWorkspace")}
+              </Button>
+            ) : (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={service.busy}
+                  onClick={() => void service.reloadWorkspace()}
+                  data-studio-header-service="reload"
+                >
+                  {service.pendingOperation === "reload" ? (
+                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RotateCcw className="size-3.5" aria-hidden="true" />
+                  )}
+                  {t(service.pendingOperation === "reload" ? "reloadingWorkspace" : "reloadWorkspace")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={service.busy}
+                  onClick={() => void service.stopWorkspace()}
+                  data-studio-header-service="down"
+                >
+                  {service.pendingOperation === "down" ? (
+                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Square className="size-3 fill-current" aria-hidden="true" />
+                  )}
+                  {t(service.pendingOperation === "down" ? "stoppingWorkspace" : "stopWorkspace")}
+                </Button>
+              </>
+            )
+          )}
           <Button
             type="button"
             variant="outline"
@@ -277,6 +339,29 @@ export function WorkspaceStudioView({
           </Button>
         </div>
       </header>
+
+      {service.error && tab !== "services" && (
+        <Alert variant="destructive">
+          <AlertTitle>{t("operationFailed")}</AlertTitle>
+          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+            <span className="break-words font-mono text-xs">{service.error}</span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="xs"
+                variant="secondary"
+                onClick={() => navigate({ view: "baseware" })}
+              >
+                <HardDrive className="size-3" aria-hidden="true" />
+                {t("servicesSection.manageBaseware")}
+              </Button>
+              <Button type="button" size="xs" variant="outline" onClick={service.clearError}>
+                ×
+              </Button>
+            </div>
+          </AlertDescription>
+        </Alert>
+      )}
 
       {readError && (
         <Alert variant="destructive">
@@ -405,6 +490,11 @@ export function ModelAndBudgetPanel({
   onOpenConnection(): void;
 }) {
   const t = useTranslations("workspaceStudio");
+  const service = useWorkspaceService({
+    workspaceId: studio.id,
+    fallbackError: t("operationFailed"),
+    onStudioSnapshot: next => onSaved(next),
+  });
   const modelInputId = useId();
   const secondsInputId = useId();
   const requestsInputId = useId();
@@ -907,10 +997,26 @@ export function ModelAndBudgetPanel({
           <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <span className="text-xs font-medium">{t("reloadHostTitle")}</span>
-              <Button type="button" variant="outline" size="xs" onClick={() => void copyReload()}>
-                {copied === "done" ? <Check className="size-3" /> : <Copy className="size-3" />}
-                {t(copied === "done" ? "copied" : "copyReload")}
-              </Button>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  disabled={service.busy}
+                  onClick={() => void service.reloadWorkspace()}
+                >
+                  {service.pendingOperation === "reload" ? (
+                    <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <RotateCcw className="size-3" aria-hidden="true" />
+                  )}
+                  {t(service.pendingOperation === "reload" ? "reloadingWorkspace" : "reloadNow")}
+                </Button>
+                <Button type="button" variant="outline" size="xs" onClick={() => void copyReload()}>
+                  {copied === "done" ? <Check className="size-3" /> : <Copy className="size-3" />}
+                  {t(copied === "done" ? "copied" : "copyReload")}
+                </Button>
+              </div>
             </div>
             <code className="block select-all break-all font-mono text-[11px] text-muted-foreground">
               {reloadCmd}
@@ -924,14 +1030,13 @@ export function ModelAndBudgetPanel({
 
 function ServicesAndShioriPanel({
   studio,
-  isZh,
   onRefresh,
   onOpenBaseware,
   onStudioUpdated,
   onShioriUpdated,
 }: {
   studio: WorkspaceStudioSnapshot;
-  isZh: boolean;
+  isZh?: boolean;
   onRefresh(): void;
   onOpenBaseware(): void;
   onStudioUpdated(next: WorkspaceStudioSnapshot): void;
@@ -943,55 +1048,35 @@ function ServicesAndShioriPanel({
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
   const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
-  const [busyServiceOp, setBusyServiceOp] = useState<"up" | "reload" | "down" | null>(null);
-  const [serviceOutput, setServiceOutput] = useState<{
-    ok: boolean;
-    operation: "up" | "reload" | "down";
-    exitCode: number;
-    stdout: string;
-    stderr: string;
-  } | null>(null);
+
+  const service = useWorkspaceService({
+    workspaceId: studio.id,
+    fallbackError: t("operationFailed"),
+    onStudioSnapshot: next => onStudioUpdated(next),
+    onSuccess: () => onRefresh(),
+  });
 
   useEffect(() => {
     setMemoryDraft(studio.shiori.memory.content);
   }, [studio.shiori.memory.content]);
 
-  const runServiceControl = async (operation: "up" | "reload" | "down") => {
-    if (busyServiceOp) return;
-    setBusyServiceOp(operation);
-    setServiceOutput(null);
-    try {
-      const response = await fetch("/api/workspaces", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "workspaceServiceControl",
-          id: studio.id,
-          service: { operation },
-        }),
-      });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value?.error ?? t("operationFailed"));
-      if (value?.studio) onStudioUpdated(value.studio as WorkspaceStudioSnapshot);
-      setServiceOutput({
-        ok: Boolean(value?.ok),
-        operation,
-        exitCode: typeof value?.exitCode === "number" ? value.exitCode : 0,
-        stdout: typeof value?.stdout === "string" ? value.stdout : "",
-        stderr: typeof value?.stderr === "string" ? value.stderr : "",
-      });
-    } catch (error) {
-      setServiceOutput({
-        ok: false,
-        operation,
-        exitCode: 1,
-        stdout: "",
-        stderr: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusyServiceOp(null);
-    }
-  };
+  const serviceOutput = service.lastResult
+    ? {
+        ok: service.lastResult.ok && service.lastResult.exitCode === 0,
+        operation: service.lastResult.operation,
+        exitCode: service.lastResult.exitCode,
+        stdout: service.lastResult.stdout,
+        stderr: service.lastResult.stderr,
+      }
+    : service.error
+      ? {
+          ok: false,
+          operation: "up" as const,
+          exitCode: 1,
+          stdout: "",
+          stderr: service.error,
+        }
+      : null;
 
   const runShioriMutation = async (payload: Record<string, unknown>, successMsg: string) => {
     if (busyAction) return;
@@ -1049,7 +1134,7 @@ function ServicesAndShioriPanel({
             <div className="flex shrink-0 flex-wrap items-center gap-2">
               <Button type="button" variant="secondary" size="sm" onClick={onOpenBaseware}>
                 <HardDrive className="size-3.5" aria-hidden="true" />
-                {isZh ? "管理受控节点 (Baseware)" : "Manage Machines (Baseware)"}
+                {t("servicesSection.manageBaseware")}
               </Button>
               <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
                 <RefreshCw className="size-3.5" aria-hidden="true" />
@@ -1111,28 +1196,28 @@ function ServicesAndShioriPanel({
                 {
                   key: "up" as const,
                   label: t("servicesSection.cmdUp"),
-                  runLabel: isZh ? "立即启动" : "Run Up",
+                  runLabel: t("servicesSection.runUp"),
                   icon: Play,
                   cmd: upCmd,
                 },
                 {
                   key: "reload" as const,
                   label: t("servicesSection.cmdReload"),
-                  runLabel: isZh ? "立即重载" : "Reload",
+                  runLabel: t("servicesSection.runReload"),
                   icon: RotateCcw,
                   cmd: reloadCmd,
                 },
                 {
                   key: "down" as const,
                   label: t("servicesSection.cmdDown"),
-                  runLabel: isZh ? "立即停止" : "Stop",
+                  runLabel: t("servicesSection.runDown"),
                   icon: Square,
                   cmd: downCmd,
                 },
               ]
             ).map(item => {
               const Icon = item.icon;
-              const isRunningOp = busyServiceOp === item.key;
+              const isRunningOp = service.pendingOperation === item.key;
               return (
                 <div
                   key={item.key}
@@ -1148,8 +1233,8 @@ function ServicesAndShioriPanel({
                         type="button"
                         size="xs"
                         variant={item.key === "up" ? "default" : "secondary"}
-                        disabled={busyServiceOp !== null}
-                        onClick={() => void runServiceControl(item.key)}
+                        disabled={service.busy}
+                        onClick={() => void service.runOperation(item.key)}
                         data-studio-service-action={item.key}
                       >
                         {isRunningOp ? (
@@ -1157,7 +1242,7 @@ function ServicesAndShioriPanel({
                         ) : (
                           <Icon className="size-3" aria-hidden="true" />
                         )}
-                        {isRunningOp ? (isZh ? "执行中…" : "Running…") : item.runLabel}
+                        {isRunningOp ? t("servicesSection.runningOp") : item.runLabel}
                       </Button>
                       <Button
                         type="button"
@@ -1191,16 +1276,14 @@ function ServicesAndShioriPanel({
               <div className="flex items-center justify-between gap-2 font-medium">
                 <span>
                   {serviceOutput.ok
-                    ? isZh
-                      ? `已执行 ludens ${serviceOutput.operation} (exit 0)`
-                      : `Executed ludens ${serviceOutput.operation} (exit 0)`
-                    : isZh
-                      ? `执行 ludens ${serviceOutput.operation} 失败 (exit ${serviceOutput.exitCode})`
-                      : `Failed ludens ${serviceOutput.operation} (exit ${serviceOutput.exitCode})`}
+                    ? t("servicesSection.execSuccess").replace("{operation}", serviceOutput.operation)
+                    : t("servicesSection.execFailed")
+                        .replace("{operation}", serviceOutput.operation)
+                        .replace("{code}", String(serviceOutput.exitCode))}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setServiceOutput(null)}
+                  onClick={() => service.clearResult()}
                   className="text-muted-foreground hover:text-foreground"
                 >
                   ×

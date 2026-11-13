@@ -4,8 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, readFile, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve, join } from "node:path";
-import { DashboardWorker } from "../lib/dashboard-worker";
-import { errorResponse } from "../lib/local-request";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 
 const file = resolve("tests/fixtures/dashboard-worker.mjs");
 
@@ -18,9 +17,9 @@ test("worker routes concurrent replies and forwards preparation status without r
     ]);
     assert.equal(slow, "slow"); assert.equal(fast, "fast"); assert.equal(worker.pendingCount, 0);
     const error = await worker.call("petConsumer", [{ error: true }]).then(() => assert.fail("expected preparation"), error => error);
-    const response = errorResponse(error);
-    assert.equal(response.status, 202); assert.equal(response.headers.get("Retry-After"), "1");
-    assert.deepEqual(await response.json(), { error: "preparing", code: "ARCHIVE_PREPARING", progress: { read: 100, total: 1000 } });
+    assert.equal(error.status, 202);
+    assert.equal(error.code, "ARCHIVE_PREPARING");
+    assert.deepEqual(error.progress, { read: 100, total: 1000 });
   } finally { await worker.close(); }
 });
 

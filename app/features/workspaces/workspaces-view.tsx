@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, CheckCircle2, Copy, Folder, FolderOpen, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, Copy, Folder, FolderOpen, Play, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,83 @@ import type { WorkspaceCreationIntent } from "@/features/workspaces/workspace-cr
 import type { CreateWorkspaceInput, WorkspaceRootResult, WorkspaceRemovalResult, WorkspaceSettings } from "@/lib/workspaces";
 import type { WorkspaceRegistration } from "@ludens/protocol/ludens";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { useRetryFocus } from "@/components/use-retry-focus";
+
+function WorkspaceInlineStartButton({
+  workspaceId,
+  label,
+  busyLabel,
+  variant = "default",
+  disabled,
+  fallbackError,
+  onStarted,
+}: {
+  workspaceId: string;
+  label: string;
+  busyLabel: string;
+  variant?: "default" | "secondary" | "outline";
+  disabled?: boolean;
+  fallbackError: string;
+  onStarted: () => void;
+}) {
+  const service = useWorkspaceService({
+    workspaceId,
+    fallbackError,
+    onSuccess: () => onStarted(),
+  });
+  const starting = service.pendingOperation === "up";
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={variant}
+      disabled={disabled || service.busy}
+      onClick={() => void service.startWorkspace()}
+      data-workspace-start={workspaceId}
+    >
+      {starting ? (
+        <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+      ) : (
+        <Play className="size-3.5 fill-current" aria-hidden="true" />
+      )}
+      {starting ? busyLabel : label}
+    </Button>
+  );
+}
+
+function WorkspaceInlineServiceError({
+  workspaceId,
+  title,
+  dismissLabel,
+}: {
+  workspaceId: string;
+  title: string;
+  dismissLabel: string;
+}) {
+  const service = useWorkspaceService({ workspaceId });
+  if (!service.error) return null;
+  return (
+    <Alert variant="destructive" className="mt-3" data-workspace-service-error={workspaceId}>
+      <AlertTitle className="flex items-center justify-between gap-2 text-xs">
+        <span>{title}</span>
+        <button
+          type="button"
+          aria-label={dismissLabel}
+          onClick={service.clearError}
+          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </button>
+      </AlertTitle>
+      <AlertDescription>
+        <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-background/80 p-2 font-mono text-[11px] text-foreground">
+          {service.error}
+        </pre>
+      </AlertDescription>
+    </Alert>
+  );
+}
 
 type DialogKind = "create" | "register" | "root";
 type Completion = { kind: "created" | "registered"; entry: WorkspaceRegistration };
@@ -240,10 +316,27 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="break-all font-mono text-xs text-muted-foreground">{completion.entry.workspace}</p>
-            <div className="flex flex-wrap gap-2"><Button type="button" size="sm" onClick={() => onOpen(completion.entry.id)}>{t("openWorkspace")}<ArrowRight /></Button>
+            <div className="flex flex-wrap gap-2">
+              <WorkspaceInlineStartButton
+                workspaceId={completion.entry.id}
+                label={t("startAndOpen")}
+                busyLabel={t("startingWorkspace")}
+                disabled={!!pending}
+                fallbackError={t("operationFailed")}
+                onStarted={() => {
+                  onChanged();
+                  onOpen(completion.entry.id);
+                }}
+              />
+              <Button type="button" size="sm" variant="outline" onClick={() => onOpen(completion.entry.id)}>{t("openWorkspace")}<ArrowRight /></Button>
               <Button type="button" size="sm" variant="outline" onClick={() => void copyCommand()}>{copied === "done" ? <Check /> : <Copy />}{copied === "done" ? t("copied") : t("copyStart")}</Button>
               <Button asChild size="sm" variant="ghost"><a href={`?view=docs&doc=tutorials%2Fquickstart&docLang=${locale}`}>{t("setupGuide")}</a></Button>
             </div>
+            <WorkspaceInlineServiceError
+              workspaceId={completion.entry.id}
+              title={t("serviceFailedTitle")}
+              dismissLabel={t("dismiss")}
+            />
             {copied === "error" && <p role="alert" className="text-xs text-destructive">{t("copyFailed")}</p>}
             <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t("viewCommand")}</summary><code className="mt-2 block select-all break-all rounded-md bg-background p-3">{command}</code></details>
           </CardContent>
@@ -296,6 +389,20 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                         </div>
                         <Badge variant="outline" className={entry.available ? "border-success/25 bg-success/5 text-success" : "text-muted-foreground"}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{entry.available ? t("available") : t("unavailable")}</Badge>
                         <div className="flex w-full flex-wrap items-center gap-2 min-[1200px]:w-auto">
+                          {entry.available && (
+                            <WorkspaceInlineStartButton
+                              workspaceId={entry.id}
+                              label={t("startWorkspace")}
+                              busyLabel={t("startingWorkspace")}
+                              variant="secondary"
+                              disabled={!!pending}
+                              fallbackError={t("operationFailed")}
+                              onStarted={() => {
+                                onChanged();
+                                onOpen(entry.id);
+                              }}
+                            />
+                          )}
                           <Button type="button" variant="outline" size="sm" disabled={!!pending || !entry.available} onClick={() => onOpen(entry.id)}>{t("open")}<ArrowRight /></Button>
                           {onConfigure && entry.available && (
                             <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => onConfigure(entry.id)}>{t("configure")}</Button>
@@ -308,6 +415,11 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                           })}>{pending === entry.id ? t("removing") : t("remove")}</Button>
                         </div>
                       </div>
+                      <WorkspaceInlineServiceError
+                        workspaceId={entry.id}
+                        title={t("serviceFailedTitle")}
+                        dismissLabel={t("dismiss")}
+                      />
                       {!entry.available && <p className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed text-muted-foreground">{t("unavailableHint")}</p>}
                     </li>;
                   })}
