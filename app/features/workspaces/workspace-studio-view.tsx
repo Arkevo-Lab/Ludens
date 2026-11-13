@@ -1275,7 +1275,7 @@ const SERVICE_ROWS: Array<{ name: "host" | "baseware" | "emulator"; label: strin
   { name: "emulator", label: "Emulator" },
 ];
 
-function ServicesAndShioriPanel({
+export function ServicesAndShioriPanel({
   studio,
   isZh,
   onRefresh,

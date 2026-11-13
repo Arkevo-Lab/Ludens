@@ -30,12 +30,20 @@ import type { PetFollow } from "@/features/pet/pet-follow";
 
 type SettingsCategoryId = "general" | "defaults" | "transport" | "pet";
 
-export function SettingsView({ follow, projects }: { follow: PetFollow; projects: Project[] }) {
+export function SettingsView({
+  follow,
+  projects,
+  initialCategory = "general",
+}: {
+  follow: PetFollow;
+  projects: Project[];
+  initialCategory?: SettingsCategoryId;
+}) {
   const { locale, setLocale } = useLocale();
   const t = useTranslations("settings");
   const vt = useTranslations("views.settings");
   const languageId = useId();
-  const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>("general");
+  const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(initialCategory);
 
   const categories: SettingsCategoryItem[] = [
     { id: "general", label: t("categories.general"), icon: <Monitor aria-hidden="true" className="size-4" /> },

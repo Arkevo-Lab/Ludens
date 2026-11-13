@@ -227,7 +227,8 @@ export function ConnectionSettings({
     }
   };
 
-  const command = !isGlobal && workspaceMeta ? reloadWorkspaceHostCommand(workspaceMeta.workspace) : "";
+  const resolvedWorkspacePath = !isGlobal ? (workspaceMeta?.workspace ?? workspaceProject?.workspace ?? null) : null;
+  const command = resolvedWorkspacePath ? reloadWorkspaceHostCommand(resolvedWorkspacePath) : "";
   const orderedChoices: ImageUrlBackend[] = [
     ...activeBackends,
     ...IMAGE_URL_BACKENDS.filter(id => !activeBackends.includes(id)),
@@ -552,7 +553,7 @@ export function ConnectionSettings({
         }
       />
 
-      {!isGlobal && workspaceMeta && (
+      {!isGlobal && resolvedWorkspacePath && (
         <AdvancedDiagnosticsDisclosure summary={t("advancedCliTitle")}>
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">{t("applyHint")}</p>
