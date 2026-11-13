@@ -542,8 +542,31 @@
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.codex-expand-all-btn {
+.codex-expand-all-btn,
+.codex-follow-toggle-btn {
   border-color: color-mix(in srgb, var(--border) 75%, transparent);
+}
+.codex-follow-toggle-btn[data-active] {
+  color: var(--foreground);
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  background: color-mix(in srgb, var(--primary) 8%, var(--surface-inset, var(--muted)));
+}
+.codex-follow-toggle-btn[data-paused] {
+  border-color: color-mix(in srgb, #d97706 36%, var(--border));
+  color: color-mix(in srgb, #f59e0b 85%, var(--foreground));
+}
+.codex-follow-unread-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 16px;
+  padding: 0 4.5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--gold) 22%, transparent);
+  color: var(--gold);
+  font: 600 10.5px/1 var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 .codex-dock-toggle-btn {
   padding: 0 7px;
@@ -572,6 +595,7 @@
   flex: 1 1 0%;
   min-height: 0;
   overflow-y: auto;
+  overflow-anchor: none;
   overscroll-behavior: contain;
   padding: 26px 28px 24px;
 }
@@ -1008,24 +1032,51 @@
   border-color: var(--primary);
 }
 
-/* Floating Scroll-to-Bottom Circle Button (anchored inside .codex-chat-scroll-stage above .codex-composer-wrap) */
-.codex-scroll-bottom-btn {
+/* Floating Follow-Latest / Unread Activity Pill (anchored inside .codex-chat-scroll-stage above .codex-composer-wrap) */
+.codex-follow-pill {
   position: absolute;
-  bottom: 8px;
+  bottom: 10px;
   left: 50%;
   transform: translateX(-50%);
-  width: 34px;
-  height: 34px;
+  height: 32px;
+  padding: 0 13px;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--card);
+  border: 1px solid color-mix(in srgb, var(--border) 88%, rgba(255, 255, 255, 0.08));
+  background: color-mix(in srgb, var(--card) 92%, transparent);
+  backdrop-filter: blur(10px);
   color: var(--foreground);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+  gap: 7px;
+  font-size: 12.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.34);
   cursor: pointer;
-  z-index: 10;
+  z-index: 12;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease;
+}
+.codex-follow-pill:hover {
+  border-color: color-mix(in srgb, var(--primary) 50%, var(--border));
+  background: var(--card);
+  transform: translateX(-50%) translateY(-1px);
+}
+.codex-follow-pill[data-has-unread="true"] {
+  border-color: color-mix(in srgb, var(--gold) 52%, var(--border));
+  background: color-mix(in srgb, var(--gold) 12%, var(--card));
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(255, 79, 31, 0.14);
+}
+.codex-follow-pill[data-has-unread="true"]:hover {
+  background: color-mix(in srgb, var(--gold) 18%, var(--card));
+  border-color: var(--gold);
+}
+.codex-follow-pill-dot {
+  flex-shrink: 0;
+}
+.codex-follow-pill-text {
+  line-height: 1;
 }
 
 /* ── Bottom Floating Rounded Pill Composer (ChatGPT / Codex style) ── */
@@ -2758,10 +2809,12 @@
 }
 
 @media (max-width: 1199px) {
-  .codex-expand-all-label {
+  .codex-expand-all-label,
+  .codex-follow-toggle-label {
     display: none;
   }
-  .codex-expand-all-btn {
+  .codex-expand-all-btn,
+  .codex-follow-toggle-btn {
     padding: 0 7px;
   }
 }
