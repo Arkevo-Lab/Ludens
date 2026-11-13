@@ -1,6 +1,6 @@
 # 安装与工作区启停
 
-本篇介绍如何安装 Ludens 各组件、配置 Python 运行时、启动一等 **Ludens 桌面端**或统一 `ludens app-server`，以及在界面内或通过 `ludens init / up / auto / down` 管理工作区的日常生命周期。模拟器与桌面驱动的具体准备步骤见 [设备与驱动准备](devices.md)，单组件前台调试、包脚本约定与测试见 [控制台调试与验证](debugging-and-verification.md)。
+本篇介绍如何安装 Ludens 各组件、配置 Python 运行时、启动一等 **Ludens 桌面端（Desktop UI）** 或统一 **App Daemon**（`ludens app-server`），以及在界面内按需拉起或通过 `ludens init / up / auto / down` 管理工作区 **Core** 的日常生命周期。模拟器与桌面驱动的具体准备步骤见 [设备与驱动准备](devices.md)，单组件前台调试、包脚本约定与测试见 [控制台调试与验证](debugging-and-verification.md)。
 
 除显式 `cd` 到目标工作区外，文内命令均在仓库根目录执行。应用全局目录默认为 `~/.ludens`，可通过 `LUDENS_HOME` 指定绝对路径；工作区可以放在任意目录，配置、会话、录制与历史均随工作区保存。源码仓库不承载运行状态；ROM、固件、密钥与游戏存档也应保存在仓库外。
 
@@ -38,11 +38,11 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 
 OMP 原生 shell 会自动注入 `LUDENS_PYTHON`。在工作区脚本中若需复用 `ludens_tools` 及框架依赖，应调用 `"$LUDENS_PYTHON" script.py`；直接运行裸 `python3` 仍遵循用户 login shell，不等同于框架虚拟环境。若将 `LUDENS_PYTHON` 指向外部训练环境（如包含 PyTorch 的 conda/venv），需在该环境中预先安装 `core/python` 包及其依赖。
 
-`ludens up` 与界面内启动工作区新建后台服务时会保留宿主环境中的 `LUDENS_PYTHON`。若服务已经运行，修改终端环境不会更新它；需停止并重新启动相关服务后才会使用新解释器。完成以上安装（及下方桌面应用／桌宠构建）后，若尚未准备目标模拟器或桌面驱动，请先转入 [设备与驱动准备](devices.md)，准备就绪后再回到本页执行 [工作区启动与停止](#工作区启动与停止)。
+`ludens up` 与界面内拉起工作区 Core 新建后台服务时会保留当前 Shell 环境中的 `LUDENS_PYTHON`。若服务已经运行，修改终端环境不会更新它；需停止并重新启动相关服务后才会使用新解释器。完成以上安装（及下方桌面应用／桌宠构建）后，若尚未准备目标模拟器或桌面驱动，请先转入 [设备与驱动准备](devices.md)，准备就绪后再回到本页执行 [工作区启动与停止](#工作区启动与停止)。
 
 ## 可选桌宠
 
-仅需网页访问时，通过 `ludens app-server` 在浏览器中打开控制台即可，无需安装 Electron。若希望使用自包含的一等 **Ludens 桌面端**（主控制台窗口 + 系统托盘 + **Ludens Pet** 桌面伴侣），在仓库根目录构建 Electron 桌面外壳（亦可通过 `desktop:dist` 打包可分发的 macOS `.dmg` 或 Windows NSIS `.exe` 安装包）：
+仅需网页访问时，通过 `ludens app-server` 在浏览器中打开控制台即可，无需安装 Electron。若希望使用自包含的一等 **Ludens 桌面端（Desktop UI）**（主控制台窗口 + 系统托盘 + **Ludens Pet** 桌面伴侣），在仓库根目录构建 Electron 桌面外壳（亦可通过 `desktop:dist` 打包可分发的 macOS `.dmg` 或 Windows NSIS `.exe` 安装包）：
 
 ```sh
 (cd app && npm run desktop:build)
@@ -52,9 +52,9 @@ app/bin/ludens-app --show-window
 (cd app && npm run desktop:dist)
 ```
 
-在未显式传入 `--dashboard <url>` 时，`ludens-app` 作为一等独立宿主运行：它会自动在后台拉起并监管 `ludens app-server --port 0 --parent-watchdog`，无需预先打开终端或执行 `ludens up` 即可直接在应用界面内新建、配置并一键**启动 / 重载 / 停止**工作区。点击主窗口关闭按钮（`×`）仅隐藏至系统托盘并保持 **Ludens Pet** 与运行中工作区在线；显式执行退出（`⌘Q` 或托盘 **Quit**）则会干净终止 `ludens app-server` 及其监管的全部游戏 AI 子进程（`--parent-watchdog` 同时监听父进程 `stdin` EOF，即使宿主异常退出也不会遗留孤儿进程）。
+在未显式传入 `--dashboard <url>` 时，`ludens-app` 会自动在后台拉起并监管 **App Daemon**（`ludens app-server --port 0 --parent-watchdog`），由 App Daemon 按 **1 Workspace = 1 Core** 并发管理多个工作区的 Core 与 Baseware。用户无需预先打开终端或执行 `ludens up`：在应用界面内打开任意工作区（包括 0-Run 空工作区）即可零门槛进入 Live，在输入框直接发送目标消息或点击 `▶` 即自动按需拉起该工作区的 **Core + Baseware**；暂停（`auto off`）后 Core 保持 **Warm Standby** 常驻待命。侧栏「活跃 Core」列表实时展示所有在线 Core 的 `App` / `CLI` 启动来源与单点停止按钮（`■`）；点击主窗口关闭按钮（`×`）仅隐藏至系统托盘并保持 **Ludens Pet** 与全部运行中 Core 在线；显式执行退出（`⌘Q` 或托盘 **Quit**）则会关闭 `App Daemon` 并**仅回收由当前 App 实例拉起的 Core（`launchedBy: "app"`）**，由终端拉起的 `CLI` headless Core（`launchedBy: "cli"`）保持继续运行（`--parent-watchdog` 同时监听父进程 `stdin` EOF，即使桌面外壳异常退出也不会遗留属于 App 的孤儿进程）。
 
-若通过无头 CLI 编排工作区，可在 `ludens init --name <name> --driver ...` 中追加 `--pet` 或在 `ludens.json` 设置 `"pet": true`，让 `ludens up` 按需拉起共享桌面伴侣并连接本地 `app-server`。也可用互斥的 `ludens up --pet` 或 `ludens up --no-pet` 仅覆盖当次启动而不写回 `ludens.json`（`pet: false` 与 `--no-pet` 均不会关闭已运行的桌面端，需从托盘菜单选择 Quit 退出）。单独启动参数或桌宠冒烟测试见 [Ludens Pet 桌面伴侣](debugging-and-verification.md#3-ludens-pet-桌面伴侣)。
+**Ludens Pet** 桌宠默认启用 **`!auto` 多 Core 自动跟随模式**，在多个并发 Core 之间优先跳转存在待响应 `🆘` 出站求助（`pendingOutbound > 0`）的工作区，其次跟随当前窗口焦点工作区的在线 Core 或后台活跃 `Auto` Core；所有 Core 停止时进入待命。若通过无头 CLI 编排工作区，可在 `ludens init --name <name> --driver ...` 中追加 `--pet` 或在 `ludens.json` 设置 `"pet": true`，让 `ludens up` 按需拉起共享桌面伴侣并连接本地 App Daemon。也可用互斥的 `ludens up --pet` 或 `ludens up --no-pet` 仅覆盖当次启动而不写回 `ludens.json`（`pet: false` 与 `--no-pet` 均不会关闭已运行的桌面端，需从托盘菜单选择 Quit 退出）。单独启动参数或桌宠冒烟测试见 [Ludens Pet 桌面伴侣](debugging-and-verification.md#3-ludens-pet-桌面伴侣)。
 
 ## 工作区启动与停止
 
@@ -84,16 +84,16 @@ ludens auto on
 | `ludens config [show]` · `ludens config set <workspaceRoot\|defaults.field> <value>` | 查看全局配置，或设置未来工作区的父目录及默认配置。 |
 | `ludens workspace open <path>` · `ludens workspace list` | 登记已有工作区，或列出当前全局 home 的登记项。 |
 | `ludens workspace forget <id>` | 只移除索引；不删目录、会话或日志，不停止服务。 |
-| `ludens app-server [--port <n>] [--host <addr>] [--static-dir <dir>] [--parent-watchdog]` | 启动统一的 `@ludens/core` 本地服务（别名 `ludens serve`，默认 `127.0.0.1:3015`），在同一进程内承载 `/api/*`、`WorkspaceSupervisor` 与静态控制台构建产物（`app/out`）；传 `--port 0` 分配临时端口，传 `--parent-watchdog` 在父进程 `stdin` 关闭时自动退出并回收受监管子进程。 |
+| `ludens app-server [--port <n>] [--host <addr>] [--static-dir <dir>] [--parent-watchdog]` | 启动统一的多工作区 **App Daemon**（别名 `ludens serve`，默认 `127.0.0.1:3015`），在同一进程内承载 `/api/*`、`WorkspaceSupervisor`（管理多 Core 并发、设备冲突仲裁与 `launchedBy` 边界）与静态控制台构建产物（`app/out`）；传 `--port 0` 分配临时端口，传 `--parent-watchdog` 在父进程 `stdin` 关闭时自动退出并仅回收由该 App 实例拉起的 Core。 |
 | `ludens up --dry-run` | 校验配置并打印完整进程启动计划，不实际拉起服务；需要新启动 `app-server` 时，实际 `ludens up` 才执行静态构建检查。 |
-| `ludens up [--pet / --no-pet]` | 通过纯 TS `WorkspaceSupervisor` 按需启动或复用模拟器、Baseware、Host 与 `ludens app-server`；按 `pet` 设置启用桌宠，也可用互斥的 `--pet` / `--no-pet` 仅覆盖本次启动，不写回配置。新启动的 Host 处于 `manual` 模式；若复用已在 `auto` 运行的 Host 则继续原控制周期。重复 `up` 不会热加载修改后的 `ludens.json`，复用现有 `app-server` 也不会热更新其静态前端产物。 |
+| `ludens up [--pet / --no-pet]` | 通过纯 TS `WorkspaceSupervisor` 以 `CLI` 来源（`launchedBy: "cli"`）按需启动或复用模拟器、Baseware、工作区 **Core**（`ludens run`）与 App Daemon（`ludens app-server`）；按 `pet` 设置启用桌宠，也可用互斥的 `--pet` / `--no-pet` 仅覆盖本次启动，不写回配置。新启动的 Core 处于 `manual`（Warm Standby）模式；若复用已在 `auto` 运行的 Core 则继续原控制周期。不同设备/端口的工作区可同时运行；若同物理设备被处于 Warm Standby 的 Core 占用则自动让位，被活跃 `Auto` Core 占用则会返回冲突。CLI 拉起的 Core 不会在桌面 App 退出时被回收。重复 `up` 不会热加载修改后的 `ludens.json`，复用现有 `app-server` 也不会热更新其静态前端产物。 |
 | `ludens services` | 查询当前工作区关联的后台受管任务 PID、状态与最近退出码。 |
 | `ludens auto on [--message '文本'] [--seconds <n>]` | 开启新控制周期（生成新 `epoch`，重置请求预算）并向模型发起推理。省略 `--seconds <n>` 时默认不设时间上限、持续运行直到手动执行 `auto off`；显式传入 `--seconds <n>` 时按指定秒数限时运行。`--message` 仅在该次接管的首轮附加一次，后续续轮不重复注入。 |
 | `ludens auto timer <seconds\|off>` | 在不新开 `epoch`、不释放设备控制权的前提下，就地设置、顺延或清除（`off`）当前活动周期的自动停止倒计时。 |
-| `ludens auto off` | 立即撤销设备操作权并取消 Ludens 管理的在途调用，模拟器保持运行；需等待当前周期清理完毕后方可再次 `auto on`。 |
-| `ludens model [<provider/id> [--service-tier none\|priority\|ultrafast] [--effort none\|minimal\|low\|medium\|high\|xhigh\|max]]` | 不带参数时打印当前工作区 Host 生效的 OMP `provider/id` 模型（`--device-only` 模式下为 `none`），`ludens status` 报告实际生效的服务档位与推理强度；传入 `<provider/id>` 时校验已鉴权且具备图像输入能力的 OMP 模型，并**仅在 `manual` 暂停模式下**就地更新当前会话（`auto` 自动运行、`consolidate` 记忆整理期间或携带 `BASEWARE_EPOCH` 的智能体周期内均会拒绝）。追加 `--service-tier none\|priority\|ultrafast` 可选择 Standard（清除 `serviceTier`）、Fast（`priority`）或 Ultra（`ultrafast`），追加 `--effort none\|minimal\|low\|medium\|high\|xhigh\|max` 可覆盖或重置（`none`）推理强度；模型不支持的档位或强度会自动回退至 Standard / 模型原生默认强度。Fast/Ultra 为付费加速档位，可能增加用量费用。跨 Host 重启保留配置请同步更新 `ludens.json`（或通过控制台 `ModelPickerDialog` 切换）。 |
-| `ludens down --keep-emulator` | 交还控制权并停止 Host 与 Baseware，保留模拟器窗口与游戏现场；适合修改 `ludens.json`（如预算或传输参数）后重新 `ludens up`。 |
-| `ludens down [--dashboard] [--pet]` | 停止本工作区受管的 Host、Baseware 与模拟器（**执行前请先在游戏内保存进度**）。默认保留共享的 Dashboard 与已运行的 Ludens Pet；附加 `--dashboard`（仅限启动它的工作区）或 `--pet` 可一并关闭对应共享服务。 |
+| `ludens auto off` | 立即撤销设备操作权并取消 Ludens 管理的在途调用，Core 保持 **Warm Standby**（`manual`）常驻待命且模拟器保持运行；需等待当前周期清理完毕后方可再次 `auto on`。 |
+| `ludens model [<provider/id> [--service-tier none\|priority\|ultrafast] [--effort none\|minimal\|low\|medium\|high\|xhigh\|max]]` | 不带参数时打印当前工作区 Core 生效的 OMP `provider/id` 模型（`--device-only` 模式下为 `none`），`ludens status` 报告实际生效的服务档位与推理强度；传入 `<provider/id>` 时校验已鉴权且具备图像输入能力的 OMP 模型，并**仅在 `manual` 暂停模式下**就地更新当前会话（`auto` 自动运行、`consolidate` 记忆整理期间或携带 `BASEWARE_EPOCH` 的智能体周期内均会拒绝）。追加 `--service-tier none\|priority\|ultrafast` 可选择 Standard（清除 `serviceTier`）、Fast（`priority`）或 Ultra（`ultrafast`），追加 `--effort none\|minimal\|low\|medium\|high\|xhigh\|max` 可覆盖或重置（`none`）推理强度；模型不支持的档位或强度会自动回退至 Standard / 模型原生默认强度。Fast/Ultra 为付费加速档位，可能增加用量费用。跨 Core 重启保留配置请同步更新 `ludens.json`（或通过控制台 `ModelPickerDialog` 切换）。 |
+| `ludens down --keep-emulator` | 交还控制权并停止 Core 与 Baseware，保留模拟器窗口与游戏现场；适合修改 `ludens.json`（如预算或传输参数）后重新拉起 Core。 |
+| `ludens down [--dashboard] [--pet]` | 停止本工作区受管的 Core、Baseware 与模拟器（**执行前请先在游戏内保存进度**）。默认保留共享的 App Daemon（Dashboard）与已运行的 Ludens Pet；附加 `--dashboard`（仅限启动它的工作区）或 `--pet` 可一并关闭对应共享服务。 |
 
 跨目录操作工作区时，可在任意命令前传入 `ludens --workspace /absolute/path/to/workspace <subcommand>` 或设置环境变量 `LUDENS_WORKSPACE`。
 
@@ -121,7 +121,7 @@ Dashboard 的“工作区”页提供创建（可选目录）、登记已有目�
 
 - **重新登记**：已有 `.ludens/workspace.json` 的工作区执行 `ludens workspace open <path>`。全局 registry 只保存 `{id, workspace, name, updatedAt}`，丢失后可逐个 `open` 重建，不影响工作区内的历史。
 - **移动目录**：先停止该工作区的受管服务，搬动完整目录，再 `ludens workspace open /new/path` 更新索引。持久 ID 不变；不要让原目录和副本同时使用同一 ID。
-- **复制成独立实验**：先停止副本目录对应的 Host 与 Baseware，再执行 `ludens workspace open /path/to/copy --new-id`，分配新 ID 并清除当前会话续接选择，保留历史会话与录制。身份文件的 `historyIds` 记录可读取的旧身份，历史记录不会用于连接原工作区的活跃 Host；原工作区不变。
+- **复制成独立实验**：先停止副本目录对应的 Core 与 Baseware，再执行 `ludens workspace open /path/to/copy --new-id`，分配新 ID 并清除当前会话续接选择，保留历史会话与录制。身份文件的 `historyIds` 记录可读取的旧身份，历史记录不会用于连接原工作区的活跃 Core；原工作区不变。
 - **导入旧布局**：显式执行下面的 `import`。`--legacy-state` 指向原来的 `artifacts/rsa/ws-...` 状态目录；若目录已搬动，用 `--previous-workspace` 提供旧的绝对工作区路径。导入负责将旧外部状态纳入新布局；日常运行不隐式读取旧缓存或旧注册目录。
 
 ```sh
@@ -158,5 +158,5 @@ ludens workspace import /absolute/path/to/workspace \
 
 ### 3. 会话续接与后台服务目录
 
-- **会话续接**：工作区 OMP 会话保存在 `.ludens/shiori/sessions/`，当前默认续接指针位于 `.ludens/shiori/current-session.json`。重启 Host 默认续接原会话并开启新的 `logs/<run-id>/` 目录。前台 `ludens run` 可传 `--new-session` 开启全新上下文（保留工作区文件），或传 `--resume /absolute/path/to/session.jsonl` 切换到同工作区的指定历史会话。
-- **后台服务日志**：[core/src/daemon/](../../../core/src/daemon/) 中的纯 TypeScript 跨平台监管器将工作区受管进程的标准输出（`<name>.log`）与后台任务状态（`<name>.job.json`，不再依赖 Python 后台启动脚本）写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（任务标识 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。通过无头 CLI 拉起的后台服务脱离终端运行（不注册开机自启或崩溃死循环重启），而由桌面端 `ludens-app`（`--parent-watchdog`）监管的服务则会在应用退出时被干净回收；排障时先查看 `ludens services`（或控制台**配置与服务 → 后台服务与会话**）及对应日志。
+- **会话续接**：工作区 OMP 会话保存在 `.ludens/shiori/sessions/`，当前默认续接指针位于 `.ludens/shiori/current-session.json`。重启 Core 默认续接原会话并开启新的 `logs/<run-id>/` 目录。前台 `ludens run` 可传 `--new-session` 开启全新上下文（保留工作区文件），或传 `--resume /absolute/path/to/session.jsonl` 切换到同工作区的指定历史会话。
+- **后台服务日志**：[core/src/daemon/](../../../core/src/daemon/) 中的纯 TypeScript 跨平台监管器将工作区受管进程的标准输出（`<name>.log`）与后台任务状态（`<name>.job.json`，不再依赖 Python 后台启动脚本）写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（任务标识 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。通过无头 CLI 拉起的后台 Core（`launchedBy: "cli"`）脱离终端运行且在桌面 App 退出时保持存活（不注册开机自启或崩溃死循环重启），而由桌面端 `ludens-app` 经 App Daemon 按需或手动拉起的 Core（`launchedBy: "app"`）会在应用退出时被干净回收；排障时先查看 `ludens services`（或控制台**配置与服务 → 后台服务与会话**）及对应日志。
