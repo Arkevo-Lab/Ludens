@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
-import { MenuIcon, XIcon } from "lucide-react";
+import { MenuIcon, PanelLeftClose, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import { useLocale, useTranslations } from "@/lib/locale";
@@ -75,6 +75,10 @@ export function ConsoleSidebar({
   mobileOpen,
   onMobileOpenChange,
   mobileTriggerRef,
+  collapsed = false,
+  onToggleCollapse,
+  collapseShortcut,
+  desktopChrome = false,
 }: {
   view: ConsoleView;
   viewLink(view: ConsoleView): string;
@@ -83,10 +87,15 @@ export function ConsoleSidebar({
   mobileOpen?: boolean;
   onMobileOpenChange?(open: boolean): void;
   mobileTriggerRef?: RefObject<HTMLButtonElement | null>;
+  collapsed?: boolean;
+  onToggleCollapse?(): void;
+  collapseShortcut?: string;
+  desktopChrome?: boolean;
 }) {
   const { t } = useLocale();
   const dt = useTranslations("dashboard");
   const st = useTranslations("consoleSidebar");
+  const ct = useTranslations("desktopChrome");
   const id = useId();
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -182,7 +191,7 @@ export function ConsoleSidebar({
     if (area) { observer.observe(area); area.addEventListener("scroll", follow, { passive: true }); }
     if (foot) { observer.observe(foot); }
     return () => { observer.disconnect(); area?.removeEventListener("scroll", follow); };
-  }, [view, expanded]);
+  }, [view, expanded, collapsed]);
   // The brand assembles itself once per browser session. The deadline lives outside the component so a remount
   // or a development double-run of the effect picks the animation up instead of skipping or repeating it.
   useEffect(() => {
@@ -228,22 +237,48 @@ export function ConsoleSidebar({
     }}>
     <NavIcon kind={id} /><span>{t(`nav.${id}`)}</span>
   </a>;
+  const collapseTitle = collapseShortcut
+    ? ct("toggleSidebarHint")
+        .replace("{action}", ct("collapseSidebar"))
+        .replace("{shortcut}", collapseShortcut)
+    : ct("collapseSidebar");
   return <>
     {expanded && <div className="sidebar-backdrop" aria-hidden="true" onClick={closeMenu} />}
-    <aside ref={sidebar} className="sidebar" data-expanded={expanded}>
+    <aside
+      ref={sidebar}
+      className="sidebar"
+      data-expanded={expanded}
+      data-collapsed={collapsed ? "true" : undefined}
+      data-desktop-chrome={desktopChrome ? "true" : undefined}
+    >
       <div className="sidebar-brand-row">
         <a className="brand" href={viewLink("live")} onClick={event => {
           if (!isPlainNavigationClick(event)) return;
           event.preventDefault(); closeMenu(); onNavigate(viewLink("live"));
         }}><PixelMark assemble={assemble} /><span>Ludens</span></a>
-        <div className="sidebar-menu-control">
-          <Button ref={menuButton} type="button" variant="ghost" size="icon-sm" className="sidebar-menu-toggle"
-            aria-expanded={expanded} aria-controls={`${id}-content ${id}-footer`}
-            aria-label={st(expanded ? "menuClose" : "menuOpen")}
-            title={st(expanded ? "menuClose" : "menuOpen")}
-            onClick={() => (expanded ? closeMenu() : setExpanded(true))}>
-            {expanded ? <XIcon aria-hidden="true" /> : <MenuIcon aria-hidden="true" />}
-          </Button>
+        <div className="sidebar-header-controls">
+          {onToggleCollapse && !desktopChrome && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              className="sidebar-collapse-toggle"
+              aria-label={ct("collapseSidebar")}
+              title={collapseTitle}
+              onClick={onToggleCollapse}
+            >
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            </Button>
+          )}
+          <div className="sidebar-menu-control">
+            <Button ref={menuButton} type="button" variant="ghost" size="icon-sm" className="sidebar-menu-toggle"
+              aria-expanded={expanded} aria-controls={`${id}-content ${id}-footer`}
+              aria-label={st(expanded ? "menuClose" : "menuOpen")}
+              title={st(expanded ? "menuClose" : "menuOpen")}
+              onClick={() => (expanded ? closeMenu() : setExpanded(true))}>
+              {expanded ? <XIcon aria-hidden="true" /> : <MenuIcon aria-hidden="true" />}
+            </Button>
+          </div>
         </div>
       </div>
       <i ref={cursor} className="nav-cursor" aria-hidden="true" />

@@ -79,7 +79,7 @@ ludens run --model openai-codex/gpt-6.1-sol --seconds 300 --requests 50
 
 ### 3. Ludens Pet 桌面伴侣
 
-这是可选组件，网页控制台不依赖 Electron。完成 [可选桌宠安装](quickstart.md#可选桌宠) 并启动 Dashboard 后，在仓库根目录运行 `app/bin/app --show-window` 可单独启动桌面端；其主窗口加载同一份 Dashboard 控制台，桌宠角色（卢登斯）与气泡消费同一套增量活动日志。通过 `ludens up` 管理桌宠时，在新工作区的 `ludens init` 命令中追加 `--pet`，或在已有 `ludens.json` 设置 `pet: true`。`ludens up --pet` / `--no-pet` 可临时覆盖配置，两者互斥且不写回文件；`--no-pet` 不会关闭已运行的共享桌宠。
+这是可选组件，网页控制台不依赖 Electron。完成 [可选桌宠安装](quickstart.md#可选桌宠) 并启动 Dashboard 后，在仓库根目录运行 `app/bin/ludens-app --show-window`（Windows 下运行 `app\bin\ludens-app.cmd --show-window`）可单独启动桌面端；主窗口采用 `#090a0d` 无边框 38px 一体化顶栏（macOS `hiddenInset` / Windows `titleBarOverlay` 且移除传统菜单栏），在 `window-state.json` 中持久化窗口位置、最大化与全屏状态，并支持 `Cmd/Ctrl+B`（折叠侧栏）与 `Cmd/Ctrl+K`（快速跳转）。也可在普通浏览器中通过 `?desktopPreview=darwin` 或 `?desktopPreview=win32` 预览桌面端顶栏外观。其主窗口加载同一份 Dashboard 控制台，桌宠角色（卢登斯）与气泡消费同一套增量活动日志。通过 `ludens up` 管理桌宠时，在新工作区的 `ludens init` 命令中追加 `--pet`，或在已有 `ludens.json` 设置 `pet: true`。`ludens up --pet` / `--no-pet` 可临时覆盖配置，两者互斥且不写回文件；`--no-pet` 不会关闭已运行的共享桌宠。
 
 - **工作区跟随**：在工作区页面使用**设为关注目标**，或在设置中选择**已保存的工作区**。选择保存在 `$LUDENS_HOME/pet/target.json`；**桌面端状态**独立显示 Ludens Pet 是否已连接并应用选择。浏览其他工作区或历史记录不会更改此选择。桌宠未连接或目录不可用时，仍会显示已保存的选择。保存响应无法确认时，请先重新读取已保存目标，再进行其他更改；该恢复操作不会重复保存。 心跳保存在 `$LUDENS_HOME/pet/consumer.json`。桌宠使用 `.ludens/workspace.json` 中的稳定 ID，工作区移动并重新登记后仍保留同一身份。
 - **语言与游戏**：设置中的语言同时应用于控制台、原生菜单、桌宠台词、日志控件和游戏。桌宠启动时使用已保存语言或操作系统语言，随后跟随 Dashboard 恢复的偏好。右键桌宠选择**玩一会儿 · 接星星**开始 20 秒一局，接到 10 颗星星即获胜，按 Esc 可退出。主动启动游戏时会聚焦桌宠，从托盘启动也一样，因此可立即按 Esc 退出；普通活动通知不会抢占焦点。实时日志到来时会立即结束本局并接管气泡。最佳成绩仅保留在当前桌宠进程中。

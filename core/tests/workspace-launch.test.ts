@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { chmod, cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { launchPlan, parseConfig, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
+import { launchPlan, parseConfig, petLaunchCommand, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
 import { getDriver } from "@ludens/baseware/drivers/registry.ts";
 import { ensureWorkspaceIdentity, ludensHome, mergeConnectionConfig, registerWorkspace, validateConnectionConfig } from "@ludens/protocol/ludens";
 import { ompSettingsOverrides } from "../src/core/agent-omp/session.ts";
@@ -923,4 +923,26 @@ test("model connection config validates, merges, maps to OMP isolated settings, 
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test("petLaunchCommand uses POSIX launcher on darwin/linux and electron.exe on win32", () => {
+  expect(petLaunchCommand("/repo", "/ws", "darwin")).toEqual([
+    "/repo/app/bin/ludens-app",
+    "--workspace",
+    "/ws",
+    "--show-window",
+  ]);
+  expect(petLaunchCommand("/repo", "/ws", "linux")).toEqual([
+    "/repo/app/bin/ludens-app",
+    "--workspace",
+    "/ws",
+    "--show-window",
+  ]);
+  expect(petLaunchCommand("C:\\repo", "C:\\ws", "win32")).toEqual([
+    join("C:\\repo", "app/node_modules/electron/dist/electron.exe"),
+    join("C:\\repo", "app/dist/electron/main.js"),
+    "--workspace",
+    "C:\\ws",
+    "--show-window",
+  ]);
 });

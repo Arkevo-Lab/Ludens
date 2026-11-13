@@ -64,7 +64,7 @@ export function SettingsView({ follow, projects }: { follow: PetFollow; projects
       <nav
         aria-label={t("sectionsNavLabel")}
         data-settings-jump-nav
-        className="sticky top-0 z-20 flex items-center gap-1.5 overflow-x-auto rounded-lg border border-border/80 bg-background/90 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/75"
+        className="sticky top-[var(--shell-topbar-height,0px)] z-20 flex items-center gap-1.5 overflow-x-auto rounded-lg border border-border/80 bg-background/90 p-1.5 backdrop-blur supports-[backdrop-filter]:bg-background/75"
       >
         {sections.map(section => {
           const Icon = section.icon;

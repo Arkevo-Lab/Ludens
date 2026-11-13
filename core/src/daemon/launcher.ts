@@ -216,9 +216,22 @@ export async function launchPlan(
         "--diagnostics", config.logging.diagnostics,
       ],
       ...(config.dashboard ? { dashboard: ["npm", "--prefix", join(repo, "app"), "run", "start"] } : {}),
-      ...(config.pet ? { pet: [join(repo, "app/bin/ludens-app"), "--workspace", workspace, "--show-window"] } : {}),
+      ...(config.pet ? { pet: petLaunchCommand(repo, workspace) } : {}),
     },
   };
+}
+
+export function petLaunchCommand(repo: string, workspace: string, platform: NodeJS.Platform = process.platform): string[] {
+  if (platform === "win32") {
+    return [
+      join(repo, "app/node_modules/electron/dist/electron.exe"),
+      join(repo, "app/dist/electron/main.js"),
+      "--workspace",
+      workspace,
+      "--show-window",
+    ];
+  }
+  return [join(repo, "app/bin/ludens-app"), "--workspace", workspace, "--show-window"];
 }
 
 type CommandResult = { code: number; stdout: string; stderr: string };

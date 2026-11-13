@@ -50,6 +50,48 @@ export interface DesktopCompanion {
     dismiss(displayId: string): Promise<boolean>;
   };
 }
+export type DesktopPlatform = "darwin" | "win32" | "linux";
+export type DesktopCaptionStyle = "macos" | "win32-overlay" | "custom";
+export type DesktopWindowCommand =
+  | "toggle-sidebar"
+  | "quick-switcher"
+  | "navigate-back"
+  | "navigate-forward";
+
+export interface DesktopWindowInitialState {
+  platform: DesktopPlatform;
+  captionStyle: DesktopCaptionStyle;
+  titlebarHeight: number;
+}
+
+export interface DesktopWindowState extends DesktopWindowInitialState {
+  maximized: boolean;
+  fullScreen: boolean;
+  focused: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+}
+
+export interface DesktopWindowBridge {
+  readonly platform: DesktopPlatform;
+  readonly initialState: DesktopWindowInitialState;
+  getState(): Promise<DesktopWindowState>;
+  onState(callback: (state: DesktopWindowState) => void): () => void;
+  onCommand(callback: (command: DesktopWindowCommand) => void): () => void;
+  minimize(): Promise<void>;
+  toggleMaximize(): Promise<boolean>;
+  close(): Promise<void>;
+  handleTitlebarDoubleClick(): Promise<void>;
+  goBack(): Promise<boolean>;
+  goForward(): Promise<boolean>;
+  reload(): Promise<void>;
+  setOverlayTheme?(options: {
+    color: string;
+    symbolColor: string;
+    height?: number;
+  }): Promise<void>;
+}
+
 export interface DesktopSnapshot {
   workspace: string;
   dashboardUrl: string;
@@ -57,7 +99,10 @@ export interface DesktopSnapshot {
 }
 declare global {
   interface Window {
-    readonly ludens?: { readonly companion?: DesktopCompanion };
+    readonly ludens?: {
+      readonly companion?: DesktopCompanion;
+      readonly window?: DesktopWindowBridge;
+    };
     readonly ludensPet?: {
       getSnapshot(): Promise<DesktopSnapshot>;
       onSnapshot(callback: (snapshot: DesktopSnapshot) => void): () => void;

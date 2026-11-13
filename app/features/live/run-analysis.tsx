@@ -208,7 +208,7 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
     </TabsContent>
 
     <TabsContent value="requests" className="min-h-0">
-      <div className="run-analysis-grid run-analysis-workbench min-[1080px]:h-[calc(100dvh-100px)] min-[1080px]:max-h-[calc(100dvh-100px)] min-[1080px]:grid-rows-[minmax(0,1fr)] min-[1080px]:items-stretch min-[1080px]:overflow-hidden">
+      <div className="run-analysis-grid run-analysis-workbench min-[1080px]:h-[calc(100dvh-100px-var(--shell-topbar-height,0px))] min-[1080px]:max-h-[calc(100dvh-100px-var(--shell-topbar-height,0px))] min-[1080px]:grid-rows-[minmax(0,1fr)] min-[1080px]:items-stretch min-[1080px]:overflow-hidden">
         <section className="surface run-analysis-requests min-[1080px]:flex min-[1080px]:max-h-full min-[1080px]:min-h-0 min-[1080px]:flex-col min-[1080px]:overflow-hidden" aria-labelledby={`${id}-requests`}>
           <div className="surface-heading"><h2 id={`${id}-requests`}>{t("requests")}</h2>
             <Button type="button" variant="ghost" size="xs" onClick={onFollowLatest}>{dt("followLatest")} ↓</Button>
