@@ -309,7 +309,12 @@
 
   .settings-row[data-stacked="true"] {
     flex-direction: column;
+    flex-wrap: nowrap;
     align-items: stretch;
+  }
+
+  .settings-row[data-stacked="true"] > .settings-row-info {
+    flex: 0 0 auto;
   }
 
   .settings-row[data-stacked="true"] > .settings-row-control {
@@ -320,7 +325,12 @@
   @media (max-width: 639px) {
     .settings-row {
       flex-direction: column;
+      flex-wrap: nowrap;
       align-items: stretch;
+    }
+
+    .settings-row-info {
+      flex: 0 0 auto;
     }
 
     .settings-row-control {
