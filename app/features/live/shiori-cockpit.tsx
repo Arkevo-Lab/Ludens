@@ -4,7 +4,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +12,7 @@ import {
 } from "react";
 import {
   ArrowDown,
+  ArrowDownToLine,
   Bot,
   Check,
   ChevronDown,
@@ -63,6 +63,7 @@ import {
   type BuildSegmentsOptions,
   type StreamSegment,
 } from "@/features/live/shiori-segments";
+import { useLiveAutoScroll } from "@/features/live/use-live-auto-scroll";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
 import {
   canSwitchShioriModel,
@@ -430,6 +431,7 @@ function CodexStepGroup({
       <button
         type="button"
         className="codex-step-group-toggle"
+        data-step-group-toggle=""
         onClick={() => setOpen(prev => !prev)}
       >
         <span>
@@ -1187,6 +1189,7 @@ export function ShioriComposer({
   externalDraft,
   onExternalConsumed,
   onReturnLatest,
+  onMessageSubmitted,
   onUpdated,
 }: {
   project: string;
@@ -1214,6 +1217,7 @@ export function ShioriComposer({
   externalDraft?: string | null;
   onExternalConsumed?(): void;
   onReturnLatest?(): void;
+  onMessageSubmitted?(): void;
   onUpdated(): void;
 }) {
   const t = useTranslations("shioriCockpit");
@@ -1537,6 +1541,7 @@ export function ShioriComposer({
     setLocalSubmitting(true);
     setError(null);
     setDurationMenuOpen(false);
+    onMessageSubmitted?.();
     try {
       const engine = sessionActions ? null : getLiveSessionEngine(project);
       if (effectiveTab === "event") {
@@ -2292,10 +2297,6 @@ export function ShioriWorkbench({
     actions,
   } = session;
 
-  const streamRef = useRef<HTMLDivElement | null>(null);
-  const prependScrollAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | null>(null);
-  const isJumpingRef = useRef(false);
-  const lastScrollTopRef = useRef<number | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const lastReportedSegmentRef = useRef("");
   const [showAllSteps, setShowAllSteps] = useState(false);
@@ -2340,14 +2341,6 @@ export function ShioriWorkbench({
     openPoolOverview();
   }, [dockOpen, dockTab, closeDock, openPoolOverview]);
 
-  const [atBottom, setAtBottomState] = useState(true);
-  const atBottomRef = useRef(true);
-  const setAtBottom = useCallback((next: boolean) => {
-    if (atBottomRef.current === next) return;
-    atBottomRef.current = next;
-    setAtBottomState(next);
-  }, []);
-
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [inspectedTurn, setInspectedTurn] = useState<{
     runId: string;
@@ -2371,10 +2364,8 @@ export function ShioriWorkbench({
     setFocusedPoolEventId(null);
     setPendingPoolLocateEvent(null);
     setPoolFlashId(null);
-    lastScrollTopRef.current = null;
     lastReportedSegmentRef.current = "";
-    setAtBottom(true);
-  }, [project, setAtBottom]);
+  }, [project]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -2416,22 +2407,8 @@ export function ShioriWorkbench({
     setDrawerDockOpen(true);
   }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt]);
 
-  const capturePrependAnchor = useCallback(() => {
-    const el = streamRef.current;
-    if (el && !atBottomRef.current && !isJumpingRef.current) {
-      prependScrollAnchorRef.current = { scrollHeight: el.scrollHeight, scrollTop: el.scrollTop };
-    }
-  }, []);
-
-  const triggerUpwardHistory = useCallback(() => {
-    if (isJumpingRef.current) return;
-    loadNextUpwardHistory(capturePrependAnchor);
-  }, [loadNextUpwardHistory, capturePrependAnchor]);
-
   const canMutatePool = Boolean(isLiveRun && project && workspace);
   const canResumeAuto = hostOnline && !isAuto && !consolidating;
-
-  const programmaticScrollUntilRef = useRef(0);
   const lastJumpedSeqRef = useRef<number | null>(null);
 
   const reportActiveSegment = useCallback(
@@ -2443,41 +2420,112 @@ export function ShioriWorkbench({
     [onActiveSegmentChange],
   );
 
-  // Preserve scroll position when prepending earlier history or older run segments
-  useLayoutEffect(() => {
-    const anchor = prependScrollAnchorRef.current;
-    const el = streamRef.current;
-    if (!anchor || !el) return;
-    const delta = el.scrollHeight - anchor.scrollHeight;
-    if (delta !== 0) {
-      programmaticScrollUntilRef.current = Date.now() + 300;
-      el.scrollTop = Math.max(0, anchor.scrollTop + delta);
-      lastScrollTopRef.current = el.scrollTop;
-    }
-    prependScrollAnchorRef.current = null;
-  }, [segments.length, feed.blocks.length, olderRuns.length]);
+  const poolLatestSeq = useMemo(
+    () => (poolSnapshot?.events ?? []).reduce((max, item) => Math.max(max, item.seq), 0),
+    [poolSnapshot?.events],
+  );
 
-  const scrollToBottom = useCallback(() => {
-    if (feed.historical) {
-      feed.latest();
-    }
-    isJumpingRef.current = false;
-    onClearJumpTarget?.();
+  const handleReachedBottom = useCallback(() => {
     reportActiveSegment("");
-    const el = streamRef.current;
-    if (!el) return;
-    programmaticScrollUntilRef.current = Date.now() + 700;
-    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
-    if (distance > 2200) {
-      el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 520);
-      requestAnimationFrame(() => {
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [reportActiveSegment]);
+
+  const followingStateMirrorRef = useRef(true);
+
+  const handleScrolledAwayFromBottom = useCallback(
+    (el: HTMLDivElement) => {
+      if (!onActiveSegmentChange || scrollRafRef.current != null) return;
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null;
+        if (!el.isConnected || followingStateMirrorRef.current) return;
+        const containerTop = el.getBoundingClientRect().top;
+        const dividers = el.querySelectorAll<HTMLElement>("[data-session-divider]");
+        let currentAnchor: HTMLElement | null = null;
+        for (const div of dividers) {
+          if (div.getBoundingClientRect().top <= containerTop + 96) {
+            currentAnchor = div;
+          } else {
+            break;
+          }
+        }
+        if (!currentAnchor && dividers.length > 0) {
+          currentAnchor = dividers[0];
+        }
+        if (currentAnchor) {
+          const divRunId = currentAnchor.dataset.runId ?? "";
+          const divEpoch = currentAnchor.dataset.epoch ?? "";
+          if (divRunId && divRunId !== data.run) {
+            reportActiveSegment(divRunId);
+          } else if (divRunId === data.run && data.cycles.length > 1 && divEpoch) {
+            const isLatestCycle = data.cycles.at(-1)?.epoch === divEpoch;
+            reportActiveSegment(isLatestCycle ? "" : `${divRunId}#${divEpoch}`);
+          } else {
+            reportActiveSegment("");
+          }
+        }
       });
-    } else {
-      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    },
+    [data.run, data.cycles, onActiveSegmentChange, reportActiveSegment],
+  );
+
+  const upwardHistoryGateRef = useRef<() => void>(() => {});
+
+  const {
+    streamRef,
+    contentRef,
+    isFollowing,
+    unreadCount,
+    isJumpingRef,
+    prependScrollAnchorRef,
+    capturePrependAnchor,
+    markProgrammaticScroll,
+    scrollToBottom: rawScrollToBottom,
+    pauseFollow,
+    toggleFollow,
+    scrollContainerProps,
+  } = useLiveAutoScroll({
+    project,
+    run: data.run,
+    blocks: feed.blocks,
+    segments,
+    olderRunsCount: olderRuns.length,
+    loadingOlder: feed.loadingOlder,
+    loadingOlderRun,
+    historical: feed.historical,
+    loading: feed.loading,
+    poolLatestSeq,
+    thinking,
+    consolidating,
+    onNearTopScrollUp: () => upwardHistoryGateRef.current(),
+    onReachedBottom: handleReachedBottom,
+    onScrolledAwayFromBottom: handleScrolledAwayFromBottom,
+  });
+  followingStateMirrorRef.current = isFollowing;
+
+  const triggerUpwardHistory = useCallback(() => {
+    if (isJumpingRef.current) return;
+    loadNextUpwardHistory(capturePrependAnchor);
+  }, [loadNextUpwardHistory, capturePrependAnchor, isJumpingRef]);
+
+  upwardHistoryGateRef.current = () => {
+    if (!olderRunError && hasMoreUpwardHistory) {
+      triggerUpwardHistory();
     }
-    setAtBottom(true);
-  }, [feed, onClearJumpTarget, reportActiveSegment, setAtBottom]);
+  };
+
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      rawScrollToBottom({
+        behavior,
+        onBeforeScroll: () => {
+          if (feed.historical) {
+            feed.latest();
+          }
+          onClearJumpTarget?.();
+        },
+      });
+    },
+    [feed, onClearJumpTarget, rawScrollToBottom],
+  );
 
   const flashPoolEvent = useCallback((eventId: string) => {
     setPoolFlashId(eventId);
@@ -2493,15 +2541,15 @@ export function ShioriWorkbench({
       if (!container) return false;
       const targetEl = container.querySelector<HTMLElement>(`[data-pool-event-id="${CSS.escape(eventId)}"]`);
       if (!targetEl) return false;
-      programmaticScrollUntilRef.current = Date.now() + 900;
-      setAtBottom(false);
+      markProgrammaticScroll(900);
+      pauseFollow({ manualHold: false });
       const top =
         container.scrollTop + (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) - 72;
       container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
       flashPoolEvent(eventId);
       return true;
     },
-    [flashPoolEvent, setAtBottom],
+    [flashPoolEvent, markProgrammaticScroll, pauseFollow, streamRef],
   );
 
   const poolLocateContextRef = useRef({
@@ -2634,8 +2682,8 @@ export function ShioriWorkbench({
       return;
     }
     isJumpingRef.current = true;
-    programmaticScrollUntilRef.current = Date.now() + 1800;
-    setAtBottom(false);
+    markProgrammaticScroll(1800);
+    pauseFollow({ manualHold: false });
 
     const [targetRunId, targetEpoch] = jumpTarget.value.split("#");
     const runAlreadyLoaded =
@@ -2766,81 +2814,14 @@ export function ShioriWorkbench({
     olderRunError,
     feed,
     loadOlderRunSegment,
+    markProgrammaticScroll,
     openDockOnStage,
+    pauseFollow,
+    prependScrollAnchorRef,
     reportActiveSegment,
     scrollToBottom,
-    setAtBottom,
-  ]);
-
-  // Keep scrolled to bottom when new blocks arrive while following
-  useLayoutEffect(() => {
-    const el = streamRef.current;
-    if (!el || !atBottom || feed.historical || isJumpingRef.current) return;
-    el.scrollTop = el.scrollHeight;
-    lastScrollTopRef.current = el.scrollTop;
-  }, [segments.length, feed.blocks.length, olderRuns.length, atBottom, feed.historical]);
-
-  const handleScroll = useCallback(() => {
-    const el = streamRef.current;
-    if (!el) return;
-    const prevScrollTop = lastScrollTopRef.current;
-    const currentScrollTop = el.scrollTop;
-    lastScrollTopRef.current = currentScrollTop;
-
-    if (Date.now() < programmaticScrollUntilRef.current) return;
-
-    const distance = el.scrollHeight - currentScrollTop - el.clientHeight;
-    const nextAtBottom = distance < 48;
-    setAtBottom(nextAtBottom);
-
-    if (nextAtBottom) {
-      reportActiveSegment("");
-    } else if (onActiveSegmentChange && scrollRafRef.current == null) {
-      scrollRafRef.current = requestAnimationFrame(() => {
-        scrollRafRef.current = null;
-        const container = streamRef.current;
-        if (!container || atBottomRef.current) return;
-        const containerTop = container.getBoundingClientRect().top;
-        const dividers = container.querySelectorAll<HTMLElement>("[data-session-divider]");
-        let currentAnchor: HTMLElement | null = null;
-        for (const div of dividers) {
-          if (div.getBoundingClientRect().top <= containerTop + 96) {
-            currentAnchor = div;
-          } else {
-            break;
-          }
-        }
-        if (!currentAnchor && dividers.length > 0) {
-          currentAnchor = dividers[0];
-        }
-        if (currentAnchor) {
-          const divRunId = currentAnchor.dataset.runId ?? "";
-          const divEpoch = currentAnchor.dataset.epoch ?? "";
-          if (divRunId && divRunId !== data.run) {
-            reportActiveSegment(divRunId);
-          } else if (divRunId === data.run && data.cycles.length > 1 && divEpoch) {
-            const isLatestCycle = data.cycles.at(-1)?.epoch === divEpoch;
-            reportActiveSegment(isLatestCycle ? "" : `${divRunId}#${divEpoch}`);
-          } else {
-            reportActiveSegment("");
-          }
-        }
-      });
-    }
-
-    const scrollingUp = prevScrollTop === null || currentScrollTop < prevScrollTop;
-    if (scrollingUp && currentScrollTop < 280 && !olderRunError && hasMoreUpwardHistory) {
-      triggerUpwardHistory();
-    }
-  }, [
-    data.run,
-    data.cycles,
-    olderRunError,
-    hasMoreUpwardHistory,
-    onActiveSegmentChange,
-    reportActiveSegment,
-    setAtBottom,
-    triggerUpwardHistory,
+    streamRef,
+    isJumpingRef,
   ]);
 
   const inspectContextRef = useRef({
@@ -3019,6 +3000,40 @@ export function ShioriWorkbench({
             {runPicker && <div className="codex-thread-run-picker">{runPicker}</div>}
             <button
               type="button"
+              className="codex-header-btn codex-follow-toggle-btn"
+              data-live-follow-toggle=""
+              data-active={(isFollowing && !feed.historical) || undefined}
+              data-paused={(!isFollowing || feed.historical) || undefined}
+              aria-pressed={isFollowing && !feed.historical}
+              title={
+                isFollowing && !feed.historical
+                  ? t("autoFollowOnHint")
+                  : t("autoFollowPausedHint")
+              }
+              aria-label={
+                isFollowing && !feed.historical
+                  ? t("autoFollowOnHint")
+                  : t("autoFollowPausedHint")
+              }
+              onClick={() =>
+                toggleFollow(() => {
+                  if (feed.historical) feed.latest();
+                  onClearJumpTarget?.();
+                })
+              }
+            >
+              <ArrowDownToLine className="size-3.5 shrink-0" aria-hidden="true" />
+              {(!isFollowing || feed.historical) && unreadCount > 0 && (
+                <span className="codex-follow-unread-count">
+                  {unreadCount > 99 ? "99+" : unreadCount}
+                </span>
+              )}
+              <span className="codex-follow-toggle-label">
+                {isFollowing && !feed.historical ? t("autoFollowOn") : t("autoFollowPaused")}
+              </span>
+            </button>
+            <button
+              type="button"
               className="codex-header-btn codex-expand-all-btn"
               data-active={showAllSteps || undefined}
               title={showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
@@ -3076,8 +3091,8 @@ export function ShioriWorkbench({
               <span>{t("locatingPoolEventBanner").replace("{seq}", String(pendingPoolLocateEvent.seq))}</span>
             </div>
           )}
-          <div ref={streamRef} className="codex-chat-scroll" onScroll={handleScroll}>
-          <div className="codex-chat-column">
+          <div ref={streamRef} className="codex-chat-scroll" {...scrollContainerProps}>
+          <div ref={contentRef} className="codex-chat-column">
             {(feed.loadingOlder || loadingOlderRun || olderRunError) ? (
               <div className="codex-load-older">
                 {olderRunError && !feed.loadingOlder && !loadingOlderRun ? (
@@ -3375,15 +3390,40 @@ export function ShioriWorkbench({
           </div>
         </div>
 
-          {/* Floating Scroll-to-Bottom Button (safely anchored inside scroll stage above composer) */}
-          {(!atBottom || feed.historical) && (
+          {/* Floating Follow-Latest / Unread Activity Pill (anchored inside scroll stage above composer) */}
+          {(!isFollowing || feed.historical) && (
             <button
               type="button"
-              className="codex-scroll-bottom-btn"
-              aria-label={t("scrollToBottomAria")}
-              onClick={scrollToBottom}
+              className="codex-follow-pill codex-scroll-bottom-btn"
+              data-live-follow-pill=""
+              data-has-unread={unreadCount > 0 ? "true" : undefined}
+              aria-label={
+                unreadCount > 0
+                  ? t("followPillUnreadLabel").replace(
+                      "{count}",
+                      unreadCount > 99 ? "99+" : String(unreadCount),
+                    )
+                  : t("scrollToBottomAria")
+              }
+              onClick={() => scrollToBottom("smooth")}
             >
-              <ArrowDown className="size-4" aria-hidden="true" />
+              {unreadCount > 0 ? (
+                <>
+                  <span className="codex-thinking-dot codex-follow-pill-dot" aria-hidden="true" />
+                  <span className="codex-follow-pill-text">
+                    {t("followPillUnreadLabel").replace(
+                      "{count}",
+                      unreadCount > 99 ? "99+" : String(unreadCount),
+                    )}
+                  </span>
+                  <ArrowDown className="size-3.5 shrink-0" aria-hidden="true" />
+                </>
+              ) : (
+                <>
+                  <ArrowDown className="size-3.5 shrink-0" aria-hidden="true" />
+                  <span className="codex-follow-pill-text">{t("followPillLatestLabel")}</span>
+                </>
+              )}
             </button>
           )}
         </div>
@@ -3413,6 +3453,7 @@ export function ShioriWorkbench({
           externalMode={workflowCommand?.mode ?? null}
           externalDraft={workflowCommand?.prompt ?? null}
           onExternalConsumed={() => setWorkflowCommand(null)}
+          onMessageSubmitted={() => scrollToBottom("smooth")}
           onReturnLatest={onReturnLatest}
           onUpdated={onUpdated}
         />
