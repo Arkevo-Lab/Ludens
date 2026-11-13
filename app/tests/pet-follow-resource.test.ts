@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createPetFollowResource } from "../features/pet/pet-follow-resource";
-import type { PetState, PetTarget, PetTargetReceipt } from "../lib/pet";
+import { PET_AUTO_TARGET, type PetState, type PetTarget, type PetTargetReceipt } from "../lib/pet";
 
 const target = (project: string): PetTarget => ({ project, workspace: "/" + project, revision: project, updatedAt: "2026-10-30T00:00:00Z" });
 const state = (project: string | null): PetState => ({ target: project ? target(project) : null, targetConfigured: true, consumer: null, connected: false });
@@ -98,4 +98,22 @@ test("disposing aborts operations and prevents late results from updating a repl
   await r.refresh(); const pending = r.follow("beta"); await flush(); r.dispose(); const count = observed.length;
   assert.equal(signal?.aborted, true); receipt.resolve({ target: target("beta") }); await pending; await flush();
   assert.equal(observed.length, count);
+});
+
+test("following PET_AUTO_TARGET sets targetConfigured false and autoFollowing true on receipt", async () => {
+  const writes: Array<string | null> = [];
+  let reads = 0;
+  const r = resource(
+    async () => (++reads === 1 ? state("alpha") : { target: null, targetConfigured: false, consumer: null, connected: true, autoFollowing: true }),
+    async project => { writes.push(project); return { target: null }; },
+  );
+  try {
+    await r.refresh();
+    await r.follow(PET_AUTO_TARGET);
+    await flush();
+    assert.deepEqual(writes, [PET_AUTO_TARGET]);
+    assert.equal(r.snapshot().state?.target, null);
+    assert.equal(r.snapshot().state?.targetConfigured, false);
+    assert.equal(r.snapshot().state?.autoFollowing, true);
+  } finally { r.dispose(); }
 });

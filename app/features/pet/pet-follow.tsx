@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckIcon, RefreshCwIcon } from "lucide-react";
-import { petStatus, petStatusKey, workspaceLabel, type PetTarget } from "@/lib/pet";
+import { PET_AUTO_TARGET, petStatus, petStatusKey, workspaceLabel, type PetTarget } from "@/lib/pet";
 import type { Project } from "@/lib/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,7 @@ function targetName(target: PetTarget, projects: Project[], t: (key: string) => 
 
 function requestedName(project: string | null, projects: Project[], target: PetTarget | null | undefined, t: (key: string) => string) {
   if (project === null) return t("noSavedTarget");
+  if (project === PET_AUTO_TARGET) return t("autoFollowOption");
   const known = projects.find(item => item.id === project);
   return known ? workspaceLabel(known, t) : target?.project === project ? targetName(target, projects, t) : project;
 }
@@ -42,8 +43,20 @@ export function PetFollowSettings({ follow, projects }: { follow: PetFollow; pro
   const target = state?.target;
   const options = projects.filter(project => project.workspace);
   const focus = useRetryFocus(reading, readError || writeError);
-  const selectedValue = pending && requested !== undefined ? requested ?? STOP_TARGET : target?.project ?? (state?.targetConfigured ? STOP_TARGET : "");
-  const knownTarget = target ? targetName(target, projects, t) : state ? t(state.targetConfigured ? "noSavedTarget" : "noSavedChoice") : t("targetUnknown");
+  const isAutoFollow = state ? !state.targetConfigured || Boolean(state.autoFollowing && !target) : false;
+  const selectedValue =
+    pending && requested !== undefined
+      ? requested ?? STOP_TARGET
+      : isAutoFollow
+        ? PET_AUTO_TARGET
+        : target?.project ?? STOP_TARGET;
+  const knownTarget = target
+    ? isAutoFollow
+      ? `${t("autoFollowTargetPrefix")}${targetName(target, projects, t)}`
+      : targetName(target, projects, t)
+    : state
+      ? t(isAutoFollow ? "autoFollowOption" : state.targetConfigured ? "noSavedTarget" : "noSavedChoice")
+      : t("targetUnknown");
   const stale = !!writeError || (!!readError && lastSaved === undefined);
   const observationUnconfirmed = pending || !!readError || !!writeError;
   const statusKey = petStatusKey(state);
@@ -66,13 +79,30 @@ export function PetFollowSettings({ follow, projects }: { follow: PetFollow; pro
         <SettingsRow
           label={t("savedWorkspace")}
           htmlFor="pet-follow-workspace"
-          description={t("savedWorkspaceHelp")}
+          description={isAutoFollow ? t("autoFollowHint") : t("savedWorkspaceHelp")}
           descriptionId="pet-follow-help"
           badge={
             state ? (
-              <Badge variant="outline" className="pet-follow-save-badge text-primary" data-pet-save-status>
-                {!pending && !writeError && !stale && state.targetConfigured && <CheckIcon aria-hidden="true" />}
-                {t(pending ? "updating" : writeError ? "saveUnconfirmed" : stale ? "lastKnownLabel" : state.targetConfigured ? "savedLabel" : "notConfigured")}
+              <Badge
+                variant="outline"
+                className="pet-follow-save-badge text-primary"
+                data-pet-save-status
+                data-pet-auto-follow={isAutoFollow ? "true" : undefined}
+              >
+                {!pending && !writeError && !stale && (state.targetConfigured || isAutoFollow) && <CheckIcon aria-hidden="true" />}
+                {t(
+                  pending
+                    ? "updating"
+                    : writeError
+                      ? "saveUnconfirmed"
+                      : stale
+                        ? "lastKnownLabel"
+                        : isAutoFollow
+                          ? "autoFollowBadge"
+                          : state.targetConfigured
+                            ? "savedLabel"
+                            : "notConfigured",
+                )}
               </Badge>
             ) : undefined
           }
@@ -90,12 +120,12 @@ export function PetFollowSettings({ follow, projects }: { follow: PetFollow; pro
                 onKeyDown={event => { if (!canWrite && !["Tab", "Escape"].includes(event.key)) event.preventDefault(); }}
                 onChange={event => {
                   const next = event.currentTarget.value;
-                  const available = next === STOP_TARGET || options.some(project => project.id === next && project.available !== false);
+                  const available = next === STOP_TARGET || next === PET_AUTO_TARGET || options.some(project => project.id === next && project.available !== false);
                   if (!canWrite || !available) { event.currentTarget.value = selectedValue; return; }
                   void follow.follow(next === STOP_TARGET ? null : next);
                 }}
               >
-                {!state.targetConfigured && <NativeSelectOption value="" disabled>{t("chooseWorkspacePlaceholder")}</NativeSelectOption>}
+                <NativeSelectOption value={PET_AUTO_TARGET}>{t("autoFollowOption")}</NativeSelectOption>
                 <NativeSelectOption value={STOP_TARGET}>{t("stopFollow")}</NativeSelectOption>
                 {target && !options.some(project => project.id === target.project) && (
                   <NativeSelectOption value={target.project} disabled>{knownTarget}{t("currentTargetSuffix")}</NativeSelectOption>
@@ -159,7 +189,7 @@ export function PetFollowSettings({ follow, projects }: { follow: PetFollow; pro
           {t("savingTarget")} <strong>{requestedName(requested, projects, target, t)}</strong>
         </p>
       )}
-      {!observationUnconfirmed && state?.connected === false && target && (
+      {!observationUnconfirmed && state?.connected === false && (target || isAutoFollow) && (
         <p className="pet-follow-desktop-note">{t("savedAwaitingDesktop")}</p>
       )}
       {lastSaved !== undefined && !observationUnconfirmed && (

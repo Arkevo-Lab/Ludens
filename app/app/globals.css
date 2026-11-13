@@ -9,6 +9,7 @@
 @import "../features/baseware/baseware-view.css";
 @import "../components/ui/settings-layout.css";
 @import "../shell/desktop-chrome.css";
+@import "../shell/active-cores.css";
 
 @custom-variant dark (&:is(.dark *));
 
