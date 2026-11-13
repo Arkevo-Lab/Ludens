@@ -1295,10 +1295,23 @@ export interface WorkspaceSupervisorActionOutcome {
   notes: string[];
 }
 
+export interface WorkspaceSupervisorUpOptions {
+  workspaceId?: string;
+  services?: readonly ("emulator" | "baseware" | "host")[];
+  launchedBy?: "app" | "cli";
+  preempt?: boolean;
+}
+
 export interface WorkspaceSupervisorLike {
-  up(workspacePath: string, options?: { workspaceId?: string }): Promise<WorkspaceSupervisorActionOutcome>;
+  up(
+    workspaceOrOptions: string | (WorkspaceSupervisorUpOptions & { workspace: string }),
+    options?: WorkspaceSupervisorUpOptions,
+  ): Promise<WorkspaceSupervisorActionOutcome>;
   down(workspacePath: string, options?: { keepEmulator?: boolean }): Promise<WorkspaceSupervisorActionOutcome>;
-  reload(workspacePath: string, options?: { workspaceId?: string }): Promise<WorkspaceSupervisorActionOutcome>;
+  reload(
+    workspacePath: string,
+    options?: WorkspaceSupervisorUpOptions,
+  ): Promise<WorkspaceSupervisorActionOutcome>;
 }
 
 const activeSupervisorKey = Symbol.for("ludens.appServer.workspaceSupervisor");
@@ -1324,8 +1337,32 @@ export async function controlWorkspaceService(
 ): Promise<WorkspaceServiceControlResult> {
   if (typeof id !== "string" || !id.trim()) throw new Error("请选择工作区");
   if (!input || typeof input !== "object" || Array.isArray(input)) throw new Error("后台服务操作必须是对象");
-  const { operation } = input as Record<string, unknown>;
-  if (operation !== "up" && operation !== "down" && operation !== "reload") throw new Error("不支持的后台服务操作");
+  const raw = input as Record<string, unknown>;
+  const actionMap: Record<string, "up" | "down" | "reload"> = {
+    start: "up",
+    stop: "down",
+    restart: "reload",
+    up: "up",
+    down: "down",
+    reload: "reload",
+  };
+  const rawOp = typeof raw.operation === "string" ? raw.operation : typeof raw.action === "string" ? raw.action : "";
+  const operation = actionMap[rawOp];
+  if (!operation) throw new Error("不支持的后台服务操作");
+  const requestedService =
+    raw.service === "emulator" || raw.service === "baseware" || raw.service === "host"
+      ? raw.service
+      : undefined;
+  const services =
+    Array.isArray(raw.services)
+      ? (raw.services.filter(
+          (item): item is "emulator" | "baseware" | "host" =>
+            item === "emulator" || item === "baseware" || item === "host",
+        ))
+      : requestedService
+        ? ([requestedService] as const)
+        : undefined;
+  const preempt = Boolean(raw.preempt);
   const entry = await registeredWorkspace(id, home);
 
   if (supervisor) {
@@ -1335,13 +1372,27 @@ export async function controlWorkspaceService(
     try {
       const result =
         operation === "up"
-          ? await supervisor.up(entry.workspace, { workspaceId: entry.id })
+          ? await supervisor.up(entry.workspace, {
+              workspaceId: entry.id,
+              launchedBy: "app",
+              ...(preempt ? { preempt: true } : {}),
+              ...(services?.length ? { services } : {}),
+            })
           : operation === "down"
             ? await supervisor.down(entry.workspace, { keepEmulator: false })
-            : await supervisor.reload(entry.workspace, { workspaceId: entry.id });
+            : await supervisor.reload(entry.workspace, {
+                workspaceId: entry.id,
+                launchedBy: "app",
+                ...(preempt ? { preempt: true } : {}),
+                ...(services?.length ? { services } : {}),
+              });
       stdout = JSON.stringify(result.status, null, 2);
       if (result.notes.length) stderr = result.notes.join("\n");
     } catch (error) {
+      if ((error as { code?: string } | null)?.code === "DEVICE_BUSY") {
+        clearCatalogCache();
+        throw error;
+      }
       code = 1;
       stderr = error instanceof Error ? error.message : String(error);
     }

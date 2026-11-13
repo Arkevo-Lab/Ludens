@@ -524,7 +524,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     expect(offlineSwitch).toMatchObject({
       mode: "manual",
       connected: false,
-      hostOffline: true,
+      coreOffline: true,
       model: "google/gemini-2.5-pro",
     });
     expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("google/gemini-2.5-pro");
@@ -535,7 +535,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
       { action: "set_model", model: "openai-codex/gpt-6.1-sol", serviceTier: "priority" },
       home,
     );
-    expect(offlineTieredSwitch).toMatchObject({ hostOffline: true, serviceTier: "priority" });
+    expect(offlineTieredSwitch).toMatchObject({ coreOffline: true, serviceTier: "priority" });
     expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).serviceTier).toBe("priority");
 
     const studioTiered = await updateWorkspaceStudioConfig(identity.id, {

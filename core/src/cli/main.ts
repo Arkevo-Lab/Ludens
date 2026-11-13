@@ -76,9 +76,13 @@ async function main() {
     requests: { type: "string", default: "50" },
     "compaction-threshold": { type: "string" },
     diagnostics: { type: "string", default: "normal" },
+    "launched-by": { type: "string" },
   } });
   if (values.diagnostics !== "normal" && values.diagnostics !== "full") throw new Error("--diagnostics must be normal|full");
   const diagnostics = values.diagnostics;
+  const rawLaunchedBy = values["launched-by"] ?? process.env.LUDENS_LAUNCHED_BY ?? "cli";
+  if (rawLaunchedBy !== "app" && rawLaunchedBy !== "cli") throw new Error("--launched-by must be app|cli");
+  const launchedBy = rawLaunchedBy;
   const seconds = Number(values.seconds);
   if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("--seconds must be positive");
   const maxRequests = Number(values.requests);
@@ -149,7 +153,7 @@ async function main() {
     }
     runtime = await createHostRuntime({ devices, workspace, state, runDir, log, resume,
       ludensSocket: socket, basewareSocket, seconds, model: values["device-only"] ? undefined : model,
-      maxRequests, compactionThreshold });
+      maxRequests, compactionThreshold, launchedBy });
     devices.onHandback(reason => { void runtime!.stop(reason); });
     devices.onDisconnect(error => { void runtime!.disconnected(error); });
     await writeFile(join(runDir, "manifest.json"), JSON.stringify({ runId, workspace, workspaceId: state.id, stateDir: state.dir, socket,

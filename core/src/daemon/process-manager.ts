@@ -4,6 +4,7 @@ import { accessSync, closeSync, constants, existsSync, mkdirSync, openSync } fro
 import { mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { ServiceLaunchOrigin } from "../core/query/types.ts";
 
 export const PRESERVED_ENV_KEYS = [
   "HOME",
@@ -49,6 +50,8 @@ export interface BackgroundJobRecord {
   lastExitCode: number | null;
   startedAt: string;
   exitedAt?: string;
+  launchedBy?: ServiceLaunchOrigin;
+  appInstanceId?: string;
 }
 
 export interface BackgroundJobSpec {
@@ -59,6 +62,8 @@ export interface BackgroundJobSpec {
   env: Record<string, string>;
   log: string;
   stateFile: string;
+  launchedBy?: ServiceLaunchOrigin;
+  appInstanceId?: string;
 }
 
 export interface BackgroundJobProbe {
@@ -75,6 +80,8 @@ export interface StartBackgroundJobOptions {
   label?: string;
   logDir?: string;
   env?: NodeJS.ProcessEnv;
+  launchedBy?: ServiceLaunchOrigin;
+  appInstanceId?: string;
 }
 
 export interface StartedBackgroundJob {
@@ -414,6 +421,12 @@ export async function startBackgroundJob(options: StartBackgroundJobOptions): Pr
       throw new Error(`command not found: ${command[0]}`);
     }
 
+    const launchedBy: ServiceLaunchOrigin =
+      options.launchedBy ??
+      (extraEnv.LUDENS_LAUNCHED_BY === "app" || baseEnv.LUDENS_LAUNCHED_BY === "app" ? "app" : "cli");
+    const appInstanceId =
+      options.appInstanceId ?? extraEnv.LUDENS_APP_INSTANCE_ID ?? baseEnv.LUDENS_APP_INSTANCE_ID;
+
     const jobEnv: Record<string, string> = { PATH: searchPath };
     for (const key of PRESERVED_ENV_KEYS) {
       const val = baseEnv[key];
@@ -425,6 +438,12 @@ export async function startBackgroundJob(options: StartBackgroundJobOptions): Pr
         delete jobEnv[key];
       }
     }
+    jobEnv.LUDENS_LAUNCHED_BY = launchedBy;
+    if (appInstanceId) {
+      jobEnv.LUDENS_APP_INSTANCE_ID = appInstanceId;
+    } else {
+      delete jobEnv.LUDENS_APP_INSTANCE_ID;
+    }
 
     const spec: BackgroundJobSpec = {
       label,
@@ -434,6 +453,8 @@ export async function startBackgroundJob(options: StartBackgroundJobOptions): Pr
       env: jobEnv,
       log,
       stateFile,
+      launchedBy,
+      ...(appInstanceId ? { appInstanceId } : {}),
     };
 
     const supervisorCmd = await supervisorSpawnCommand(searchPath, workspace);
@@ -606,6 +627,8 @@ export async function runJobSupervisorFromStdin(): Promise<number> {
     state: "running",
     lastExitCode: null,
     startedAt: utcIsoSeconds(),
+    launchedBy: spec.launchedBy ?? "cli",
+    ...(spec.appInstanceId ? { appInstanceId: spec.appInstanceId } : {}),
   };
   try {
     await atomicWriteJobJson(spec.stateFile, record);
@@ -652,6 +675,8 @@ export async function runBackgroundJobCli(args: string[], cwd = process.cwd()): 
 
   let label: string | undefined;
   let logDir: string | undefined;
+  let launchedBy: ServiceLaunchOrigin | undefined;
+  let appInstanceId: string | undefined;
   let idx = 0;
   while (idx < args.length) {
     const arg = args[idx]!;
@@ -663,6 +688,17 @@ export async function runBackgroundJobCli(args: string[], cwd = process.cwd()): 
       if (!args[idx + 1]) throw new Error("--log-dir requires a path");
       logDir = args[idx + 1];
       idx += 2;
+    } else if (arg === "--launched-by") {
+      const origin = args[idx + 1];
+      if (origin !== "app" && origin !== "cli") {
+        throw new Error("--launched-by must be 'app' or 'cli'");
+      }
+      launchedBy = origin;
+      idx += 2;
+    } else if (arg === "--app-instance-id") {
+      if (!args[idx + 1]) throw new Error("--app-instance-id requires a value");
+      appInstanceId = args[idx + 1];
+      idx += 2;
     } else {
       break;
     }
@@ -671,7 +707,9 @@ export async function runBackgroundJobCli(args: string[], cwd = process.cwd()): 
   const name = args[idx];
   const command = args.slice(idx + 1);
   if (!name || command.length === 0) {
-    throw new Error("Usage: [--label <label>] [--log-dir <dir>] <name> <command...>");
+    throw new Error(
+      "Usage: [--label <label>] [--log-dir <dir>] [--launched-by <app|cli>] [--app-instance-id <id>] <name> <command...>",
+    );
   }
 
   const started = await startBackgroundJob({
@@ -680,6 +718,8 @@ export async function runBackgroundJobCli(args: string[], cwd = process.cwd()): 
     cwd,
     ...(label ? { label } : {}),
     ...(logDir ? { logDir } : {}),
+    ...(launchedBy ? { launchedBy } : {}),
+    ...(appInstanceId ? { appInstanceId } : {}),
   });
   process.stdout.write(`${JSON.stringify(started)}\n`);
   return 0;

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultSocket } from "@ludens/baseware/address";
 import {
@@ -17,6 +17,7 @@ import {
   type MachineTransportKind,
   type WorkspaceMachinesBinding,
 } from "@ludens/protocol/machines";
+import type { ServiceLaunchOrigin } from "../core/query/types.ts";
 import { jobStateFilePath, jobTargetLabel } from "./background-jobs.ts";
 import {
   probeBackgroundJob,
@@ -352,6 +353,9 @@ function parseNetstatPids(stdout: string, port: number, state: "LISTENING" | "ES
 export interface UpOptions {
   includeDashboard?: boolean;
   includePet?: boolean;
+  launchedBy?: ServiceLaunchOrigin;
+  appInstanceId?: string;
+  services?: readonly ("emulator" | "baseware" | "host")[];
 }
 
 // Thin cross-platform orchestration over the CLI and pure-TS background process manager (no auto-restart loop).
@@ -415,7 +419,10 @@ export class WorkspaceLauncher {
     }
     await this.checked([process.execPath, this.plan.launcher, "--stop", this.stateFile(name)]);
   }
-  private async ensure(name: ServiceName) {
+  private async ensure(
+    name: ServiceName,
+    provenance?: { launchedBy?: ServiceLaunchOrigin; appInstanceId?: string },
+  ) {
     const job = await this.job(name);
     if (job.pid) { this.io.note(`Reusing ${name} (PID ${job.pid}).`); return; }
     // Remove only this managed service's stopped registration before starting fresh.
@@ -429,12 +436,23 @@ export class WorkspaceLauncher {
         command,
         cwd,
         ...(name === "pet" ? { label: "dev.ludens.pet", logDir: this.plan.sharedPet.background } : { logDir: this.plan.background }),
+        ...(provenance?.launchedBy ? { launchedBy: provenance.launchedBy } : {}),
+        ...(provenance?.appInstanceId ? { appInstanceId: provenance.appInstanceId } : {}),
       });
       return;
     }
-    await this.checked([process.execPath, this.plan.launcher,
+    await this.checked([
+      process.execPath,
+      this.plan.launcher,
       ...(name === "pet" ? ["--label", "dev.ludens.pet", "--log-dir", this.plan.sharedPet.background] : []),
-      name, ...command], cwd);
+      ...(provenance?.launchedBy ? ["--launched-by", provenance.launchedBy] : []),
+      ...(provenance?.appInstanceId ? ["--app-instance-id", provenance.appInstanceId] : []),
+      name,
+      ...command,
+    ], cwd);
+  }
+  async isPortListening(port: number): Promise<boolean> {
+    return (await this.listeningPids(port)).length > 0;
   }
   private async alive(name: ServiceName) {
     const job = await this.job(name);
@@ -495,19 +513,19 @@ export class WorkspaceLauncher {
     for (const match of listeners.stdout.matchAll(/^n.*:(\d+)$/gm)) ports.push(Number(match[1]));
     return ports;
   }
-  private async isExternalExecutableRunning(executable: string): Promise<boolean> {
-    if (process.platform === "win32") {
-      const image = basename(executable);
-      const running = await this.run(["tasklist", "/FI", `IMAGENAME eq ${image}`, "/NH"]);
-      return running.code === 0 && running.stdout.toLowerCase().includes(image.toLowerCase());
-    }
-    const literalExecutable = executable.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const running = await this.run(["pgrep", "-f", `^${literalExecutable}([[:space:]]|$)`]);
-    return running.code === 0;
-  }
   async up(options?: UpOptions) {
     const wantDashboard = options?.includeDashboard ?? this.plan.config.dashboard;
     const wantPet = options?.includePet ?? this.plan.config.pet;
+    const serviceSet = options?.services ? new Set(options.services) : null;
+    const wantBaseware = !serviceSet || serviceSet.has("baseware") || serviceSet.has("host");
+    const wantHost = !serviceSet || serviceSet.has("host");
+    const wantEmulatorOnly = Boolean(serviceSet && serviceSet.has("emulator") && !wantBaseware);
+    const provenance = (options?.launchedBy || options?.appInstanceId)
+      ? {
+          ...(options.launchedBy ? { launchedBy: options.launchedBy } : {}),
+          ...(options.appInstanceId ? { appInstanceId: options.appInstanceId } : {}),
+        }
+      : undefined;
     // Fail before launching the device when the permanent Dashboard would run stale code.
     let dashboard = (wantDashboard || wantPet) ? await this.io.dashboardReady(this.plan.dashboardUrl) : false;
     if (wantDashboard && !dashboard) {
@@ -515,77 +533,93 @@ export class WorkspaceLauncher {
       if (build.code !== 0) throw new Error(build.stderr || build.stdout || "Build the Dashboard before starting it.");
       if ((await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied by a Dashboard with a different Ludens home or an unready service. Stop that Dashboard before switching global homes.");
     }
-    let baseware = await this.baseware();
-    if (!baseware) {
-      const existing = await this.job("baseware");
-      if (!existing.pid) {
-        const manifest = this.plan.manifest;
-        const activeMachine = this.plan.activeMachine;
-        const isLocalBridge = activeMachine
-          ? activeMachine.transport.kind === "bridge" &&
-            ["127.0.0.1", "localhost", "::1"].includes(activeMachine.transport.host ?? "127.0.0.1")
-          : manifest
-            ? manifest.transport !== "stdio"
-            : true;
-        if (isLocalBridge) {
-          const port = activeMachine && activeMachine.transport.kind === "bridge"
-            ? activeMachine.transport.port
-            : this.plan.config.port!;
-          const effectiveDriver = activeMachine ? activeMachine.driver : this.plan.config.driver;
-          if (this.plan.commands.emulator) {
-            const emulator = await this.job("emulator");
-            if (!emulator.pid) {
-              // Package launchers may exec a different binary, so matching argv[0]
-              // alone cannot identify an already prepared external emulator.
-              if ((await this.listeningPids(port)).length) {
-                throw new Error(`Bridge port ${port} is already listening outside this workspace's emulator job. Omit game to connect to the prepared device, or use its workspace.`);
-              }
-              const executable = manifest?.launchCommand?.[0];
-              if (executable && await this.isExternalExecutableRunning(executable)) {
-                throw new Error(`${effectiveDriver} is already running outside this workspace's emulator job. Use its workspace, or omit game to explicitly connect to the prepared device.`);
-              }
-            }
-            await this.ensure("emulator");
-            await this.waitFor("this emulator's bridge listener", async () => {
-              const pid = await this.alive("emulator");
-              return !!pid && (await this.listeningPids(port)).includes(pid);
-            });
-          } else if (!(await this.listeningPids(port)).length) {
-            throw new Error(`No prepared bridge on port ${port}. ${manifest?.launchHint ?? `Prepare the ${effectiveDriver} backend, then retry.`}`);
-          }
-          // Only probe bridge ownership when there is no reusable Baseware service.
-          const clients = await this.bridgeClients(port);
-          if (clients.length) throw new Error(`Bridge port ${port} is already used by PID ${clients.join(", ")}. Use its Baseware service or stop it before switching workspaces.`);
-        }
-        await this.ensure("baseware");
+    if (wantEmulatorOnly && this.plan.commands.emulator) {
+      const emulator = await this.job("emulator");
+      const port = this.plan.activeMachine?.transport.kind === "bridge"
+        ? this.plan.activeMachine.transport.port
+        : this.plan.config.port;
+      if (!emulator.pid && port !== undefined && (await this.listeningPids(port)).length) {
+        throw new Error(`Bridge port ${port} is already listening outside this workspace's emulator job. Omit game to connect to the prepared device, or use its workspace.`);
       }
-      baseware = await this.waitFor("Baseware service", async () => {
-        const value = await this.baseware();
-        if (value) return value;
-        await this.alive("baseware");
-        return false;
-      });
-    } else this.io.note(`Reusing Baseware ${baseware.serviceId}; running settings are unchanged.`);
-    if (!baseware.connected) throw new Error("Baseware is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
+      await this.ensure("emulator", provenance);
+      if (port !== undefined) {
+        await this.waitFor("this emulator's bridge listener", async () => {
+          const pid = await this.alive("emulator");
+          return !!pid && (await this.listeningPids(port)).includes(pid);
+        });
+      }
+      return this.status();
+    }
+    if (wantBaseware) {
+      let baseware = await this.baseware();
+      if (!baseware) {
+        const existing = await this.job("baseware");
+        if (!existing.pid) {
+          const manifest = this.plan.manifest;
+          const activeMachine = this.plan.activeMachine;
+          const isLocalBridge = activeMachine
+            ? activeMachine.transport.kind === "bridge" &&
+              ["127.0.0.1", "localhost", "::1"].includes(activeMachine.transport.host ?? "127.0.0.1")
+            : manifest
+              ? manifest.transport !== "stdio"
+              : true;
+          if (isLocalBridge) {
+            const port = activeMachine && activeMachine.transport.kind === "bridge"
+              ? activeMachine.transport.port
+              : this.plan.config.port!;
+            const effectiveDriver = activeMachine ? activeMachine.driver : this.plan.config.driver;
+            if (this.plan.commands.emulator) {
+              const emulator = await this.job("emulator");
+              if (!emulator.pid) {
+                if ((await this.listeningPids(port)).length) {
+                  throw new Error(`Bridge port ${port} is already listening outside this workspace's emulator job. Omit game to connect to the prepared device, or use its workspace.`);
+                }
+              }
+              await this.ensure("emulator", provenance);
+              await this.waitFor("this emulator's bridge listener", async () => {
+                const pid = await this.alive("emulator");
+                return !!pid && (await this.listeningPids(port)).includes(pid);
+              });
+            } else if (!(await this.listeningPids(port)).length) {
+              throw new Error(`No prepared bridge on port ${port}. ${manifest?.launchHint ?? `Prepare the ${effectiveDriver} backend, then retry.`}`);
+            }
+            // Only probe bridge ownership when there is no reusable Baseware service.
+            const clients = await this.bridgeClients(port);
+            if (clients.length) throw new Error(`Bridge port ${port} is already used by PID ${clients.join(", ")}. Use its Baseware service or stop it before switching workspaces.`);
+          }
+          await this.ensure("baseware", provenance);
+        }
+        baseware = await this.waitFor("Baseware service", async () => {
+          const value = await this.baseware();
+          if (value) return value;
+          await this.alive("baseware");
+          return false;
+        });
+      } else this.io.note(`Reusing Baseware ${baseware.serviceId}; running settings are unchanged.`);
+      if (!baseware.connected) throw new Error("Baseware is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
+    }
 
-    let host = await this.host();
-    if (!host) {
-      await this.ensure("host");
-      host = await this.waitFor("Ludens host", async () => {
-        const value = await this.host();
-        if (value) return value;
-        await this.alive("host");
-        return false;
-      });
-    } else this.io.note(`Reusing host ${host.runId}; running settings are unchanged.`);
-    if (!host.connected) throw new Error("Host is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
+    let host: HostStatus | null = null;
+    if (wantHost) {
+      host = await this.host();
+      if (!host) {
+        await this.ensure("host", provenance);
+        host = await this.waitFor("Ludens host", async () => {
+          const value = await this.host();
+          if (value) return value;
+          await this.alive("host");
+          return false;
+        });
+      } else this.io.note(`Reusing host ${host.runId}; running settings are unchanged.`);
+      if (!host.connected) throw new Error("Host is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
+    }
 
     if (wantDashboard || wantPet) {
       dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
     }
     if (wantDashboard && !dashboard) {
       if (!(await this.job("dashboard")).pid && (await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied but the Ludens Dashboard API is not ready; inspect that service before retrying.");
-      await this.ensure("dashboard");
+      await this.ensure("dashboard", provenance);
       dashboard = await this.waitFor("Dashboard API", async () => {
         if (await this.io.dashboardReady(this.plan.dashboardUrl)) return true;
         await this.alive("dashboard");
@@ -596,7 +630,7 @@ export class WorkspaceLauncher {
       if (!dashboard) throw new Error("Pet needs the Dashboard. Enable dashboard in ludens.json or start it separately.");
       if (await this.io.petReady(this.plan.dashboardUrl)) this.io.note("Reusing Ludens Pet's connected desktop instance.");
       else {
-        await this.ensure("pet");
+        await this.ensure("pet", provenance);
         await this.waitFor(`Ludens Pet activity connection (${this.log("pet")})`, async () => {
           if (await this.io.petReady(this.plan.dashboardUrl)) return true;
           const job = await this.job("pet");
@@ -607,7 +641,9 @@ export class WorkspaceLauncher {
         });
       }
     }
-    this.io.note(host.mode === "auto" ? "Existing takeover is still running." : "Ready in manual mode. Run ludens auto on to start acting.");
+    if (host) {
+      this.io.note(host.mode === "auto" ? "Existing takeover is still running." : "Ready in manual mode. Run ludens auto on to start acting.");
+    }
     return this.status();
   }
   async down(includeDashboard: boolean, keepEmulator = false, includePet = false) {

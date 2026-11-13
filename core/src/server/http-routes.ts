@@ -1,12 +1,14 @@
+import { realpath } from "node:fs/promises";
 import {
   EVENT_DIRECTIONS,
   POOL_EVENT_STATUSES,
   type EventDirection,
   type PoolEventStatus,
 } from "@ludens/protocol/event-pool";
-import { isOmpEffort, isOmpServiceTier } from "@ludens/protocol/ludens";
+import { isOmpEffort, isOmpServiceTier, readWorkspaceIdentity, registeredWorkspace } from "@ludens/protocol/ludens";
 import type { ActivityQuery } from "../core/query/activity";
 import type { DashboardWorker } from "../core/query/dashboard-worker";
+import { workspaceForProject } from "../core/query/data";
 import type { DiagnosticQuery } from "../core/query/diagnostic-events";
 import type { EventPoolMutationCommand, EventPoolQueryFilter } from "../core/query/event-pool";
 import { parsePerceptionPatch } from "../core/query/perception-config";
@@ -52,6 +54,35 @@ async function readJsonObject(
     throw badRequest(invalidMessage);
   }
   return parsed as Record<string, unknown>;
+}
+
+function stripStaleControlScope<T extends object>(command: T): T {
+  if (!("runId" in command) && !("expectedEpoch" in command)) return command;
+  const { runId: _runId, expectedEpoch: _expectedEpoch, ...rest } = command as Record<string, unknown>;
+  return rest as T;
+}
+
+async function spawnWorkspaceCore(
+  ctx: ApiRouteContext,
+  project: string,
+  expectedWorkspace: string,
+  preempt: boolean,
+): Promise<void> {
+  const registered = await workspaceForProject(project, ctx.home);
+  const canonicalExpected = await realpath(expectedWorkspace).catch(() => expectedWorkspace);
+  if (registered !== canonicalExpected) {
+    throw Object.assign(new Error("工作区登记目录已变化，请刷新工作区列表后重试"), {
+      code: "WORKSPACE_SCOPE_CHANGED",
+      status: 409,
+    });
+  }
+  await ctx.supervisor.up({
+    workspace: registered,
+    workspaceId: project,
+    launchedBy: "app",
+    preempt,
+  });
+  await ctx.worker.call("clearCatalogCache", []).catch(() => null);
 }
 
 export async function handleApiRequest(
@@ -454,6 +485,8 @@ export async function handleApiRequest(
           project?: string;
           workspace?: string;
           command?: EventPoolMutationCommand;
+          preempt?: boolean;
+          spawnIfOffline?: boolean;
         };
         if (
           typeof body.project !== "string" ||
@@ -466,12 +499,30 @@ export async function handleApiRequest(
         ) {
           throw badRequest("必须提供 project、workspace 与 command");
         }
-        const result = await ctx.worker.call(
-          "eventPoolMutate",
-          [body.project, body.workspace, body.command],
-          request.signal,
-        );
-        return Response.json(result, { headers: NO_STORE_HEADERS });
+        try {
+          const result = await ctx.worker.call(
+            "eventPoolMutate",
+            [body.project, body.workspace, body.command],
+            request.signal,
+          );
+          if (body.spawnIfOffline && !(result as { hostOnline?: boolean }).hostOnline) {
+            await spawnWorkspaceCore(ctx, body.project, body.workspace, Boolean(body.preempt));
+            const synced = await ctx.worker.call("eventPoolRead", [body.project, body.workspace], request.signal);
+            return Response.json({ ...synced, spawned: true }, { headers: NO_STORE_HEADERS });
+          }
+          return Response.json(result, { headers: NO_STORE_HEADERS });
+        } catch (error) {
+          if ((error as { code?: string } | null)?.code !== "CORE_OFFLINE") {
+            throw error;
+          }
+          await spawnWorkspaceCore(ctx, body.project, body.workspace, Boolean(body.preempt));
+          const retried = await ctx.worker.call(
+            "eventPoolMutate",
+            [body.project, body.workspace, stripStaleControlScope(body.command)],
+            request.signal,
+          );
+          return Response.json({ ...retried, spawned: true }, { headers: NO_STORE_HEADERS });
+        }
       } catch (error) {
         return errorResponse(error, 409);
       }
@@ -697,6 +748,7 @@ export async function handleApiRequest(
           project?: string;
           workspace?: string;
           command?: RuntimeControlCommand;
+          preempt?: boolean;
         };
         if (
           typeof body.project !== "string" ||
@@ -709,14 +761,90 @@ export async function handleApiRequest(
         ) {
           throw badRequest("必须提供 project、workspace 与 command");
         }
-        return Response.json(
-          await ctx.worker.call(
+        try {
+          return Response.json(
+            await ctx.worker.call(
+              "runtimeControl",
+              [body.project, body.workspace, body.command],
+              request.signal,
+            ),
+            { headers: NO_STORE_HEADERS },
+          );
+        } catch (error) {
+          const canSpawnOnOffline =
+            body.command.action !== "status" && body.command.action !== "auto_off";
+          if ((error as { code?: string } | null)?.code !== "CORE_OFFLINE" || !canSpawnOnOffline) {
+            throw error;
+          }
+          await spawnWorkspaceCore(ctx, body.project, body.workspace, Boolean(body.preempt));
+          const retried = await ctx.worker.call(
             "runtimeControl",
-            [body.project, body.workspace, body.command],
+            [body.project, body.workspace, stripStaleControlScope(body.command)],
             request.signal,
-          ),
-          { headers: NO_STORE_HEADERS },
-        );
+          );
+          return Response.json({ ...retried, spawned: true }, { headers: NO_STORE_HEADERS });
+        }
+      } catch (error) {
+        return errorResponse(error, 409);
+      }
+    }
+
+    case "/api/workspaces/service": {
+      if (method !== "POST") return methodNotAllowed(["POST"]);
+      try {
+        checkLocal(true);
+        const body = await readJsonObject(request, "无效的工作区服务操作") as {
+          project?: unknown;
+          id?: unknown;
+          workspace?: unknown;
+          service?: unknown;
+          action?: unknown;
+          operation?: unknown;
+          preempt?: unknown;
+        };
+        let projectId =
+          typeof body.project === "string" && body.project.trim()
+            ? body.project.trim()
+            : typeof body.id === "string" && body.id.trim()
+              ? body.id.trim()
+              : undefined;
+        const workspaceArg =
+          typeof body.workspace === "string" && body.workspace.trim() ? body.workspace.trim() : undefined;
+        if (projectId && workspaceArg) {
+          const entry = await registeredWorkspace(projectId, ctx.home);
+          const [canonicalReg, canonicalArg] = await Promise.all([
+            realpath(entry.workspace).catch(() => entry.workspace),
+            realpath(workspaceArg).catch(() => workspaceArg),
+          ]);
+          if (canonicalReg !== canonicalArg) {
+            throw Object.assign(new Error("工作区登记目录已变化，请刷新工作区列表后重试"), {
+              code: "WORKSPACE_SCOPE_CHANGED",
+              status: 409,
+            });
+          }
+        } else if (!projectId && workspaceArg) {
+          const canonicalArg = await realpath(workspaceArg).catch(() => workspaceArg);
+          const identity = await readWorkspaceIdentity(canonicalArg);
+          projectId = identity.id;
+        }
+        if (!projectId) {
+          throw badRequest("必须提供 project 或 workspace");
+        }
+        const serviceInput =
+          body.service && typeof body.service === "object" && !Array.isArray(body.service)
+            ? { ...(body.service as Record<string, unknown>), preempt: Boolean(body.preempt) }
+            : {
+                ...(typeof body.service === "string" ? { service: body.service } : { service: "host" }),
+                ...(typeof body.action === "string" ? { action: body.action } : {}),
+                ...(typeof body.operation === "string" ? { operation: body.operation } : {}),
+                preempt: Boolean(body.preempt),
+              };
+        const result = await controlWorkspaceService(projectId, serviceInput, ctx.home, ctx.supervisor);
+        await ctx.worker.call("clearCatalogCache", []).catch(() => null);
+        return Response.json(result, {
+          status: result.ok ? 200 : 409,
+          headers: NO_STORE_HEADERS,
+        });
       } catch (error) {
         return errorResponse(error, 409);
       }

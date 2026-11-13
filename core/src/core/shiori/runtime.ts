@@ -13,6 +13,7 @@ import {
 } from "@ludens/protocol/event-pool";
 import type { DiagnosticsMode, EventTrace, RecordEvent } from "../storage/events.ts";
 import { isOmpEffort, isOmpServiceTier, type OmpEffort, type OmpServiceTier } from "@ludens/protocol/ludens";
+import type { ServiceLaunchOrigin } from "../query/types.ts";
 import type { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
 import type { WorkspaceController } from "../subsystems/controller.ts";
@@ -109,10 +110,13 @@ export class Runtime {
     if (subsystems.eventPoolSummary) this.eventPoolSummary = { ...subsystems.eventPoolSummary };
   }
 
-  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds: number | null = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0) {
+  private readonly launchedBy: ServiceLaunchOrigin;
+
+  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds: number | null = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0, launchedBy?: ServiceLaunchOrigin) {
     if (maxSeconds !== null && (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori time budget");
     if (budget && !Number.isFinite(budget.deadlineMs)) throw new Error("Invalid shared Shiori deadline");
     this.activeMaxSeconds = this.maxSeconds;
+    this.launchedBy = launchedBy ?? (process.env.LUDENS_LAUNCHED_BY === "app" ? "app" : "cli");
     devices?.onReconnect?.(() => { void this.reconnected(); });
   }
 
@@ -127,6 +131,7 @@ export class Runtime {
       epoch: this.mode === "auto" ? this.epoch : null,
       connected: this.connected,
       reason: this.reason,
+      launchedBy: this.launchedBy,
       agent: !!this._agent,
       model: this._agent?.model?.() ?? null,
       serviceTier: this._agent?.serviceTier?.() ?? null,

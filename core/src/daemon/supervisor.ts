@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,15 @@ import {
   registerWorkspace,
   type BasewareMachineSpec,
 } from "@ludens/protocol/ludens";
+import type { ServiceLaunchOrigin } from "../core/query/types.ts";
 import { jobStateFilePath, ludensSocketPath } from "./background-jobs.ts";
+import {
+  DeviceBusyError,
+  findOnlineDeviceHolders,
+  isHolderActive,
+  resolveWorkspaceDeviceIdentity,
+  toDeviceContentionConflict,
+} from "./device-arbitration.ts";
 import {
   createSystemLaunchIO,
   launchPlan,
@@ -19,10 +27,19 @@ import {
   type LaunchIO,
   type LaunchPlan,
 } from "./launcher.ts";
-import { probeBackgroundJob, stopBackgroundJob } from "./process-manager.ts";
+import { probeBackgroundJob, readJobRecord, stopBackgroundJob } from "./process-manager.ts";
 import { send, type Request as TransportRequest } from "./transport.ts";
 
+export { DeviceBusyError };
 export type ManagedServiceName = "emulator" | "baseware" | "host";
+
+export interface SupervisorUpOptions {
+  workspace?: string;
+  workspaceId?: string;
+  services?: readonly ManagedServiceName[];
+  launchedBy?: ServiceLaunchOrigin;
+  preempt?: boolean;
+}
 
 interface OwnedWorkspaceRecord {
   workspace: string;
@@ -62,8 +79,10 @@ async function sendWithTimeout<T>(socketPath: string, request: TransportRequest,
 export class WorkspaceSupervisor {
   readonly home: string;
   readonly repo: string;
+  readonly instanceId = randomUUID();
   private readonly owned = new Map<string, OwnedWorkspaceRecord>();
   private readonly locks = new Map<string, Promise<void>>();
+  private readonly deviceLocks = new Map<string, Promise<void>>();
   private readonly ioFactory?: (plan: LaunchPlan, note: (message: string) => void) => LaunchIO;
   private closing = false;
 
@@ -131,6 +150,21 @@ export class WorkspaceSupervisor {
       record.workspaceId = workspaceId;
     }
     return record;
+  }
+
+  private withDeviceLock<T>(deviceKey: string | null, action: () => Promise<T>): Promise<T> {
+    if (!deviceKey) return action();
+    const prev = this.deviceLocks.get(deviceKey) ?? Promise.resolve();
+    const run = prev.then(action);
+    const tail = run.then(
+      () => {},
+      () => {},
+    );
+    this.deviceLocks.set(deviceKey, tail);
+    void tail.then(() => {
+      if (this.deviceLocks.get(deviceKey) === tail) this.deviceLocks.delete(deviceKey);
+    });
+    return run;
   }
 
   private withWorkspaceLock<T>(workspace: string, action: () => Promise<T>): Promise<T> {
@@ -244,15 +278,26 @@ export class WorkspaceSupervisor {
     return launchPlan(config, workspace, this.repo, undefined, manifest);
   }
 
-  async up(workspacePath: string, options?: { workspaceId?: string }): Promise<SupervisedActionResult> {
+  async up(
+    workspaceOrOptions: string | (SupervisorUpOptions & { workspace: string }),
+    maybeOptions?: SupervisorUpOptions,
+  ): Promise<SupervisedActionResult> {
     if (this.closing) throw new Error("Workspace supervisor is shutting down");
+    const workspacePath =
+      typeof workspaceOrOptions === "string" ? workspaceOrOptions : workspaceOrOptions.workspace;
+    const options: SupervisorUpOptions =
+      typeof workspaceOrOptions === "string" ? (maybeOptions ?? {}) : workspaceOrOptions;
     const workspace = await realpath(workspacePath);
-    return this.withWorkspaceLock(workspace, () => this.upLocked(workspace, options));
+    const deviceIdentity = await resolveWorkspaceDeviceIdentity(workspace, this.home);
+    return this.withDeviceLock(deviceIdentity.deviceKey, () =>
+      this.withWorkspaceLock(workspace, () => this.upLocked(workspace, options, deviceIdentity)),
+    );
   }
 
   private async upLocked(
     workspace: string,
-    options?: { workspaceId?: string },
+    options: SupervisorUpOptions,
+    deviceIdentity?: Awaited<ReturnType<typeof resolveWorkspaceDeviceIdentity>>,
   ): Promise<SupervisedActionResult> {
     if (this.closing) throw new Error("Workspace supervisor is shutting down");
     let registration;
@@ -267,13 +312,44 @@ export class WorkspaceSupervisor {
       throw error;
     }
 
-    const workspaceId = options?.workspaceId ?? registration.id;
+    const identity = deviceIdentity ?? (await resolveWorkspaceDeviceIdentity(workspace, this.home));
+    const holders = await findOnlineDeviceHolders(workspace, identity, this.home);
+    for (const holder of holders) {
+      if (isHolderActive(holder) && !options.preempt) {
+        throw new DeviceBusyError(toDeviceContentionConflict(holder));
+      }
+    }
+
+    const workspaceId = options.workspaceId ?? registration.id;
+    const launchedBy: ServiceLaunchOrigin = options.launchedBy ?? "app";
+    const appInstanceId = launchedBy === "app" ? this.instanceId : undefined;
     const plan = await this.buildUpPlan(workspace);
     const notes: string[] = [];
-    const launcher = this.makeLauncher(plan, notes, (service, pid) => {
-      const record = this.ensureRecord(workspace, workspaceId);
-      record.ownedServices.set(service, pid);
-    });
+    const launcher = this.makeLauncher(
+      plan,
+      notes,
+      launchedBy === "app"
+        ? (service, pid) => {
+            const record = this.ensureRecord(workspace, workspaceId);
+            record.ownedServices.set(service, pid);
+          }
+        : undefined,
+    );
+
+    if (holders.length > 0) {
+      for (const holder of holders) {
+        notes.push(
+          `Stopping ${isHolderActive(holder) ? "active" : "standby"} holder ${holder.workspaceName} (${holder.projectId}) on device ${holder.deviceKey}.`,
+        );
+        await this.down(holder.workspace, { keepEmulator: false });
+      }
+      if (identity.port !== undefined) {
+        const deadline = Date.now() + 5000;
+        while (Date.now() < deadline && (await launcher.isPortListening(identity.port))) {
+          await sleep(50);
+        }
+      }
+    }
 
     const preExistingPids = new Map<ManagedServiceName, number | null>();
     for (const service of MANAGED_SERVICES) {
@@ -282,27 +358,35 @@ export class WorkspaceSupervisor {
     }
 
     try {
-      const status = await launcher.up({ includeDashboard: false, includePet: false });
+      const status = await launcher.up({
+        includeDashboard: false,
+        includePet: false,
+        launchedBy,
+        ...(appInstanceId ? { appInstanceId } : {}),
+        ...(options.services ? { services: options.services } : {}),
+      });
       return { status, notes };
     } finally {
-      const record = this.ensureRecord(workspace, workspaceId);
-      for (const service of MANAGED_SERVICES) {
-        const current = await launcher.job(service);
-        const beforePid = preExistingPids.get(service) ?? null;
-        if (
-          !record.ownedServices.has(service) &&
-          current.registered &&
-          (beforePid === null || (current.pid !== null && current.pid !== beforePid))
-        ) {
-          record.ownedServices.set(service, current.pid);
-        } else if (!current.registered && !current.pid) {
-          record.ownedServices.delete(service);
+      if (launchedBy === "app") {
+        const record = this.ensureRecord(workspace, workspaceId);
+        for (const service of MANAGED_SERVICES) {
+          const current = await launcher.job(service);
+          const beforePid = preExistingPids.get(service) ?? null;
+          if (
+            !record.ownedServices.has(service) &&
+            current.registered &&
+            (beforePid === null || (current.pid !== null && current.pid !== beforePid))
+          ) {
+            record.ownedServices.set(service, current.pid);
+          } else if (!current.registered && !current.pid) {
+            record.ownedServices.delete(service);
+          }
         }
-      }
-      if (record.ownedServices.size === 0) {
-        this.owned.delete(workspace);
-      } else if (this.closing) {
-        await this.shutdownRecord(record, true);
+        if (record.ownedServices.size === 0) {
+          this.owned.delete(workspace);
+        } else if (this.closing) {
+          await this.shutdownRecord(record, true);
+        }
       }
     }
   }
@@ -336,18 +420,21 @@ export class WorkspaceSupervisor {
     return { status, notes };
   }
 
-  async reload(workspacePath: string, options?: { workspaceId?: string }): Promise<SupervisedActionResult> {
+  async reload(workspacePath: string, options?: SupervisorUpOptions): Promise<SupervisedActionResult> {
     if (this.closing) throw new Error("Workspace supervisor is shutting down");
     const workspace = await realpath(workspacePath);
-    return this.withWorkspaceLock(workspace, async () => {
-      if (this.closing) throw new Error("Workspace supervisor is shutting down");
-      const downRes = await this.downLocked(workspace, { keepEmulator: true });
-      const upRes = await this.upLocked(workspace, options);
-      return {
-        status: upRes.status,
-        notes: [...downRes.notes, ...upRes.notes],
-      };
-    });
+    const deviceIdentity = await resolveWorkspaceDeviceIdentity(workspace, this.home);
+    return this.withDeviceLock(deviceIdentity.deviceKey, () =>
+      this.withWorkspaceLock(workspace, async () => {
+        if (this.closing) throw new Error("Workspace supervisor is shutting down");
+        const downRes = await this.downLocked(workspace, { keepEmulator: true });
+        const upRes = await this.upLocked(workspace, options ?? {}, deviceIdentity);
+        return {
+          status: upRes.status,
+          notes: [...downRes.notes, ...upRes.notes],
+        };
+      }),
+    );
   }
 
   async shutdownAll(options: { emergency?: boolean } = {}): Promise<void> {
@@ -368,8 +455,11 @@ export class WorkspaceSupervisor {
     expectedPid: number | null | undefined,
     stopOptions: { graceMs?: number; immediate?: boolean },
   ): Promise<void> {
-    const probe = await probeBackgroundJob(stateFile);
-    if (!probe.registered) return;
+    const [probe, jobRecord] = await Promise.all([probeBackgroundJob(stateFile), readJobRecord(stateFile)]);
+    if (!probe.registered || !jobRecord) return;
+    if (jobRecord.launchedBy !== "app" || jobRecord.appInstanceId !== this.instanceId) {
+      return;
+    }
     if (expectedPid !== null && expectedPid !== undefined && probe.pid !== null && probe.pid !== expectedPid) {
       return;
     }
@@ -397,9 +487,14 @@ export class WorkspaceSupervisor {
     if (record.ownedServices.has("host")) {
       const expectedHostPid = record.ownedServices.get("host");
       const hostStateFile = jobStateFilePath(record.backgroundDir, "host");
-      const hostProbe = await probeBackgroundJob(hostStateFile);
+      const [hostProbe, hostRecord] = await Promise.all([
+        probeBackgroundJob(hostStateFile),
+        readJobRecord(hostStateFile),
+      ]);
       const isOwnedHost =
         hostProbe.pid !== null &&
+        hostRecord?.launchedBy === "app" &&
+        hostRecord.appInstanceId === this.instanceId &&
         (expectedHostPid === null || expectedHostPid === undefined || hostProbe.pid === expectedHostPid);
       if (isOwnedHost) {
         type LiveHostStatus = {

@@ -662,50 +662,12 @@ test("detached background launcher preserves environment, records exit codes, an
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
 
-test("an externally started emulator process blocks startup before spawning or stopping anything", async () => {
+test("another emulator process on a different port does not block multi-core startup", async () => {
   const value = await plan();
   const io = new FakeServices(value);
   io.externalEmulator = true;
-  await expect(new WorkspaceLauncher(value, io).up()).rejects.toThrow("already running outside this workspace");
-  expect(io.starts).toEqual([]);
-  expect(io.calls.some(argv => argv[2] === "--stop" || argv[1] === "auto")).toBe(false);
-});
-
-test("emulator process matching treats custom executable paths as POSIX regex literals", async () => {
-  const executable = "/tmp/Emulator (native)[1]+.app/Contents/MacOS/emulator";
-  const manifest = { ...manifestFor("bridge-fixture"), launchCommand: [executable] };
-  const value = await launchPlan(parseConfig({ driver: manifest.id, game: "game.rom" }, manifest),
-    "/tmp/Literal path workspace", "/tmp/Source", "/tmp/literal-path.sock", manifest);
-  for (const [existingCommand, matches] of [
-    [executable, true],
-    [`${executable} game.rom`, true],
-    [`${executable}-helper game.rom`, false],
-    ["/tmp/Emulator native11Xapp/Contents/MacOS/emulator game.rom", false],
-  ] as const) {
-    const io = new FakeServices(value);
-    const run = io.run.bind(io);
-    io.run = async (argv, cwd) => {
-      if (argv[0] !== "pgrep") return run(argv, cwd);
-      io.calls.push([...argv]);
-      // Exercise the same POSIX ERE syntax as pgrep without inspecting or
-      // starting any real emulator process, including lookalikes and prefixes.
-      const matcher = Bun.spawn(["grep", "-E", argv[2]!], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
-      matcher.stdin.write(`${existingCommand}\n`);
-      matcher.stdin.end();
-      const [code, stdout, stderr] = await Promise.all([
-        matcher.exited, new Response(matcher.stdout).text(), new Response(matcher.stderr).text(),
-      ]);
-      expect(stderr).toBe("");
-      return { code, stdout, stderr };
-    };
-    if (matches) {
-      await expect(new WorkspaceLauncher(value, io).up()).rejects.toThrow("already running outside this workspace");
-      expect(io.starts).toEqual([]);
-    } else {
-      expect((await new WorkspaceLauncher(value, io).up()).host?.mode).toBe("manual");
-      expect(io.starts).toContain("emulator");
-    }
-  }
+  expect((await new WorkspaceLauncher(value, io).up()).host?.mode).toBe("manual");
+  expect(io.starts).toContain("emulator");
 });
 
 test("package launch wrappers cannot start another emulator on an externally occupied bridge", async () => {

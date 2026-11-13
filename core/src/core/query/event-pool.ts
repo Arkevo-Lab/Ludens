@@ -172,8 +172,8 @@ export async function mutateWorkspaceEventPool(
 
   if (command.action === "reply" && command.resumeAuto) {
     throw Object.assign(
-      new Error("当前工作区宿主未在线，无法恢复 auto 循环；请仅发送回复或先启动宿主"),
-      { code: "HOST_OFFLINE", status: 409 },
+      new Error("当前工作区 Core 未在线，无法恢复 auto 循环；请仅发送回复或先启动 Core"),
+      { code: "CORE_OFFLINE", status: 409 },
     );
   }
 
