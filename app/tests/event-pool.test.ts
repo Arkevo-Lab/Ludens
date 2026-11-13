@@ -67,7 +67,7 @@ test("dashboard worker reads and mutates workspace Event Pool in standby mode wi
         workspace,
         { action: "reply", replyTo: outbound.event.id, text: "Code is 0451", resumeAuto: true },
       ]),
-      /宿主未在线/,
+      /Core 未在线/,
     );
 
     const replied = await worker.call("eventPoolMutate", [
