@@ -1,14 +1,18 @@
-# 开发约定
+## 开发约定
 
 - 目前处于开发态，无需也请勿进行任何向下兼容。
-- 现行文档按类放在 `docs/en/tutorials/`（怎么跑）、`docs/en/reference/`（组件与契约）、`docs/en/insights/`（为什么这么做），英文优先；中文镜像在 `docs/zh/` 下同名对应。改任一语言必须同步改另一语言，保持标题、结构、链接与代码块一致，不留单语更新。
-- 新增或修改 `package.json` 脚本时，遵循 [脚本命名与命令目录](docs/en/tutorials/debugging-and-verification.md#script-naming-and-command-catalog)，同步调用方与文档。
-- 施工计划走根目录 [PLANS.md](PLANS.md)：施工前在 `plans/` 写计划并用 `[[plans/<name>]]` 双链索引，完成施工后删除计划文件并清除索引，不留已完工 plan。
-- 能力评测采用工作区内生的 Capability–Eval–Env 三元契约（@capability / @eval_capability / @eval_env 与 ludens eval）
-- 动手改代码前先同步远程上游（`git fetch` / 变基或合并到最新），避免在过期基线上施工。
-- 原则上，任何修改都应该使用 PR 提交而不是直接推 main。
-- 开发调试时，无需使用 electron 态，直接使用前端观看即可。
-- 原则上，任何对前端的改动都应该自己点开浏览器操作观看验收。
-- 目前默认的 Shiori 为 OMP，在进行修改前请确认版本是否为最新，如果有差距，则提醒评估进行升级工程
-- 模型梯队与分工倾向见根目录 [MODELS.md](MODELS.md)。
+- 文档同步时需同步多语种文档
+- 施工计划走根目录 [PLANS.md](PLANS.md)：施工前在 `plans/` 写计划并用 `[[plans/<name>]]` 双链索引，完成施工后删除计划文件并清除索引，不留已完工 plan
+- 动手改代码前先同步远程上游，避免在过期代码上施工
+
+## 风格约定
+
+- 原则上，任何修改都应该使用 PR 提交而不是直接推 main
+- 原则上，任何对前端的改动都应该自己点开浏览器操作观看验收
+- 在允许的情况下，请适当指挥其他模型和使用调度器完成必要工作，模型梯队与建议见根目录 [MODELS.md](MODELS.md) 
+- 原则上，前端与后端交互时应当建立完善的 hook 封装，将交互逻辑统一管理起来
+
+## **Tips**
+
+- Shiori Core 为 OMP，请定期检查 OMP core 是否可以升级
 
