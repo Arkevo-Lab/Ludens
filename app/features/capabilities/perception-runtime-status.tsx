@@ -4,6 +4,11 @@ import { Activity } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  AdvancedDiagnosticsDisclosure,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/ui/settings-primitives";
 import { useTranslations } from "@/lib/locale";
 import type { PerceptionRuntimeSnapshot } from "@/lib/perception-config";
 import { PERCEPTION_KEYS, type SavedPerception } from "@/features/capabilities/perception-draft";
@@ -41,24 +46,81 @@ export function PerceptionRuntimeStatus({ project, workspace, settings, revision
     : result.value.connection === "unavailable" ? "runtimeUnavailable"
       : current ? !settings ? "runtimeSavedUnknown" : overrides.length ? matching ? "runtimeOverridesMatch" : "runtimeOverridesDiffer" : "runtimeObserved"
         : perception?.valueStatus === "last-loaded" ? "runtimeLastLoaded" : "runtimeNoValues";
-  return <div className="space-y-4" data-perception-runtime>
-    <div className="flex flex-wrap items-start justify-between gap-4">
-      <div className="min-w-0 flex-1 space-y-2"><h3 className="text-sm font-semibold">{t("runtimeTitle")}</h3>
-        <p className="text-xs leading-relaxed text-muted-foreground" role="status">{t(status)}</p>
-        {perception && <Badge variant="outline">{t(`runtimeStates.${perception.state}`)}</Badge>}
-      </div>
-      <Button type="button" size="sm" variant="outline" aria-disabled={loading || saving} className="aria-disabled:opacity-50" onClick={() => void check()}>
-        <Activity className="size-4" />{t(loading ? "checkingRuntime" : "checkRuntime")}
-      </Button>
+  const hasTechnicalDetails = Boolean(error || perception?.error || result);
+
+  return (
+    <div className="space-y-4" data-perception-runtime>
+      <SettingsSection
+        headingLevel={3}
+        title={t("runtimeTitle")}
+        description={<span role="status">{t(status)}</span>}
+        actions={
+          <div className="flex items-center gap-2">
+            {perception && <Badge variant="outline">{t(`runtimeStates.${perception.state}`)}</Badge>}
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-disabled={loading || saving}
+              className="aria-disabled:opacity-50"
+              onClick={() => void check()}
+            >
+              <Activity className="size-3.5" aria-hidden="true" />
+              {t(loading ? "checkingRuntime" : "checkRuntime")}
+            </Button>
+          </div>
+        }
+      >
+        {values ? (
+          PERCEPTION_KEYS.map(key => (
+            <SettingsRow
+              key={key}
+              label={t(`limits.${key}.label`)}
+              control={
+                <span className="font-mono text-sm tabular-nums text-foreground">
+                  {values[key]} {t("seconds")}
+                </span>
+              }
+            />
+          ))
+        ) : (
+          <SettingsRow
+            label={t("runtimeTitle")}
+            description={t("runtimeReadOnly")}
+            control={
+              <span className="text-xs text-muted-foreground">
+                {perception ? t(`runtimeStates.${perception.state}`) : "—"}
+              </span>
+            }
+          />
+        )}
+      </SettingsSection>
+
+      {error && (
+        <Alert variant="destructive">
+          <AlertDescription>
+            <p>{t("runtimeReadFailed")}</p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {hasTechnicalDetails && (
+        <AdvancedDiagnosticsDisclosure summary={t("errorDetails")}>
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <p>{t("runtimeReadOnly")}</p>
+            {result && (
+              <p>
+                {t("checkedAt")}{" "}
+                <time dateTime={result.value.checkedAt}>
+                  {new Date(result.value.checkedAt).toLocaleTimeString()}
+                </time>
+              </p>
+            )}
+            {error && <p className="break-all font-mono text-destructive">{error}</p>}
+            {perception?.error && <p className="break-all font-mono">{perception.error}</p>}
+          </div>
+        </AdvancedDiagnosticsDisclosure>
+      )}
     </div>
-    <p className="text-xs leading-relaxed text-muted-foreground">{t("runtimeReadOnly")}</p>
-    {error && <Alert variant="destructive"><AlertDescription><p>{t("runtimeReadFailed")}</p>
-      <details className="mt-2 text-xs"><summary>{t("errorDetails")}</summary><p className="mt-2 break-all">{error}</p></details>
-    </AlertDescription></Alert>}
-    {values && <dl className="grid gap-3 sm:grid-cols-3">{PERCEPTION_KEYS.map(key => <div key={key} className="rounded-md bg-background/40 p-3">
-      <dt className="text-xs text-muted-foreground">{t(`limits.${key}.label`)}</dt><dd className="mt-1 text-sm tabular-nums">{values[key]} {t("seconds")}</dd>
-    </div>)}</dl>}
-    {result && <p className="text-xs text-muted-foreground">{t("checkedAt")} <time dateTime={result.value.checkedAt}>{new Date(result.value.checkedAt).toLocaleTimeString()}</time></p>}
-    {perception?.error && <details className="text-xs text-muted-foreground"><summary>{t("errorDetails")}</summary><p className="mt-2 break-all">{perception.error}</p></details>}
-  </div>;
+  );
 }

@@ -6,6 +6,7 @@
 @import "../features/workspaces/context-picker.css";
 @import "../components/model-picker-dialog.css";
 @import "../features/baseware/baseware-view.css";
+@import "../components/ui/settings-layout.css";
 @import "../shell/desktop-chrome.css";
 
 @custom-variant dark (&:is(.dark *));

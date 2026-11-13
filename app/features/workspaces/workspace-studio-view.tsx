@@ -1,28 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Activity,
-  BookOpen,
   Bot,
   Cable,
-  Check,
   CheckCircle2,
-  Copy,
   Cpu,
   Eye,
-  FileText,
   FlaskConical,
   HardDrive,
-  History,
+  Monitor,
   Play,
   RefreshCw,
   RotateCcw,
   Save,
   Server,
-  Sparkles,
   Square,
-  Terminal,
 } from "lucide-react";
 import type { Project } from "@/lib/types";
 import type {
@@ -33,12 +27,19 @@ import type {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  AdvancedDiagnosticsDisclosure,
+  InlineCopyButton,
+  SettingsRow,
+  SettingsSaveBar,
+  SettingsSection,
+  SettingsWorkspaceLayout,
+  SingleLineTruncate,
+  type SettingsCategoryItem,
+} from "@/components/ui/settings-primitives";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   ModelEffortBadge,
   ModelPickerDialog,
@@ -50,10 +51,16 @@ import { useLocale, useTranslations } from "@/lib/locale";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
+import {
+  buildDisplayMachines,
+  formatTransportSummary,
+  type DisplayMachineItem,
+} from "@/features/baseware/baseware-model";
+import { useBasewareOverview } from "@/features/baseware/use-baseware-overview";
 import { LoopLab } from "@/shell/loop-lab";
 
-export type StudioTab = "model" | "connection" | "services" | "perception" | "simulator";
-const STUDIO_TABS: readonly StudioTab[] = ["model", "connection", "services", "perception", "simulator"];
+export type StudioTab = "device" | "model" | "connection" | "perception" | "services" | "simulator";
+const STUDIO_TABS: readonly StudioTab[] = ["device", "model", "connection", "perception", "services", "simulator"];
 
 const MODEL_PRESETS: Array<{ id: string; label: string; badgeEn: string; badgeZh: string }> = [
   {
@@ -123,6 +130,11 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
+export interface ActiveDeviceSummary {
+  name: string;
+  online: boolean;
+}
+
 export function WorkspaceStudioView({
   project,
   projects,
@@ -148,11 +160,14 @@ export function WorkspaceStudioView({
   const resolvedTab: StudioTab =
     initialTab && (STUDIO_TABS as readonly string[]).includes(initialTab)
       ? (initialTab as StudioTab)
-      : "model";
+      : "device";
   const [tab, setTab] = useState<StudioTab>(resolvedTab);
+
   useEffect(() => {
     if (initialTab && (STUDIO_TABS as readonly string[]).includes(initialTab)) {
       setTab(initialTab as StudioTab);
+    } else if (!initialTab) {
+      setTab("device");
     }
   }, [initialTab]);
 
@@ -163,9 +178,21 @@ export function WorkspaceStudioView({
   const [reloadTick, setReloadTick] = useState(0);
   const requestVersion = useRef(0);
 
+  const baseware = useBasewareOverview({
+    project: target?.id ?? "",
+    workspace: target?.workspace ?? null,
+    ready: ready && Boolean(target?.id),
+    loadFailedMessage: t("loadFailed"),
+    capabilitiesFailedMessage: t("loadFailed"),
+  });
+  const reloadBaseware = baseware.reloadAll;
+
   const refreshStudio = useCallback(() => {
     setReloadTick(value => value + 1);
-  }, []);
+    if (target?.id) {
+      void reloadBaseware();
+    }
+  }, [reloadBaseware, target?.id]);
 
   useEffect(() => {
     if (!target?.id) {
@@ -200,14 +227,13 @@ export function WorkspaceStudioView({
   }, [target?.id, reloadTick, t]);
 
   const onTabChange = (next: string) => {
-    const valid = (STUDIO_TABS as readonly string[]).includes(next) ? (next as StudioTab) : "model";
+    const valid = (STUDIO_TABS as readonly string[]).includes(next) ? (next as StudioTab) : "device";
     setTab(valid);
-    navigate({ studioTab: valid === "model" ? null : valid });
+    navigate({ studioTab: valid === "device" ? null : valid });
   };
 
   const hostJob = studio?.services.jobs.find(item => item.name === "host");
   const basewareJob = studio?.services.jobs.find(item => item.name === "baseware");
-  const emulatorJob = studio?.services.jobs.find(item => item.name === "emulator");
   const workspaceRunning = Boolean(hostJob?.pid || basewareJob?.pid);
 
   const service = useWorkspaceService({
@@ -216,66 +242,85 @@ export function WorkspaceStudioView({
     onStudioSnapshot: next => setStudio(next),
     onSuccess: () => {
       onRetryCatalog();
+      if (target?.id) void reloadBaseware();
     },
   });
 
+  const displayMachines = useMemo(() => buildDisplayMachines(baseware.snapshot), [baseware.snapshot]);
+  const primaryMachine = useMemo(
+    () => displayMachines.find(item => item.workspaceAdditionStatus === "primary") ?? null,
+    [displayMachines],
+  );
+  const activeDeviceSummary: ActiveDeviceSummary | null = useMemo(() => {
+    if (primaryMachine) {
+      return {
+        name: primaryMachine.name || primaryMachine.id,
+        online: primaryMachine.isMounted,
+      };
+    }
+    if (baseware.snapshot?.activeMachine) {
+      return {
+        name: baseware.snapshot.activeMachine.name || baseware.snapshot.activeMachine.id,
+        online: false,
+      };
+    }
+    if (studio?.config?.driver) {
+      return {
+        name: studio.config.driver,
+        online: workspaceRunning,
+      };
+    }
+    return null;
+  }, [baseware.snapshot?.activeMachine, primaryMachine, studio?.config?.driver, workspaceRunning]);
+
+  const workspaceDisplayName = target?.name?.trim() || studio?.name?.trim() || target?.id || t("title");
+
+  const categories: SettingsCategoryItem[] = useMemo(
+    () => [
+      { id: "device", label: t("tabs.device"), icon: <Monitor className="size-4" aria-hidden="true" /> },
+      { id: "model", label: t("tabs.model"), icon: <Bot className="size-4" aria-hidden="true" /> },
+      { id: "connection", label: t("tabs.connection"), icon: <Cable className="size-4" aria-hidden="true" /> },
+      { id: "perception", label: t("tabs.perception"), icon: <Eye className="size-4" aria-hidden="true" /> },
+      {
+        id: "services",
+        label: t("tabs.services"),
+        icon: <Server className="size-4" aria-hidden="true" />,
+        badge: studio?.shiori.sessions.length ? (
+          <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+            {studio.shiori.sessions.length}
+          </Badge>
+        ) : undefined,
+      },
+      { id: "simulator", label: t("tabs.simulator"), icon: <FlaskConical className="size-4" aria-hidden="true" /> },
+    ],
+    [studio?.shiori.sessions.length, t],
+  );
+
   return (
     <section className="mx-auto grid w-full max-w-6xl gap-5" aria-label={t("title")}>
-      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-border/70 pb-4">
-        <div className="space-y-1.5">
+      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border/70 pb-4">
+        <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
-            {studio?.config && (
-              <>
-                <Badge variant="outline" className="border-primary/35 bg-primary/10 font-mono text-xs text-primary">
-                  {studio.config.driver}
-                </Badge>
-                <Badge variant="secondary" className="font-mono text-xs">
-                  {studio.config.model}
-                </Badge>
-              </>
-            )}
+            <h1 className="truncate text-lg font-semibold tracking-tight">{workspaceDisplayName}</h1>
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <span
+                className={
+                  "size-2 rounded-full " +
+                  (!target ? "bg-muted-foreground/45" : workspaceRunning ? "bg-emerald-500" : "bg-muted-foreground/50")
+                }
+                aria-hidden="true"
+              />
+              <span>
+                {!target
+                  ? t("runtimeBanner.noWorkspace")
+                  : workspaceRunning
+                    ? t("runtimeBanner.running")
+                    : t("runtimeBanner.stopped")}
+              </span>
+            </span>
           </div>
-          <p className="text-sm leading-relaxed text-muted-foreground">{t("subtitle")}</p>
-          {target?.workspace && (
-            <p className="break-all font-mono text-xs text-muted-foreground">{target.workspace}</p>
-          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {studio && (
-            <div className="flex flex-wrap items-center gap-1.5 rounded-md border border-border/80 bg-[var(--surface-inset)] px-2.5 py-1.5 text-xs">
-              <span
-                className={
-                  "size-2 rounded-full " +
-                  (hostJob?.pid ? "bg-success" : "bg-muted-foreground/50")
-                }
-              />
-              <span className="font-medium">Host</span>
-              <span className="font-mono text-muted-foreground">
-                {hostJob?.pid ? `PID ${hostJob.pid}` : t("stopped")}
-              </span>
-              <span className="text-muted-foreground">·</span>
-              <span
-                className={
-                  "size-2 rounded-full " +
-                  (basewareJob?.pid ? "bg-success" : "bg-muted-foreground/50")
-                }
-              />
-              <span className="font-medium">Baseware</span>
-              <span className="font-mono text-muted-foreground">
-                {basewareJob?.pid ? `PID ${basewareJob.pid}` : t("stopped")}
-              </span>
-              {emulatorJob?.registered && (
-                <>
-                  <span className="text-muted-foreground">·</span>
-                  <span className="font-medium">Emulator</span>
-                  <span className="font-mono text-muted-foreground">
-                    {emulatorJob.pid ? `PID ${emulatorJob.pid}` : t("stopped")}
-                  </span>
-                </>
-              )}
-            </div>
-          )}
           {studio && target && (
             !workspaceRunning ? (
               <Button
@@ -350,7 +395,7 @@ export function WorkspaceStudioView({
                 type="button"
                 size="xs"
                 variant="secondary"
-                onClick={() => navigate({ view: "baseware" })}
+                onClick={() => navigate({ view: "baseware", project: target?.id ?? null })}
               >
                 <HardDrive className="size-3" aria-hidden="true" />
                 {t("servicesSection.manageBaseware")}
@@ -375,89 +420,71 @@ export function WorkspaceStudioView({
         </Alert>
       )}
 
-      <Tabs value={tab} onValueChange={onTabChange} className="w-full space-y-5">
-        <TabsList className="flex h-auto min-h-9 w-full flex-wrap justify-start gap-1 bg-[var(--surface-inset)] p-1">
-          <TabsTrigger value="model" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
-            <Bot className="size-4" aria-hidden="true" />
-            {t("tabs.model")}
-          </TabsTrigger>
-          <TabsTrigger value="connection" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
-            <Cable className="size-4" aria-hidden="true" />
-            {t("tabs.connection")}
-          </TabsTrigger>
-          <TabsTrigger value="services" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
-            <Server className="size-4" aria-hidden="true" />
-            {t("tabs.services")}
-            {studio?.shiori.sessions.length ? (
-              <Badge variant="secondary" className="ml-1 px-1.5 py-0 text-[10px]">
-                {studio.shiori.sessions.length}
-              </Badge>
-            ) : null}
-          </TabsTrigger>
-          <TabsTrigger value="perception" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
-            <Eye className="size-4" aria-hidden="true" />
-            {t("tabs.perception")}
-          </TabsTrigger>
-          <TabsTrigger value="simulator" className="h-8 flex-none gap-1.5 px-3 text-xs sm:text-sm">
-            <FlaskConical className="size-4" aria-hidden="true" />
-            {t("tabs.simulator")}
-          </TabsTrigger>
-        </TabsList>
+      <SettingsWorkspaceLayout
+        navLabel={t("title")}
+        categories={categories}
+        activeCategory={tab}
+        onCategoryChange={onTabChange}
+        wide={tab === "simulator"}
+      >
+        {tab === "device" && (
+          !target ? (
+            <p role="status" className="py-8 text-sm text-muted-foreground">
+              {ready ? t("selectWorkspace") : t("loading")}
+            </p>
+          ) : (
+            <WorkspaceTargetDevicePanel
+              target={target}
+              studio={studio}
+              displayMachines={displayMachines}
+              snapshot={baseware.snapshot}
+              loading={baseware.loading}
+              loadError={baseware.loadError}
+              actionError={baseware.actionError}
+              busyMachineId={baseware.busyMachineId}
+              probeStates={baseware.probeStates}
+              onRefresh={() => void baseware.reloadAll()}
+              onUseDevice={machineId => void baseware.controlWorkspaceMachine("setPrimary", machineId)}
+              onProbe={machine => void baseware.probeMachine(machine)}
+              onManageInBaseware={() => navigate({ view: "baseware", project: target.id })}
+              onOpenModel={() => onTabChange("model")}
+            />
+          )
+        )}
 
-        <TabsContent value="model" className="space-y-5">
-          {!target ? (
-            <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                {ready ? t("selectWorkspace") : t("loading")}
-              </CardContent>
-            </Card>
+        {tab === "model" && (
+          !target ? (
+            <p role="status" className="py-8 text-sm text-muted-foreground">
+              {ready ? t("selectWorkspace") : t("loading")}
+            </p>
           ) : !studio ? (
-            <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                {loading ? t("loading") : t("loadFailed")}
-              </CardContent>
-            </Card>
+            <p role="status" className="py-8 text-sm text-muted-foreground">
+              {loading ? t("loading") : t("loadFailed")}
+            </p>
           ) : (
             <ModelAndBudgetPanel
               studio={studio}
               isZh={isZh}
+              workspaceRunning={workspaceRunning}
+              activeDeviceSummary={activeDeviceSummary}
               onSaved={next => setStudio(next)}
+              onOpenDevice={() => onTabChange("device")}
               onOpenSimulator={() => onTabChange("simulator")}
               onOpenConnection={() => onTabChange("connection")}
             />
-          )}
-        </TabsContent>
+          )
+        )}
 
-        <TabsContent value="connection" className="space-y-5">
+        {tab === "connection" && (
           <ConnectionSettings
+            key={target?.id ?? "global"}
             projects={projects}
             initialScope={target?.id ?? "global"}
             onSaved={refreshStudio}
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="services" className="space-y-5">
-          {!studio ? (
-            <Card>
-              <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                {loading ? t("loading") : t("selectWorkspace")}
-              </CardContent>
-            </Card>
-          ) : (
-            <ServicesAndShioriPanel
-              studio={studio}
-              isZh={isZh}
-              onRefresh={refreshStudio}
-              onOpenBaseware={() => navigate({ view: "baseware" })}
-              onStudioUpdated={next => setStudio(next)}
-              onShioriUpdated={shiori =>
-                setStudio(current => (current ? { ...current, shiori } : current))
-              }
-            />
-          )}
-        </TabsContent>
-
-        <TabsContent value="perception" className="space-y-5">
+        {tab === "perception" && (
           <PerceptionSettingsPanel
             project={project}
             projects={projects}
@@ -466,26 +493,224 @@ export function WorkspaceStudioView({
             catalogLoading={catalogLoading}
             onRetryCatalog={onRetryCatalog}
           />
-        </TabsContent>
+        )}
 
-        <TabsContent value="simulator" className="space-y-5">
-          <LoopLab navigate={navigate} />
-        </TabsContent>
-      </Tabs>
+        {tab === "services" && (
+          !studio ? (
+            <p role="status" className="py-8 text-sm text-muted-foreground">
+              {loading ? t("loading") : t("selectWorkspace")}
+            </p>
+          ) : (
+            <ServicesAndShioriPanel
+              studio={studio}
+              isZh={isZh}
+              onRefresh={refreshStudio}
+              onOpenBaseware={() => navigate({ view: "baseware", project: target?.id ?? null })}
+              onStudioUpdated={next => setStudio(next)}
+              onShioriUpdated={shiori =>
+                setStudio(current => (current ? { ...current, shiori } : current))
+              }
+            />
+          )
+        )}
+
+        {tab === "simulator" && <LoopLab navigate={navigate} />}
+      </SettingsWorkspaceLayout>
     </section>
+  );
+}
+
+function WorkspaceTargetDevicePanel({
+  studio,
+  displayMachines,
+  snapshot,
+  loading,
+  loadError,
+  actionError,
+  busyMachineId,
+  probeStates,
+  onRefresh,
+  onUseDevice,
+  onProbe,
+  onManageInBaseware,
+  onOpenModel,
+}: {
+  target: Project;
+  studio: WorkspaceStudioSnapshot | null;
+  displayMachines: DisplayMachineItem[];
+  snapshot: ReturnType<typeof useBasewareOverview>["snapshot"];
+  loading: boolean;
+  loadError: string;
+  actionError: string;
+  busyMachineId: string | null;
+  probeStates: ReturnType<typeof useBasewareOverview>["probeStates"];
+  onRefresh(): void;
+  onUseDevice(machineId: string): void;
+  onProbe(machine: DisplayMachineItem): void;
+  onManageInBaseware(): void;
+  onOpenModel(): void;
+}) {
+  const t = useTranslations("workspaceStudio");
+  const activeMachine = snapshot?.activeMachine ?? null;
+  const activeDriver = activeMachine?.driver ?? studio?.config?.driver ?? null;
+  const showDriverLaunch = Boolean(activeDriver && activeDriver !== "cua");
+  const bridgeTransport = activeMachine?.transport.kind === "bridge" ? activeMachine.transport : null;
+  const launchPort = bridgeTransport?.port ?? studio?.config?.port;
+  const launchGame = bridgeTransport?.game ?? studio?.config?.game;
+
+  return (
+    <div className="grid min-w-0 gap-6">
+      {(loadError || actionError) && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">{actionError || loadError}</AlertDescription>
+        </Alert>
+      )}
+
+      <SettingsSection
+        title={t("deviceSection.title")}
+        description={t("deviceSection.description")}
+        actions={
+          <>
+            <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRefresh}>
+              <RefreshCw className={"size-3.5" + (loading ? " animate-spin" : "")} aria-hidden="true" />
+              {t(loading ? "refreshing" : "refresh")}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={onManageInBaseware}>
+              <HardDrive className="size-3.5" aria-hidden="true" />
+              {t("deviceSection.manageInBaseware")}
+            </Button>
+          </>
+        }
+      >
+        {loading && displayMachines.length === 0 ? (
+          <p role="status" className="py-5 text-sm text-muted-foreground">{t("loading")}</p>
+        ) : displayMachines.length === 0 ? (
+          <p className="py-5 text-sm text-muted-foreground">{t("deviceSection.noDevices")}</p>
+        ) : (
+          displayMachines.map(machine => {
+            const isPrimary = machine.workspaceAdditionStatus === "primary";
+            const probeState = probeStates[machine.id];
+            const probing = probeState === "probing";
+            const probeOutcome = probeState && probeState !== "probing" ? probeState : null;
+            const humanName = machine.name || machine.id;
+            const transportLine = `${machine.driver} · ${machine.transport.kind.toUpperCase()} · ${formatTransportSummary(machine.transport)}`;
+
+            return (
+              <SettingsRow
+                key={machine.id}
+                label={humanName}
+                badge={
+                  <>
+                    <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span
+                        className={
+                          "size-2 rounded-full " +
+                          (machine.isMounted ? "bg-emerald-500" : "bg-muted-foreground/45")
+                        }
+                        aria-hidden="true"
+                      />
+                      <span>{t(machine.isMounted ? "deviceSection.online" : "deviceSection.standby")}</span>
+                    </span>
+                    {machine.isImplicit && (
+                      <Badge variant="outline" className="text-[11px]">
+                        {t("deviceSection.workspaceDirectTag")}
+                      </Badge>
+                    )}
+                  </>
+                }
+                description={
+                  <span className="flex flex-col gap-0.5">
+                    <SingleLineTruncate mono text={transportLine} />
+                    {probeOutcome && (
+                      <span className={probeOutcome.ok ? "text-emerald-600 dark:text-emerald-400" : "text-destructive"}>
+                        {probeOutcome.latencyMs}ms · {probeOutcome.detail}
+                      </span>
+                    )}
+                  </span>
+                }
+                control={
+                  <div className="flex flex-wrap items-center gap-2">
+                    {isPrimary ? (
+                      <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
+                        {t("deviceSection.currentDevice")}
+                      </Badge>
+                    ) : (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={busyMachineId !== null}
+                        onClick={() => onUseDevice(machine.id)}
+                      >
+                        {t("deviceSection.useDevice")}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={probing}
+                      onClick={() => onProbe(machine)}
+                    >
+                      <Activity className="size-3.5" aria-hidden="true" />
+                      {t(probing ? "deviceSection.probingBtn" : "deviceSection.probeBtn")}
+                    </Button>
+                  </div>
+                }
+              />
+            );
+          })
+        )}
+      </SettingsSection>
+
+      {showDriverLaunch && (
+        <SettingsSection
+          headingLevel={3}
+          title={t("deviceSection.driverLaunchTitle")}
+          actions={
+            studio?.config ? (
+              <Button type="button" size="sm" variant="outline" onClick={onOpenModel}>
+                {t("tabs.model")}
+              </Button>
+            ) : undefined
+          }
+        >
+          <SettingsRow
+            label={activeDriver ?? ""}
+            control={
+              <span className="font-mono text-xs text-muted-foreground">
+                {launchPort !== undefined ? `${t("modelSection.portLabel")}: ${launchPort}` : "—"}
+              </span>
+            }
+          />
+          {launchGame && (
+            <SettingsRow
+              label={t("modelSection.gameLabel")}
+              control={<SingleLineTruncate mono text={launchGame} className="max-w-sm text-xs text-muted-foreground" />}
+            />
+          )}
+        </SettingsSection>
+      )}
+    </div>
   );
 }
 
 export function ModelAndBudgetPanel({
   studio,
   isZh,
+  workspaceRunning,
+  activeDeviceSummary,
   onSaved,
+  onOpenDevice,
   onOpenSimulator,
   onOpenConnection,
 }: {
   studio: WorkspaceStudioSnapshot;
   isZh: boolean;
+  workspaceRunning?: boolean;
+  activeDeviceSummary?: ActiveDeviceSummary | null;
   onSaved(snapshot: WorkspaceStudioSnapshot): void;
+  onOpenDevice?: () => void;
   onOpenSimulator(): void;
   onOpenConnection(): void;
 }) {
@@ -532,7 +757,6 @@ export function ModelAndBudgetPanel({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState(false);
-  const [copied, setCopied] = useState<"idle" | "done" | "failed">("idle");
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
 
   useEffect(() => {
@@ -550,12 +774,6 @@ export function ModelAndBudgetPanel({
     setPort(cfg.port !== undefined ? String(cfg.port) : "");
     setGame(cfg.game ?? "");
   }, [studio.config]);
-
-  useEffect(() => {
-    if (copied === "idle") return;
-    const timer = setTimeout(() => setCopied("idle"), 2500);
-    return () => clearTimeout(timer);
-  }, [copied]);
 
   const parsedSeconds = Number(seconds.trim());
   const parsedRequests = Number(requests.trim());
@@ -628,118 +846,143 @@ export function ModelAndBudgetPanel({
     }
   };
 
+  const isWorkspaceRunning =
+    workspaceRunning ??
+    Boolean(studio.services.jobs.some(item => (item.name === "host" || item.name === "baseware") && item.pid));
+
+  const deviceName = activeDeviceSummary?.name ?? initial.driver;
+  const deviceOnline = activeDeviceSummary?.online ?? isWorkspaceRunning;
   const reloadCmd = `ludens --workspace ${quoteShellPath(studio.workspace)} down --keep-emulator && ludens --workspace ${quoteShellPath(studio.workspace)} up`;
-  const copyReload = async () => {
-    try {
-      await navigator.clipboard.writeText(reloadCmd);
-      setCopied("done");
-    } catch {
-      setCopied("failed");
-    }
-  };
 
   return (
-    <div className="grid gap-5">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Bot className="size-4 text-[var(--gold)]" aria-hidden="true" />
-                {t("modelSection.title")}
-              </CardTitle>
-              <CardDescription>{t("modelSection.description")}</CardDescription>
+    <div className="grid min-w-0 gap-6">
+      <SettingsSection
+        title={t("modelSection.title")}
+        description={t("modelSection.description")}
+        actions={
+          <Button type="button" variant="outline" size="sm" onClick={onOpenConnection}>
+            <Cable className="size-3.5" aria-hidden="true" />
+            {t("modelSection.configureTransport")}
+          </Button>
+        }
+      >
+        <SettingsRow
+          label={t("modelSection.activeDeviceLabel")}
+          control={
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
+                <span
+                  className={"size-2 rounded-full " + (deviceOnline ? "bg-emerald-500" : "bg-muted-foreground/45")}
+                  aria-hidden="true"
+                />
+                <span>{deviceName}</span>
+                <span className="text-muted-foreground">
+                  ({t(deviceOnline ? "deviceSection.online" : "deviceSection.standby")})
+                </span>
+              </span>
+              {onOpenDevice && (
+                <Button type="button" variant="outline" size="xs" onClick={onOpenDevice}>
+                  {t("modelSection.switchDeviceBtn")}
+                </Button>
+              )}
             </div>
-            <Button type="button" variant="outline" size="sm" onClick={onOpenConnection}>
-              <Cable className="size-3.5" aria-hidden="true" />
-              {t("modelSection.configureTransport")}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-5">
-          <div className="space-y-2.5">
-            <Label htmlFor={modelInputId}>{t("modelSection.modelLabel")}</Label>
-            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <Input
-                id={modelInputId}
+          }
+        />
+
+        <SettingsRow
+          stacked
+          label={t("modelSection.modelLabel")}
+          htmlFor={modelInputId}
+          description={t("modelSection.modelHint")}
+          control={
+            <div className="flex w-full flex-col gap-2.5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  id={modelInputId}
+                  value={model}
+                  onChange={event => {
+                    setModel(event.target.value);
+                    setServiceTier(null);
+                    setEffort(null);
+                    setSavedNotice(false);
+                  }}
+                  placeholder="openai-codex/gpt-6.1-sol"
+                  className="font-mono text-sm sm:flex-1"
+                  spellCheck={false}
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <ModelEffortBadge effort={effort} />
+                  <ServiceTierBadge tier={serviceTier} showStandard={Boolean(model.trim())} />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={saving}
+                    data-browse-models="workspace-studio"
+                    onClick={() => setModelPickerOpen(true)}
+                  >
+                    <Cpu className="size-3.5" aria-hidden="true" />
+                    {t("modelSection.browseModels")}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-1.5">
+                {MODEL_PRESETS.map(preset => {
+                  const active = model.trim() === preset.id;
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      onClick={() => {
+                        setModel(preset.id);
+                        setServiceTier(null);
+                        setEffort(null);
+                        setSavedNotice(false);
+                      }}
+                      className={
+                        "inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-left text-xs transition-colors " +
+                        (active
+                          ? "border-primary/50 bg-primary/10 text-foreground"
+                          : "border-border/80 bg-[var(--surface-inset)] text-muted-foreground hover:text-foreground")
+                      }
+                    >
+                      <span className="font-mono font-medium">{preset.label}</span>
+                      <Badge variant="outline" className="text-[10px]">
+                        {isZh ? preset.badgeZh : preset.badgeEn}
+                      </Badge>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <ModelPickerDialog
+                open={modelPickerOpen}
+                onOpenChange={setModelPickerOpen}
                 value={model}
-                onChange={event => {
-                  setModel(event.target.value);
-                  setServiceTier(null);
-                  setEffort(null);
+                serviceTier={serviceTier}
+                effort={effort}
+                projectId={studio.id}
+                allowUnauthenticated={true}
+                onSelect={(nextModel, nextServiceTier, nextEffort) => {
+                  setModel(nextModel);
+                  setServiceTier(nextServiceTier);
+                  setEffort(nextEffort);
                   setSavedNotice(false);
                 }}
-                placeholder="openai-codex/gpt-6.1-sol"
-                className="font-mono text-sm sm:flex-1"
-                spellCheck={false}
               />
-              <ModelEffortBadge effort={effort} className="self-start sm:self-center" />
-              <ServiceTierBadge
-                tier={serviceTier}
-                showStandard={Boolean(model.trim())}
-                className="self-start sm:self-center"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                className="shrink-0"
-                disabled={saving}
-                data-browse-models="workspace-studio"
-                onClick={() => setModelPickerOpen(true)}
-              >
-                <Cpu className="size-3.5" aria-hidden="true" />
-                {t("modelSection.browseModels")}
-              </Button>
             </div>
-            <p className="text-xs text-muted-foreground">{t("modelSection.modelHint")}</p>
-            <ModelPickerDialog
-              open={modelPickerOpen}
-              onOpenChange={setModelPickerOpen}
-              value={model}
-              serviceTier={serviceTier}
-              effort={effort}
-              projectId={studio.id}
-              allowUnauthenticated={true}
-              onSelect={(nextModel, nextServiceTier, nextEffort) => {
-                setModel(nextModel);
-                setServiceTier(nextServiceTier);
-                setEffort(nextEffort);
-                setSavedNotice(false);
-              }}
-            />
-            <div className="flex flex-wrap gap-2 pt-1">
-              {MODEL_PRESETS.map(preset => {
-                const active = model.trim() === preset.id;
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    onClick={() => {
-                      setModel(preset.id);
-                      setServiceTier(null);
-                      setEffort(null);
-                      setSavedNotice(false);
-                    }}
-                    className={
-                      "inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors " +
-                      (active
-                        ? "border-primary/50 bg-primary/10 text-foreground"
-                        : "border-border/80 bg-[var(--surface-inset)] text-muted-foreground hover:text-foreground")
-                    }
-                  >
-                    <span className="font-mono font-medium">{preset.label}</span>
-                    <Badge variant="outline" className="text-[10px]">
-                      {isZh ? preset.badgeZh : preset.badgeEn}
-                    </Badge>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          }
+        />
 
-          <div className="grid gap-4 border-t border-border/60 pt-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor={secondsInputId}>{t("modelSection.secondsLabel")}</Label>
+        <SettingsRow
+          className="items-start"
+          label={t("modelSection.secondsLabel")}
+          htmlFor={secondsInputId}
+          description={t("modelSection.secondsHint")}
+          control={
+            <div className="flex flex-col items-end gap-2">
               <Input
                 id={secondsInputId}
                 type="number"
@@ -750,9 +993,9 @@ export function ModelAndBudgetPanel({
                   setSeconds(event.target.value);
                   setSavedNotice(false);
                 }}
-                className="font-mono"
+                className="w-36 font-mono tabular-nums"
               />
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap justify-end gap-1.5">
                 {[900, 1800, 3600, 7200].map(preset => (
                   <Button
                     key={preset}
@@ -768,11 +1011,17 @@ export function ModelAndBudgetPanel({
                   </Button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">{t("modelSection.secondsHint")}</p>
             </div>
+          }
+        />
 
-            <div className="space-y-2">
-              <Label htmlFor={requestsInputId}>{t("modelSection.requestsLabel")}</Label>
+        <SettingsRow
+          className="items-start"
+          label={t("modelSection.requestsLabel")}
+          htmlFor={requestsInputId}
+          description={t("modelSection.requestsHint")}
+          control={
+            <div className="flex flex-col items-end gap-2">
               <Input
                 id={requestsInputId}
                 type="number"
@@ -783,9 +1032,9 @@ export function ModelAndBudgetPanel({
                   setRequests(event.target.value);
                   setSavedNotice(false);
                 }}
-                className="font-mono"
+                className="w-36 font-mono tabular-nums"
               />
-              <div className="flex flex-wrap gap-1.5">
+              <div className="flex flex-wrap justify-end gap-1.5">
                 {[200, 500, 1000, 2000].map(preset => (
                   <Button
                     key={preset}
@@ -801,130 +1050,130 @@ export function ModelAndBudgetPanel({
                   </Button>
                 ))}
               </div>
-              <p className="text-xs text-muted-foreground">{t("modelSection.requestsHint")}</p>
             </div>
-          </div>
+          }
+        />
 
-          <div className="space-y-3 border-t border-border/60 pt-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="space-y-1">
-                <Label htmlFor={compactionInputId} className="flex items-center gap-2">
-                  <Sparkles className="size-3.5 text-[var(--gold)]" aria-hidden="true" />
-                  {t("modelSection.compactionLabel")}
-                </Label>
-                <p className="text-xs leading-relaxed text-muted-foreground">
-                  {t("modelSection.compactionHint")}
-                </p>
+        <SettingsRow
+          stacked
+          label={t("modelSection.compactionLabel")}
+          htmlFor={compactionInputId}
+          description={t("modelSection.compactionHint")}
+          control={
+            <div className="flex w-full flex-col gap-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Input
+                  id={compactionInputId}
+                  type="number"
+                  min={1000}
+                  step={4000}
+                  value={compaction}
+                  onChange={event => {
+                    setCompaction(event.target.value);
+                    setSavedNotice(false);
+                  }}
+                  placeholder={t("modelSection.compactionPlaceholder")}
+                  className="max-w-xs font-mono tabular-nums"
+                />
+                <Button type="button" variant="outline" size="sm" onClick={onOpenSimulator}>
+                  <FlaskConical className="size-3.5" aria-hidden="true" />
+                  {t("modelSection.openLoopSimulator")}
+                </Button>
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={onOpenSimulator}>
-                <FlaskConical className="size-3.5" aria-hidden="true" />
-                {t("modelSection.openLoopSimulator")}
-              </Button>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {COMPACTION_PRESETS.map(preset => {
+                  const selected =
+                    preset.tokens === null
+                      ? compaction.trim() === ""
+                      : Number(compaction.trim()) === preset.tokens;
+                  return (
+                    <button
+                      key={String(preset.tokens)}
+                      type="button"
+                      onClick={() => {
+                        setCompaction(preset.tokens === null ? "" : String(preset.tokens));
+                        setSavedNotice(false);
+                      }}
+                      className={
+                        "rounded-md border p-2.5 text-left transition-colors " +
+                        (selected
+                          ? "border-primary/50 bg-primary/10"
+                          : "border-border/70 bg-[var(--surface-inset)] hover:border-border")
+                      }
+                    >
+                      <div className="text-xs font-semibold">
+                        {isZh ? preset.labelZh : preset.labelEn}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-muted-foreground">
+                        {isZh ? preset.hintZh : preset.hintEn}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-            <Input
-              id={compactionInputId}
-              type="number"
-              min={1000}
-              step={4000}
-              value={compaction}
+          }
+        />
+
+        <SettingsRow
+          label={t("modelSection.diagnosticsLabel")}
+          htmlFor={diagnosticsId}
+          description={t("modelSection.diagnosticsHint")}
+          control={
+            <NativeSelect
+              id={diagnosticsId}
+              value={diagnostics}
               onChange={event => {
-                setCompaction(event.target.value);
+                setDiagnostics(event.target.value === "full" ? "full" : "normal");
                 setSavedNotice(false);
               }}
-              placeholder={t("modelSection.compactionPlaceholder")}
-              className="max-w-sm font-mono"
+              wrapperClassName="w-full sm:w-64"
+              className="w-full"
+            >
+              <NativeSelectOption value="normal">{t("modelSection.diagnosticsNormal")}</NativeSelectOption>
+              <NativeSelectOption value="full">{t("modelSection.diagnosticsFull")}</NativeSelectOption>
+            </NativeSelect>
+          }
+        />
+
+        <SettingsRow
+          label={t("modelSection.dashboardSwitch")}
+          htmlFor="studio-dashboard-switch"
+          description={t("modelSection.dashboardHint")}
+          control={
+            <Switch
+              id="studio-dashboard-switch"
+              checked={dashboard}
+              onCheckedChange={checked => {
+                setDashboard(checked);
+                setSavedNotice(false);
+              }}
             />
-            <div className="grid gap-2 sm:grid-cols-2">
-              {COMPACTION_PRESETS.map(preset => {
-                const selected =
-                  preset.tokens === null
-                    ? compaction.trim() === ""
-                    : Number(compaction.trim()) === preset.tokens;
-                return (
-                  <button
-                    key={String(preset.tokens)}
-                    type="button"
-                    onClick={() => {
-                      setCompaction(preset.tokens === null ? "" : String(preset.tokens));
-                      setSavedNotice(false);
-                    }}
-                    className={
-                      "rounded-md border p-2.5 text-left transition-colors " +
-                      (selected
-                        ? "border-primary/50 bg-primary/10"
-                        : "border-border/70 bg-[var(--surface-inset)] hover:border-border")
-                    }
-                  >
-                    <div className="text-xs font-semibold">
-                      {isZh ? preset.labelZh : preset.labelEn}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-muted-foreground">
-                      {isZh ? preset.hintZh : preset.hintEn}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
+          }
+        />
 
-          <div className="grid gap-4 border-t border-border/60 pt-4 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <Label htmlFor={diagnosticsId}>{t("modelSection.diagnosticsLabel")}</Label>
-              <NativeSelect
-                id={diagnosticsId}
-                value={diagnostics}
-                onChange={event => {
-                  setDiagnostics(event.target.value === "full" ? "full" : "normal");
-                  setSavedNotice(false);
-                }}
-                wrapperClassName="w-full"
-                className="w-full"
-              >
-                <NativeSelectOption value="normal">{t("modelSection.diagnosticsNormal")}</NativeSelectOption>
-                <NativeSelectOption value="full">{t("modelSection.diagnosticsFull")}</NativeSelectOption>
-              </NativeSelect>
-              <p className="text-[11px] text-muted-foreground">{t("modelSection.diagnosticsHint")}</p>
-            </div>
+        <SettingsRow
+          label={t("modelSection.petSwitch")}
+          htmlFor="studio-pet-switch"
+          description={t("modelSection.petHint")}
+          control={
+            <Switch
+              id="studio-pet-switch"
+              checked={pet}
+              onCheckedChange={checked => {
+                setPet(checked);
+                setSavedNotice(false);
+              }}
+            />
+          }
+        />
 
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-[var(--surface-inset)] p-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="studio-dashboard-switch" className="text-xs font-semibold">
-                  {t("modelSection.dashboardSwitch")}
-                </Label>
-                <p className="text-[11px] text-muted-foreground">{t("modelSection.dashboardHint")}</p>
-              </div>
-              <Switch
-                id="studio-dashboard-switch"
-                checked={dashboard}
-                onCheckedChange={checked => {
-                  setDashboard(checked);
-                  setSavedNotice(false);
-                }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between gap-3 rounded-md border border-border/70 bg-[var(--surface-inset)] p-3">
-              <div className="space-y-0.5">
-                <Label htmlFor="studio-pet-switch" className="text-xs font-semibold">
-                  {t("modelSection.petSwitch")}
-                </Label>
-                <p className="text-[11px] text-muted-foreground">{t("modelSection.petHint")}</p>
-              </div>
-              <Switch
-                id="studio-pet-switch"
-                checked={pet}
-                onCheckedChange={checked => {
-                  setPet(checked);
-                  setSavedNotice(false);
-                }}
-              />
-            </div>
-          </div>
-
-          {initial.driver !== "cua" && (
-            <div className="grid gap-4 border-t border-border/60 pt-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor={portInputId}>{t("modelSection.portLabel")}</Label>
+        {initial.driver !== "cua" && (
+          <>
+            <SettingsRow
+              label={t("modelSection.portLabel")}
+              htmlFor={portInputId}
+              control={
                 <Input
                   id={portInputId}
                   type="number"
@@ -935,11 +1184,14 @@ export function ModelAndBudgetPanel({
                     setPort(event.target.value);
                     setSavedNotice(false);
                   }}
-                  className="font-mono"
+                  className="w-36 font-mono tabular-nums"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor={gameInputId}>{t("modelSection.gameLabel")}</Label>
+              }
+            />
+            <SettingsRow
+              label={t("modelSection.gameLabel")}
+              htmlFor={gameInputId}
+              control={
                 <Input
                   id={gameInputId}
                   value={game}
@@ -948,95 +1200,91 @@ export function ModelAndBudgetPanel({
                     setSavedNotice(false);
                   }}
                   placeholder={t("modelSection.gamePlaceholder")}
-                  className="font-mono"
+                  className="w-full font-mono sm:w-72"
                 />
-              </div>
-            </div>
-          )}
+              }
+            />
+          </>
+        )}
+      </SettingsSection>
 
-          {saveError && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-xs">{saveError}</AlertDescription>
-            </Alert>
-          )}
-          {savedNotice && (
-            <Alert className="border-success/35 bg-success/5">
-              <CheckCircle2 className="text-success" />
-              <AlertTitle>{t("savedTitle")}</AlertTitle>
-              <AlertDescription className="text-xs">{t("savedHint")}</AlertDescription>
-            </Alert>
-          )}
+      {saveError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">{saveError}</AlertDescription>
+        </Alert>
+      )}
+      {savedNotice && (
+        <Alert className="border-success/35 bg-success/5">
+          <CheckCircle2 className="text-success" />
+          <AlertTitle>{t("savedTitle")}</AlertTitle>
+          <AlertDescription className="text-xs">{t("savedHint")}</AlertDescription>
+        </Alert>
+      )}
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4">
-            <p className="text-xs text-muted-foreground">
-              {dirty ? t("unsavedChanges") : t("syncedWithDisk")}
-            </p>
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!dirty || saving}
-                onClick={resetDraft}
-              >
+      <SettingsSaveBar
+        dirty={dirty}
+        saving={saving}
+        statusText={dirty ? t("unsavedChanges") : t("syncedWithDisk")}
+        discardLabel={t("discard")}
+        onDiscard={resetDraft}
+        saveLabel={t("saveConfig")}
+        savingLabel={t("saving")}
+        onSave={() => void saveConfig()}
+        secondaryAction={
+          isWorkspaceRunning ? (
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              disabled={service.busy}
+              onClick={() => void service.reloadWorkspace()}
+            >
+              {service.pendingOperation === "reload" ? (
+                <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+              ) : (
                 <RotateCcw className="size-3.5" aria-hidden="true" />
-                {t("discard")}
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!dirty || saving}
-                onClick={() => void saveConfig()}
-              >
-                <Save className="size-3.5" aria-hidden="true" />
-                {t(saving ? "saving" : "saveConfig")}
-              </Button>
-            </div>
-          </div>
+              )}
+              {t(service.pendingOperation === "reload" ? "reloadingWorkspace" : "reloadNow")}
+            </Button>
+          ) : undefined
+        }
+      />
 
-          <div className="space-y-2 rounded-md border border-border/70 bg-background/50 p-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs font-medium">{t("reloadHostTitle")}</span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="xs"
-                  disabled={service.busy}
-                  onClick={() => void service.reloadWorkspace()}
-                >
-                  {service.pendingOperation === "reload" ? (
-                    <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
-                  ) : (
-                    <RotateCcw className="size-3" aria-hidden="true" />
-                  )}
-                  {t(service.pendingOperation === "reload" ? "reloadingWorkspace" : "reloadNow")}
-                </Button>
-                <Button type="button" variant="outline" size="xs" onClick={() => void copyReload()}>
-                  {copied === "done" ? <Check className="size-3" /> : <Copy className="size-3" />}
-                  {t(copied === "done" ? "copied" : "copyReload")}
-                </Button>
-              </div>
-            </div>
-            <code className="block select-all break-all font-mono text-[11px] text-muted-foreground">
+      <AdvancedDiagnosticsDisclosure summary={t("servicesSection.advancedDiagnostics")}>
+        <div className="space-y-2 text-xs text-muted-foreground">
+          <p>{t("reloadHostTitle")}</p>
+          <div className="flex items-center gap-2 rounded-md border border-border/70 bg-[var(--surface-inset)] px-3 py-2">
+            <code className="min-w-0 flex-1 select-all break-all font-mono text-[11px] text-foreground">
               {reloadCmd}
             </code>
+            <InlineCopyButton
+              text={reloadCmd}
+              ariaLabel={t("copyReload")}
+              copiedText={t("copied")}
+            />
           </div>
-        </CardContent>
-      </Card>
+        </div>
+      </AdvancedDiagnosticsDisclosure>
     </div>
   );
 }
 
-function ServicesAndShioriPanel({
+const SERVICE_ROWS: Array<{ name: "host" | "baseware" | "emulator"; label: string }> = [
+  { name: "host", label: "Host" },
+  { name: "baseware", label: "Baseware" },
+  { name: "emulator", label: "Emulator" },
+];
+
+export function ServicesAndShioriPanel({
   studio,
+  isZh,
   onRefresh,
   onOpenBaseware,
   onStudioUpdated,
   onShioriUpdated,
 }: {
   studio: WorkspaceStudioSnapshot;
-  isZh?: boolean;
+  isZh: boolean;
   onRefresh(): void;
   onOpenBaseware(): void;
   onStudioUpdated(next: WorkspaceStudioSnapshot): void;
@@ -1047,7 +1295,6 @@ function ServicesAndShioriPanel({
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [copiedCmd, setCopiedCmd] = useState<string | null>(null);
 
   const service = useWorkspaceService({
     workspaceId: studio.id,
@@ -1104,337 +1351,301 @@ function ServicesAndShioriPanel({
     }
   };
 
-  const copyCommand = async (key: string, cmd: string) => {
-    try {
-      await navigator.clipboard.writeText(cmd);
-      setCopiedCmd(key);
-      setTimeout(() => setCopiedCmd(current => (current === key ? null : current)), 2200);
-    } catch {
-      // ignore clipboard errors
-    }
-  };
-
   const quotedWs = quoteShellPath(studio.workspace);
   const upCmd = `ludens --workspace ${quotedWs} up`;
   const reloadCmd = `ludens --workspace ${quotedWs} down --keep-emulator && ludens --workspace ${quotedWs} up`;
   const downCmd = `ludens --workspace ${quotedWs} down`;
+  const serviceOps: Array<{
+    key: "up" | "reload" | "down";
+    runLabel: string;
+    label: string;
+    icon: typeof Play;
+    cmd: string;
+  }> = [
+    { key: "up", runLabel: t("servicesSection.runUp"), label: t("servicesSection.cmdUp"), icon: Play, cmd: upCmd },
+    { key: "reload", runLabel: t("servicesSection.runReload"), label: t("servicesSection.cmdReload"), icon: RotateCcw, cmd: reloadCmd },
+    { key: "down", runLabel: t("servicesSection.runDown"), label: t("servicesSection.cmdDown"), icon: Square, cmd: downCmd },
+  ];
+
+  const runningText = isZh ? "运行中" : "Running";
 
   return (
-    <div className="grid gap-5">
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 flex-1 space-y-1">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Server className="size-4 text-[var(--gold)]" aria-hidden="true" />
-                {t("servicesSection.title")}
-              </CardTitle>
-              <CardDescription>{t("servicesSection.description")}</CardDescription>
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={onOpenBaseware}>
-                <HardDrive className="size-3.5" aria-hidden="true" />
-                {t("servicesSection.manageBaseware")}
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
-                <RefreshCw className="size-3.5" aria-hidden="true" />
-                {t("refresh")}
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {studio.services.jobs.map(job => (
-              <div
-                key={job.name}
-                className="flex flex-col justify-between gap-2.5 rounded-md border border-border/80 bg-[var(--surface-inset)] p-3.5"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-mono text-sm font-semibold">{job.name}</span>
-                    <Badge
-                      variant="outline"
-                      className={
-                        job.pid
-                          ? "border-success/35 bg-success/10 text-success"
-                          : "text-muted-foreground"
-                      }
-                    >
-                      {job.pid ? `PID ${job.pid}` : t("stopped")}
-                    </Badge>
-                  </div>
-                  <p className="break-all font-mono text-[11px] text-muted-foreground">
-                    {job.target}
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/50 pt-2 text-[11px] text-muted-foreground">
-                  <span>
-                    {t("servicesSection.state")}: {job.state ?? (job.registered ? "registered" : "unregistered")}
-                  </span>
-                  {job.lastExitCode !== null && (
-                    <span>exit: {job.lastExitCode}</span>
+    <div className="grid min-w-0 gap-6">
+      <SettingsSection
+        title={t("servicesSection.title")}
+        description={t("servicesSection.description")}
+        actions={
+          <>
+            {serviceOps.map(item => {
+              const Icon = item.icon;
+              const isRunningOp = service.pendingOperation === item.key;
+              return (
+                <Button
+                  key={item.key}
+                  type="button"
+                  size="sm"
+                  variant={item.key === "up" ? "default" : item.key === "reload" ? "secondary" : "outline"}
+                  disabled={service.busy}
+                  onClick={() => void service.runOperation(item.key)}
+                  data-studio-service-action={item.key}
+                >
+                  {isRunningOp ? (
+                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                  ) : (
+                    <Icon className="size-3.5" aria-hidden="true" />
                   )}
+                  {isRunningOp ? t("servicesSection.runningOp") : item.runLabel}
+                </Button>
+              );
+            })}
+            <Button type="button" variant="outline" size="sm" onClick={onOpenBaseware}>
+              <HardDrive className="size-3.5" aria-hidden="true" />
+              {t("servicesSection.manageBaseware")}
+            </Button>
+            <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
+              <RefreshCw className="size-3.5" aria-hidden="true" />
+              {t("refresh")}
+            </Button>
+          </>
+        }
+      >
+        {SERVICE_ROWS.map(entry => {
+          const job = studio.services.jobs.find(item => item.name === entry.name);
+          const isRunning = Boolean(job?.pid);
+          const isStandby = !isRunning && Boolean(job?.registered);
+          const statusLabel = isRunning
+            ? runningText
+            : isStandby
+              ? t("deviceSection.standby")
+              : t("stopped");
+
+          return (
+            <SettingsRow
+              key={entry.name}
+              label={entry.label}
+              control={
+                <span className="inline-flex items-center gap-2 text-xs font-medium text-foreground">
+                  <span
+                    className={
+                      "size-2 rounded-full " +
+                      (isRunning
+                        ? "bg-emerald-500"
+                        : isStandby
+                          ? "bg-amber-500"
+                          : "bg-muted-foreground/45")
+                    }
+                    aria-hidden="true"
+                  />
+                  <span>{statusLabel}</span>
+                </span>
+              }
+            />
+          );
+        })}
+      </SettingsSection>
+
+      {serviceOutput && (
+        <div
+          className={
+            "space-y-1.5 rounded-md border p-3 text-xs " +
+            (serviceOutput.ok
+              ? "border-success/35 bg-success/5 text-foreground"
+              : "border-destructive/40 bg-destructive/10 text-destructive")
+          }
+          data-studio-service-output
+        >
+          <div className="flex items-center justify-between gap-2 font-medium">
+            <span>
+              {serviceOutput.ok
+                ? t("servicesSection.execSuccess").replace("{operation}", serviceOutput.operation)
+                : t("servicesSection.execFailed")
+                    .replace("{operation}", serviceOutput.operation)
+                    .replace("{code}", String(serviceOutput.exitCode))}
+            </span>
+            <button
+              type="button"
+              onClick={() => service.clearResult()}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              ×
+            </button>
+          </div>
+          {(serviceOutput.stdout || serviceOutput.stderr) && (
+            <pre className="max-h-36 overflow-auto rounded bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+              {[serviceOutput.stdout, serviceOutput.stderr].filter(Boolean).join("\n")}
+            </pre>
+          )}
+        </div>
+      )}
+
+      {actionError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">{actionError}</AlertDescription>
+        </Alert>
+      )}
+      {actionSuccess && (
+        <Alert className="border-success/35 bg-success/5">
+          <CheckCircle2 className="text-success" />
+          <AlertDescription className="text-xs">{actionSuccess}</AlertDescription>
+        </Alert>
+      )}
+
+      <SettingsSection
+        headingLevel={3}
+        title={t("shioriSection.title")}
+        description={t("shioriSection.description")}
+        actions={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!!busyAction || !studio.shiori.currentSessionFile}
+            onClick={() =>
+              void runShioriMutation({ kind: "newSession" }, t("shioriSection.newSessionReady"))
+            }
+          >
+            <RotateCcw className="size-3.5" aria-hidden="true" />
+            {t("shioriSection.startFreshNext")}
+          </Button>
+        }
+      >
+        <SettingsRow
+          label={t("shioriSection.currentPointer")}
+          control={
+            <SingleLineTruncate
+              mono
+              text={studio.shiori.currentSessionFile ?? t("shioriSection.freshOnNextStart")}
+              className="max-w-full text-xs text-muted-foreground"
+            />
+          }
+        />
+
+        {studio.shiori.sessions.length === 0 ? (
+          <p className="py-4 text-xs text-muted-foreground">{t("shioriSection.noSessions")}</p>
+        ) : (
+          studio.shiori.sessions.map(session => (
+            <SettingsRow
+              key={session.relativePath}
+              label={<SingleLineTruncate mono text={session.file} className="max-w-xs text-xs sm:max-w-md" />}
+              badge={
+                session.isCurrent ? (
+                  <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
+                    {t("shioriSection.activePointer")}
+                  </Badge>
+                ) : undefined
+              }
+              description={`${formatBytes(session.sizeBytes)} · ${new Date(session.updatedAt).toLocaleString()}`}
+              control={
+                !session.isCurrent ? (
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant="outline"
+                    disabled={!!busyAction}
+                    onClick={() =>
+                      void runShioriMutation(
+                        { kind: "selectSession", sessionFile: session.relativePath },
+                        t("shioriSection.sessionSelected"),
+                      )
+                    }
+                  >
+                    {t("shioriSection.resumeThis")}
+                  </Button>
+                ) : undefined
+              }
+            />
+          ))
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        headingLevel={3}
+        title={t("memorySection.title")}
+        description={t("memorySection.description")}
+        actions={
+          <Button
+            type="button"
+            size="sm"
+            disabled={!!busyAction || memoryDraft === studio.shiori.memory.content}
+            onClick={() =>
+              void runShioriMutation(
+                { kind: "saveMemory", content: memoryDraft },
+                t("memorySection.saved"),
+              )
+            }
+          >
+            <Save className="size-3.5" aria-hidden="true" />
+            {t("memorySection.save")}
+          </Button>
+        }
+      >
+        <SettingsRow
+          stacked
+          label="MEMORY.md"
+          control={
+            <textarea
+              value={memoryDraft}
+              onChange={event => setMemoryDraft(event.target.value)}
+              rows={10}
+              placeholder={t("memorySection.placeholder")}
+              aria-label={t("memorySection.title")}
+              className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        />
+      </SettingsSection>
+
+      <AdvancedDiagnosticsDisclosure summary={t("servicesSection.advancedDiagnostics")}>
+        <div className="space-y-4 text-xs">
+          <div className="space-y-2">
+            {serviceOps.map(item => (
+              <div key={item.key} className="space-y-1">
+                <p className="text-muted-foreground">{item.label}</p>
+                <div className="flex items-center gap-2 rounded-md border border-border/70 bg-[var(--surface-inset)] px-2.5 py-1.5">
+                  <code className="min-w-0 flex-1 select-all break-all font-mono text-[11px] text-foreground">
+                    {item.cmd}
+                  </code>
+                  <InlineCopyButton
+                    text={item.cmd}
+                    ariaLabel={item.label}
+                    copiedText={t("copied")}
+                  />
                 </div>
-                {job.logTail.length > 0 && (
-                  <details className="text-[11px]">
-                    <summary className="cursor-pointer font-medium text-muted-foreground hover:text-foreground">
-                      {t("servicesSection.viewLogs")} ({job.logTail.length})
-                    </summary>
-                    <pre className="mt-1.5 max-h-36 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
-                      {job.logTail.join("\n")}
-                    </pre>
-                  </details>
-                )}
               </div>
             ))}
           </div>
 
-          <div className="grid gap-2.5 border-t border-border/60 pt-4 sm:grid-cols-3">
-            {(
-              [
-                {
-                  key: "up" as const,
-                  label: t("servicesSection.cmdUp"),
-                  runLabel: t("servicesSection.runUp"),
-                  icon: Play,
-                  cmd: upCmd,
-                },
-                {
-                  key: "reload" as const,
-                  label: t("servicesSection.cmdReload"),
-                  runLabel: t("servicesSection.runReload"),
-                  icon: RotateCcw,
-                  cmd: reloadCmd,
-                },
-                {
-                  key: "down" as const,
-                  label: t("servicesSection.cmdDown"),
-                  runLabel: t("servicesSection.runDown"),
-                  icon: Square,
-                  cmd: downCmd,
-                },
-              ]
-            ).map(item => {
-              const Icon = item.icon;
-              const isRunningOp = service.pendingOperation === item.key;
-              return (
-                <div
-                  key={item.key}
-                  className="flex flex-col justify-between gap-2 rounded-md border border-border/70 bg-background/50 p-3"
-                >
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="flex items-center gap-1.5 text-xs font-medium">
-                      <Terminal className="size-3.5 text-muted-foreground" aria-hidden="true" />
-                      {item.label}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant={item.key === "up" ? "default" : "secondary"}
-                        disabled={service.busy}
-                        onClick={() => void service.runOperation(item.key)}
-                        data-studio-service-action={item.key}
-                      >
-                        {isRunningOp ? (
-                          <RefreshCw className="size-3 animate-spin" aria-hidden="true" />
-                        ) : (
-                          <Icon className="size-3" aria-hidden="true" />
-                        )}
-                        {isRunningOp ? t("servicesSection.runningOp") : item.runLabel}
-                      </Button>
-                      <Button
-                        type="button"
-                        size="xs"
-                        variant="outline"
-                        onClick={() => void copyCommand(item.key, item.cmd)}
-                      >
-                        {copiedCmd === item.key ? <Check className="size-3" /> : <Copy className="size-3" />}
-                        {t(copiedCmd === item.key ? "copied" : "copy")}
-                      </Button>
-                    </div>
-                  </div>
-                  <code className="block select-all break-all font-mono text-[11px] text-muted-foreground">
-                    {item.cmd}
-                  </code>
-                </div>
-              );
-            })}
-          </div>
-
-          {serviceOutput && (
-            <div
-              className={
-                "space-y-1.5 rounded-md border p-3 text-xs " +
-                (serviceOutput.ok
-                  ? "border-success/35 bg-success/5 text-foreground"
-                  : "border-destructive/40 bg-destructive/10 text-destructive")
-              }
-              data-studio-service-output
-            >
-              <div className="flex items-center justify-between gap-2 font-medium">
-                <span>
-                  {serviceOutput.ok
-                    ? t("servicesSection.execSuccess").replace("{operation}", serviceOutput.operation)
-                    : t("servicesSection.execFailed")
-                        .replace("{operation}", serviceOutput.operation)
-                        .replace("{code}", String(serviceOutput.exitCode))}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => service.clearResult()}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  ×
-                </button>
-              </div>
-              {(serviceOutput.stdout || serviceOutput.stderr) && (
-                <pre className="max-h-36 overflow-auto rounded bg-background/80 p-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
-                  {[serviceOutput.stdout, serviceOutput.stderr].filter(Boolean).join("\n")}
-                </pre>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <History className="size-4 text-[var(--gold)]" aria-hidden="true" />
-                {t("shioriSection.title")}
-              </CardTitle>
-              <CardDescription>{t("shioriSection.description")}</CardDescription>
-            </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!!busyAction || !studio.shiori.currentSessionFile}
-              onClick={() =>
-                void runShioriMutation({ kind: "newSession" }, t("shioriSection.newSessionReady"))
-              }
-            >
-              <RotateCcw className="size-3.5" aria-hidden="true" />
-              {t("shioriSection.startFreshNext")}
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {actionError && (
-            <Alert variant="destructive">
-              <AlertDescription className="text-xs">{actionError}</AlertDescription>
-            </Alert>
-          )}
-          {actionSuccess && (
-            <Alert className="border-success/35 bg-success/5">
-              <CheckCircle2 className="text-success" />
-              <AlertDescription className="text-xs">{actionSuccess}</AlertDescription>
-            </Alert>
-          )}
-
-          <div className="rounded-md border border-border/70 bg-[var(--surface-inset)] p-3 text-xs">
-            <span className="font-medium">{t("shioriSection.currentPointer")}: </span>
-            <code className="break-all font-mono text-muted-foreground">
-              {studio.shiori.currentSessionFile ?? t("shioriSection.freshOnNextStart")}
-            </code>
-          </div>
-
-          {studio.shiori.sessions.length === 0 ? (
-            <p className="py-4 text-center text-xs text-muted-foreground">
-              {t("shioriSection.noSessions")}
+          <div className="space-y-1.5 border-t border-border/50 pt-3 font-mono text-[11px] text-muted-foreground">
+            <p className="break-all">
+              hostSocket: {studio.services.hostSocket} ({studio.services.hostSocketExists ? "exists" : "missing"})
             </p>
-          ) : (
-            <ul className="grid gap-2">
-              {studio.shiori.sessions.map(session => (
-                <li
-                  key={session.relativePath}
-                  className={
-                    "flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-xs " +
-                    (session.isCurrent
-                      ? "border-primary/45 bg-primary/5"
-                      : "border-border/70 bg-[var(--surface-inset)]")
-                  }
-                >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="break-all font-mono font-medium">{session.file}</span>
-                      {session.isCurrent && (
-                        <Badge variant="outline" className="border-primary/40 bg-primary/10 text-primary">
-                          {t("shioriSection.activePointer")}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="font-mono text-[11px] text-muted-foreground">
-                      {formatBytes(session.sizeBytes)} · {new Date(session.updatedAt).toLocaleString()}
-                    </p>
-                  </div>
-                  {!session.isCurrent && (
-                    <Button
-                      type="button"
-                      size="xs"
-                      variant="outline"
-                      disabled={!!busyAction}
-                      onClick={() =>
-                        void runShioriMutation(
-                          { kind: "selectSession", sessionFile: session.relativePath },
-                          t("shioriSection.sessionSelected"),
-                        )
-                      }
-                    >
-                      {t("shioriSection.resumeThis")}
-                    </Button>
-                  )}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="space-y-1">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <FileText className="size-4 text-[var(--gold)]" aria-hidden="true" />
-                {t("memorySection.title")}
-              </CardTitle>
-              <CardDescription>{t("memorySection.description")}</CardDescription>
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!!busyAction || memoryDraft === studio.shiori.memory.content}
-              onClick={() =>
-                void runShioriMutation(
-                  { kind: "saveMemory", content: memoryDraft },
-                  t("memorySection.saved"),
-                )
-              }
-            >
-              <Save className="size-3.5" aria-hidden="true" />
-              {t("memorySection.save")}
-            </Button>
+            <p className="break-all">memory: {studio.shiori.memory.path}</p>
           </div>
-        </CardHeader>
-        <CardContent className="space-y-2.5">
-          <p className="break-all font-mono text-xs text-muted-foreground">
-            {studio.shiori.memory.path}
-          </p>
-          <textarea
-            value={memoryDraft}
-            onChange={event => setMemoryDraft(event.target.value)}
-            rows={12}
-            placeholder={t("memorySection.placeholder")}
-            aria-label={t("memorySection.title")}
-            className="w-full rounded-md border border-border bg-background p-3 font-mono text-xs leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </CardContent>
-      </Card>
+
+          <div className="space-y-3 border-t border-border/50 pt-3">
+            {studio.services.jobs.map(job => (
+              <div key={job.name} className="space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+                  <span className="font-semibold text-foreground">{job.name}</span>
+                  <span className="text-muted-foreground">
+                    {job.pid ? `PID ${job.pid}` : t("stopped")} · {job.state ?? (job.registered ? "registered" : "unregistered")}
+                    {job.lastExitCode !== null ? ` · exit ${job.lastExitCode}` : ""}
+                  </span>
+                </div>
+                <p className="break-all font-mono text-[11px] text-muted-foreground">{job.target}</p>
+                {job.logPath && (
+                  <p className="break-all font-mono text-[11px] text-muted-foreground">{job.logPath}</p>
+                )}
+                {job.logTail.length > 0 && (
+                  <pre className="max-h-36 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                    {job.logTail.join("\n")}
+                  </pre>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </AdvancedDiagnosticsDisclosure>
     </div>
   );
 }

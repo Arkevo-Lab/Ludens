@@ -31,7 +31,7 @@ test("consoleViewIds includes baseware and ConsoleSidebar renders the Baseware n
   assert.match(html, /aria-current="page"/);
 });
 
-test("BasewareView renders driver library, topology summary, machine pool, and relocated device controllers card", () => {
+test("BasewareView renders flat tabbed device/driver lists and modal detail drawer without summary cards", () => {
   const html = renderToStaticMarkup(
     createElement(BasewareView, {
       project: "my-workspace",
@@ -43,11 +43,15 @@ test("BasewareView renders driver library, topology summary, machine pool, and r
     }),
   );
   assert.match(html, /data-baseware-view/);
-  assert.match(html, /data-baseware-summary/);
-  assert.match(html, /data-baseware-section="driver-library"/);
+  assert.doesNotMatch(html, /data-baseware-summary/);
+  assert.match(html, /role="tablist"/);
   assert.match(html, /data-baseware-section="machine-pool"/);
-  assert.match(html, /data-baseware-section="controllers-catalog"/);
+  assert.match(html, /role="tabpanel"[^>]*data-baseware-section="machine-pool"/);
+  assert.doesNotMatch(html, /<div[^>]*hidden[^>]*data-baseware-section="machine-pool"/);
+  assert.match(html, /role="tabpanel"[^>]*hidden=""[^>]*data-baseware-section="driver-library"/);
+  assert.match(html, /<dialog[^>]*data-baseware-section="controllers-catalog"/);
   assert.match(html, /data-capability-source="device"/);
+  assert.doesNotMatch(html, /<dialog[^>]*role="dialog"/);
   assert.match(html, /data-baseware-add-driver/);
   assert.match(html, /data-baseware-add-machine/);
 });

@@ -58,12 +58,28 @@
   },
   "settings": {
     "sectionsNavLabel": "设置分组导航",
+    "categories": {
+      "general": "常规",
+      "defaults": "新建默认参数",
+      "transport": "模型与传输",
+      "pet": "桌面伴侣"
+    },
     "sections": {
       "console": "界面与语言",
       "defaults": "新建默认参数",
       "connection": "模型与传输",
       "pet": "桌面伴侣"
     },
+    "generalTitle": "常规",
+    "generalDescription": "控制台显示语言与基础偏好设置。",
+    "defaultsSectionTitle": "新建工作区默认参数",
+    "defaultsModelLabel": "默认推理模型",
+    "defaultsModelHint": "新建工作区未指定 --model 时默认使用的模型标识。",
+    "defaultsSecondsLabel": "默认单轮时长预算",
+    "defaultsRequestsLabel": "默认单轮请求上限",
+    "defaultsCompactionLabel": "默认上下文压缩阈值",
+    "defaultsPetLabel": "运行时自动拉起桌宠",
+    "defaultsPetHint": "启动工作区运行时自动启动或连接 Ludens Pet 桌面陪伴。",
     "language": "语言",
     "languageDescription": "控制台与桌宠显示语言。默认跟随浏览器。",
     "languageEnglish": "English",
@@ -175,7 +191,11 @@
     "applyHint": "在保留模拟器和游戏进度的前提下重启工作区 Host，使新 OMP 会话应用更新后的连接配置：",
     "copyCommand": "复制重启生效命令",
     "copiedCommand": "已复制",
-    "copyFailed": "无法复制命令到剪贴板。"
+    "copyFailed": "无法复制命令到剪贴板。",
+    "scopeLockedGlobal": "全局默认",
+    "scopeLockedWorkspace": "当前工作区覆盖",
+    "advancedCliTitle": "热重载命令与诊断",
+    "transportSettingsTitle": "传输与缓存"
   },
   "perceptionSettings": {
     "selectWorkspace": "选择已登记的工作区",
@@ -668,7 +688,9 @@
     "invalidSound": "请选择不超过 2 MB、10 秒的 WAV、MP3 或 OGG 音频。",
     "writeUnconfirmed": "无法确认本次修改是否生效，请重新读取设置后再修改。",
     "previewFailed": "无法播放这段音频。",
-    "noSoundFile": "尚未选择音频文件。"
+    "noSoundFile": "尚未选择音频文件。",
+    "desktopBannerTitle": "请从 Ludens Pet 托盘打开控制台窗口，以调整外观、通知和声音。",
+    "desktopBannerAction": "检查窗口"
   },
   "activityFeed": {
     "copyAria": "复制完整内容",
@@ -2129,10 +2151,31 @@
     "loading": "正在读取工作区配置与服务状态…",
     "tabs": {
       "model": "模型与预算",
+      "device": "目标设备",
       "connection": "连接与多模态传输",
       "services": "后台服务与会话",
       "perception": "感知录制参数",
       "simulator": "上下文容量推演"
+    },
+    "runtimeBanner": {
+      "noWorkspace": "请先在顶部栏选择一个工作区。",
+      "running": "工作区服务运行中",
+      "stopped": "工作区服务已停止"
+    },
+    "deviceSection": {
+      "title": "目标设备",
+      "description": "选择当前工作区的主控受控设备，并配置驱动启动参数。",
+      "activeBadge": "当前主控",
+      "online": "在线",
+      "standby": "待命",
+      "useDevice": "设为当前设备",
+      "currentDevice": "当前使用",
+      "probeBtn": "探测连通",
+      "probingBtn": "探测中…",
+      "manageInBaseware": "前往 Baseware 管理",
+      "noDevices": "当前工作区尚未配置受控设备。",
+      "workspaceDirectTag": "工作区直连",
+      "driverLaunchTitle": "驱动与启动参数"
     },
     "modelSection": {
       "title": "模型、循环预算与环境驱动契约 (ludens.json)",
@@ -2160,7 +2203,9 @@
       "petHint": "运行 ludens up 时自动启动或连接 Ludens Pet 桌面陪伴。",
       "portLabel": "桥接端口 (port)",
       "gameLabel": "游戏 / ROM 路径 (game)",
-      "gamePlaceholder": "留空则连接你手动启动的游戏或环境"
+      "gamePlaceholder": "留空则连接你手动启动的游戏或环境",
+      "activeDeviceLabel": "当前目标设备",
+      "switchDeviceBtn": "切换设备"
     },
     "savedTitle": "工作区配置已保存到 ludens.json。",
     "savedHint": "若工作区正在运行，可在不断开模拟器的前提下热重载 Host 使新模型或预算参数生效。",
@@ -2189,7 +2234,8 @@
       "runDown": "立即停止",
       "runningOp": "执行中…",
       "execSuccess": "已执行 ludens {operation} (exit 0)",
-      "execFailed": "执行 ludens {operation} 失败 (exit {code})"
+      "execFailed": "执行 ludens {operation} 失败 (exit {code})",
+      "advancedDiagnostics": "高级诊断与命令行"
     },
     "shioriSection": {
       "title": "Shiori 会话指针与历史会话",
@@ -2352,7 +2398,33 @@
     "inspectorTabDaemon": "守护进程与租约",
     "cliRoutingLabel": "CLI 指定调用示例",
     "unmountedPrompt": "节点「{id}」当前未挂载到工作区 Baseware 守护进程中。",
-    "mountNowBtn": "立即并发挂载此节点"
+    "mountNowBtn": "立即并发挂载此节点",
+    "pageTitle": "基座设备",
+    "tabDevices": "受控设备",
+    "tabDrivers": "驱动包",
+    "drawerTitle": "设备详情",
+    "drawerAdvancedTitle": "守护进程与命令行诊断",
+    "driverLocalPkg": "本地包",
+    "driverNpmPkg": "npm 包",
+    "driverGithubPkg": "GitHub 包",
+    "driverBuiltinPkg": "内置",
+    "driverSaveGlobal": "纳入全局库",
+    "driverRemoveGlobal": "移出全局库",
+    "driverNewDevice": "新建设备",
+    "deviceInUse": "当前使用",
+    "deviceWorkspaceLocal": "工作区直连",
+    "deviceSetActive": "设为当前",
+    "deviceSaveGlobal": "存入节点池",
+    "inspectDevice": "查看详情",
+    "copySpec": "复制包来源",
+    "copyCli": "复制 CLI 命令",
+    "copiedNotice": "已复制",
+    "copyFailedNotice": "复制失败",
+    "poolFilterCurrent": "当前工作区",
+    "poolFilterOnline": "在线",
+    "driverLabel": "驱动",
+    "endpointLabel": "连接端点",
+    "controllersSectionTitle": "控制器接口"
   },
   "modelPicker": {
     "title": "选择多模态推理模型",

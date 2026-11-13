@@ -1,14 +1,18 @@
 "use client";
 
-import { CheckIcon, ChevronRightIcon, RefreshCwIcon } from "lucide-react";
+import { CheckIcon, RefreshCwIcon } from "lucide-react";
 import { petStatus, petStatusKey, workspaceLabel, type PetTarget } from "@/lib/pet";
 import type { Project } from "@/lib/types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
+import {
+  AdvancedDiagnosticsDisclosure,
+  InlineCopyButton,
+  SettingsRow,
+  SettingsSection,
+} from "@/components/ui/settings-primitives";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useRetryFocus } from "@/components/use-retry-focus";
 import "@/features/pet/pet-settings.css";
@@ -23,19 +27,17 @@ function targetName(target: PetTarget, projects: Project[], t: (key: string) => 
   const project = projects.find(project => project.id === target.project && project.workspace === target.workspace);
   return workspaceLabel(project ?? { id: target.project, workspace: target.workspace }, t);
 }
+
 function requestedName(project: string | null, projects: Project[], target: PetTarget | null | undefined, t: (key: string) => string) {
   if (project === null) return t("noSavedTarget");
   const known = projects.find(item => item.id === project);
   return known ? workspaceLabel(known, t) : target?.project === project ? targetName(target, projects, t) : project;
 }
-function TechnicalDetails({ error }: { error: string }) {
-  const t = useTranslations("petFollow");
-  return <details className="pet-follow-technical"><summary>{t("technicalDetails")}</summary><p>{error}</p></details>;
-}
 
 export function PetFollowSettings({ follow, projects }: { follow: PetFollow; projects: Project[] }) {
   const { state, pending, reading, readError, writeError, requested, lastReadAt, lastSaved, canWrite } = follow;
   const t = useTranslations("petFollow");
+  const ct = useTranslations("connectionSettings");
   const { locale } = useLocale();
   const target = state?.target;
   const options = projects.filter(project => project.workspace);
@@ -46,75 +48,195 @@ export function PetFollowSettings({ follow, projects }: { follow: PetFollow; pro
   const observationUnconfirmed = pending || !!readError || !!writeError;
   const statusKey = petStatusKey(state);
   const status = pending ? t("updating") : observationUnconfirmed ? t("statusUnavailable") : petStatus(state, t);
+  const consumerError = !observationUnconfirmed ? state?.consumerError : undefined;
   const currentError = !observationUnconfirmed && statusKey === "followError" ? state?.consumer?.error : null;
   const canRead = !reading && !pending;
   const requestLabel = reading ? "readingStatus" : writeError ? "readSavedTarget" : readError || state?.consumerError ? "retryRead" : "refreshStatus";
-  return <Card className="pet-follow-settings gap-0 py-0 shadow-none" data-pet-follow="settings">
-    <CardContent ref={focus.target} tabIndex={-1} className="pet-follow-settings-content p-[18px] outline-none max-[480px]:p-3.5" aria-label={t("savedWorkspace")}>
-      <div className="pet-follow-selection">
-        <div className="pet-follow-selection-label">
-          <Label htmlFor="pet-follow-workspace" className="text-sm font-semibold">{t("savedWorkspace")}</Label>
-          <p id="pet-follow-help">{t("savedWorkspaceHelp")}</p>
-        </div>
-        {state ? <div className="pet-follow-selection-control">
-          <NativeSelect id="pet-follow-workspace" aria-label={t("followSelectLabel")} aria-describedby="pet-follow-help"
-            wrapperClassName="w-full" className="w-full aria-disabled:opacity-60" value={selectedValue}
-            aria-disabled={!canWrite}
-            onMouseDown={event => { if (!canWrite) event.preventDefault(); }}
-            onKeyDown={event => { if (!canWrite && !["Tab", "Escape"].includes(event.key)) event.preventDefault(); }}
-            onChange={event => {
-              const next = event.currentTarget.value;
-              const available = next === STOP_TARGET || options.some(project => project.id === next && project.available !== false);
-              if (!canWrite || !available) { event.currentTarget.value = selectedValue; return; }
-              void follow.follow(next === STOP_TARGET ? null : next);
-            }}>
-            {!state.targetConfigured && <NativeSelectOption value="" disabled>{t("chooseWorkspacePlaceholder")}</NativeSelectOption>}
-            <NativeSelectOption value={STOP_TARGET}>{t("stopFollow")}</NativeSelectOption>
-            {target && !options.some(project => project.id === target.project) &&
-              <NativeSelectOption value={target.project} disabled>{knownTarget}{t("currentTargetSuffix")}</NativeSelectOption>}
-            {requested && requested !== target?.project && !options.some(project => project.id === requested) &&
-              <NativeSelectOption value={requested} disabled>{requestedName(requested, projects, target, t)}</NativeSelectOption>}
-            {options.map(project => <NativeSelectOption key={project.id} value={project.id} disabled={project.available === false}>{workspaceLabel(project, t)}</NativeSelectOption>)}
-          </NativeSelect>
-          <Badge variant="outline" className="pet-follow-save-badge whitespace-normal text-primary max-[480px]:text-[10px]" data-pet-save-status>
-            {!pending && !writeError && !stale && state.targetConfigured && <CheckIcon aria-hidden="true" />}
-            {t(pending ? "updating" : writeError ? "saveUnconfirmed" : stale ? "lastKnownLabel" : state.targetConfigured ? "savedLabel" : "notConfigured")}
-          </Badge>
-        </div> : <p className="pet-follow-empty" role="status">{t(readError ? "readUnavailable" : "readingTarget")}</p>}
-      </div>
-      {pending && requested !== undefined && <p className="pet-follow-saving" role="status">{t("savingTarget")} <strong>{requestedName(requested, projects, target, t)}</strong></p>}
-      {target && <details className="pet-follow-path">
-        <summary><ChevronRightIcon aria-hidden="true" /><span>{t("workspaceLocation")}</span><span className="pet-follow-path-preview" aria-hidden="true">{target.workspace}</span></summary>
-        <p>{target.workspace}</p>
-      </details>}
-      {state?.targetUnavailable && <Alert><AlertDescription>{t("targetUnavailable")}</AlertDescription></Alert>}
-      {writeError && <Alert variant="destructive" data-pet-write-error><AlertDescription>
-        <p className="font-medium">{t("saveUnconfirmed")}</p><p>{t("followWriteFailed")}</p>
-        <dl className="pet-follow-comparison"><div><dt>{t("lastConfirmed")}</dt><dd>{knownTarget}</dd></div>
-          {requested !== undefined && <div><dt>{t("requestedTarget")}</dt><dd>{requestedName(requested, projects, target, t)}</dd></div>}
-        </dl>
-        <TechnicalDetails error={writeError} />
-      </AlertDescription></Alert>}
-      {readError && <Alert variant="destructive" data-pet-read-error><AlertDescription>
-        <p>{t(lastSaved !== undefined ? "savedAwaitingStatus" : state ? "showingLastTarget" : "readUnavailable")}</p><TechnicalDetails error={readError} />
-      </AlertDescription></Alert>}
-      <div className="pet-follow-desktop">
-        <div><h3>{t("desktopStatus")}</h3><p>{t("desktopStatusHelp")}</p></div>
-        <div className="pet-follow-desktop-actions">
-          <Badge variant="outline" className="pet-follow-desktop-badge whitespace-normal" data-pet-desktop-status>
-            <i aria-hidden="true" className={"status-dot " + (!observationUnconfirmed && state?.connected === true ? "online" : "")} />{status}
-          </Badge>
-          <Button type="button" variant="outline" size="sm" aria-disabled={!canRead} className="pet-follow-refresh h-auto whitespace-normal text-left aria-disabled:opacity-50" onClick={event => {
-            if (!canRead) return;
-            focus.remember(event.currentTarget); follow.refresh();
-          }}><RefreshCwIcon aria-hidden="true" className={reading ? "motion-safe:animate-spin" : ""} />{t(requestLabel)}</Button>
-        </div>
-        {lastReadAt !== null && <p className="pet-follow-read-time">{t("lastReadAt")} <time dateTime={new Date(lastReadAt).toISOString()}>{new Date(lastReadAt).toLocaleTimeString(locale === "zh" ? "zh-CN" : "en", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</time></p>}
-        {!observationUnconfirmed && state?.connected === false && target && <p className="pet-follow-desktop-note">{t("savedAwaitingDesktop")}</p>}
-        {lastSaved !== undefined && !observationUnconfirmed && <p className="pet-follow-desktop-note" role="status">{t("savedAwaitingStatus")}</p>}
-        {!observationUnconfirmed && state?.consumerError && <Alert variant="destructive"><AlertDescription><p>{t("statusUnavailable")}</p><TechnicalDetails error={state.consumerError} /></AlertDescription></Alert>}
-        {currentError && <Alert variant="destructive"><AlertDescription>{currentError}</AlertDescription></Alert>}
-      </div>
-    </CardContent>
-  </Card>;
+  const hasDiagnostics = Boolean(target || writeError || readError || consumerError);
+
+  return (
+    <div
+      ref={focus.target}
+      tabIndex={-1}
+      data-pet-follow="settings"
+      aria-label={t("savedWorkspace")}
+      className="grid min-w-0 gap-3 outline-none"
+    >
+      <SettingsSection title={t("followTargetTitle")} description={t("followTargetDescription")}>
+        <SettingsRow
+          label={t("savedWorkspace")}
+          htmlFor="pet-follow-workspace"
+          description={t("savedWorkspaceHelp")}
+          descriptionId="pet-follow-help"
+          badge={
+            state ? (
+              <Badge variant="outline" className="pet-follow-save-badge text-primary" data-pet-save-status>
+                {!pending && !writeError && !stale && state.targetConfigured && <CheckIcon aria-hidden="true" />}
+                {t(pending ? "updating" : writeError ? "saveUnconfirmed" : stale ? "lastKnownLabel" : state.targetConfigured ? "savedLabel" : "notConfigured")}
+              </Badge>
+            ) : undefined
+          }
+          control={
+            state ? (
+              <NativeSelect
+                id="pet-follow-workspace"
+                aria-label={t("followSelectLabel")}
+                aria-describedby="pet-follow-help"
+                wrapperClassName="w-full sm:w-64"
+                className="w-full aria-disabled:opacity-60"
+                value={selectedValue}
+                aria-disabled={!canWrite}
+                onMouseDown={event => { if (!canWrite) event.preventDefault(); }}
+                onKeyDown={event => { if (!canWrite && !["Tab", "Escape"].includes(event.key)) event.preventDefault(); }}
+                onChange={event => {
+                  const next = event.currentTarget.value;
+                  const available = next === STOP_TARGET || options.some(project => project.id === next && project.available !== false);
+                  if (!canWrite || !available) { event.currentTarget.value = selectedValue; return; }
+                  void follow.follow(next === STOP_TARGET ? null : next);
+                }}
+              >
+                {!state.targetConfigured && <NativeSelectOption value="" disabled>{t("chooseWorkspacePlaceholder")}</NativeSelectOption>}
+                <NativeSelectOption value={STOP_TARGET}>{t("stopFollow")}</NativeSelectOption>
+                {target && !options.some(project => project.id === target.project) && (
+                  <NativeSelectOption value={target.project} disabled>{knownTarget}{t("currentTargetSuffix")}</NativeSelectOption>
+                )}
+                {requested && requested !== target?.project && !options.some(project => project.id === requested) && (
+                  <NativeSelectOption value={requested} disabled>{requestedName(requested, projects, target, t)}</NativeSelectOption>
+                )}
+                {options.map(project => (
+                  <NativeSelectOption key={project.id} value={project.id} disabled={project.available === false}>
+                    {workspaceLabel(project, t)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            ) : (
+              <p className="pet-follow-empty" role="status">{t(readError ? "readUnavailable" : "readingTarget")}</p>
+            )
+          }
+        />
+
+        <SettingsRow
+          label={t("desktopStatus")}
+          description={t("desktopStatusHelp")}
+          meta={
+            lastReadAt !== null ? (
+              <span className="pet-follow-read-time">
+                {t("lastReadAt")}{" "}
+                <time dateTime={new Date(lastReadAt).toISOString()}>
+                  {new Date(lastReadAt).toLocaleTimeString(locale === "zh" ? "zh-CN" : "en", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                </time>
+              </span>
+            ) : undefined
+          }
+          control={
+            <div className="pet-follow-desktop-actions">
+              <Badge variant="outline" className="pet-follow-desktop-badge whitespace-normal" data-pet-desktop-status>
+                <i aria-hidden="true" className={"status-dot " + (!observationUnconfirmed && state?.connected === true ? "online" : "")} />
+                {status}
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                aria-disabled={!canRead}
+                className="pet-follow-refresh aria-disabled:opacity-50"
+                onClick={event => {
+                  if (!canRead) return;
+                  focus.remember(event.currentTarget);
+                  follow.refresh();
+                }}
+              >
+                <RefreshCwIcon aria-hidden="true" className={reading ? "motion-safe:animate-spin" : ""} />
+                {t(requestLabel)}
+              </Button>
+            </div>
+          }
+        />
+      </SettingsSection>
+
+      {pending && requested !== undefined && (
+        <p className="pet-follow-saving" role="status">
+          {t("savingTarget")} <strong>{requestedName(requested, projects, target, t)}</strong>
+        </p>
+      )}
+      {!observationUnconfirmed && state?.connected === false && target && (
+        <p className="pet-follow-desktop-note">{t("savedAwaitingDesktop")}</p>
+      )}
+      {lastSaved !== undefined && !observationUnconfirmed && (
+        <p className="pet-follow-desktop-note" role="status">{t("savedAwaitingStatus")}</p>
+      )}
+      {state?.targetUnavailable && (
+        <Alert><AlertDescription className="text-xs">{t("targetUnavailable")}</AlertDescription></Alert>
+      )}
+      {writeError && (
+        <Alert variant="destructive" data-pet-write-error>
+          <AlertDescription className="text-xs">
+            <p className="font-medium">{t("saveUnconfirmed")}</p>
+            <p>{t("followWriteFailed")}</p>
+          </AlertDescription>
+        </Alert>
+      )}
+      {readError && (
+        <Alert variant="destructive" data-pet-read-error>
+          <AlertDescription className="text-xs">
+            <p>{t(lastSaved !== undefined ? "savedAwaitingStatus" : state ? "showingLastTarget" : "readUnavailable")}</p>
+          </AlertDescription>
+        </Alert>
+      )}
+      {consumerError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">{t("statusUnavailable")}</AlertDescription>
+        </Alert>
+      )}
+      {currentError && (
+        <Alert variant="destructive">
+          <AlertDescription className="text-xs">{currentError}</AlertDescription>
+        </Alert>
+      )}
+
+      {hasDiagnostics && (
+        <AdvancedDiagnosticsDisclosure summary={writeError || readError || consumerError ? t("technicalDetails") : t("workspaceLocation")}>
+          <div className="grid gap-3 text-xs">
+            {target && (
+              <div className="flex items-center justify-between gap-2 rounded-md border border-border/60 bg-[var(--surface-inset)] px-3 py-2">
+                <div className="min-w-0 space-y-0.5">
+                  <p className="text-[11px] text-muted-foreground">{t("workspaceLocation")}</p>
+                  <code className="block break-all font-mono text-xs text-foreground">{target.workspace}</code>
+                </div>
+                <InlineCopyButton
+                  text={target.workspace}
+                  ariaLabel={t("workspaceLocation")}
+                  copiedText={ct("copiedCommand")}
+                  failedText={ct("copyFailed")}
+                />
+              </div>
+            )}
+            {writeError && (
+              <div className="space-y-2">
+                <dl className="pet-follow-comparison">
+                  <div><dt>{t("lastConfirmed")}</dt><dd>{knownTarget}</dd></div>
+                  {requested !== undefined && (
+                    <div><dt>{t("requestedTarget")}</dt><dd>{requestedName(requested, projects, target, t)}</dd></div>
+                  )}
+                </dl>
+                <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-destructive">
+                  {writeError}
+                </pre>
+              </div>
+            )}
+            {readError && (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-destructive">
+                {readError}
+              </pre>
+            )}
+            {consumerError && (
+              <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all font-mono text-xs text-destructive">
+                {consumerError}
+              </pre>
+            )}
+          </div>
+        </AdvancedDiagnosticsDisclosure>
+      )}
+    </div>
+  );
 }
