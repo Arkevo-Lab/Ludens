@@ -141,17 +141,19 @@ The [baseware/contracts/cua-driver/](../../../baseware/contracts/cua-driver/) di
 
 ## Controlled node pool, multi-transport, and multi-device mounting
 
-Baseware decouples the workspace control plane (`<workspace>/ludens.json`) from controlled nodes (`~/.ludens/machines.json`, contract in [machines.ts](../../../protocol/src/machines.ts)):
+Baseware separates the global driver registry (`~/.ludens/drivers.json`, contract in [drivers.ts](../../../protocol/src/drivers.ts)), workspace control plane (`<workspace>/ludens.json`), and controlled machine pool (`~/.ludens/machines.json`, contract in [machines.ts](../../../protocol/src/machines.ts)); workspaces without explicit `machines` bindings synthesize a `workspace-default` endpoint (mapped cleanly to live `primary` mounts).
 
-1. **Five transport kinds**:
+1. **Orthogonal driver registration & workspace usage**:
+   - `~/.ludens/drivers.json` persists verified external driver manifests (`DriverRegistration`), while local `file:` or cached workspace drivers are automatically surfaced in `basewareOverview.drivers` with `registrationStatus: "unregistered"` until promoted.
+2. **Five transport kinds**:
    - `stdio`: local child-process pipe (such as built-in `local-desktop` CUA);
    - `bridge`: local or LAN TCP JSON-line bridge (`host:port`);
    - `ssh`: remote SSH stdio tunnel (`ssh -o BatchMode=yes ... [user@]host <command>`);
    - `http` / `sse`: Streamable HTTP or Server-Sent Events MCP endpoints.
-2. **Concurrent multi-device mounting and routing**:
+3. **Concurrent multi-device mounting and routing**:
    - A workspace binds an authorized node pool (`machines.allowed`) and a primary target (`machines.active`).
    - At runtime, `ludens machine list | use <id> | connect <id...> | disconnect <id>` (or the Dashboard `?view=baseware` Master-Detail Machine Hub) switches the primary machine or mounts multiple machines concurrently without restarting the Host or Baseware.
    - When multiple machines are mounted, unprefixed controller calls (`controller/screen.capture`) route to the active primary machine, while prefixed calls (`controller/<machineId>/screen.capture` or `ludens_tools.call("controller/screen.capture", machine="<machineId>")`) route to the specified machine.
-3. **Auto-resync and 3-attempt reconnect-then-pause resilience**:
+4. **Auto-resync and 3-attempt reconnect-then-pause resilience**:
    - When a mounted device disconnects and restarts, Baseware's background resync loop automatically reconnects the provider and broadcasts `baseware_reconnected`.
    - When the primary device disconnects during an autonomous run (`mode: "auto"`), the Ludens Host records `device_disconnected`, attempts up to 3 automatic reconnections (`device_reconnect_attempt`), and if all attempts fail, records `device_reconnect_failed` and `device_paused` while transitioning back to `manual` mode.

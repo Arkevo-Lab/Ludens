@@ -32,8 +32,22 @@ export async function discoverDriver(spec: string, signal?: AbortSignal): Promis
   let bytes = 0, failure: unknown, terminating = false;
   let forced: ReturnType<typeof setTimeout> | undefined;
   const kill = (name: NodeJS.Signals) => {
-    if (child.pid) try { process.kill(-child.pid, name); }
-    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+    if (!child.pid) return;
+    if (process.platform !== "win32") {
+      try {
+        process.kill(-child.pid, name);
+        return;
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === "ESRCH") return;
+        if (code !== "EPERM") throw error;
+      }
+    }
+    try { process.kill(child.pid, name); }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ESRCH" && code !== "EPERM") throw error;
+    }
   };
   const stop = (reason: unknown) => {
     if (terminating) return;

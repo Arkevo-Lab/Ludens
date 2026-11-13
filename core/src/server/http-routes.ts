@@ -149,7 +149,31 @@ export async function handleApiRequest(
         );
         if (method === "POST") {
           if (body.action === "upsertMachine") {
-            return Response.json(await ctx.worker.call("upsertBasewareMachine", [body.machine], request.signal));
+            return Response.json(
+              await ctx.worker.call(
+                "upsertBasewareMachine",
+                [body.machine, { workspaceId: body.workspaceId, bindMode: body.bindMode }],
+                request.signal,
+              ),
+            );
+          }
+          if (body.action === "registerDriver") {
+            return Response.json(
+              await ctx.worker.call(
+                "registerBasewareDriver",
+                [{ spec: body.spec, workspaceId: body.workspaceId }],
+                request.signal,
+              ),
+            );
+          }
+          if (body.action === "unregisterDriver") {
+            return Response.json(
+              await ctx.worker.call(
+                "removeBasewareDriver",
+                [{ id: body.id, spec: body.spec, workspaceId: body.workspaceId }],
+                request.signal,
+              ),
+            );
           }
           if (body.action === "probeMachine") {
             return Response.json(

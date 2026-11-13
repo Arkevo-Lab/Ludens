@@ -1,0 +1,143 @@
+dialog.baseware-dialog {
+  padding: 0;
+  margin: auto;
+  border: 1px solid var(--line, #1e232e);
+  border-radius: 14px;
+  background: var(--panel, #101319);
+  color: var(--ink, #e5e9f0);
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+  max-width: min(640px, calc(100vw - 24px));
+  max-height: calc(100dvh - 32px);
+  width: 100%;
+  overflow: hidden;
+}
+
+dialog.baseware-dialog.baseware-dialog--sm {
+  max-width: min(460px, calc(100vw - 24px));
+}
+
+dialog.baseware-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.baseware-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog.baseware-dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgba(4, 6, 10, 0.78);
+  backdrop-filter: blur(4px);
+}
+
+.baseware-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1rem 1.25rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line, #1e232e) 75%, transparent);
+  flex-shrink: 0;
+}
+
+.baseware-dialog-body {
+  padding: 1rem 1.25rem 1.25rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* Single-row ARIA tablist for the sticky inspector (Forced-Colors safe ::after border) */
+.baseware-tablist {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.baseware-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  flex-shrink: 0;
+  white-space: nowrap;
+  border-radius: 0.375rem;
+  padding: 0.375rem 0.625rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--muted-foreground, #94a3b8);
+  transition: background-color 150ms ease, color 150ms ease;
+}
+
+.baseware-tab:hover {
+  background: color-mix(in srgb, var(--muted, #1e232e) 65%, transparent);
+  color: var(--foreground, #f1f5f9);
+}
+
+.baseware-tab[aria-selected="true"] {
+  color: var(--foreground, #f1f5f9);
+  background: color-mix(in srgb, var(--muted, #1e232e) 80%, transparent);
+}
+
+.baseware-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0.375rem;
+  right: 0.375rem;
+  bottom: 0;
+  height: 2px;
+  border-bottom: 2px solid var(--gold, #ff4f1f);
+}
+
+.baseware-tab:focus-visible {
+  outline: 2px solid var(--gold, #ff4f1f);
+  outline-offset: 2px;
+}
+
+.baseware-tabpanel-inner {
+  min-width: 0;
+}
+
+/* Form controls + non-color invalid feedback */
+.baseware-input {
+  width: 100%;
+  border-radius: 0.375rem;
+  border: 1px solid color-mix(in srgb, var(--line, #1e232e) 95%, transparent);
+  background: var(--surface-inset, #07080b);
+  padding: 0.4375rem 0.625rem;
+  font-size: 0.75rem;
+  color: var(--foreground, #f1f5f9);
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+.baseware-input:focus-visible {
+  outline: 2px solid var(--gold, #ff4f1f);
+  outline-offset: 1px;
+  border-color: transparent;
+}
+
+.baseware-input:is(:user-invalid, [aria-invalid="true"]) {
+  border-color: var(--danger, #f43f5e);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger, #f43f5e) 45%, transparent);
+}
+
+.baseware-field-hint {
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--muted-foreground, #94a3b8);
+}
+
+.baseware-field-error {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.6875rem;
+  line-height: 1.35;
+  color: var(--danger, #f43f5e);
+}

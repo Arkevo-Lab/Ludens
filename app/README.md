@@ -15,7 +15,7 @@ First-class **Ludens Desktop App** (Electron) and shared static SPA observabilit
 - **Performance (`?view=perf`)**: Per-request latency breakdown, token/cache telemetry, and compaction timeline analysis.
 - **Capabilities (`?view=caps`)**: Visual **Capability – Eval – Env** triad topology, 3-way stale drift attribution, reward evolution charts, and 1-click **Run All Evals** / **Run Eval**.
 - **Config & Studio (`?view=perception`)**: Unified 5-tab workspace workbench (**Model & Budget**, **Connection & Multimodal Transport**, **Services & Session** with 1-click `up` / `reload` / `down` and inline `MEMORY.md` editor, **Perception Recording**, and **Loop Simulator**).
-- **Baseware (`?view=baseware`)**: Master-Detail **Controlled Node Hub** for managing `~/.ludens/machines.json`, 1-click workspace node mounting (`use` / `connect` / `disconnect`), connectivity probes, and Controller Interfaces catalog.
+- **Baseware (`?view=baseware`)**: Unified **Driver Library** (`~/.ludens/drivers.json` + automatic workspace discovery) and Master-Detail **Controlled Node Hub** (`~/.ludens/machines.json` + inline `workspace-default` endpoints) separating registration, workspace addition, and live mounting, with connectivity probes and Controller Interfaces inspection.
 - **Workspaces (`?view=workspaces`)**, **Docs (`?view=docs`)**, and **Settings (`?view=settings`)**.
 
 ## Scripts
