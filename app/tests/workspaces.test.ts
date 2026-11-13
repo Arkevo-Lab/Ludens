@@ -8,8 +8,7 @@ import { readGlobalConfig, writeGlobalConfig, registeredWorkspace, registerWorks
   withPetTargetLock } from "@ludens/protocol/ludens";
 import { setPetTarget, petState } from "../lib/pet-state";
 import { registerFixture } from "./fixtures/registry";
-import { DashboardWorker } from "../lib/dashboard-worker";
-import { POST, PUT, DELETE } from "../app/api/workspaces/route";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 
 test("workspace management preserves defaults, missing registrations, files, and the import boundary", async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-management-")));
@@ -199,13 +198,7 @@ test("creating through the CLI uses the global default or explicit directory wit
   }
 });
 
-test("workspace API rejects cross-origin writes and worker reports its actual home", async () => {
-  for (const [method, handler] of [["POST", POST], ["PUT", PUT], ["DELETE", DELETE]] as const) {
-    const response = await handler(new Request("http://localhost:3015/api/workspaces", { method,
-      headers: { host: "localhost:3015", origin: "https://outside.invalid", "content-type": "application/json" }, body: "{}" }));
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /同源/);
-  }
+test("worker reports its actual home", async () => {
   const home = await realpath(await mkdtemp(join(tmpdir(), "ludens-api-home-")));
   const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: home } });
   try {

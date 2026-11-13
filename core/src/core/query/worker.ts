@@ -1,5 +1,5 @@
 import { parentPort } from "node:worker_threads";
-import { archiveBuild, catalog, getRun, mediaFile, stopRun, timelineRecord } from "./data";
+import { archiveBuild, catalog, clearCatalogCache, getRun, mediaFile, stopRun, timelineRecord } from "./data";
 import { diagnosticEvents } from "./diagnostic-events";
 import { getActivity } from "./activity";
 import { availableModels } from "./available-models";
@@ -82,6 +82,7 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   petState: () => petState(),
   petTarget: ([project, ifUnset]) => setPetTarget(project, ifUnset),
   petConsumer: ([input]) => recordPetConsumer(input),
+  clearCatalogCache: () => { clearCatalogCache(); return null; },
 };
 const requests = new Map<number, { abort: AbortController; work: Promise<void> }>();
 let closing = false;

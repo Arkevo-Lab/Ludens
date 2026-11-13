@@ -11,6 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import {
+  AlertCircle,
   ArrowDown,
   ArrowDownToLine,
   Bot,
@@ -22,13 +23,16 @@ import {
   CornerUpLeft,
   Cpu,
   FileText,
+  HardDrive,
   Inbox,
   Infinity as InfinityIcon,
   Lock,
   PanelRight,
   Play,
   Plus,
+  RefreshCw,
   RotateCcw,
+  SlidersHorizontal,
   Square,
   X,
   Zap,
@@ -46,6 +50,8 @@ import {
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
 import { useTranslations } from "@/lib/locale";
+import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
+import { useWorkspaceService } from "@/lib/use-workspace-service";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
 import { CachedObservationImg } from "@/features/live/live-media-cache";
@@ -2948,6 +2954,38 @@ export function ShioriWorkbench({
     [project, workspace, actions],
   );
 
+  const workspaceService = useWorkspaceService({
+    workspaceId: isLiveRun ? project : null,
+    fallbackError: t("hostStartFailedTitle"),
+    onSuccess: result => {
+      if (result.operation === "up" || result.operation === "reload") {
+        onReturnLatest();
+      }
+      onUpdated();
+    },
+  });
+
+  const navigateConsoleLink = useCallback(
+    (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+      if (!isPlainNavigationClick(event) || typeof window === "undefined") return;
+      event.preventDefault();
+      const url = new URL(href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      const next = url.pathname + url.search;
+      if (next === window.location.pathname + window.location.search) return;
+      window.history.pushState(null, "", next);
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    },
+    [],
+  );
+
+  const basewareHref = project
+    ? `/?view=baseware&project=${encodeURIComponent(project)}`
+    : null;
+  const studioHref = project
+    ? `/?view=perception&project=${encodeURIComponent(project)}`
+    : null;
+
   const stateTitle = !isLiveRun
     ? t("stateSnapshot")
     : !hostOnline
@@ -3076,6 +3114,95 @@ export function ShioriWorkbench({
             </button>
           </div>
         </header>
+
+        {/* First-Class Workspace Service Bar when Host is offline or a service operation reports an issue */}
+        {isLiveRun && project && (!hostOnline || workspaceService.error) && (
+          <div
+            className="codex-host-offline-bar"
+            data-live-host-offline={!hostOnline ? "true" : undefined}
+            data-has-error={workspaceService.error ? "true" : undefined}
+          >
+            {!hostOnline && (
+              <div className="codex-host-offline-row">
+                <div className="codex-host-offline-copy">
+                  <span
+                    className="codex-host-offline-dot"
+                    data-busy={workspaceService.pendingOperation === "up" ? "true" : undefined}
+                    aria-hidden="true"
+                  />
+                  <div className="codex-host-offline-text">
+                    <strong>{t("hostOfflineTitle")}</strong>
+                    <span>{t("hostOfflineDesc")}</span>
+                  </div>
+                </div>
+                <div className="codex-host-offline-actions">
+                  <button
+                    type="button"
+                    className="codex-host-start-btn"
+                    disabled={workspaceService.busy}
+                    onClick={() => void workspaceService.startWorkspace()}
+                    data-live-start-workspace=""
+                  >
+                    {workspaceService.pendingOperation === "up" ? (
+                      <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
+                    ) : (
+                      <Play className="size-3.5 fill-current shrink-0" aria-hidden="true" />
+                    )}
+                    <span>
+                      {t(
+                        workspaceService.pendingOperation === "up"
+                          ? "startingWorkspaceBtn"
+                          : "startWorkspaceBtn",
+                      )}
+                    </span>
+                  </button>
+                  {basewareHref && (
+                    <a
+                      href={basewareHref}
+                      className="codex-host-link-btn"
+                      onClick={event => navigateConsoleLink(event, basewareHref)}
+                    >
+                      <HardDrive className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span>{t("openBasewareLink")}</span>
+                    </a>
+                  )}
+                  {studioHref && (
+                    <a
+                      href={studioHref}
+                      className="codex-host-link-btn"
+                      onClick={event => navigateConsoleLink(event, studioHref)}
+                    >
+                      <SlidersHorizontal className="size-3.5 shrink-0" aria-hidden="true" />
+                      <span>{t("openStudioLink")}</span>
+                    </a>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {workspaceService.error && (
+              <div className="codex-host-offline-error" role="alert" data-live-service-error="">
+                <div className="codex-host-offline-error-head">
+                  <div className="codex-host-offline-error-title">
+                    <AlertCircle className="size-3.5 shrink-0" aria-hidden="true" />
+                    <strong>{t("hostStartFailedTitle")}</strong>
+                    <span className="codex-host-offline-error-hint">{t("hostStartFailedHint")}</span>
+                  </div>
+                  <button
+                    type="button"
+                    className="codex-host-error-dismiss"
+                    aria-label={t("dismissServiceError")}
+                    title={t("dismissServiceError")}
+                    onClick={workspaceService.clearError}
+                  >
+                    <X className="size-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+                <pre className="codex-host-offline-error-pre">{workspaceService.error}</pre>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Scrollable Chat Stream + Safely Anchored Scroll-to-Bottom Button */}
         <div className="codex-chat-scroll-stage">
@@ -3656,6 +3783,76 @@ export function ShioriWorkbench({
                     </div>
                   </dl>
                 </details>
+
+                {isLiveRun && project && (
+                  !hostOnline ? (
+                    <div className="codex-host-ops-grid">
+                      <button
+                        type="button"
+                        className="codex-host-op-btn"
+                        disabled={workspaceService.busy}
+                        onClick={() => void workspaceService.startWorkspace()}
+                        data-dock-service-op="up"
+                      >
+                        {workspaceService.pendingOperation === "up" ? (
+                          <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
+                        ) : (
+                          <Play className="size-3.5 fill-current shrink-0" aria-hidden="true" />
+                        )}
+                        <span>
+                          {t(
+                            workspaceService.pendingOperation === "up"
+                              ? "startingWorkspaceBtn"
+                              : "startWorkspaceBtn",
+                          )}
+                        </span>
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="codex-host-ops-grid" data-cols="2">
+                      <button
+                        type="button"
+                        className="codex-host-op-btn"
+                        disabled={workspaceService.busy || isAuto || consolidating}
+                        onClick={() => void workspaceService.reloadWorkspace()}
+                        data-dock-service-op="reload"
+                      >
+                        {workspaceService.pendingOperation === "reload" ? (
+                          <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
+                        ) : (
+                          <RotateCcw className="size-3.5 shrink-0" aria-hidden="true" />
+                        )}
+                        <span>
+                          {t(
+                            workspaceService.pendingOperation === "reload"
+                              ? "reloadingWorkspaceBtn"
+                              : "reloadWorkspaceBtn",
+                          )}
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="codex-host-op-btn"
+                        disabled={workspaceService.busy || consolidating}
+                        onClick={() => void workspaceService.stopWorkspace()}
+                        data-dock-service-op="down"
+                      >
+                        {workspaceService.pendingOperation === "down" ? (
+                          <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
+                        ) : (
+                          <Square className="size-3 fill-current shrink-0" aria-hidden="true" />
+                        )}
+                        <span>
+                          {t(
+                            workspaceService.pendingOperation === "down"
+                              ? "stoppingWorkspaceBtn"
+                              : "stopWorkspaceBtn",
+                          )}
+                        </span>
+                      </button>
+                    </div>
+                  )
+                )}
               </div>
             )}
           </div>

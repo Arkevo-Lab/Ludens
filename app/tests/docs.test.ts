@@ -6,8 +6,6 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { docGroups, readDoc, renderDocument, renderMarkdown } from "../lib/docs";
-import { dashboardWorker } from "../lib/dashboard-worker";
-import { GET } from "../app/api/docs/route";
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const repositoryDocs = fileURLToPath(new URL("../../docs/", import.meta.url));
@@ -238,22 +236,4 @@ test("a symlinked language root cannot expose files outside the documentation tr
     assert.deepEqual((await docGroups(root)).flatMap(group => group.docs), []);
     await assert.rejects(readDoc("reference/index", root), /Unknown doc/);
   } finally { await rm(directory, { recursive: true, force: true }); }
-});
-
-test("Docs GET carries the requested language through the real worker without accepting a client file path", async () => {
-  const request = (query: string, host = "localhost:3015") => new Request(`http://${host}/api/docs?${query}`, { headers: { host } });
-  try {
-    const forbidden = await GET(request("lang=zh", "untrusted.test")); assert.equal(forbidden.status, 400);
-    const en = await GET(request("lang=en")), zh = await GET(request("lang=zh"));
-    assert.equal(en.status, 200); assert.equal(zh.status, 200);
-    const enCatalog = await en.json(), zhCatalog = await zh.json();
-    assert.equal(enCatalog[0].title, "Tutorials"); assert.equal(zhCatalog[0].title, "教程");
-    assert.notEqual(enCatalog[0].docs[0].title, zhCatalog[0].docs[0].title);
-    const response = await GET(request("doc=reference%2Findex&lang=zh&root=%2Fnot-a-docs-root"));
-    assert.equal(response.status, 200);
-    const doc = await response.json(); assert.equal(doc.requestedLang, "zh"); assert.equal(doc.lang, "zh");
-    assert(Array.isArray(doc.headings)); assert(Array.isArray(doc.codeBlocks));
-    for (const [, href] of doc.html.matchAll(/class="doc-ref" href="([^"]+)"/g)) assert.match(href, /docLang=zh/);
-    assert.equal((await GET(request("doc=..%2Fsecret&lang=zh"))).status, 400);
-  } finally { await dashboardWorker().close(); }
 });

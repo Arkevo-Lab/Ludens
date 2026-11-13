@@ -7,8 +7,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { getReplay } from "../lib/replay";
 import { closeLogIndexes, getLogIndex, indexCacheStats, resetStorageMetrics, storageMetrics } from "../lib/log-index";
-import type { ReplayWindow, ReplayOverview, ReplayDetail, ReplaySearchResult } from "../lib/replay-types";
-import type { FileMedia } from "../lib/file-response";
+import type { FileMedia, ReplayWindow, ReplayOverview, ReplayDetail, ReplaySearchResult } from "../lib/replay-types";
 
 const start = Date.parse("2026-10-27T00:00:00Z");
 const iso = (ms: number) => new Date(start + ms).toISOString();

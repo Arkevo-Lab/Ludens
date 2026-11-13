@@ -16,7 +16,6 @@ import {
   mediaFile,
   stopRun,
 } from "../lib/data";
-import { localRequest } from "../lib/local-request";
 import type { Event, LiveStatus, RunData } from "../lib/types";
 
 test("run summary retains controller, cache, compaction and skill evidence", () => {
@@ -362,30 +361,6 @@ test("control is confined to newest matching connected host", () => {
   );
 });
 
-test("HTTP controls reject cross-origin and nonlocal callers", () => {
-  assert.throws(() =>
-    localRequest(
-      new Request("http://evil.test/api", { headers: { host: "evil.test" } }),
-    ),
-  );
-  assert.throws(() =>
-    localRequest(
-      new Request("http://127.0.0.1:3015/api", {
-        headers: { host: "127.0.0.1:3015", origin: "https://evil.test" },
-      }),
-      true,
-    ),
-  );
-  assert.doesNotThrow(() =>
-    localRequest(
-      new Request("http://127.0.0.1:3015/api", {
-        headers: { host: "127.0.0.1:3015", origin: "http://127.0.0.1:3015" },
-      }),
-      true,
-    ),
-  );
-});
-
 test("IPC communicates exact guarded control fields over local socket", async () => {
   const socket = join(tmpdir(), `ludens-app-${process.pid}.sock`);
   let received: unknown;
@@ -428,18 +403,6 @@ test("catalog is empty before the first run but does not hide invalid roots", as
   } finally {
     await rm(root, { recursive: true, force: true });
   }
-});
-
-// Next normalizes request.url to its listener hostname; browsers retain the original Host.
-test("same-origin validation uses the browser Host even when Next normalizes URL", () => {
-  assert.doesNotThrow(() =>
-    localRequest(
-      new Request("http://localhost:3015/api/control", {
-        headers: { host: "127.0.0.1:3015", origin: "http://127.0.0.1:3015" },
-      }),
-      true,
-    ),
-  );
 });
 
 test("two epochs in one host have isolated time, requests, actions and late cleanup", () => {

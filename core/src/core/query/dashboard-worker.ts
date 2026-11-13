@@ -1,5 +1,7 @@
 import { Worker } from "node:worker_threads";
-import { join, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { DashboardMethod, DashboardMethods, WorkerRequest, WorkerResponse } from "./dashboard-protocol";
 import { archiveBudget } from "./archive-budget";
 import { repoRoot } from "./repo";
@@ -7,8 +9,26 @@ import { repoRoot } from "./repo";
 type Waiting = { resolve(value: unknown): void; reject(error: unknown): void; cleanup(): void };
 interface WorkerOptions { file?: string; env?: NodeJS.ProcessEnv; maxPending?: number; timeoutMs?: number }
 const unavailable = (message: string) => Object.assign(new Error(message), { status: 503, code: "DASHBOARD_WORKER_UNAVAILABLE" });
+const defaultWorkerFile = fileURLToPath(new URL("./worker.ts", import.meta.url));
 
-/** One isolated archive reader per Next server, with no retained completed Promise chain. */
+function spawnWorkerThread(file: string, env: NodeJS.ProcessEnv | undefined): Worker {
+  const resourceLimits = { maxOldGenerationSizeMb: archiveBudget(env).readerHeapMiB };
+  if (process.versions.bun || !file.endsWith(".ts")) {
+    return Reflect.construct(Worker, [file, { execArgv: [], env, resourceLimits }]) as Worker;
+  }
+  const appPkg = join(repoRoot, "app/package.json");
+  const reqAnchor = existsSync(appPkg) ? pathToFileURL(appPkg).href : import.meta.url;
+  const evalCode = [
+    `const { createRequire } = require("node:module");`,
+    `const { pathToFileURL } = require("node:url");`,
+    `const req = createRequire(${JSON.stringify(reqAnchor)});`,
+    `const tsx = req("tsx/cjs/api");`,
+    `tsx.require(${JSON.stringify(file)}, pathToFileURL(${JSON.stringify(file)}).href);`,
+  ].join("\n");
+  return Reflect.construct(Worker, [evalCode, { eval: true, execArgv: [], env, resourceLimits }]) as Worker;
+}
+
+/** One isolated archive reader per server instance, with no retained completed Promise chain. */
 export class DashboardWorker {
   private worker?: Worker;
   private waiting = new Map<number, Waiting>();
@@ -20,12 +40,8 @@ export class DashboardWorker {
   private start() {
     if (this.closed) throw unavailable("Dashboard reader is closed");
     if (this.worker) return this.worker;
-    // Keep this a native Node constructor. Turbopack rewrites `new Worker(...)`
-    // and would otherwise bundle the TypeScript backend back into the React runtime.
-    // The tsx bootstrap stays inside app; anchor it to the repository root.
-    const file = this.options.file ?? join(repoRoot, "app/worker/bootstrap.mjs");
-    const worker: Worker = Reflect.construct(Worker, [file, { execArgv: [], env: this.options.env,
-      resourceLimits: { maxOldGenerationSizeMb: archiveBudget(this.options.env).readerHeapMiB } }]);
+    const file = this.options.file ?? defaultWorkerFile;
+    const worker = spawnWorkerThread(file, this.options.env);
     this.worker = worker;
     worker.on("message", (message: WorkerResponse) => {
       if (message.type === "ready") return;

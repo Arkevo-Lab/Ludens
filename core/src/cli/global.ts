@@ -17,6 +17,7 @@ ludens workspace list
 ludens workspace open <directory> [--new-id]
 ludens workspace forget <id>
 ludens workspace import <directory> [--legacy-state <directory>] [--previous-workspace <directory>]
+ludens app-server [--host 127.0.0.1] [--port <0|1..65535>] [--static-dir <path>] [--trusted-origin <origin>] [--parent-watchdog]
 
 LUDENS_HOME selects the global directory (default ~/.ludens).
 New workspaces use its configured workspaceRoot; existing workspace settings do not change.

@@ -74,7 +74,7 @@ class FakeServices implements LaunchIO {
   now = () => this.clock;
   note = () => {};
   async run(argv: string[], cwd: string) {
-    const sharedPetLaunch = argv[0] === "python3" && argv[2] === "--label";
+    const sharedPetLaunch = argv[0] === process.execPath && argv[2] === "--label";
     expect(cwd).toBe(sharedPetLaunch ? this.plan.sharedPet.cwd : this.plan.workspace);
     this.calls.push([...argv]);
     const result = (stdout = "", code = 0, stderr = "") => ({ code, stdout, stderr });
@@ -100,19 +100,19 @@ class FakeServices implements LaunchIO {
       this.cleanupReads = 2;
       return result();
     }
-    if (argv[0] === "python3" && argv[1] === this.plan.launcher && argv[2] === "--status") {
+    if (argv[0] === process.execPath && argv[1] === this.plan.launcher && argv[2] === "--status") {
       const pid = this.jobs.get(this.targetForStateFile(argv[3]!));
       return result(JSON.stringify(pid
         ? { registered: true, pid, state: "running", lastExitCode: null }
         : { registered: false, pid: null, state: null, lastExitCode: null }));
     }
-    if (argv[0] === "python3" && argv[1] === this.plan.launcher && argv[2] === "--stop") {
+    if (argv[0] === process.execPath && argv[1] === this.plan.launcher && argv[2] === "--stop") {
       const target = this.targetForStateFile(argv[3]!);
       this.events.push(`stop:${target}`);
       this.jobs.delete(target);
       return result();
     }
-    if (argv[0] === "python3" && argv[1] === this.plan.launcher) {
+    if (argv[0] === process.execPath && argv[1] === this.plan.launcher) {
       const nameIndex = sharedPetLaunch ? 6 : 2;
       const name = argv[nameIndex]!;
       this.starts.push(name);
@@ -234,7 +234,14 @@ test("Dashboard reuse requires the same global home and rejects occupied mismatc
 
 test("managed Dashboard uses a current production build and fails before starting devices when stale", async () => {
   const value = await plan();
-  expect(value.commands.dashboard).toEqual(["npm", "--prefix", "/tmp/Source with spaces/app", "run", "start"]);
+  expect(value.commands.dashboard).toEqual([
+    "/tmp/Source with spaces/core/bin/ludens",
+    "app-server",
+    "--port",
+    "3015",
+    "--static-dir",
+    "/tmp/Source with spaces/app/out",
+  ]);
   const io = new FakeServices(value);
   io.dashboardBuild = false;
   await expect(new WorkspaceLauncher(value, io).up()).rejects.toThrow("production build is stale");
@@ -438,8 +445,9 @@ test("external packages resolve workspace-relative file specs and check only exe
     if (process.platform !== "win32") {
       const startup = await run("up");
       expect(startup.code).not.toBe(0);
-      expect(startup.stderr).toContain("launch-stopped");
+      expect(startup.stderr).toContain("emulator exited");
       expect(startup.stderr).not.toContain("Missing");
+      expect(await readFile(join(workspace, "logs/background/emulator.log"), "utf8")).toContain("launch-stopped");
       await chmod(join(bin, "fixture-emulator"), 0o644);
       const unavailable = await run("up");
       expect(unavailable.stderr).toContain("Missing executable fixture-emulator");
@@ -548,11 +556,10 @@ test("detached background launcher preserves environment, records exit codes, an
     const driverState = join(directory, "isolated driver state");
     const pythonOverride = join(directory, "custom Python", "bin", "python3");
     await mkdir(stableCwd);
-    const pyBin = Bun.which("python3") ?? Bun.which("python") ?? "python3";
-    const script = resolve(import.meta.dir, "../scripts/launch-background.py");
+    const script = resolve(import.meta.dir, "../src/daemon/process-manager.ts");
 
     const child = Bun.spawn([
-      pyBin, script, "--label", "dev.ludens.pet", "--log-dir", logs, "pet",
+      process.execPath, script, "--label", "dev.ludens.pet", "--log-dir", logs, "pet",
       "env", "EXTRA_FLAG=active", process.execPath, "-e",
       "console.log(JSON.stringify({ cwd: process.cwd(), extra: process.env.EXTRA_FLAG })); process.exit(7);",
     ], {
@@ -587,7 +594,7 @@ test("detached background launcher preserves environment, records exit codes, an
     // Wait briefly for the short-lived child to exit and record exit code 7.
     let finalStatus: { registered: boolean; pid: number | null; state: string | null; lastExitCode: number | null } | null = null;
     for (let i = 0; i < 40; i++) {
-      const check = Bun.spawn([pyBin, script, "--status", stateFile], { stdout: "pipe", stderr: "pipe" });
+      const check = Bun.spawn([process.execPath, script, "--status", stateFile], { stdout: "pipe", stderr: "pipe" });
       const [statusCode, statusOut] = await Promise.all([check.exited, new Response(check.stdout).text()]);
       expect(statusCode).toBe(0);
       const parsed = JSON.parse(statusOut);
@@ -614,21 +621,43 @@ test("detached background launcher preserves environment, records exit codes, an
     expect(await readFile(join(canonicalLogs, "pet.log"), "utf8")).toContain('"extra":"active"');
 
     // Stopping unregisters the state file, allowing a fresh job to start and be stopped while running.
-    const cleanup = Bun.spawn([pyBin, script, "--stop", stateFile], { stdout: "pipe", stderr: "pipe" });
+    const cleanup = Bun.spawn([process.execPath, script, "--stop", stateFile], { stdout: "pipe", stderr: "pipe" });
     expect(await cleanup.exited).toBe(0);
     expect(await Bun.file(stateFile).exists()).toBe(false);
 
+    const grandchildPidFile = join(directory, "grandchild.pid");
     const sleeper = Bun.spawn([
-      pyBin, script, "--label", "dev.ludens.pet", "--log-dir", logs, "pet",
-      process.execPath, "-e", "setInterval(() => {}, 1000);",
+      process.execPath, script, "--label", "dev.ludens.pet", "--log-dir", logs, "pet",
+      process.execPath, "-e",
+      `const { spawn } = require("node:child_process"); const { writeFileSync } = require("node:fs"); const sub = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000);"], { stdio: "ignore" }); writeFileSync(${JSON.stringify(grandchildPidFile)}, String(sub.pid)); setInterval(() => {}, 1000);`,
     ], { cwd: stableCwd, stdout: "pipe", stderr: "pipe" });
     expect(await sleeper.exited).toBe(0);
     const sleeperInfo = JSON.parse(await new Response(sleeper.stdout).text()) as { pid: number };
     expect(sleeperInfo.pid).toBeGreaterThan(0);
 
-    const stopLive = Bun.spawn([pyBin, script, "--stop", stateFile], { stdout: "pipe", stderr: "pipe" });
+    let grandchildPid = 0;
+    for (let i = 0; i < 40; i++) {
+      if (await Bun.file(grandchildPidFile).exists()) {
+        grandchildPid = Number((await readFile(grandchildPidFile, "utf8")).trim());
+        if (grandchildPid > 0) break;
+      }
+      await Bun.sleep(50);
+    }
+    expect(grandchildPid).toBeGreaterThan(0);
+
+    const stopLive = Bun.spawn([process.execPath, script, "--stop", stateFile], { stdout: "pipe", stderr: "pipe" });
     expect(await stopLive.exited).toBe(0);
     expect(await Bun.file(stateFile).exists()).toBe(false);
+    expect(() => process.kill(sleeperInfo.pid, 0)).toThrow();
+    for (let i = 0; i < 20; i++) {
+      try {
+        process.kill(grandchildPid, 0);
+        await Bun.sleep(50);
+      } catch {
+        break;
+      }
+    }
+    expect(() => process.kill(grandchildPid, 0)).toThrow();
     expect(await readdir(stableCwd)).toEqual([]);
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

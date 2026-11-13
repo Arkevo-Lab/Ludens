@@ -13,6 +13,8 @@
     "./core/subsystems/*": "./src/core/subsystems/*.ts",
     "./core/agent-omp/*": "./src/core/agent-omp/*.ts",
     "./daemon/*": "./src/daemon/*.ts",
+    "./server/app-server": "./src/server/app-server.ts",
+    "./server/*": "./src/server/*.ts",
     "./perf/*": "./src/perf/*.ts",
     "./cli/*": "./src/cli/*.ts",
     "./package.json": "./package.json"

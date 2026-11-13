@@ -20,6 +20,8 @@ import { ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
 import { GLOBAL_HELP, globalCommand } from "./global.ts";
 import { evalCommand } from "./eval-cli.ts";
 import { eventCommand } from "./event-cli.ts";
+import { APP_SERVER_HELP, appServerCommand } from "./app-server-cli.ts";
+import { runBackgroundJobCli } from "../daemon/process-manager.ts";
 const globalHome = ludensHome();
 let exit: (code: number) => void | Promise<void> = code => process.exit(code);
 const RUN_HELP = `ludens [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--seconds <n>] [--requests <n>] [--compaction-threshold <tokens>]
@@ -42,10 +44,15 @@ async function main() {
     explicitWorkspace = true;
     args.splice(0, 2);
   }
-  if (!args.length || args[0] === "--help" || (args[0] === "run" && args.includes("--help"))) {
-    console.log(`${GLOBAL_HELP}\n\n${WORKSPACE_HELP}\n\n${RUN_HELP}\n${HELP}\nludens eval <list|run|history> — workspace capability evaluations; ludens eval --help\n${LOG_HELP}`);
+  if (args[0] === "__supervise-job") {
+    process.exitCode = await runBackgroundJobCli(["--supervise", ...args.slice(1)]);
     return;
   }
+  if (!args.length || args[0] === "--help" || (args[0] === "run" && args.includes("--help"))) {
+    console.log(`${GLOBAL_HELP}\n\n${WORKSPACE_HELP}\n\n${APP_SERVER_HELP}\n\n${RUN_HELP}\n${HELP}\nludens eval <list|run|history> — workspace capability evaluations; ludens eval --help\n${LOG_HELP}`);
+    return;
+  }
+  if (args[0] === "app-server" || args[0] === "serve") return appServerCommand(args.slice(1), globalHome);
   if (args[0] === "config" || args[0] === "workspace") return globalCommand(args[0], args.slice(1), globalHome);
   if (args[0] === "eval") return evalCommand(args.slice(1), selectedWorkspace);
   if (args[0] === "event") {

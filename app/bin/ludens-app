@@ -6,5 +6,8 @@ while [ -L "$SCRIPT" ]; do
   SCRIPT=$(readlink "$SCRIPT")
   case "$SCRIPT" in /*) ;; *) SCRIPT=$DIRECTORY/$SCRIPT ;; esac
 done
-PET_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")/.." && pwd)
-exec "$PET_ROOT/node_modules/.bin/electron" "$PET_ROOT/dist/electron/main.js" "$@"
+APP_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")/.." && pwd)
+if [ -x "$APP_ROOT/node_modules/.bin/electron" ]; then
+  exec "$APP_ROOT/node_modules/.bin/electron" "$APP_ROOT/dist/electron/main.js" "$@"
+fi
+exec "$APP_ROOT/../node_modules/.bin/electron" "$APP_ROOT/dist/electron/main.js" "$@"

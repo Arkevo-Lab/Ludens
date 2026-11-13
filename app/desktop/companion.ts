@@ -44,8 +44,8 @@ export interface CompanionHandle {
 export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, onLocale: (locale: CompanionLocale) => void = () => {}): CompanionHandle | undefined {
   if (process.env.LUDENS_DISABLE_COMPANION === '1') return
   const here = dirname(fileURLToPath(import.meta.url))
-  const assets = app.isPackaged
-    ? join(process.resourcesPath, 'runtime/ui/dist/companion')
+  const assets = app.isPackaged && existsSync(join(process.resourcesPath, 'public/companion'))
+    ? join(process.resourcesPath, 'public/companion')
     : existsSync(resolve(here, '../public/companion'))
       ? resolve(here, '../public/companion')
       : resolve(here, '../../public/companion')

@@ -6,8 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { perceptionSettings, updatePerceptionSettings } from "../lib/perception-config";
 import { clearCatalogCache } from "../lib/data";
-import { DashboardWorker } from "../lib/dashboard-worker";
-import * as route from "../app/api/perception-config/route";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 import { withWorkspaceRegistrationLock } from "@ludens/protocol/ludens";
 
 async function fixture() {
@@ -119,21 +118,4 @@ test("settings paths reject symlinks and saves do not follow a predictable tempo
     assert.deepEqual(await updatePerceptionSettings("registered", { hotSeconds: 120 }, f.workspace, f.root), { hotSeconds: 120 });
     assert.equal(await readFile(externalFile, "utf8"), original);
   } finally { await f.cleanup(); }
-});
-
-test("the settings route rejects foreign origins and invalid patches before dispatching a mutation", async () => {
-  const request = (body: unknown, origin?: string) => new Request("http://localhost:3015/api/perception-config?project=registered", {
-    method: "PUT", headers: { host: "localhost:3015", "content-type": "application/json", ...(origin ? { origin } : {}) },
-    body: JSON.stringify(body),
-  });
-  for (const origin of [undefined, "https://untrusted.test"]) {
-    const response = await route.PUT(request({ hotSeconds: null }, origin));
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /同源/);
-  }
-  for (const body of [null, [], { hotSeconds: "120" }, { hotSeconds: -1 }, { hotSeconds: 1e9 }, { __proto__: null, unexpected: 1 }]) {
-    const response = await route.PUT(request(body, "http://localhost:3015"));
-    assert.equal(response.status, 400);
-    assert.match((await response.json()).error, /设置/);
-  }
 });

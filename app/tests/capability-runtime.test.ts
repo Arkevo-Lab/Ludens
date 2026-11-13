@@ -5,10 +5,9 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { capabilityRuntime } from "../lib/capabilities";
-import { DashboardWorker } from "../lib/dashboard-worker";
+import { DashboardWorker } from "@ludens/core/core/query/dashboard-worker";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { registerFixture } from "./fixtures/registry";
-import { GET } from "../app/api/capabilities/runtime/route";
 
 async function fixture() {
   const base = await realpath(await mkdtemp(join(tmpdir(), "capability-runtime-")));
@@ -79,9 +78,4 @@ test("offline, invalid, and foreign-run replies never establish device availabil
     await assert.rejects(capabilityRuntime("selected", "", f.home), { code: "WORKSPACE_SCOPE_REQUIRED" });
     assert.equal(f.requests.length, requestCount, "scope checks precede socket requests");
   } finally { await f.cleanup(); }
-});
-
-test("runtime HTTP endpoint rejects nonlocal access before opening a socket", async () => {
-  const response = await GET(new Request("http://untrusted.test/api/capabilities/runtime", { headers: { host: "untrusted.test" } }));
-  assert.equal(response.status, 400); assert.equal(response.headers.get("cache-control"), "no-store");
 });

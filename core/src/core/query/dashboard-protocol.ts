@@ -88,6 +88,7 @@ export interface DashboardMethods {
   petState: { args: []; result: Awaited<ReturnType<typeof petState>> };
   petTarget: { args: [project: unknown, ifUnset: boolean]; result: Awaited<ReturnType<typeof setPetTarget>> };
   petConsumer: { args: [input: unknown]; result: Awaited<ReturnType<typeof recordPetConsumer>> };
+  clearCatalogCache: { args: []; result: null };
 }
 export type DashboardMethod = keyof DashboardMethods;
 export type WorkerRequest = { type: "call"; id: number; method: DashboardMethod; args: unknown[] }

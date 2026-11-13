@@ -20,7 +20,7 @@ Ludens 不把智能体困在静态提示词或写死的动作空间里，而是�
 - **任意屏幕，任意控制器** — 统一接入本机桌面（`CUA`）、采集卡 + HID 硬件桥（如通过 SSH 连接树莓派控制主机）、模拟器或 MCP 节点；单个工作区可并发挂载多台设备并随时切换。
 - **代码即感知** — 常驻 Python 进程将实时画面持续录制为可检索的 30 Hz fMP4 时间轴，同时在内存中运行并热重载智能体自己编写的视觉检测器与闭环反射（`perception.py`）。
 - **可自验证的技能演化** — 智能体把试错经验提炼为带类型的 `@capability` 函数，配合 `@eval_env` 代理环境与 `@eval_capability` 断言，通过 `ludens eval` 在毫秒内完成离线回归验证。
-- **实时驾驶舱与逐帧回放** — 在浏览器控制台中查看多机直播流、通过双向**事件池**异步协作（`ludens event`）、轮内紧急插话纠偏（`steer`）、秒级收回设备租约（`epoch`），并对照模型完整轨迹拖拽 30 Hz 录像回放；也可选配 **Ludens Pet** 桌面伴侣。
+- **原生桌面应用、实时驾驶舱与逐帧回放** — 既可直接启动自包含的 **Ludens 桌面端**（含系统托盘与 **Ludens Pet** 桌宠伴侣），也可在 `ludens app-server` 承载的浏览器控制台中一键启停与重载工作区、查看多机直播流、通过双向**事件池**异步协作（`ludens event`）、轮内紧急插话纠偏（`steer`）、秒级收回设备租约（`epoch`），并对照模型完整轨迹拖拽 30 Hz 录像回放。
 
 ## 30 秒看懂工作流
 
@@ -80,12 +80,16 @@ git clone https://github.com/Arkevo-Lab/Ludens.git && cd Ludens
 bun install --frozen-lockfile
 uv sync --project core/python --frozen
 (cd app && npm run build)
-export PATH="$PWD/baseware/bin:$PWD/core/bin:$PATH"
+export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 ```
 
-### 2. 创建并启动工作区
+### 2. 启动桌面应用或本地 App-Server
 
-以内置 `cua` 桌面驱动为例（接入外部模拟器驱动包 `--driver-package` 或远程 SSH / 桥接节点见[设备与驱动准备](docs/zh/tutorials/devices.md)）：
+Ludens 基于统一的 `@ludens/core` `app-server`（生产态零 Next.js 服务端进程、纯 TypeScript 跨平台进程监管）提供三种一等运行方式：
+
+- **Ludens 桌面端（一等宿主）**：执行一次 `(cd app && npm run desktop:build)` 后直接运行 `ludens-app --show-window`（或通过 `npm --prefix app run desktop:dist` 打包原生 macOS `.dmg` / Windows NSIS `.exe` 安装包）。桌面端会自动在后台拉起并监管 `ludens app-server`，无需打开终端即可在界面内新建并一键**启动 / 重载 / 停止**工作区；点击窗口关闭按钮（`×`）仅隐藏至系统托盘与 **Ludens Pet** 桌宠，显式退出应用（`⌘Q` / 托盘 **Quit**）时则干净回收全部受管游戏 AI 子进程。
+- **本地浏览器控制台（`ludens app-server` / `npm run dev`）**：运行 `ludens app-server`（别名 `ludens serve`）由单个 `@ludens/core` 进程在 [`http://127.0.0.1:3015`](http://127.0.0.1:3015) 同时承载 `/api/*` 与静态前端产物（`app/out`）；前端热更新开发执行 `(cd app && npm run dev)`（自动拉起后台 `ludens app-server` 并代理 `/api/*`）。
+- **无头 CLI 模式**：直接在终端初始化与编排工作区（接入外部模拟器驱动包 `--driver-package` 或远程 SSH / 桥接节点见[设备与驱动准备](docs/zh/tutorials/devices.md)）：
 
 ```sh
 ludens init --name my-agent --driver cua
@@ -93,9 +97,9 @@ cd "$HOME/.ludens/workspaces/my-agent"
 ludens up
 ```
 
-### 3. 打开控制台并交接控制权
+### 3. 交接控制权与异步协作
 
-访问 [`http://127.0.0.1:3015`](http://127.0.0.1:3015) 管理受控节点、观看实时画面或回放历史记录，也可以直接在终端启动自主运行：
+在桌面应用或 [`http://127.0.0.1:3015`](http://127.0.0.1:3015) 的**运行（`?view=live`）**页一键启动工作区并开启自主循环，或直接通过终端指令控制：
 
 ```sh
 ludens auto on --message "探索当前环境并沉淀可复用的技能函数"
@@ -110,8 +114,8 @@ ludens auto off
 | --- | --- |
 | [`@ludens/protocol`](protocol/README.md) | 零依赖契约层：RPC Schema、事件信封与内容寻址归档格式。 |
 | [`@ludens/baseware`](baseware/README.md) | 设备控制面：驱动加载器、多机受控节点池与 `epoch` 控制权租约仲裁。 |
-| [`@ludens/core`](core/README.md) | 智能体基座：Shiori 运行时、常驻 Python `perception.py` 进程、跨平台后台编排与 `ludens eval`。 |
-| [`@ludens/app`](app/README.md) | Next.js Web 控制台（`:3015`，含实时、回放、能力、配置与基座视图）及可选 Electron **桌宠**。 |
+| [`@ludens/core`](core/README.md) | 智能体基座与统一 `app-server`：Shiori 运行时、常驻 Python `perception.py` 进程、`/api/*` 与静态 UI 服务（`ludens app-server`）、纯 TS `WorkspaceSupervisor` 以及 `ludens eval`。 |
+| [`@ludens/app`](app/README.md) | 静态 Web 控制台构建产物（`app/out`，含实时、回放、能力、配置与基座视图）以及一等 Electron **Ludens 桌面端**与 **Ludens Pet** 桌宠伴侣。 |
 
 ## 文档导航
 

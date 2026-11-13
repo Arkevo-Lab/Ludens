@@ -20,7 +20,7 @@ Instead of locking an agent behind static prompts and fixed action spaces, Luden
 - **Any Screen, Any Controller** — Connect local desktops (`CUA`), real consoles over capture + HID bridges (e.g. Raspberry Pi via SSH), emulators, or MCP endpoints. Mount multiple machines into one workspace and route actions on the fly.
 - **Code-First Perception** — A resident Python worker continuously records fMP4 video into a searchable 30 Hz timeline while executing and hot-reloading the agent's own detectors and closed-loop reflexes in `perception.py`.
 - **Self-Verified Skills** — Agents turn trial-and-error into typed `@capability` functions paired with `@eval_env` surrogate environments and `@eval_capability` checks, iterating in milliseconds via `ludens eval`.
-- **Live Cockpit & Frame-Exact Replay** — Watch live multi-device streams, collaborate asynchronously via the duplex **Event Pool** (`ludens event`), interrupt mid-turn (`steer`), revoke control instantly (`epoch` leases), and scrub 30 Hz replays alongside model traces in the Web Console—or follow along with the optional **Ludens Pet** desktop companion.
+- **Live Cockpit, Desktop App & Frame-Exact Replay** — Run the self-contained **Ludens Desktop App** (with system tray and **Ludens Pet** companion) or open the browser console served by `ludens app-server`: start/reload/stop workspaces with one click, collaborate asynchronously via the duplex **Event Pool** (`ludens event`), interrupt mid-turn (`steer`), revoke control instantly (`epoch` leases), and scrub 30 Hz replays alongside model traces.
 
 ## How It Works
 
@@ -80,12 +80,16 @@ git clone https://github.com/Arkevo-Lab/Ludens.git && cd Ludens
 bun install --frozen-lockfile
 uv sync --project core/python --frozen
 (cd app && npm run build)
-export PATH="$PWD/baseware/bin:$PWD/core/bin:$PATH"
+export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 ```
 
-### 2. Initialize & Start a Workspace
+### 2. Launch the Desktop App or Local App-Server
 
-Use the built-in `cua` desktop driver (see [Devices & Drivers](docs/en/tutorials/devices.md) to attach emulators via `--driver-package` or remote SSH / bridge nodes):
+Ludens supports three workflows over the same unified `@ludens/core` `app-server` (zero Next.js production server runtime, pure-TypeScript process supervision):
+
+- **Ludens Desktop App (First-Class Host)**: build the desktop shell once (`(cd app && npm run desktop:build)`) and run `ludens-app --show-window` (or package a native macOS `.dmg` / Windows NSIS `.exe` installer via `npm --prefix app run desktop:dist`). The app automatically spawns and supervises `ludens app-server`, lets you create and **Start / Reload / Stop** workspaces right inside the UI without a terminal, hides to the system tray + **Ludens Pet** when closing the window (`×`), and tears down all managed game AI processes cleanly when you quit (`⌘Q` / tray **Quit**).
+- **Local Browser Console (`ludens app-server` / `npm run dev`)**: run `ludens app-server` (alias `ludens serve`) to serve `/api/*` and the static bundle (`app/out`) on [`http://127.0.0.1:3015`](http://127.0.0.1:3015), or `(cd app && npm run dev)` for frontend HMR (which auto-spawns `ludens app-server` and proxies `/api/*`).
+- **Headless CLI**: initialize and orchestrate workspaces directly from the terminal (see [Devices & Drivers](docs/en/tutorials/devices.md) to attach emulators via `--driver-package` or remote SSH / bridge nodes):
 
 ```sh
 ludens init --name my-agent --driver cua
@@ -93,9 +97,9 @@ cd "$HOME/.ludens/workspaces/my-agent"
 ludens up
 ```
 
-### 3. Open the Console & Hand Over Control
+### 3. Hand Over Control & Collaborate
 
-Open [`http://127.0.0.1:3015`](http://127.0.0.1:3015) to manage devices, watch live streams, or scrub replays—or grant autonomous control from the terminal:
+Start a workspace and launch an autonomous loop from **Live** (`?view=live`) in the Desktop App or [`http://127.0.0.1:3015`](http://127.0.0.1:3015)—or drive it from the CLI:
 
 ```sh
 ludens auto on --message "Explore the environment and build reusable capabilities"
@@ -110,8 +114,8 @@ ludens auto off
 | --- | --- |
 | [`@ludens/protocol`](protocol/README.md) | Zero-dependency RPC schemas, event envelopes, and content-addressed archive contracts. |
 | [`@ludens/baseware`](baseware/README.md) | Device control plane: driver loader, multi-machine node pool, and `epoch` lease arbitration. |
-| [`@ludens/core`](core/README.md) | Agent harness: Shiori runtime, resident Python `perception.py` worker, background launcher, and `ludens eval`. |
-| [`@ludens/app`](app/README.md) | Next.js Web Console (`:3015`) for Live, Replay, Capabilities, Studio & Baseware, plus the optional Electron **Pet**. |
+| [`@ludens/core`](core/README.md) | Agent harness & unified `app-server`: Shiori runtime, resident Python `perception.py` worker, `/api/*` + static UI server (`ludens app-server`), pure-TS `WorkspaceSupervisor`, and `ludens eval`. |
+| [`@ludens/app`](app/README.md) | Static Web Console bundle (`app/out`) for Live, Replay, Capabilities, Studio & Baseware, plus the first-class Electron **Ludens Desktop App** & **Ludens Pet** companion. |
 
 ## Documentation
 
