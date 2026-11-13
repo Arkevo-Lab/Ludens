@@ -1,18 +1,15 @@
 "use client";
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import {
-  Activity,
   BookOpen,
   CheckCircle2,
   Cpu,
   Edit3,
+  Eye,
   Gamepad2,
   Globe,
   HardDrive,
-  Link2,
-  Monitor,
-  PackageCheck,
   PackagePlus,
   Play,
   Plus,
@@ -20,12 +17,12 @@ import {
   Radio,
   RefreshCw,
   Server,
-  ShieldCheck,
   Sparkles,
   Star,
   Terminal,
   Trash2,
   Unplug,
+  X,
   XCircle,
 } from "lucide-react";
 import type { MachineTransportKind } from "@ludens/protocol/machines";
@@ -38,13 +35,16 @@ import { useLocale, useTranslations } from "@/lib/locale";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import {
+  AdvancedDiagnosticsDisclosure,
+  InlineCopyButton,
+  SingleLineTruncate,
+} from "@/components/ui/settings-primitives";
 import { BasewareModalDialog } from "./baseware-modal-dialog";
 import { DriverRegisterDialog } from "./driver-register-dialog";
 import { MachineEditorDialog } from "./machine-editor-dialog";
 import {
   buildDisplayMachines,
-  computeBasewareSummary,
   createEmptyMachineDraft,
   draftFromDriver,
   draftFromImplicitMachine,
@@ -69,9 +69,36 @@ export interface BasewareViewProps {
   onNavigate(href: string): void;
 }
 
+type MainTab = "devices" | "drivers";
 type DriverFilter = "all" | "current" | "registered" | "unregistered";
-type PoolFilter = "all" | "added" | "mounted" | "unregistered";
-type InspectorTab = "controllers" | "daemon";
+type PoolFilter = "all" | "current" | "online";
+
+function isPointOutsideRect(clientX: number, clientY: number, rect: DOMRect): boolean {
+  return (
+    clientX < rect.left
+    || clientX > rect.right
+    || clientY < rect.top
+    || clientY > rect.bottom
+  );
+}
+
+function driverSourceLabelKey(driver: BasewareDriverOverviewItem): string {
+  switch (driver.sourceKind) {
+    case "builtin":
+      return "driverBuiltinPkg";
+    case "file":
+      return "driverLocalPkg";
+    case "github":
+      return "driverGithubPkg";
+    case "npm":
+      return "driverNpmPkg";
+    default:
+      if (driver.spec.startsWith("driver:")) return "driverBuiltinPkg";
+      if (driver.spec.startsWith("file:")) return "driverLocalPkg";
+      if (driver.spec.startsWith("github:") || driver.spec.includes("github.com")) return "driverGithubPkg";
+      return "driverNpmPkg";
+  }
+}
 
 function TransportIcon({ kind }: { kind: MachineTransportKind }) {
   switch (kind) {
@@ -166,10 +193,11 @@ export function BasewareView({
     capabilitiesFailedMessage: ct("loadFailed"),
   });
 
+  const [activeTab, setActiveTab] = useState<MainTab>("devices");
   const [driverFilter, setDriverFilter] = useState<DriverFilter>("all");
   const [poolFilter, setPoolFilter] = useState<PoolFilter>("all");
   const [selectedMachineId, setSelectedMachineId] = useState<string | null>(null);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("controllers");
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // Modal dialog states
   const [driverModalOpen, setDriverModalOpen] = useState(false);
@@ -178,13 +206,18 @@ export function BasewareView({
   const [editorDraft, setEditorDraft] = useState<MachineDraft>(() => createEmptyMachineDraft("primary"));
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<DisplayMachineItem | null>(null);
 
-  const tabRefs = useRef<Record<InspectorTab, HTMLButtonElement | null>>({
-    controllers: null,
-    daemon: null,
+  const devicesTabId = useId();
+  const driversTabId = useId();
+  const drawerTitleId = useId();
+
+  const tabRefs = useRef<Record<MainTab, HTMLButtonElement | null>>({
+    devices: null,
+    drivers: null,
   });
+  const drawerDialogRef = useRef<HTMLDialogElement | null>(null);
+  const drawerPointerOutsideRef = useRef(false);
 
   const displayMachines = useMemo(() => buildDisplayMachines(snapshot), [snapshot]);
-  const summary = useMemo(() => computeBasewareSummary(snapshot), [snapshot]);
   const normalizedDaemon = useMemo(() => normalizeDaemonForSnapshot(snapshot), [snapshot]);
   const existingGlobalIds = useMemo(() => (snapshot?.machines ?? []).map(m => m.id), [snapshot?.machines]);
 
@@ -207,12 +240,10 @@ export function BasewareView({
   const filteredMachines = useMemo(() => {
     return displayMachines.filter(machine => {
       switch (poolFilter) {
-        case "added":
+        case "current":
           return machine.workspaceAdditionStatus !== "not-added";
-        case "mounted":
+        case "online":
           return machine.isMounted;
-        case "unregistered":
-          return machine.registrationStatus === "unregistered";
         default:
           return true;
       }
@@ -220,9 +251,60 @@ export function BasewareView({
   }, [displayMachines, poolFilter]);
 
   const selectedMachine = useMemo(
-    () => displayMachines.find(m => m.id === selectedMachineId) ?? filteredMachines[0] ?? displayMachines[0] ?? null,
-    [displayMachines, filteredMachines, selectedMachineId],
+    () => displayMachines.find(m => m.id === selectedMachineId) ?? null,
+    [displayMachines, selectedMachineId],
   );
+
+  // Close drawer automatically if the inspected machine was deleted
+  useEffect(() => {
+    if (drawerOpen && !selectedMachine) {
+      setDrawerOpen(false);
+    }
+  }, [drawerOpen, selectedMachine]);
+
+  // Sync native modal <dialog> for the right-side detail drawer
+  useEffect(() => {
+    const dialog = drawerDialogRef.current;
+    if (!dialog) return;
+    if (drawerOpen) {
+      if (!dialog.open) {
+        dialog.showModal();
+      }
+    } else if (dialog.open) {
+      dialog.close();
+    }
+  }, [drawerOpen]);
+
+  // Light-dismiss fallback when browser lacks HTMLDialogElement.prototype.closedBy
+  useEffect(() => {
+    const dialog = drawerDialogRef.current;
+    if (!dialog || !drawerOpen) return;
+    if (typeof HTMLDialogElement !== "undefined" && "closedBy" in HTMLDialogElement.prototype) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const rect = dialog.getBoundingClientRect();
+      drawerPointerOutsideRef.current = isPointOutsideRect(event.clientX, event.clientY, rect);
+    };
+
+    const handlePointerUp = (event: PointerEvent) => {
+      const startedOutside = drawerPointerOutsideRef.current;
+      drawerPointerOutsideRef.current = false;
+      if (!startedOutside) return;
+      const rect = dialog.getBoundingClientRect();
+      if (isPointOutsideRect(event.clientX, event.clientY, rect)) {
+        dialog.close();
+      }
+    };
+
+    dialog.addEventListener("pointerdown", handlePointerDown);
+    dialog.addEventListener("pointerup", handlePointerUp);
+    return () => {
+      dialog.removeEventListener("pointerdown", handlePointerDown);
+      dialog.removeEventListener("pointerup", handlePointerUp);
+    };
+  }, [drawerOpen]);
 
   const rawDeviceItems = useMemo(
     () => capabilities.value?.groups.find(group => group.id === "device")?.items ?? [],
@@ -241,6 +323,19 @@ export function BasewareView({
       : "/?view=docs&doc=tutorials/devices.md";
     return `${base}&docLang=${locale}`;
   }, [project, locale]);
+
+  const openMachineDrawer = (machineId: string) => {
+    setSelectedMachineId(machineId);
+    setDrawerOpen(true);
+  };
+
+  const handleDrawerClose = () => {
+    const dialog = drawerDialogRef.current;
+    if (dialog && dialog.returnValue) {
+      dialog.returnValue = "";
+    }
+    setDrawerOpen(false);
+  };
 
   const openNewMachineEditor = () => {
     const firstNonBuiltinDriver = drivers.find(d => d.spec !== BUILTIN_CUA_DRIVER_SPEC);
@@ -271,9 +366,14 @@ export function BasewareView({
     setEditorOpen(true);
   };
 
-  const handleInspectorTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
-    const order: InspectorTab[] = ["controllers", "daemon"];
-    const currentIndex = order.indexOf(inspectorTab);
+  const selectMainTab = (tab: MainTab) => {
+    setActiveTab(tab);
+    tabRefs.current[tab]?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  };
+
+  const handleMainTabKeyDown = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const order: MainTab[] = ["devices", "drivers"];
+    const currentIndex = order.indexOf(activeTab);
     let nextIndex = -1;
 
     if (event.key === "ArrowRight") {
@@ -289,36 +389,61 @@ export function BasewareView({
     if (nextIndex >= 0) {
       event.preventDefault();
       const nextTab = order[nextIndex]!;
-      setInspectorTab(nextTab);
+      setActiveTab(nextTab);
       const target = tabRefs.current[nextTab];
       target?.focus();
       target?.scrollIntoView({ block: "nearest", inline: "nearest" });
     }
   };
 
-  const daemonStateLabel = !daemon
-    ? t("daemonOffline")
-    : daemon.status?.connected
-      ? t("daemonConnected")
-      : daemon.basewareSocketExists
-        ? t("daemonStandby")
-        : t("daemonOffline");
-
   const editorTitle = editingGlobalId
     ? `${t("editMachineTitle")}: ${editingGlobalId}`
     : t("newMachineTitle");
 
+  const cliExample = selectedMachine ? formatCliControllerExample(selectedMachine) : "";
+
   return (
-    <div className="space-y-6 p-4 md:p-6" data-baseware-view>
-      {/* Header */}
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div className="space-y-1">
+    <div className="space-y-5 p-4 md:p-6" data-baseware-view>
+      {/* Compact Header Bar with Single-Row ARIA Tablist */}
+      <header className="baseware-header-bar">
+        <div className="baseware-header-leading">
           <div className="flex items-center gap-2">
-            <Cpu className="size-5 text-primary" aria-hidden="true" />
-            <h1 className="text-xl font-semibold tracking-tight">{t("title")}</h1>
+            <Cpu className="size-4 text-primary" aria-hidden="true" />
+            <h1 className="text-lg font-semibold tracking-tight">{t("pageTitle")}</h1>
           </div>
-          <p className="max-w-3xl text-sm text-muted-foreground">{t("description")}</p>
+
+          <div className="baseware-tablist" role="tablist" aria-label={t("pageTitle")}>
+            <button
+              ref={el => { tabRefs.current.devices = el; }}
+              id={devicesTabId}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "devices"}
+              tabIndex={activeTab === "devices" ? 0 : -1}
+              onClick={() => selectMainTab("devices")}
+              onKeyDown={handleMainTabKeyDown}
+              className="baseware-tab"
+            >
+              <Server className="size-3.5" aria-hidden="true" />
+              <span>{t("tabDevices")}</span>
+            </button>
+            <button
+              ref={el => { tabRefs.current.drivers = el; }}
+              id={driversTabId}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === "drivers"}
+              tabIndex={activeTab === "drivers" ? 0 : -1}
+              onClick={() => selectMainTab("drivers")}
+              onKeyDown={handleMainTabKeyDown}
+              className="baseware-tab"
+            >
+              <HardDrive className="size-3.5" aria-hidden="true" />
+              <span>{t("tabDrivers")}</span>
+            </button>
+          </div>
         </div>
+
         <div className="flex flex-wrap items-center gap-2">
           <Button
             type="button"
@@ -350,7 +475,7 @@ export function BasewareView({
             {t("addMachine")}
           </Button>
         </div>
-      </div>
+      </header>
 
       {/* Feedback & Errors */}
       {catalogError && (
@@ -377,578 +502,390 @@ export function BasewareView({
         </Alert>
       )}
 
-      {/* 4-Card Summary Strip */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4" data-baseware-summary aria-label={t("summaryLabel")}>
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{t("cardDriversSummary")}</span>
-              <PackageCheck className="size-3.5 text-primary" aria-hidden="true" />
-            </div>
-            <div className="mt-1.5 text-lg font-semibold tabular-nums">{summary.totalDrivers}</div>
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              {fmt("driversSummaryDetail", {
-                registered: summary.registeredDrivers,
-                unregistered: summary.unregisteredDrivers,
-              })}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{t("cardActiveTarget")}</span>
-              <Star className="size-3.5 text-amber-400" aria-hidden="true" />
-            </div>
-            <div className="mt-1.5 flex items-center gap-1.5 font-mono text-sm font-semibold">
-              {summary.activeTarget ? (
-                <>
-                  <TransportIcon kind={summary.activeTarget.transport.kind} />
-                  <span className="truncate">{summary.activeTarget.name}</span>
-                </>
-              ) : (
-                <span className="text-muted-foreground">{t("unboundTarget")}</span>
-              )}
-            </div>
-            <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-              {summary.activeTarget
-                ? `${summary.activeTarget.id} · ${formatTransportSummary(summary.activeTarget.transport)}`
-                : "—"}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{t("cardWorkspacePool")}</span>
-              <Link2 className="size-3.5 text-primary" aria-hidden="true" />
-            </div>
-            <div className="mt-1.5 text-lg font-semibold tabular-nums">
-              {project ? summary.addedMachinesCount : "—"}
-            </div>
-            <div className="mt-0.5 text-xs text-muted-foreground">
-              {project
-                ? fmt("workspaceNodesUnit", {
-                    mounted: summary.mountedMachinesCount,
-                    added: summary.addedMachinesCount,
-                  })
-                : t("noWorkspaceSelected")}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span>{t("cardDaemonStatus")}</span>
-              <Activity className="size-3.5 text-emerald-400" aria-hidden="true" />
-            </div>
-            <div className="mt-1.5 flex items-center gap-2 text-sm font-semibold">
-              <span
-                className={`size-2 rounded-full ${
-                  daemon?.status?.connected
-                    ? "bg-emerald-400"
-                    : daemon?.basewareSocketExists
-                      ? "bg-amber-400"
-                      : "bg-muted-foreground/40"
-                }`}
-              />
-              <span>{daemonStateLabel}</span>
-            </div>
-            <div className="mt-0.5 truncate font-mono text-xs text-muted-foreground">
-              {daemon?.status?.epoch ? `epoch ${daemon.status.epoch}` : t("daemonHint")}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* SECTION 1: Driver Library (Orthogonal Registration vs Usage) */}
-      <section className="space-y-3" data-baseware-section="driver-library">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <HardDrive className="size-4 text-primary" aria-hidden="true" />
-              <h2 className="text-base font-semibold">{t("driverLibraryTitle")}</h2>
-            </div>
-            <p className="max-w-3xl text-xs text-muted-foreground">{t("driverLibraryDesc")}</p>
-          </div>
-
-          <search className="flex flex-wrap items-center gap-1" aria-label={t("driverFilterLabel")}>
-            {(
-              [
-                { key: "all", label: t("driverFilterAll") },
-                { key: "current", label: t("driverFilterCurrent") },
-                { key: "registered", label: t("driverFilterRegistered") },
-                { key: "unregistered", label: t("driverFilterUnregistered") },
-              ] as const
-            ).map(item => (
-              <Button
-                key={item.key}
-                type="button"
-                size="sm"
-                variant={driverFilter === item.key ? "secondary" : "ghost"}
-                className="h-7 px-2.5 text-xs"
-                onClick={() => setDriverFilter(item.key)}
-              >
-                {item.label}
-              </Button>
-            ))}
-          </search>
-        </div>
-
-        {filteredDrivers.length === 0 ? (
-          <Card>
-            <CardContent className="p-4 text-xs text-muted-foreground">
-              {t("emptyDriverFilter")}
-            </CardContent>
-          </Card>
-        ) : (
-          <ul role="list" className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {filteredDrivers.map(driver => {
-              const isBusy = busyDriverKey === driver.key || busyDriverKey === driver.id;
-              return (
-                <li
-                  key={driver.key}
-                  data-baseware-driver={driver.id}
-                  className="flex flex-col justify-between gap-3 rounded-xl border border-border/80 bg-card p-3.5"
-                >
-                  <div className="space-y-2">
-                    <div className="flex flex-wrap items-start justify-between gap-2">
-                      <div className="min-w-0 space-y-0.5">
-                        <h3 className="flex flex-wrap items-center gap-1.5 text-sm font-semibold">
-                          <span className="font-mono">{driver.id}</span>
-                          {driver.version && (
-                            <span className="font-mono text-[11px] font-normal text-muted-foreground">
-                              v{driver.version}
-                            </span>
-                          )}
-                        </h3>
-                        {driver.packageName && (
-                          <p className="truncate font-mono text-[11px] text-muted-foreground" title={driver.packageName}>
-                            {driver.packageName}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Orthogonal Status Pill Pair */}
-                      <div className="flex flex-wrap items-center gap-1">
-                        {driver.registrationStatus === "builtin" ? (
-                          <Badge variant="outline" className="border-sky-500/40 bg-sky-500/10 text-[10px] text-sky-300">
-                            {t("driverRegBuiltin")}
-                          </Badge>
-                        ) : driver.registrationStatus === "registered" ? (
-                          <Badge variant="outline" className="border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-300">
-                            {t("driverRegRegistered")}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-300">
-                            {t("driverRegUnregistered")}
-                          </Badge>
-                        )}
-
-                        {driver.usedByCurrentWorkspace ? (
-                          <Badge variant="outline" className="border-primary/45 bg-primary/10 text-[10px] text-primary">
-                            {t("driverUsedHere")}
-                          </Badge>
-                        ) : driver.usedByMachineIds.length > 0 ? (
-                          <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                            {fmt("driverUsedByNodes", { count: driver.usedByMachineIds.length })}
-                          </Badge>
-                        ) : (
-                          <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                            {t("driverUnused")}
-                          </Badge>
-                        )}
-                      </div>
-                    </div>
-
-                    {driver.description && (
-                      <p className="line-clamp-2 text-xs text-muted-foreground">{driver.description}</p>
-                    )}
-
-                    <div className="space-y-1 font-mono text-[11px] text-muted-foreground">
-                      <div className="truncate" title={driver.spec}>
-                        {t("driverPathLabel")}: {driver.spec}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        {driver.transport && <span>transport: {driver.transport}</span>}
-                        {driver.defaultPort !== undefined && <span>port: {driver.defaultPort}</span>}
-                        {driver.cacheKey && <span>cache: {driver.cacheKey}</span>}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5 border-t border-border/60 pt-2.5">
-                    {driver.registrationStatus === "unregistered" && !driver.spec.startsWith("driver:") && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        className="h-7 px-2.5 text-xs"
-                        disabled={isBusy}
-                        aria-label={`${t("driverRegisterBtn")}: ${driver.id}`}
-                        data-baseware-register-driver={driver.id}
-                        onClick={() => {
-                          void registerDriver(driver.spec, driver.key).then(() => {
-                            setActionNotice(fmt("driverRegisteredNotice", { id: driver.id }));
-                          }).catch(() => {});
-                        }}
-                      >
-                        <PackagePlus className="size-3" aria-hidden="true" />
-                        {t("driverRegisterBtn")}
-                      </Button>
-                    )}
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2.5 text-xs"
-                      aria-label={`${t("driverCreateNodeBtn")}: ${driver.id}`}
-                      onClick={() => openEditorFromDriver(driver)}
-                    >
-                      {t("driverCreateNodeBtn")}
-                    </Button>
-
-                    {driver.registrationStatus === "registered" && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
-                        disabled={isBusy}
-                        aria-label={`${t("driverUnregisterBtn")}: ${driver.id}`}
-                        data-baseware-unregister-driver={driver.id}
-                        onClick={() => {
-                          void unregisterDriver({
-                            id: driver.id,
-                            spec: driver.spec,
-                            key: driver.key,
-                          }).then(() => {
-                            setActionNotice(fmt("driverUnregisteredNotice", { id: driver.id }));
-                          }).catch(() => {});
-                        }}
-                      >
-                        {t("driverUnregisterBtn")}
-                      </Button>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      {/* SECTION 2: Master-Detail Controlled Nodes + Sticky Controller Inspector */}
-      <section className="space-y-3">
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <Server className="size-4 text-primary" aria-hidden="true" />
-            <h2 className="text-base font-semibold">{t("poolSectionTitle")}</h2>
-          </div>
-          <p className="max-w-3xl text-xs text-muted-foreground">{t("poolSectionDesc")}</p>
-        </div>
-
-        <div className="grid grid-cols-1 gap-5 lg:grid-cols-12">
-          {/* Left 7 Cols: Controlled Node List */}
-          <div className="min-w-0 space-y-3 lg:col-span-7" data-baseware-section="machine-pool">
-            <search className="flex flex-wrap items-center gap-1" aria-label={t("poolFilterLabel")}>
+      {/* Tabpanels: ZERO padding/border/margin on [role="tabpanel"] itself */}
+      <div className="baseware-tabpanels">
+        {/* TAB 1: Controlled Devices */}
+        <div
+          role="tabpanel"
+          aria-labelledby={devicesTabId}
+          hidden={activeTab !== "devices"}
+          data-baseware-section="machine-pool"
+        >
+          <div className="baseware-tabpanel-inner space-y-3">
+            <search className="baseware-filter-bar" aria-label={t("poolFilterLabel")}>
               {(
                 [
                   { key: "all", label: t("poolFilterAll") },
-                  { key: "added", label: t("poolFilterAdded") },
-                  { key: "mounted", label: t("poolFilterMounted") },
-                  { key: "unregistered", label: t("poolFilterUnregistered") },
+                  { key: "current", label: t("poolFilterCurrent") },
+                  { key: "online", label: t("poolFilterOnline") },
                 ] as const
               ).map(item => (
-                <Button
+                <button
                   key={item.key}
                   type="button"
-                  size="sm"
-                  variant={poolFilter === item.key ? "secondary" : "ghost"}
-                  className="h-7 px-2.5 text-xs"
+                  aria-pressed={poolFilter === item.key}
+                  className="baseware-filter-pill"
                   onClick={() => setPoolFilter(item.key)}
                 >
                   {item.label}
-                </Button>
+                </button>
               ))}
             </search>
 
             {filteredMachines.length === 0 ? (
-              <Card>
-                <CardContent className="p-4 text-xs text-muted-foreground">
-                  {t("emptyPoolFilter")}
-                </CardContent>
-              </Card>
+              <div className="border-y border-border/75 py-6 text-xs text-muted-foreground">
+                {t("emptyPoolFilter")}
+              </div>
             ) : (
-              <ul role="list" className="space-y-2.5">
+              <ul role="list" className="settings-rows">
                 {filteredMachines.map(machine => {
-                  const isSelected = selectedMachine?.id === machine.id;
-                  const isBuiltin = machine.registrationStatus === "builtin";
                   const isUnregistered = machine.registrationStatus === "unregistered";
                   const isBusy = busyMachineId === machine.id;
                   const probe = probeStates[machine.id];
+                  const isInspecting = drawerOpen && selectedMachine?.id === machine.id;
 
                   return (
                     <li
                       key={machine.id}
                       data-baseware-machine={machine.id}
-                      className={
-                        "rounded-xl border p-3.5 transition-colors " +
-                        (isSelected
-                          ? "border-primary bg-primary/[0.04]"
-                          : "border-border/80 bg-card hover:border-border")
-                      }
+                      className="baseware-list-row"
                     >
-                      <div className="flex flex-col gap-3">
-                        {/* Clickable header to select machine */}
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setSelectedMachineId(machine.id)}
-                            className="flex min-w-0 flex-1 items-start gap-2.5 text-left"
-                          >
-                            <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
-                              <TransportIcon kind={machine.transport.kind} />
-                            </div>
-                            <div className="min-w-0 space-y-0.5">
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <h3 className="text-sm font-semibold text-foreground">{machine.name}</h3>
-                                <span className="font-mono text-xs text-muted-foreground">{machine.id}</span>
-                              </div>
-                              <div className="truncate font-mono text-[11px] text-muted-foreground">
-                                {machine.driver} · {machine.transport.kind.toUpperCase()} ·{" "}
-                                {formatTransportSummary(machine.transport)}
-                              </div>
-                              {machine.driverPackage && (
-                                <div className="truncate font-mono text-[11px] text-muted-foreground/80" title={machine.driverPackage}>
-                                  {machine.driverPackage}
-                                </div>
-                              )}
-                            </div>
-                          </button>
-
-                          {/* Orthogonal 3-axis badges */}
-                          <div className="flex flex-wrap items-center gap-1">
-                            {/* Axis 1: Registration */}
-                            {isBuiltin ? (
-                              <Badge variant="outline" className="border-sky-500/40 bg-sky-500/10 text-[10px] text-sky-300">
-                                <ShieldCheck className="mr-1 size-2.5" aria-hidden="true" />
-                                {t("nodeRegBuiltin")}
-                              </Badge>
-                            ) : isUnregistered ? (
-                              <Badge variant="outline" className="border-amber-500/40 bg-amber-500/10 text-[10px] text-amber-300">
-                                {t("nodeRegUnregistered")}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="border-emerald-500/35 bg-emerald-500/10 text-[10px] text-emerald-300">
-                                {t("nodeRegRegistered")}
-                              </Badge>
-                            )}
-
-                            {/* Axis 2: Workspace Addition */}
-                            {project && (
-                              machine.workspaceAdditionStatus === "primary" ? (
-                                <Badge variant="outline" className="border-amber-400/50 bg-amber-400/15 text-[10px] text-amber-300">
-                                  {t("nodeAddPrimary")}
+                      <div className="baseware-list-row-main">
+                        <button
+                          type="button"
+                          onClick={() => openMachineDrawer(machine.id)}
+                          aria-expanded={isInspecting}
+                          className="baseware-device-trigger"
+                        >
+                          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
+                            <TransportIcon kind={machine.transport.kind} />
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-sm font-medium text-foreground">{machine.name}</span>
+                              <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                                <span
+                                  aria-hidden="true"
+                                  className={`size-2 rounded-full ${
+                                    machine.isMounted ? "bg-emerald-400" : "bg-muted-foreground/40"
+                                  }`}
+                                />
+                                <span>{t(machine.isMounted ? "nodeMountConnected" : "nodeMountStandby")}</span>
+                              </span>
+                              {machine.workspaceAdditionStatus === "primary" && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-amber-400/45 bg-amber-400/10 text-[10px] text-amber-300"
+                                >
+                                  {t("deviceInUse")}
                                 </Badge>
-                              ) : machine.workspaceAdditionStatus === "added" ? (
-                                <Badge variant="outline" className="border-primary/40 bg-primary/10 text-[10px] text-primary">
+                              )}
+                              {machine.workspaceAdditionStatus === "added" && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-primary/40 bg-primary/10 text-[10px] text-primary"
+                                >
                                   {t("nodeAddAdded")}
                                 </Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                                  {t("nodeAddNotAdded")}
+                              )}
+                              {isUnregistered && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-border/80 text-[10px] text-muted-foreground"
+                                >
+                                  {t("deviceWorkspaceLocal")}
                                 </Badge>
-                              )
-                            )}
-
-                            {/* Axis 3: Live Daemon Mount */}
-                            {machine.isMounted ? (
-                              <Badge variant="outline" className="border-emerald-500/45 bg-emerald-500/15 text-[10px] text-emerald-300">
-                                <span className="mr-1 inline-block size-1.5 rounded-full bg-emerald-400" />
-                                {t("nodeMountConnected")}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                                {t("nodeMountStandby")}
-                              </Badge>
-                            )}
+                              )}
+                            </div>
+                            <SingleLineTruncate
+                              text={`${machine.driver} · ${machine.transport.kind.toUpperCase()} · ${formatTransportSummary(machine.transport)}`}
+                              mono
+                              className="text-[11px] text-muted-foreground"
+                            />
                           </div>
-                        </div>
+                        </button>
 
-                        {/* Probe Result Banner */}
-                        {probe && probe !== "probing" && (
-                          <div
-                            className={`rounded-md border px-2.5 py-1.5 font-mono text-[11px] ${
-                              probe.ok
-                                ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
-                                : "border-destructive/40 bg-destructive/10 text-destructive"
-                            }`}
-                          >
-                            {probe.ok ? t("probeOk") : t("probeFailed")} ({probe.latencyMs}ms): {probe.detail}
-                          </div>
-                        )}
-
-                        {/* Actions Footer */}
-                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/60 pt-2.5">
-                          <span className="text-[11px] text-muted-foreground">
-                            {fmt("usedByWorkspaces", { count: machine.usedByWorkspaceIds.length })}
-                          </span>
-
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {isUnregistered ? (
-                              <>
+                        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                          {isUnregistered ? (
+                            <>
+                              <Button
+                                type="button"
+                                size="sm"
+                                className="h-7 px-2.5 text-xs"
+                                aria-label={`${t("deviceSaveGlobal")}: ${machine.name}`}
+                                data-baseware-promote-machine={machine.id}
+                                onClick={() => openEditorForPromote(machine)}
+                              >
+                                <Sparkles className="size-3" aria-hidden="true" />
+                                {t("deviceSaveGlobal")}
+                              </Button>
+                              {project && machine.isMounted && (
                                 <Button
                                   type="button"
+                                  variant="outline"
                                   size="sm"
-                                  className="h-7 px-2.5 text-xs"
-                                  aria-label={`${t("promoteInlineBtn")}: ${machine.name}`}
-                                  data-baseware-promote-machine={machine.id}
-                                  onClick={() => openEditorForPromote(machine)}
+                                  className="h-7 px-2 text-xs"
+                                  disabled={isBusy}
+                                  aria-label={`${t("reconnectBtn")}: ${machine.name}`}
+                                  onClick={() => void controlWorkspaceMachine("reconnect", machine.id)}
                                 >
-                                  <Sparkles className="size-3" aria-hidden="true" />
-                                  {t("promoteInlineBtn")}
+                                  <RefreshCw className="size-3" aria-hidden="true" />
+                                  {t("reconnectBtn")}
                                 </Button>
-                                {project && machine.isMounted && (
+                              )}
+                            </>
+                          ) : (
+                            project && (
+                              <>
+                                {machine.workspaceAdditionStatus !== "primary" && (
+                                  <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    className="h-7 px-2.5 text-xs"
+                                    disabled={isBusy}
+                                    aria-label={`${t("deviceSetActive")}: ${machine.name}`}
+                                    data-baseware-set-primary={machine.id}
+                                    onClick={() => void controlWorkspaceMachine("setPrimary", machine.id)}
+                                  >
+                                    <Star className="size-3" aria-hidden="true" />
+                                    {t("deviceSetActive")}
+                                  </Button>
+                                )}
+
+                                {machine.isMounted ? (
                                   <Button
                                     type="button"
                                     variant="outline"
                                     size="sm"
                                     className="h-7 px-2 text-xs"
                                     disabled={isBusy}
-                                    aria-label={`${t("reconnectBtn")}: ${machine.name}`}
-                                    onClick={() => void controlWorkspaceMachine("reconnect", machine.id)}
+                                    aria-label={`${t("unmountBtn")}: ${machine.name}`}
+                                    data-baseware-unmount-btn={machine.id}
+                                    onClick={() => void controlWorkspaceMachine("unmount", machine.id)}
                                   >
-                                    <RefreshCw className="size-3" aria-hidden="true" />
-                                    {t("reconnectBtn")}
+                                    <Unplug className="size-3" aria-hidden="true" />
+                                    {t("unmountBtn")}
                                   </Button>
-                                )}
-                              </>
-                            ) : (
-                              project && (
-                                <>
-                                  {machine.workspaceAdditionStatus === "not-added" && (
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 px-2.5 text-xs"
-                                      disabled={isBusy}
-                                      aria-label={`${t("addToWorkspaceBtn")}: ${machine.name}`}
-                                      onClick={() => void controlWorkspaceMachine("toggleAllowed", machine.id)}
-                                    >
-                                      {t("addToWorkspaceBtn")}
-                                    </Button>
-                                  )}
-
-                                  {machine.workspaceAdditionStatus !== "primary" && (
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      size="sm"
-                                      className="h-7 px-2.5 text-xs"
-                                      disabled={isBusy}
-                                      aria-label={`${t("setPrimaryBtn")}: ${machine.name}`}
-                                      data-baseware-set-primary={machine.id}
-                                      onClick={() => void controlWorkspaceMachine("setPrimary", machine.id)}
-                                    >
-                                      <Star className="size-3" aria-hidden="true" />
-                                      {t("setPrimaryBtn")}
-                                    </Button>
-                                  )}
-
-                                  {machine.isMounted ? (
+                                ) : (
+                                  daemon?.basewareSocketExists && (
                                     <Button
                                       type="button"
                                       variant="outline"
                                       size="sm"
                                       className="h-7 px-2 text-xs"
                                       disabled={isBusy}
-                                      aria-label={`${t("unmountBtn")}: ${machine.name}`}
-                                      data-baseware-unmount-btn={machine.id}
-                                      onClick={() => void controlWorkspaceMachine("unmount", machine.id)}
+                                      aria-label={`${t("coMountBtn")}: ${machine.name}`}
+                                      data-baseware-mount-btn={machine.id}
+                                      onClick={() => void controlWorkspaceMachine("mount", machine.id)}
                                     >
-                                      <Unplug className="size-3" aria-hidden="true" />
-                                      {t("unmountBtn")}
+                                      <PlugIcon className="size-3" aria-hidden="true" />
+                                      {t("coMountBtn")}
                                     </Button>
-                                  ) : (
-                                    daemon?.basewareSocketExists && (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="h-7 px-2 text-xs"
-                                        disabled={isBusy}
-                                        aria-label={`${t("coMountBtn")}: ${machine.name}`}
-                                        data-baseware-mount-btn={machine.id}
-                                        onClick={() => void controlWorkspaceMachine("mount", machine.id)}
-                                      >
-                                        <PlugIcon className="size-3" aria-hidden="true" />
-                                        {t("coMountBtn")}
-                                      </Button>
-                                    )
-                                  )}
+                                  )
+                                )}
+                              </>
+                            )
+                          )}
 
-                                  {machine.workspaceAdditionStatus === "added" && (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 px-2 text-xs text-muted-foreground"
-                                      disabled={isBusy}
-                                      aria-label={`${t("removeFromWorkspaceBtn")}: ${machine.name}`}
-                                      onClick={() => void controlWorkspaceMachine("toggleAllowed", machine.id)}
-                                    >
-                                      {t("removeFromWorkspaceBtn")}
-                                    </Button>
-                                  )}
-                                </>
-                              )
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            onClick={() => void probeMachine(machine)}
+                            disabled={probe === "probing"}
+                            aria-label={`${t("probe")}: ${machine.name}`}
+                            data-baseware-probe-btn={machine.id}
+                          >
+                            <Play className="size-3" aria-hidden="true" />
+                            {probe === "probing" ? t("probing") : t("probe")}
+                          </Button>
+
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+                            aria-expanded={isInspecting}
+                            aria-label={`${t("inspectDevice")}: ${machine.name}`}
+                            onClick={() => openMachineDrawer(machine.id)}
+                          >
+                            <Eye className="size-3" aria-hidden="true" />
+                            {t("inspectDevice")}
+                          </Button>
+                        </div>
+                      </div>
+
+                      {probe && probe !== "probing" && (
+                        <div
+                          className={`rounded-md border px-2.5 py-1.5 font-mono text-[11px] ${
+                            probe.ok
+                              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                              : "border-destructive/40 bg-destructive/10 text-destructive"
+                          }`}
+                        >
+                          {probe.ok ? t("probeOk") : t("probeFailed")} ({probe.latencyMs}ms): {probe.detail}
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        {/* TAB 2: Driver Library */}
+        <div
+          role="tabpanel"
+          aria-labelledby={driversTabId}
+          hidden={activeTab !== "drivers"}
+          data-baseware-section="driver-library"
+        >
+          <div className="baseware-tabpanel-inner space-y-3">
+            <search className="baseware-filter-bar" aria-label={t("driverFilterLabel")}>
+              {(
+                [
+                  { key: "all", label: t("driverFilterAll") },
+                  { key: "current", label: t("driverFilterCurrent") },
+                  { key: "registered", label: t("driverFilterRegistered") },
+                  { key: "unregistered", label: t("driverFilterUnregistered") },
+                ] as const
+              ).map(item => (
+                <button
+                  key={item.key}
+                  type="button"
+                  aria-pressed={driverFilter === item.key}
+                  className="baseware-filter-pill"
+                  onClick={() => setDriverFilter(item.key)}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </search>
+
+            {filteredDrivers.length === 0 ? (
+              <div className="border-y border-border/75 py-6 text-xs text-muted-foreground">
+                {t("emptyDriverFilter")}
+              </div>
+            ) : (
+              <ul role="list" className="settings-rows">
+                {filteredDrivers.map(driver => {
+                  const isBusy = busyDriverKey === driver.key || busyDriverKey === driver.id;
+                  const summaryLine = driver.description || driver.packageName || "";
+                  return (
+                    <li
+                      key={driver.key}
+                      data-baseware-driver={driver.id}
+                      className="baseware-list-row settings-copyable"
+                    >
+                      <div className="baseware-list-row-main">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="font-mono text-sm font-medium text-foreground">{driver.id}</span>
+                            {driver.version && (
+                              <span className="font-mono text-[11px] text-muted-foreground">v{driver.version}</span>
                             )}
+                            <span className="text-[11px] text-muted-foreground">
+                              · {t(driverSourceLabelKey(driver))}
+                            </span>
 
+                            {driver.usedByCurrentWorkspace ? (
+                              <Badge
+                                variant="outline"
+                                className="border-primary/45 bg-primary/10 text-[10px] text-primary"
+                              >
+                                {t("driverUsedHere")}
+                              </Badge>
+                            ) : driver.usedByMachineIds.length > 0 ? (
+                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                                {fmt("driverUsedByNodes", { count: driver.usedByMachineIds.length })}
+                              </Badge>
+                            ) : null}
+
+                            {driver.registrationStatus === "registered" && (
+                              <Badge
+                                variant="outline"
+                                className="border-emerald-500/40 bg-emerald-500/10 text-[10px] text-emerald-300"
+                              >
+                                {t("driverRegRegistered")}
+                              </Badge>
+                            )}
+                          </div>
+
+                          {summaryLine && (
+                            <SingleLineTruncate
+                              text={summaryLine}
+                              className="text-xs text-muted-foreground"
+                            />
+                          )}
+
+                          <div className="flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                            <SingleLineTruncate text={driver.spec} mono className="flex-1" />
+                            <InlineCopyButton
+                              text={driver.spec}
+                              ariaLabel={`${t("copySpec")}: ${driver.id}`}
+                              copiedText={t("copiedNotice")}
+                              failedText={t("copyFailedNotice")}
+                              revealOnHover
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex shrink-0 flex-wrap items-center gap-1.5">
+                          {driver.registrationStatus === "unregistered" && !driver.spec.startsWith("driver:") && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              className="h-7 px-2.5 text-xs"
+                              disabled={isBusy}
+                              aria-label={`${t("driverSaveGlobal")}: ${driver.id}`}
+                              data-baseware-register-driver={driver.id}
+                              onClick={() => {
+                                void registerDriver(driver.spec, driver.key).then(() => {
+                                  setActionNotice(fmt("driverRegisteredNotice", { id: driver.id }));
+                                }).catch(() => {});
+                              }}
+                            >
+                              <PackagePlus className="size-3" aria-hidden="true" />
+                              {t("driverSaveGlobal")}
+                            </Button>
+                          )}
+
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-7 px-2.5 text-xs"
+                            aria-label={`${t("driverNewDevice")}: ${driver.id}`}
+                            onClick={() => openEditorFromDriver(driver)}
+                          >
+                            {t("driverNewDevice")}
+                          </Button>
+
+                          {driver.registrationStatus === "registered" && (
                             <Button
                               type="button"
                               variant="ghost"
                               size="sm"
-                              className="h-7 px-2 text-xs"
-                              onClick={() => void probeMachine(machine)}
-                              disabled={probe === "probing"}
-                              aria-label={`${t("probe")}: ${machine.name}`}
-                              data-baseware-probe-btn={machine.id}
+                              className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive"
+                              disabled={isBusy}
+                              aria-label={`${t("driverRemoveGlobal")}: ${driver.id}`}
+                              data-baseware-unregister-driver={driver.id}
+                              onClick={() => {
+                                void unregisterDriver({
+                                  id: driver.id,
+                                  spec: driver.spec,
+                                  key: driver.key,
+                                }).then(() => {
+                                  setActionNotice(fmt("driverUnregisteredNotice", { id: driver.id }));
+                                }).catch(() => {});
+                              }}
                             >
-                              <Play className="size-3" aria-hidden="true" />
-                              {probe === "probing" ? t("probing") : t("probe")}
+                              {t("driverRemoveGlobal")}
                             </Button>
-
-                            {!isUnregistered && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs"
-                                onClick={() => openEditorForMachine(machine)}
-                                aria-label={`${t("edit")}: ${machine.name}`}
-                              >
-                                <Edit3 className="size-3.5" aria-hidden="true" />
-                              </Button>
-                            )}
-
-                            {!isBuiltin && !isUnregistered && (
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                onClick={() => setConfirmDeleteTarget(machine)}
-                                aria-label={`${t("delete")}: ${machine.name}`}
-                              >
-                                <Trash2 className="size-3.5" aria-hidden="true" />
-                              </Button>
-                            )}
-                          </div>
+                          )}
                         </div>
                       </div>
                     </li>
@@ -957,199 +894,399 @@ export function BasewareView({
               </ul>
             )}
           </div>
+        </div>
+      </div>
 
-          {/* Right 5 Cols: Contextual Sticky Machine & Daemon Inspector */}
-          <div className="min-w-0 lg:sticky lg:top-[calc(1rem+var(--shell-topbar-height,0px))] lg:col-span-5" data-baseware-section="controllers-catalog">
-            <Card className="min-w-0" data-capability-source="device">
-              <CardContent className="min-w-0 space-y-4 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2.5">
-                  <div className="baseware-tablist min-w-0" role="tablist">
-                    <button
-                      ref={el => { tabRefs.current.controllers = el; }}
-                      type="button"
-                      role="tab"
-                      aria-selected={inspectorTab === "controllers"}
-                      tabIndex={inspectorTab === "controllers" ? 0 : -1}
-                      onClick={() => setInspectorTab("controllers")}
-                      onKeyDown={handleInspectorTabKeyDown}
-                      className="baseware-tab"
-                    >
-                      <Monitor className="size-3.5" aria-hidden="true" />
-                      {t("inspectorTabControllers")}
-                    </button>
-                    <button
-                      ref={el => { tabRefs.current.daemon = el; }}
-                      type="button"
-                      role="tab"
-                      aria-selected={inspectorTab === "daemon"}
-                      tabIndex={inspectorTab === "daemon" ? 0 : -1}
-                      onClick={() => setInspectorTab("daemon")}
-                      onKeyDown={handleInspectorTabKeyDown}
-                      className="baseware-tab"
-                    >
-                      <Activity className="size-3.5" aria-hidden="true" />
-                      {t("inspectorTabDaemon")}
-                    </button>
-                  </div>
+      {/* Right-Side Native Modal Detail Drawer */}
+      <dialog
+        ref={drawerDialogRef}
+        aria-labelledby={drawerTitleId}
+        onClose={handleDrawerClose}
+        className="baseware-drawer"
+        data-baseware-section="controllers-catalog"
+        data-capability-source="device"
+        {...({ closedby: "any" } as Record<string, string>)}
+      >
+        <div className="baseware-drawer-header">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {selectedMachine ? (
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
+                <TransportIcon kind={selectedMachine.transport.kind} />
+              </div>
+            ) : (
+              <Server className="size-4 shrink-0 text-primary" aria-hidden="true" />
+            )}
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 id={drawerTitleId} className="truncate text-sm font-semibold text-foreground">
+                  {selectedMachine ? selectedMachine.name : t("drawerTitle")}
+                </h2>
+                {selectedMachine && (
+                  <Badge
+                    variant="outline"
+                    className={
+                      selectedMachine.isMounted
+                        ? "border-emerald-500/45 bg-emerald-500/15 text-[10px] text-emerald-300"
+                        : "text-[10px] text-muted-foreground"
+                    }
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`mr-1 inline-block size-1.5 rounded-full ${
+                        selectedMachine.isMounted ? "bg-emerald-400" : "bg-muted-foreground/40"
+                      }`}
+                    />
+                    {t(selectedMachine.isMounted ? "nodeMountConnected" : "nodeMountStandby")}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          </div>
 
-                  <Button asChild variant="ghost" size="sm" className="ml-auto h-7 shrink-0 whitespace-nowrap px-2 text-xs">
-                    <a
-                      href={deviceGuideHref}
-                      onClick={event => {
-                        if (isPlainNavigationClick(event)) {
-                          event.preventDefault();
-                          onNavigate(deviceGuideHref);
-                        }
-                      }}
-                    >
-                      <BookOpen className="size-3.5" aria-hidden="true" />
-                      {ct("deviceGuide")}
-                    </a>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            autoFocus
+            className="h-7 shrink-0 px-2"
+            onClick={() => drawerDialogRef.current?.close()}
+            aria-label={t("closeDialog")}
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+
+        <div className="baseware-drawer-body space-y-5">
+          {selectedMachine && (
+            <>
+              {/* Quick actions strip */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 px-2.5 text-xs"
+                  onClick={() => void probeMachine(selectedMachine)}
+                  disabled={probeStates[selectedMachine.id] === "probing"}
+                >
+                  <Play className="size-3" aria-hidden="true" />
+                  {probeStates[selectedMachine.id] === "probing" ? t("probing") : t("probe")}
+                </Button>
+
+                {selectedMachine.registrationStatus === "unregistered" ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    onClick={() => openEditorForPromote(selectedMachine)}
+                  >
+                    <Sparkles className="size-3" aria-hidden="true" />
+                    {t("deviceSaveGlobal")}
                   </Button>
+                ) : (
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-7 px-2.5 text-xs"
+                      onClick={() => openEditorForMachine(selectedMachine)}
+                    >
+                      <Edit3 className="size-3" aria-hidden="true" />
+                      {t("edit")}
+                    </Button>
+                    {selectedMachine.registrationStatus !== "builtin" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                        onClick={() => setConfirmDeleteTarget(selectedMachine)}
+                      >
+                        <Trash2 className="size-3" aria-hidden="true" />
+                        {t("delete")}
+                      </Button>
+                    )}
+                  </>
+                )}
+
+                {project && selectedMachine.registrationStatus !== "unregistered" && (
+                  <>
+                    {selectedMachine.workspaceAdditionStatus === "not-added" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2.5 text-xs"
+                        disabled={busyMachineId === selectedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("toggleAllowed", selectedMachine.id)}
+                      >
+                        {t("addToWorkspaceBtn")}
+                      </Button>
+                    )}
+                    {selectedMachine.workspaceAdditionStatus !== "primary" && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="h-7 px-2.5 text-xs"
+                        disabled={busyMachineId === selectedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("setPrimary", selectedMachine.id)}
+                      >
+                        <Star className="size-3" aria-hidden="true" />
+                        {t("deviceSetActive")}
+                      </Button>
+                    )}
+                    {selectedMachine.isMounted ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2.5 text-xs"
+                        disabled={busyMachineId === selectedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("unmount", selectedMachine.id)}
+                      >
+                        <Unplug className="size-3" aria-hidden="true" />
+                        {t("unmountBtn")}
+                      </Button>
+                    ) : (
+                      daemon?.basewareSocketExists && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 px-2.5 text-xs"
+                          disabled={busyMachineId === selectedMachine.id}
+                          onClick={() => void controlWorkspaceMachine("mount", selectedMachine.id)}
+                        >
+                          <PlugIcon className="size-3" aria-hidden="true" />
+                          {t("coMountBtn")}
+                        </Button>
+                      )
+                    )}
+                    {selectedMachine.workspaceAdditionStatus === "added" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs text-muted-foreground"
+                        disabled={busyMachineId === selectedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("toggleAllowed", selectedMachine.id)}
+                      >
+                        {t("removeFromWorkspaceBtn")}
+                      </Button>
+                    )}
+                  </>
+                )}
+
+                {project && selectedMachine.registrationStatus === "unregistered" && selectedMachine.isMounted && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2.5 text-xs"
+                    disabled={busyMachineId === selectedMachine.id}
+                    onClick={() => void controlWorkspaceMachine("reconnect", selectedMachine.id)}
+                  >
+                    <RefreshCw className="size-3" aria-hidden="true" />
+                    {t("reconnectBtn")}
+                  </Button>
+                )}
+
+                <Button asChild variant="ghost" size="sm" className="ml-auto h-7 px-2 text-xs">
+                  <a
+                    href={deviceGuideHref}
+                    onClick={event => {
+                      if (isPlainNavigationClick(event)) {
+                        event.preventDefault();
+                        drawerDialogRef.current?.close();
+                        onNavigate(deviceGuideHref);
+                      }
+                    }}
+                  >
+                    <BookOpen className="size-3.5" aria-hidden="true" />
+                    {ct("deviceGuide")}
+                  </a>
+                </Button>
+              </div>
+
+              {(() => {
+                const probe = probeStates[selectedMachine.id];
+                if (!probe || probe === "probing") return null;
+                return (
+                  <div
+                    className={`rounded-md border px-2.5 py-1.5 font-mono text-[11px] ${
+                      probe.ok
+                        ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-300"
+                        : "border-destructive/40 bg-destructive/10 text-destructive"
+                    }`}
+                  >
+                    {probe.ok ? t("probeOk") : t("probeFailed")} ({probe.latencyMs}ms): {probe.detail}
+                  </div>
+                );
+              })()}
+
+              {/* Clean metadata rows */}
+              <dl className="settings-rows text-xs">
+                <div className="flex items-center justify-between gap-4 py-2.5">
+                  <dt className="shrink-0 text-muted-foreground">{t("driverLabel")}</dt>
+                  <dd className="min-w-0 font-mono text-foreground">{selectedMachine.driver}</dd>
+                </div>
+                <div className="flex items-center justify-between gap-4 py-2.5">
+                  <dt className="shrink-0 text-muted-foreground">{t("endpointLabel")}</dt>
+                  <dd className="min-w-0 font-mono text-foreground">
+                    <SingleLineTruncate
+                      text={`${selectedMachine.transport.kind.toUpperCase()} · ${formatTransportSummary(selectedMachine.transport)}`}
+                      mono
+                    />
+                  </dd>
+                </div>
+              </dl>
+
+              {/* Controllers section */}
+              <section className="space-y-2.5">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <h3 className="font-semibold uppercase tracking-wider text-muted-foreground">
+                    {t("controllersSectionTitle")} ({selectedMachineControllers.length})
+                  </h3>
+                  {capsDriversLabel(capabilities.value)}
                 </div>
 
-                {inspectorTab === "controllers" ? (
-                  <div role="tabpanel">
-                    <div className="baseware-tabpanel-inner space-y-4">
-                      {selectedMachine ? (
-                        <>
-                          <div className="space-y-2 rounded-lg border bg-muted/30 p-3 text-xs">
-                            <div className="flex items-center justify-between gap-2">
-                              <div className="flex min-w-0 items-center gap-2 font-semibold">
-                                <TransportIcon kind={selectedMachine.transport.kind} />
-                                <span className="truncate">{selectedMachine.name}</span>
-                              </div>
-                              <Badge variant="outline" className="font-mono text-[10px]">
-                                {selectedMachine.id}
-                              </Badge>
-                            </div>
-                            <div className="font-mono text-[11px] text-muted-foreground">
-                              {formatTransportSummary(selectedMachine.transport)}
-                            </div>
-                            {selectedMachine.driverPackage && (
-                              <div className="truncate font-mono text-[11px] text-muted-foreground" title={selectedMachine.driverPackage}>
-                                pkg: {selectedMachine.driverPackage}
-                              </div>
-                            )}
-                            <div className="rounded border bg-background/80 px-2.5 py-1.5 font-mono text-[11px] text-muted-foreground">
-                              <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80">
-                                {t("cliRoutingLabel")}
-                              </div>
-                              <code className="text-foreground">
-                                {formatCliControllerExample(selectedMachine)}
-                              </code>
-                            </div>
-                          </div>
-
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between text-xs">
-                              <h3 className="font-semibold uppercase tracking-wider text-muted-foreground">
-                                {ct("groupTitles.device")} ({selectedMachineControllers.length})
-                              </h3>
-                              {capsDriversLabel(capabilities.value)}
-                            </div>
-
-                            {capabilities.error ? (
-                              <Alert variant="destructive">
-                                <XCircle className="size-4" aria-hidden="true" />
-                                <AlertDescription className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                                  <span>{capabilities.error}</span>
-                                  <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={capabilities.retry}>
-                                    {ct("refresh")}
-                                  </Button>
-                                </AlertDescription>
-                              </Alert>
-                            ) : !capabilities.value ? (
-                              <p className="text-xs text-muted-foreground">{ct("loadingDesc")}</p>
-                            ) : capabilities.value.sources.device.status === "error" ? (
-                              <p className="text-xs text-destructive">{ct("sourceFailure")}</p>
-                            ) : selectedMachineControllers.length === 0 ? (
-                              normalizedDaemon.mountedById.size > 0 && !selectedMachine.isMounted ? (
-                                <div className="space-y-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                                  <p>{fmt("unmountedPrompt", { id: selectedMachine.id })}</p>
-                                  {project && !selectedMachine.isImplicit && (
-                                    <Button
-                                      type="button"
-                                      variant="secondary"
-                                      size="sm"
-                                      className="h-7 text-xs"
-                                      disabled={busyMachineId === selectedMachine.id}
-                                      onClick={() => void controlWorkspaceMachine("mount", selectedMachine.id)}
-                                    >
-                                      <PlugIcon className="size-3" aria-hidden="true" />
-                                      {t("mountNowBtn")}
-                                    </Button>
-                                  )}
-                                </div>
-                              ) : (
-                                <p className="text-xs text-muted-foreground">{ct("sourceEmpty.device")}</p>
-                              )
-                            ) : (
-                              <DeviceCapabilityDeclarations
-                                items={selectedMachineControllers}
-                                title={ct("groupTitles.device")}
-                              />
-                            )}
-                          </div>
-                        </>
-                      ) : (
-                        <p className="text-xs text-muted-foreground">{t("emptyPoolFilter")}</p>
+                {capabilities.error ? (
+                  <Alert variant="destructive">
+                    <XCircle className="size-4" aria-hidden="true" />
+                    <AlertDescription className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                      <span>{capabilities.error}</span>
+                      <Button type="button" size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={capabilities.retry}>
+                        {ct("refresh")}
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                ) : !capabilities.value ? (
+                  <p className="text-xs text-muted-foreground">{ct("loadingDesc")}</p>
+                ) : capabilities.value.sources.device.status === "error" ? (
+                  <p className="text-xs text-destructive">{ct("sourceFailure")}</p>
+                ) : selectedMachineControllers.length === 0 ? (
+                  normalizedDaemon.mountedById.size > 0 && !selectedMachine.isMounted ? (
+                    <div className="space-y-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                      <p>{fmt("unmountedPrompt", { id: selectedMachine.id })}</p>
+                      {project && !selectedMachine.isImplicit && (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={busyMachineId === selectedMachine.id}
+                          onClick={() => void controlWorkspaceMachine("mount", selectedMachine.id)}
+                        >
+                          <PlugIcon className="size-3" aria-hidden="true" />
+                          {t("mountNowBtn")}
+                        </Button>
                       )}
                     </div>
-                  </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{ct("sourceEmpty.device")}</p>
+                  )
                 ) : (
-                  <div role="tabpanel">
-                    <div className="baseware-tabpanel-inner space-y-4">
-                      <div className="space-y-2 rounded-lg border bg-muted/20 p-3">
-                        <div className="flex items-center justify-between">
-                          <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                            {t("liveLeaseTitle")}
-                          </h3>
-                          {daemon?.status && (
-                            <Badge variant={daemon.status.connected ? "default" : "outline"} className="text-[11px]">
-                              {daemon.status.mode}
-                            </Badge>
-                          )}
-                        </div>
-                        <dl className="grid grid-cols-1 gap-2 text-xs">
-                          <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-1.5">
-                            <dt className="text-muted-foreground">{t("basewareSocketLabel")}</dt>
-                            <dd className="truncate font-mono text-[11px]" title={daemon?.basewareSocket ?? ""}>
-                              {daemon?.basewareSocket ?? "—"}
-                            </dd>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-1.5">
-                            <dt className="text-muted-foreground">{t("basewareJobLabel")}</dt>
-                            <dd className="font-mono text-[11px]">
-                              {daemon?.basewareJob
-                                ? `${daemon.basewareJob.state ?? "stopped"}${daemon.basewareJob.pid ? ` (PID ${daemon.basewareJob.pid})` : ""}`
-                                : t("notRegistered")}
-                            </dd>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-1.5">
-                            <dt className="text-muted-foreground">{t("emulatorJobLabel")}</dt>
-                            <dd className="font-mono text-[11px]">
-                              {daemon?.emulatorJob
-                                ? `${daemon.emulatorJob.state ?? "stopped"}${daemon.emulatorJob.pid ? ` (PID ${daemon.emulatorJob.pid})` : ""}`
-                                : t("notRegistered")}
-                            </dd>
-                          </div>
-                          <div className="flex items-center justify-between gap-2">
-                            <dt className="text-muted-foreground">{t("epochLabel")}</dt>
-                            <dd className="font-mono text-[11px]">
-                              {daemon?.status?.epoch ?? "—"}
-                            </dd>
-                          </div>
-                        </dl>
-                      </div>
-                    </div>
-                  </div>
+                  <DeviceCapabilityDeclarations
+                    items={selectedMachineControllers}
+                    title={t("controllersSectionTitle")}
+                  />
                 )}
-              </CardContent>
-            </Card>
-          </div>
+              </section>
+
+              {/* Collapsed Advanced Diagnostics Disclosure */}
+              <AdvancedDiagnosticsDisclosure summary={t("drawerAdvancedTitle")}>
+                <div className="space-y-3 text-xs">
+                  <dl className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <dt className="shrink-0 text-muted-foreground">{t("fieldId")}</dt>
+                      <dd className="min-w-0 font-mono text-[11px] text-foreground">{selectedMachine.id}</dd>
+                    </div>
+
+                    {selectedMachine.driverPackage && (
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="shrink-0 text-muted-foreground">{t("driverPathLabel")}</dt>
+                        <dd className="flex min-w-0 items-center gap-1.5">
+                          <SingleLineTruncate
+                            text={selectedMachine.driverPackage}
+                            mono
+                            className="text-[11px] text-foreground"
+                          />
+                          <InlineCopyButton
+                            text={selectedMachine.driverPackage}
+                            ariaLabel={`${t("copySpec")}: ${selectedMachine.driverPackage}`}
+                            copiedText={t("copiedNotice")}
+                            failedText={t("copyFailedNotice")}
+                          />
+                        </dd>
+                      </div>
+                    )}
+
+                    <div className="space-y-1">
+                      <dt className="text-[11px] text-muted-foreground">{t("cliRoutingLabel")}</dt>
+                      <dd className="flex items-center justify-between gap-2 rounded border bg-background/80 px-2.5 py-1.5">
+                        <SingleLineTruncate text={cliExample} mono className="text-[11px] text-foreground" />
+                        <InlineCopyButton
+                          text={cliExample}
+                          ariaLabel={t("copyCli")}
+                          copiedText={t("copiedNotice")}
+                          failedText={t("copyFailedNotice")}
+                        />
+                      </dd>
+                    </div>
+                  </dl>
+
+                  <div className="space-y-2 border-t border-border/60 pt-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        {t("liveLeaseTitle")}
+                      </h4>
+                      {daemon?.status && (
+                        <Badge variant={daemon.status.connected ? "default" : "outline"} className="text-[10px]">
+                          {daemon.status.mode}
+                        </Badge>
+                      )}
+                    </div>
+                    <dl className="space-y-1.5 text-[11px]">
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="shrink-0 text-muted-foreground">{t("basewareSocketLabel")}</dt>
+                        <dd className="min-w-0">
+                          <SingleLineTruncate
+                            text={daemon?.basewareSocket ?? "—"}
+                            mono
+                            className="text-[11px] text-foreground"
+                          />
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="shrink-0 text-muted-foreground">{t("basewareJobLabel")}</dt>
+                        <dd className="font-mono text-foreground">
+                          {daemon?.basewareJob
+                            ? `${daemon.basewareJob.state ?? "stopped"}${daemon.basewareJob.pid ? ` (PID ${daemon.basewareJob.pid})` : ""}`
+                            : t("notRegistered")}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="shrink-0 text-muted-foreground">{t("emulatorJobLabel")}</dt>
+                        <dd className="font-mono text-foreground">
+                          {daemon?.emulatorJob
+                            ? `${daemon.emulatorJob.state ?? "stopped"}${daemon.emulatorJob.pid ? ` (PID ${daemon.emulatorJob.pid})` : ""}`
+                            : t("notRegistered")}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <dt className="shrink-0 text-muted-foreground">{t("epochLabel")}</dt>
+                        <dd className="font-mono text-foreground">{daemon?.status?.epoch ?? "—"}</dd>
+                      </div>
+                    </dl>
+                  </div>
+                </div>
+              </AdvancedDiagnosticsDisclosure>
+            </>
+          )}
         </div>
-      </section>
+      </dialog>
 
       {/* Dialog 1: Register Driver Package */}
       <DriverRegisterDialog
