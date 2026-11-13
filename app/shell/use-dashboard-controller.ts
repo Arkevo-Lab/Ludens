@@ -141,13 +141,14 @@ export function useDashboardController() {
   } | null>(null);
   const [activeLiveSegment, setActiveLiveSegment] = useState("");
   const requested = initialSelection(search, projects);
-  const requestedLatest = latestGameRun(projects.find(p => p.id === requested.project));
+  const requestedProject = projects.find(p => p.id === requested.project);
+  const requestedLatest = latestGameRun(requestedProject);
   const followed = resolveLiveSelection({
     location: search,
     project: requested.project,
     requestedRun: view === "live" ? "" : requested.run,
     requestedEpoch: view === "live" ? "" : requested.epoch,
-    latestRun: requestedLatest?.id ?? "",
+    latestRun: requestedLatest?.id || requestedProject?.core?.runId || (view === "live" ? requested.run : "") || "",
     refresh,
     archiveRevision,
     paused: view === "live" ? null : pausedSelection,
