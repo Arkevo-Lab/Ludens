@@ -58,12 +58,28 @@
   },
   "settings": {
     "sectionsNavLabel": "Settings sections",
+    "categories": {
+      "general": "General",
+      "defaults": "Workspace Defaults",
+      "transport": "Model & Transport",
+      "pet": "Desktop Pet"
+    },
     "sections": {
       "console": "Display & Language",
       "defaults": "Workspace Defaults",
       "connection": "Model & Transport",
       "pet": "Desktop Companion"
     },
+    "generalTitle": "General",
+    "generalDescription": "Display language and console preferences.",
+    "defaultsSectionTitle": "New Workspace Defaults",
+    "defaultsModelLabel": "Default model",
+    "defaultsModelHint": "Provider/model identifier applied when creating a workspace without --model.",
+    "defaultsSecondsLabel": "Default cycle budget",
+    "defaultsRequestsLabel": "Default request cap",
+    "defaultsCompactionLabel": "Default compaction threshold",
+    "defaultsPetLabel": "Launch Ludens Pet on run",
+    "defaultsPetHint": "Automatically launch or connect the desktop companion when starting a run.",
     "language": "Language",
     "languageDescription": "Console and desktop pet display language. Follows your browser by default.",
     "languageEnglish": "English",
@@ -175,7 +191,11 @@
     "applyHint": "Restart the workspace Host while keeping the emulator open so the new OMP session picks up updated connection settings:",
     "copyCommand": "Copy reload command",
     "copiedCommand": "Copied",
-    "copyFailed": "Could not copy command to clipboard."
+    "copyFailed": "Could not copy command to clipboard.",
+    "scopeLockedGlobal": "Global defaults",
+    "scopeLockedWorkspace": "Workspace override",
+    "advancedCliTitle": "Reload Command & Diagnostics",
+    "transportSettingsTitle": "Transport & Cache"
   },
   "perceptionSettings": {
     "selectWorkspace": "Select a registered workspace",
@@ -668,7 +688,9 @@
     "invalidSound": "Choose a WAV, MP3, or OGG file no larger than 2 MB and 10 seconds.",
     "writeUnconfirmed": "The change could not be confirmed. Read settings again before making another change.",
     "previewFailed": "Could not play this audio.",
-    "noSoundFile": "No audio file selected."
+    "noSoundFile": "No audio file selected.",
+    "desktopBannerTitle": "Open from the Ludens Pet tray to configure appearance, notifications, and sound.",
+    "desktopBannerAction": "Check window"
   },
   "activityFeed": {
     "copyAria": "Copy full content",
@@ -2129,10 +2151,31 @@
     "loading": "Loading workspace studio…",
     "tabs": {
       "model": "Model & Budget",
+      "device": "Target Device",
       "connection": "Connection & Transport",
       "services": "Services & Session",
       "perception": "Perception Recording",
       "simulator": "Loop Simulator"
+    },
+    "runtimeBanner": {
+      "noWorkspace": "Select a workspace to inspect runtime status.",
+      "running": "Workspace services running",
+      "stopped": "Workspace services stopped"
+    },
+    "deviceSection": {
+      "title": "Target Device",
+      "description": "Select the primary controlled device for this workspace and inspect driver launch parameters.",
+      "activeBadge": "Primary",
+      "online": "Online",
+      "standby": "Standby",
+      "useDevice": "Use Device",
+      "currentDevice": "Active",
+      "probeBtn": "Probe",
+      "probingBtn": "Probing…",
+      "manageInBaseware": "Manage in Baseware",
+      "noDevices": "No controlled devices configured for this workspace yet.",
+      "workspaceDirectTag": "Workspace inline",
+      "driverLaunchTitle": "Driver & Launch Parameters"
     },
     "modelSection": {
       "title": "Model, Loop Budget & Driver Contract (ludens.json)",
@@ -2160,7 +2203,9 @@
       "petHint": "Launch or attach the desktop companion pet on ludens up.",
       "portLabel": "Bridge port (port)",
       "gameLabel": "Game / ROM path (game)",
-      "gamePlaceholder": "Leave blank to attach to a manually started environment"
+      "gamePlaceholder": "Leave blank to attach to a manually started environment",
+      "activeDeviceLabel": "Active device",
+      "switchDeviceBtn": "Switch device"
     },
     "savedTitle": "Workspace configuration saved to ludens.json.",
     "savedHint": "Restart the workspace host while keeping the environment open to apply updated model or budget settings.",
@@ -2189,7 +2234,8 @@
       "runDown": "Stop",
       "runningOp": "Running…",
       "execSuccess": "Executed ludens {operation} (exit 0)",
-      "execFailed": "Failed ludens {operation} (exit {code})"
+      "execFailed": "Failed ludens {operation} (exit {code})",
+      "advancedDiagnostics": "Advanced Diagnostics & CLI"
     },
     "shioriSection": {
       "title": "Shiori Session & Context History",
@@ -2352,7 +2398,33 @@
     "inspectorTabDaemon": "Daemon & Lease",
     "cliRoutingLabel": "Multi-node CLI routing",
     "unmountedPrompt": "Node \"{id}\" is not currently mounted in the workspace Baseware daemon.",
-    "mountNowBtn": "Mount Node Now"
+    "mountNowBtn": "Mount Node Now",
+    "pageTitle": "Baseware",
+    "tabDevices": "Controlled Devices",
+    "tabDrivers": "Driver Packages",
+    "drawerTitle": "Device Inspector",
+    "drawerAdvancedTitle": "Daemon & CLI Diagnostics",
+    "driverLocalPkg": "Local package",
+    "driverNpmPkg": "npm package",
+    "driverGithubPkg": "GitHub package",
+    "driverBuiltinPkg": "Built-in",
+    "driverSaveGlobal": "Save to library",
+    "driverRemoveGlobal": "Remove",
+    "driverNewDevice": "New Device",
+    "deviceInUse": "In use",
+    "deviceWorkspaceLocal": "Workspace inline",
+    "deviceSetActive": "Use here",
+    "deviceSaveGlobal": "Save to pool",
+    "inspectDevice": "Inspect",
+    "copySpec": "Copy package spec",
+    "copyCli": "Copy CLI command",
+    "copiedNotice": "Copied",
+    "copyFailedNotice": "Copy failed",
+    "poolFilterCurrent": "Current workspace",
+    "poolFilterOnline": "Online",
+    "driverLabel": "Driver",
+    "endpointLabel": "Endpoint",
+    "controllersSectionTitle": "Controller Interfaces"
   },
   "modelPicker": {
     "title": "Select Vision Model",
