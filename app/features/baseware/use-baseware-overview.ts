@@ -300,8 +300,7 @@ export function useBasewareOverview({
             {
               action: "controlWorkspaceMachine",
               workspaceId: requestWorkspace,
-              // protocol BasewareMutateParams narrows operation to "up"|"down"|"reload" while core expects WorkspaceMachineOperation
-              operation: operation as unknown as "up",
+              operation,
               machineId,
             },
             { signal },

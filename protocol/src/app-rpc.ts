@@ -427,7 +427,7 @@ export type BasewareMutateParams =
   | {
       action: "controlWorkspaceMachine";
       workspaceId: string;
-      operation: "up" | "down" | "reload";
+      operation: "setPrimary" | "toggleAllowed" | "mount" | "unmount" | "reconnect";
       machineId?: string;
     }
   | {
