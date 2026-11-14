@@ -331,8 +331,8 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
               <Button type="button" size="sm" variant="outline" onClick={() => onOpen(completion.entry.id)}>{t("openWorkspace")}<ArrowRight /></Button>
               <Button type="button" size="sm" variant="outline" onClick={() => void copyCommand()}>
                 <span className="relative inline-flex size-3.5 items-center justify-center">
-                  <Copy className={`size-3.5 transition-all duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-75 opacity-0" : "scale-100 opacity-100"}`} aria-hidden="true" />
-                  <Check className={`text-success absolute inset-0 size-3.5 transition-all duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} aria-hidden="true" />
+                  <Copy className={`size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-75 opacity-0" : "scale-100 opacity-100"}`} aria-hidden="true" />
+                  <Check className={`text-success absolute inset-0 size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} aria-hidden="true" />
                 </span>
                 <span className="inline-grid items-center justify-items-center">
                   <span className={`col-start-1 row-start-1 transition-opacity duration-150 motion-reduce:transition-none ${copied === "done" ? "opacity-0" : "opacity-100"}`} aria-hidden={copied === "done"}>

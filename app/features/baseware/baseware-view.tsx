@@ -43,7 +43,7 @@ import {
 import { BasewareModalDialog } from "./baseware-modal-dialog";
 import { DriverRegisterDialog } from "./driver-register-dialog";
 import { MachineEditorDialog } from "./machine-editor-dialog";
-import { useAnimatedNativeDialog } from "@/components/use-motion-preferences";
+import { prefersReducedMotion, useAnimatedNativeDialog } from "@/components/use-motion-preferences";
 import {
   buildDisplayMachines,
   createEmptyMachineDraft,
@@ -225,7 +225,7 @@ export function BasewareView({
       setRenderedDeleteTarget(confirmDeleteTarget);
       return;
     }
-    const timer = window.setTimeout(() => setRenderedDeleteTarget(null), 220);
+    const timer = window.setTimeout(() => setRenderedDeleteTarget(null), prefersReducedMotion() ? 0 : 220);
     return () => window.clearTimeout(timer);
   }, [confirmDeleteTarget]);
   const deleteDialogTarget = confirmDeleteTarget ?? renderedDeleteTarget;

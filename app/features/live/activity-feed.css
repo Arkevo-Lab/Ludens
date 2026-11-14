@@ -3336,6 +3336,7 @@
 @media (prefers-reduced-motion: reduce) {
   .codex-workbench,
   .codex-right-dock,
+  .codex-right-dock[data-dock-state="closed"],
   .codex-dock-backdrop,
   .codex-dock-seg-tab,
   .codex-dock-body[data-dock-tab]:not([hidden]),
@@ -3357,11 +3358,11 @@
   .block-content details::details-content,
   .block-provenance::details-content,
   .codex-provenance-details::details-content {
-    transition: none;
+    transition: none !important;
   }
   [data-stream-enter="true"],
   .codex-live-thinking {
-    animation: none;
+    animation: none !important;
   }
 }
 
