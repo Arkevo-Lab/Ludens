@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { realpath } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import { globalHome } from "./data";
 import { registeredWorkspace, readWorkspaceIdentity, validWorkspaceId, withWorkspaceRegistrationLock, withPetTargetLock } from "@ludens/protocol/ludens";
-import type { PetConsumer, PetConsumerReceipt, PetState, PetTarget, PetTargetReceipt } from "./pet";
+import { PET_AUTO_TARGET, type PetConsumer, type PetConsumerReceipt, type PetState, type PetTarget, type PetTargetReceipt } from "./pet";
 
 const targetFile = "pet/target.json";
 const consumerFile = "pet/consumer.json";
@@ -22,14 +22,15 @@ function queueTargetWrite<T>(root: string, action: () => Promise<T>): Promise<T>
 export const PET_HEARTBEAT_TTL_MS = 15_000;
 const validPid = (pid: unknown): pid is number =>
   typeof pid === "number" && Number.isSafeInteger(pid) && pid > 0;
-function validConsumer(value: unknown): value is Omit<PetConsumer, "seenAt"> {
+function validConsumer(value: unknown): value is Omit<PetConsumer, "seenAt"> & { autoFollowing?: boolean } {
   if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<PetConsumer>;
+  const candidate = value as Partial<PetConsumer> & { autoFollowing?: unknown };
   return typeof candidate.instanceId === "string" && !!candidate.instanceId && validPid(candidate.pid) &&
     ["idle", "switching", "following", "error"].includes(candidate.phase ?? "") &&
     ["revision", "workspace", "runId", "error"].every(key =>
       candidate[key as keyof PetConsumer] === null || typeof candidate[key as keyof PetConsumer] === "string") &&
-    (candidate.targetRevision === undefined || candidate.targetRevision === null || typeof candidate.targetRevision === "string");
+    (candidate.targetRevision === undefined || candidate.targetRevision === null || typeof candidate.targetRevision === "string") &&
+    (candidate.autoFollowing === undefined || typeof candidate.autoFollowing === "boolean");
 }
 
 function processAlive(pid: number) {
@@ -108,9 +109,17 @@ export async function petState(root = globalHome, now?: number): Promise<PetStat
     if (value === undefined) return { ...targetState, consumer: null, connected: false };
     if (!validConsumer(value) || typeof (value as PetConsumer).seenAt !== "string" ||
         !Number.isFinite(Date.parse((value as PetConsumer).seenAt))) throw new Error("无效的桌宠状态");
-    const consumer = value as PetConsumer;
+    const rawConsumer = value as PetConsumer & { autoFollowing?: boolean };
+    const { autoFollowing: consumerAutoFollowing, ...consumer } = rawConsumer;
     const age = observedAt - Date.parse(consumer.seenAt);
-    return { ...targetState, consumer, connected: age >= 0 && age < PET_HEARTBEAT_TTL_MS && processAlive(consumer.pid) };
+    const connected = age >= 0 && age < PET_HEARTBEAT_TTL_MS && processAlive(consumer.pid);
+    const autoFollowing = !targetState.targetConfigured && connected && consumerAutoFollowing === true;
+    return {
+      ...targetState,
+      consumer,
+      connected,
+      ...(autoFollowing ? { autoFollowing: true } : {}),
+    };
   } catch (error) {
     // Reading a consumer is an independent observation. It cannot invalidate a
     // saved selection or prove that the desktop is disconnected.
@@ -125,12 +134,17 @@ export async function setPetTarget(
 ): Promise<PetTargetReceipt> {
   if (project !== null && typeof project !== "string")
     throw new Error("请选择已登记的工作区");
-  if (project !== null && !validWorkspaceId(project)) throw new Error("未找到已登记的工作区");
+  const isAutoTarget = project === PET_AUTO_TARGET;
+  if (project !== null && !isAutoTarget && !validWorkspaceId(project)) {
+    throw new Error("未找到已登记的工作区");
+  }
   const select = async () => {
-    const indexed = project === null ? null : await registeredWorkspace(project, root).catch(error => {
-      if (error.code !== "ENOENT") throw error;
-      throw new Error("未找到已登记的工作区");
-    });
+    const indexed = project === null || isAutoTarget
+      ? null
+      : await registeredWorkspace(project, root).catch(error => {
+          if (error.code !== "ENOENT") throw error;
+          throw new Error("未找到已登记的工作区");
+        });
     if (indexed) {
       const identity = await readWorkspaceIdentity(await realpath(indexed.workspace)).catch(() => null);
       if (identity?.id !== indexed.id) throw new Error("未找到已登记的工作区");
@@ -139,6 +153,14 @@ export async function setPetTarget(
       // Null is an explicit choice to stop following. Startup must not undo it.
       const previous = readTarget(root);
       if (ifUnset && previous !== undefined) return { target: previous };
+      if (isAutoTarget) {
+        try {
+          unlinkSync(join(root, targetFile));
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        return { target: null };
+      }
       if (previous?.project === project && previous.workspace === indexed?.workspace) return { target: previous };
       const target = indexed ? {
         project: indexed.id, workspace: indexed.workspace,
@@ -150,7 +172,8 @@ export async function setPetTarget(
   };
   // A removal and a follow choice serialize around the same registration. A
   // queued follow must re-check it after unlink, never resurrecting stale state.
-  return queueTargetWrite(root, () => project === null ? select() : withWorkspaceRegistrationLock(root, project, select));
+  return queueTargetWrite(root, () =>
+    project === null || isAutoTarget ? select() : withWorkspaceRegistrationLock(root, project, select));
 }
 export async function recordPetConsumer(input: unknown, root = globalHome): Promise<PetConsumerReceipt> {
   if (!validConsumer(input)) throw new Error("无效的桌宠状态");
@@ -166,6 +189,9 @@ export async function recordPetConsumer(input: unknown, root = globalHome): Prom
     error: value.error,
     seenAt: new Date().toISOString(),
   };
-  write(root, consumerFile, consumer);
+  const persisted = value.autoFollowing === undefined
+    ? consumer
+    : { ...consumer, autoFollowing: value.autoFollowing };
+  write(root, consumerFile, persisted);
   return { consumer };
 }

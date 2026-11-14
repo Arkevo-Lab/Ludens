@@ -97,7 +97,7 @@ export interface DashboardMethods {
 export type DashboardMethod = keyof DashboardMethods;
 export type WorkerRequest = { type: "call"; id: number; method: DashboardMethod; args: unknown[] }
   | { type: "cancel"; id: number } | { type: "close" };
-export interface WorkerFailure { name: string; message: string; status?: number; code?: string; progress?: unknown }
+export interface WorkerFailure { name: string; message: string; status?: number; code?: string; progress?: unknown; conflict?: unknown }
 export type WorkerResponse = { type: "ready" } | { type: "result"; id: number; value: unknown }
   | { type: "error"; id: number; error: WorkerFailure };
 
@@ -106,5 +106,6 @@ export function workerFailure(error: unknown): WorkerFailure {
   return { name: value?.name ?? "Error", message: value?.message ?? String(error),
     ...(typeof value?.status === "number" ? { status: value.status } : {}),
     ...(typeof value?.code === "string" ? { code: value.code } : {}),
-    ...(value?.progress === undefined ? {} : { progress: value.progress }) };
+    ...(value?.progress === undefined ? {} : { progress: value.progress }),
+    ...(value?.conflict === undefined ? {} : { conflict: value.conflict }) };
 }

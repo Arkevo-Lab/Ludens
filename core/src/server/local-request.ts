@@ -77,12 +77,13 @@ export function localRequest(
 }
 
 export function errorResponse(error: unknown, fallback = 400): Response {
-  const value = (error ?? {}) as Error & { status?: number; code?: string; progress?: unknown };
+  const value = (error ?? {}) as Error & { status?: number; code?: string; progress?: unknown; conflict?: unknown };
   return Response.json(
     {
       error: value.message ?? String(error),
       ...(value.code ? { code: value.code } : {}),
       ...(value.progress === undefined ? {} : { progress: value.progress }),
+      ...(value.conflict === undefined ? {} : { conflict: value.conflict }),
     },
     {
       status: value.status ?? fallback,

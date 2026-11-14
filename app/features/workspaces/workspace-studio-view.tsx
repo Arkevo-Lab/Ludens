@@ -1270,7 +1270,7 @@ export function ModelAndBudgetPanel({
 }
 
 const SERVICE_ROWS: Array<{ name: "host" | "baseware" | "emulator"; label: string }> = [
-  { name: "host", label: "Host" },
+  { name: "host", label: "Core" },
   { name: "baseware", label: "Baseware" },
   { name: "emulator", label: "Emulator" },
 ];

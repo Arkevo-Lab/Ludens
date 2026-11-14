@@ -8,11 +8,11 @@ Ludens 在桌面应用与本地服务（`ludens app-server`，默认 `http://127
 
 | 侧栏菜单 | URL 参数 | 核心操作 |
 | --- | --- | --- |
-| **运行（Live）** | `?view=live` | 点击 **启动自主运行** 或 **收回控制权**，切换多节点实时画面（`[machineId]`），通过 **事件池** 发送异步留言、处理智能体发出的协助请求与通知（**回复** / **回复并继续** / **标记已处理**），用 **即时插话（Steer Now）** 紧急纠偏，点击 **整理 skills/ 与 memory/ 笔记**，并查看 **画面与遥测** 与实时活动流 |
+| **运行（Live）** | `?view=live` | 零门槛直接进入任意工作区（含 0-Run）并在点击 **启动自主运行** 时按需拉起 Core + Baseware，在侧边栏「**活跃 Core**」管理全部并发工作区（展示 `App` / `CLI` 来源、`🆘` 数量与单点停止 `■`），通过 **设备冲突弹窗**（`409 DEVICE_BUSY`）切换或抢占接管，点击 **收回控制权**，切换多节点实时画面（`[machineId]`），通过 **事件池** 发送异步留言、处理智能体发出的协助请求与通知（**回复** / **回复并继续** / **标记已处理**），用 **即时插话（Steer Now）** 紧急纠偏，点击 **整理 skills/ 与 memory/ 笔记**，并查看 **画面与遥测** 与实时活动流 |
 | **回放（Replay）** | `?view=replay` | 拖拽受限 30 秒 fMP4 视频窗（上限 60 秒）与 15 分钟事件窗，使用 **跳转时间** 精确定位毫秒时刻，在 **事件流** 按 **全部轨道** 筛选，并点击 **节点详情** 核对真实送入模型的截图、工具调用与 `observation_context` 回执 |
 | **性能（Performance）** | `?view=perf` | 观测 **性能概览**（已完成轮次、P95 与中位轮次延迟、Prompt 缓存命中率、解码速率、占空比、采样速率、自主运行占比），并在 **请求与调用链回溯** 中排查单次请求耗时与压缩时间线 |
-| **能力（Capabilities）** | `?view=caps` | 浏览 **Capability – Eval – Env** 三元拓扑，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）过滤，核对 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**宿主连接检查** 与 **社区驱动验证**，并一键运行全部或单项评测 |
-| **配置（Config）** | `?view=perception` | 通过 6 个页签管理工作区配置：**模型与预算**、**目标设备**、**连接与多模态传输**、**感知录制参数**（`hotSeconds`、`videoSegmentSeconds`、`videoIdleSeconds`）、**后台服务与会话**（含一键 **启动工作区 / 热重载 / 停止**、**工作区长期记忆（`MEMORY.md`）** 与 Shiori 会话摘要），以及 **上下文容量推演** |
+| **能力（Capabilities）** | `?view=caps` | 浏览 **Capability – Eval – Env** 三元拓扑，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）过滤，核对 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**Core 连接检查** 与 **社区驱动验证**，并一键运行全部或单项评测 |
+| **配置（Config）** | `?view=perception` | 通过 6 个页签管理工作区配置：**模型与预算**、**目标设备**、**连接与多模态传输**、**感知录制参数**（`hotSeconds`、`videoSegmentSeconds`、`videoIdleSeconds`）、**后台服务与会话**（含一键 **启动工作区 / 热重载 Core / 停止**、`emulator`/`baseware`/`core`/`app-daemon`/`pet` 后台进程状态行、**工作区长期记忆（`MEMORY.md`）** 与 Shiori 会话摘要），以及 **上下文容量推演** |
 
 ### 全局与工具视图
 
@@ -21,7 +21,7 @@ Ludens 在桌面应用与本地服务（`ludens app-server`，默认 `http://127
 | **工作区（Workspaces）** | `?view=workspaces` | 浏览、创建、导入和切换工作区（支持快捷键 `Cmd/Ctrl+K` 快速切换、`Cmd/Ctrl+B` 收放侧栏、`Cmd/Ctrl+[` 与 `Cmd/Ctrl+]` 前进后退） |
 | **设备（Devices）** | `?view=baseware` | **设备与节点 · Baseware**：管理 **受控设备**（`~/.ludens/machines.json` 与 `workspace-default`）和 **驱动包**（`~/.ludens/drivers.json`），探测 **节点检视与控制器**，并在 **守护进程与租约** 吊销异常占用的租约 |
 | **文档（Docs）** | `?view=docs` | 在控制台内离线阅读中英双语同步文档 |
-| **设置（Settings）** | `?view=settings` | 配置全局 **常规**、**新建默认参数**、**模型与传输** 以及可选 **桌宠** 显示与跟随策略 |
+| **设置（Settings）** | `?view=settings` | 配置全局 **常规**、**新建默认参数**、**模型与传输** 以及可选 **桌宠** 显示与 `!auto` 多 Core 自动跟随策略 |
 | **开发者（Developer）** | `?view=dev` | **Loop 实验室**：在不同预设下推演多轮上下文增长曲线、帧 Token 占比与压缩阈值 |
 
 ## 2. 在回放（`?view=replay`）中核查时间线证据
@@ -39,7 +39,7 @@ Ludens 在桌面应用与本地服务（`ludens app-server`，默认 `http://127
 ### 场景 A：控制周期卡顿或需要立即停止设备动作
 
 1. **第一时间回收控制权**：在控制台 **运行（Live）** 点击 **收回控制权**，或执行 `ludens auto off`。若 Baseware 底层仍持锁，可执行 `baseware revoke`（或在 **设备** -> **守护进程与租约** 手动吊销）。
-2. **检查宿主与服务健康状态**：在工作区目录下依次查看各层状态：
+2. **检查 Core 与服务健康状态**：在工作区目录下依次查看各层状态：
 
 ```sh
 ludens status
@@ -49,7 +49,7 @@ ludens perception state
 baseware status
 ```
 
-3. **排查阻塞或异常退出的 `perception.py`**：若 `perception.state` 显示 `error` 或长期停在 `loading`，检查 `logs/<run-id>/perception/<gen>/` 下的 stderr 输出（或在 **配置** 页查看状态），修复代码后执行 `ludens perception reload`（或点击 **配置 -> 后台服务与会话** 的 **热重载**）。
+3. **排查阻塞或异常退出的 `perception.py`**：若 `perception.state` 显示 `error` 或长期停在 `loading`，检查 `logs/<run-id>/perception/<gen>/` 下的 stderr 输出（或在 **配置** 页查看状态），修复代码后执行 `ludens perception reload`（或点击 **配置 -> 后台服务与会话** 的 **热重载 Core**）。
 4. **恢复断连节点**：打开 **设备**（`?view=baseware`）-> **守护进程与租约** 检查状态，或终端执行 `ludens machine list` 与 `baseware reconnect [--machine <id>]`。
 5. **在不关闭外部目标窗口的前提下干净重启**：
 

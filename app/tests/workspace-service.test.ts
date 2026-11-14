@@ -438,10 +438,10 @@ test("Live ShioriWorkbench and WorkspaceRunEmpty render first-class Start Worksp
       }),
     ),
   );
-  assert.match(offlineHtml, /class="codex-host-offline-bar"/);
-  assert.match(offlineHtml, /data-live-start-workspace=""/);
-  assert.match(offlineHtml, /\?view=baseware&amp;project=demo-ws/);
-  assert.match(offlineHtml, /\?view=perception&amp;project=demo-ws/);
+  assert.doesNotMatch(offlineHtml, /class="codex-host-offline-bar"/);
+  assert.match(offlineHtml, /data-shiori-composer="start"/);
+  assert.match(offlineHtml, /Core Offline \(Spawns on demand\)/);
+  assert.match(offlineHtml, /data-dock-service-op="up"/);
 
   const onlineHtml = renderToStaticMarkup(
     createElement(

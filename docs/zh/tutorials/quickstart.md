@@ -27,7 +27,7 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 
 ## 3. 三种启动方式
 
-三种启动方式底层共享同一个 `@ludens/core` `app-server` 进程监管服务，以及统一的 `~/.ludens/` 全局注册表。
+三种启动方式底层统一运行在 **App Daemon**（`ludens app-server`，按 **1 Workspace = 1 Core** 并发监管各个工作区 **Core**）之上，并共享同一个 `~/.ludens/` 全局注册表。
 
 ### 方式 A：桌面端应用（Desktop App）
 
@@ -46,17 +46,17 @@ ludens-app --show-window
 - `--background`：以后台托盘模式启动，暂不弹出主窗口
 - `--show-window`：启动时立即显示并聚焦控制台窗口
 
-在桌面应用内，打开 **工作区（Workspaces）**（`?view=workspaces`）即可切换或新建工作区，再进入 **配置（Config）**（`?view=perception`）一键**启动工作区**，全程无需打开终端。关闭主窗口时应用会收起至系统托盘（托盘附带可选的**桌宠**小组件，可在**设置**中开关或通过环境变量 `LUDENS_DISABLE_COMPANION=1` 禁用）；完全退出应用（macOS `⌘Q` 或托盘 **Quit**）时会自动清理全部受管后台进程。如需打包原生 `.dmg` 或 `.exe` 安装包，运行 `npm --prefix app run desktop:dist`。
+桌面应用会自动拉起并监管 **App Daemon**（`ludens app-server --port 0 --parent-watchdog`）。在窗口中打开 **工作区（Workspaces）**（`?view=workspaces`）切换或新建工作区后，即可零门槛直接进入 **运行（Live）**（`?view=live`，即使 0 条历史运行记录也能直接进入）：输入任务目标并发送或点击 **启动自主运行**，App Daemon 会自动按需拉起该工作区的 **Core + Baseware**（标记为 `launchedBy: "app"`），无需先开终端执行 `ludens up` 或先去配置页手动启动（仍可在 **配置（Config）** `?view=perception` 点击 **启动工作区 / 热重载 Core / 停止**）。侧边栏「**活跃 Core**」列表会实时汇总全部运行中的 Core，展示 `App` / `CLI` 启动来源徽章与单点停止按钮（`■`）。关闭主窗口（`×`）时应用收起至系统托盘并保持所有运行中的 Core 继续工作（可选**桌宠**默认开启 `!auto` 多 Core 自动追踪，按待处理 `🆘` `pendingOutbound > 0` → 当前聚焦工作区 Core → 后台**自主运行** Core 的优先级跟随；可在 **设置** 中开关或通过 `LUDENS_DISABLE_COMPANION=1` 禁用）；完全退出应用（macOS `⌘Q` 或托盘 **Quit**）时会停止 App Daemon 并**仅清理 App 拉起的 Core（`launchedBy === "app"`）**，由 `CLI`（`ludens up`、`launchedBy === "cli"`）启动的后台 Core 会保持不受影响。如需打包原生 `.dmg` 或 `.exe` 安装包，运行 `npm --prefix app run desktop:dist`。
 
 ### 方式 B：本地浏览器控制台（`ludens app-server` / `npm run dev`）
 
-启动统一的 `app-server`（别名 `ludens serve`），由它同时提供 `/api/*` 接口与静态前端控制台（`app/out`）：
+启动统一多工作区 **App Daemon**（`ludens app-server`，别名 `ludens serve`），同时提供 `/api/*` 接口与静态前端控制台（`app/out`）：
 
 ```sh
 ludens app-server
 ```
 
-`ludens app-server` 默认监听 `127.0.0.1:3015`（支持 `--host`、`--port <0|1..65535>`、`--static-dir <path>`、`--trusted-origin <origin>` 与 `--parent-watchdog`）。在浏览器打开 [`http://127.0.0.1:3015`](http://127.0.0.1:3015)，前往 **工作区（Workspaces）**（`?view=workspaces`）选择或新建工作区，随后在 **配置（Config）**（`?view=perception`）点击**启动工作区**。若你在开发前端界面并需要热更新，保持 `ludens app-server` 运行并在另一终端启动 `(cd app && npm run dev)` 即可。
+`ludens app-server` 默认监听 `127.0.0.1:3015`（支持 `--host`、`--port <0|1..65535>`、`--static-dir <path>`、`--trusted-origin <origin>` 与 `--parent-watchdog`）。在浏览器打开 [`http://127.0.0.1:3015`](http://127.0.0.1:3015)，前往 **工作区（Workspaces）**（`?view=workspaces`）选择或新建工作区后即可直接进入 **运行（Live）** 按需拉起 Core（或前往 **配置（Config）** `?view=perception` 显式启动工作区）。若你在开发前端界面并需要热更新，保持 `ludens app-server` 运行并在另一终端启动 `(cd app && npm run dev)` 即可。
 
 ### 方式 C：无头 CLI 模式
 
@@ -81,15 +81,15 @@ ludens up
 
 Ludens 将人工监管与智能体自主执行划分为两个清晰的控制模式：
 
-- **手动待命**（`manual`）：设备操作权由你持有，**Shiori**（Ludens 的 Agent 线程核心）处于待命状态，不会下发执行动作。
+- **手动待命**（`manual`）：设备操作权由你持有，**Shiori**（Ludens 的 Agent 线程核心）处于 **Warm Standby** 待命状态，不会下发执行动作。
 - **自主运行**（`auto`）：Shiori 获得当前**控制租约 (Epoch)** / **控制周期**，在设定的时间与请求预算内持续驱动 `perception.py` 与 Baseware 设备执行闭环任务。
 
 ### 在控制台（**运行**，`?view=live`）操作
 
-1. 在桌面应用或浏览器控制台打开 **运行（Live）**（`?view=live`）。
-2. 在底部输入框填写初始任务目标（例如巡检特定桌面流程或监测传感器状态流），点击 **启动自主运行**。
+1. 在桌面应用或浏览器控制台打开 **运行（Live）**（`?view=live`）——0-Run 工作区无需先运行 `ludens up` 即可零门槛进入。
+2. 在底部输入框填写初始任务目标（例如巡检特定桌面流程或监测传感器状态流），点击 **启动自主运行**。若该工作区 Core 尚未启动，App Daemon 会自动按需拉起 **Core + Baseware**；若另一工作区正在同一物理设备上执行**自主运行**，控制台会弹出冲突提示（`409 DEVICE_BUSY`），供你选择取消、切换到持有工作区或**抢占接管**（处于手动待命热备中的 Core 会自动让位）。
 3. 运行过程中，可通过输入框的 **事件池（Event Pool）** 模式追加不打断当前推理的异步指令；若需立即纠偏，则切换为 **即时插话（Steer Now）** 直接中断并引导当前轮次。
-4. 任意时刻点击 **收回控制权**，即可立刻中止自主运行并吊销智能体控制租约，切回 **手动待命**。
+4. 任意时刻点击 **收回控制权**，即可立刻中止自主运行并吊销智能体控制租约，同时将 Core 保留在 **Warm Standby**（**手动待命**，`manual`）以便随时续跑或切换模型。
 5. 一轮探索结束后，点击 **整理 skills/ 与 memory/ 笔记**，将有效经验沉淀到工作区的 `skills/` 与 `memory/`。
 
 ### 使用 CLI 操作

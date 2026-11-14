@@ -80,7 +80,7 @@ Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `ope
 
 ### `ludens up` / `ludens services` / `ludens down`
 
-Manage supervised workspace processes (Baseware, Shiori daemon, optional target/simulator launch command, Console app-server, and optional Desktop Pet).
+Manage supervised workspace processes (**Baseware**, per-workspace **Core** hosting **Shiori** with `launchedBy: "cli"` so it survives Desktop App Quit, optional target/simulator launch command, **App Daemon**, and optional **Desktop Pet**) following **1 Workspace = 1 Core** isolation.
 
 ```bash
 ludens up [--dry-run] [--dashboard | --no-dashboard] [--pet | --no-pet]
@@ -88,13 +88,13 @@ ludens services
 ludens down [--keep-emulator] [--dashboard] [--pet]
 ```
 
-- `--dashboard` / `--no-dashboard` controls launching the Console backend (`ludens app-server`) and desktop window.
+- `--dashboard` / `--no-dashboard` controls launching the multi-workspace Console **App Daemon** (`ludens app-server`) and desktop window.
 - `--pet` / `--no-pet` toggles the optional Desktop Pet widget during `up` / `down`.
 - `--keep-emulator` keeps target simulator/runtime processes alive while stopping Ludens daemons.
 
 ### `ludens app-server` / `ludens serve`
 
-Start the HTTP + WebSocket backend for the Console (and docs/playback APIs).
+Start the unified multi-workspace **App Daemon** (HTTP + WebSocket backend for Console, multi-Core supervision, device contention arbitration, and docs/playback APIs).
 
 ```bash
 ludens app-server [--host 127.0.0.1] [--port <0|1..65535>] [-p <port>] \
@@ -106,7 +106,7 @@ Defaults: `--host 127.0.0.1`, `--port 3015` (pass `0` for an ephemeral port). `-
 
 ### `ludens run`
 
-Run the Shiori Agent Thread Core directly in the foreground (without `ludens up` supervisor orchestration).
+Run the workspace **Core** (hosting the **Shiori** Agent Thread Core) directly in the foreground (without `ludens up` supervisor orchestration).
 
 ```bash
 ludens [--workspace <path>] run \
@@ -118,10 +118,11 @@ ludens [--workspace <path>] run \
   [--seconds <n>] \
   [--requests <n>] \
   [--compaction-threshold <tokens>] \
-  [--diagnostics normal|full]
+  [--diagnostics normal|full] \
+  [--launched-by app|cli]
 ```
 
-Defaults in [`core/src/cli/main.ts`](../../../core/src/cli/main.ts): `--seconds 300`, `--requests 50`, `--diagnostics normal`; `--model` falls back to `ludens.json` or `openai-codex/gpt-6.1-sol`.
+Defaults in [`core/src/cli/main.ts`](../../../core/src/cli/main.ts): `--seconds 300`, `--requests 50`, `--diagnostics normal`, and `--launched-by` (with `LUDENS_LAUNCHED_BY` env fallback) defaults to `cli` (`app` is used by **App Daemon** for App-owned teardown boundaries); `--model` falls back to `ludens.json` or `openai-codex/gpt-6.1-sol`.
 
 ---
 

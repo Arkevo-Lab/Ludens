@@ -80,7 +80,7 @@ ludens init --driver <id> \
 
 ### `ludens up` / `ludens services` / `ludens down`
 
-统一拉起、检查与关闭受管工作区进程（Baseware、Shiori 守护进程、可选目标应用/模拟器启动命令、控制台后端与可选桌宠）。
+按 **1 Workspace = 1 Core** 隔离统一拉起、检查与关闭受管工作区进程（Baseware、承载 **Shiori** 的工作区 **Core**，标记为 `launchedBy: "cli"` 以免受桌面端退出影响、可选目标应用/模拟器启动命令、**App Daemon** 与可选桌宠）。
 
 ```bash
 ludens up [--dry-run] [--dashboard | --no-dashboard] [--pet | --no-pet]
@@ -88,13 +88,13 @@ ludens services
 ludens down [--keep-emulator] [--dashboard] [--pet]
 ```
 
-- `--dashboard` / `--no-dashboard` 控制是否同时启动控制台后端（`ludens app-server`）与控制台页面。
+- `--dashboard` / `--no-dashboard` 控制是否同时启动多工作区控制台 **App Daemon**（`ludens app-server`）与控制台页面。
 - `--pet` / `--no-pet` 控制在 `up` / `down` 时是否联动可选桌宠窗口。
 - `--keep-emulator` 在停止 Ludens 各守护进程的同时保留外部目标应用/模拟器进程。
 
 ### `ludens app-server` / `ludens serve`
 
-启动为控制台（以及文档与回放 API）提供 HTTP 与 WebSocket 服务的后端进程。
+启动统一的多工作区 **App Daemon**（提供控制台 HTTP + WebSocket 接口、多 Core 编排、物理设备冲突仲裁以及文档与回放 API）。
 
 ```bash
 ludens app-server [--host 127.0.0.1] [--port <0|1..65535>] [-p <port>] \
@@ -106,7 +106,7 @@ ludens serve ...   # app-server 的别名
 
 ### `ludens run`
 
-直接在前台启动 Shiori Agent 线程核心（不经过 `ludens up` 托管编排）。
+直接在前台启动工作区 **Core**（内部承载 **Shiori** Agent 线程核心，不经过 `ludens up` 托管编排）。
 
 ```bash
 ludens [--workspace <path>] run \
@@ -118,10 +118,11 @@ ludens [--workspace <path>] run \
   [--seconds <n>] \
   [--requests <n>] \
   [--compaction-threshold <tokens>] \
-  [--diagnostics normal|full]
+  [--diagnostics normal|full] \
+  [--launched-by app|cli]
 ```
 
-[`core/src/cli/main.ts`](../../../core/src/cli/main.ts) 中的直调默认值：`--seconds 300`、`--requests 50`、`--diagnostics normal`；`--model` 优先读取 `ludens.json`，缺省时为 `openai-codex/gpt-6.1-sol`。
+[`core/src/cli/main.ts`](../../../core/src/cli/main.ts) 中的直调默认值：`--seconds 300`、`--requests 50`、`--diagnostics normal`，`--launched-by`（回退读取 `LUDENS_LAUNCHED_BY` 环境变量）默认为 `cli`（`app` 由 **App Daemon** 传入，用于限定桌面端 Quit 仅回收 App 拉起的 Core）；`--model` 优先读取 `ludens.json`，缺省时为 `openai-codex/gpt-6.1-sol`。
 
 ---
 

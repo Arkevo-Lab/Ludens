@@ -6,7 +6,7 @@ For design motivation behind this triad, see [Code-First Perception & Self-Verif
 
 ## 1. Workspace Layout
 
-A newly initialized workspace (via `ludens init`) uses the following directory structure:
+Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runtime and state; workspaces on distinct devices or ports run concurrently under App Daemon, and **Reclaim Control** leaves the Core in **Warm Standby** (**Manual Standby**, `manual`). A newly initialized workspace (via `ludens init`) uses the following directory structure:
 
 | Path | Purpose |
 | --- | --- |
@@ -130,7 +130,7 @@ Every `@capability` tracks an exact `codeSHA` across the capability function, it
 
 ### Turning Live Failures Into Regression Tests (`adapt` & `record_window`)
 
-Only `.ludens/timeline/`'s single writer (`perception.py` or a running host) appends permanent `@record` frames to avoid timeline lock contention. Inside live scripts or probes, wrap execution with `record_window()` (or mark helper capabilities with `@record @capability` running through the host) to capture the real time span:
+Only `.ludens/timeline/`'s single writer (`perception.py` or a running Core) appends permanent `@record` frames to avoid timeline lock contention. Inside live scripts or probes, wrap execution with `record_window()` (or mark helper capabilities with `@record @capability` running through Core) to capture the real time span:
 
 ```python
 from ludens_tools import Client, record_window
@@ -155,8 +155,8 @@ Inspect the exact sequence around `<record-id>` using `client.replay(around=reco
 
 ## 5. Capabilities, Config & Consolidation in Console
 
-- **Capabilities (`?view=caps`)**: Visualize the **Capability – Eval – Env** triad, filter by verification status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), inspect **Workspace sources** (`baseware.json` vs static Python `@capability`), verify **Host connection check** and **Community driver verification**, and trigger **Run All Evals** with one click.
-- **Config (`?view=perception`)**: Open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload** / **Stop**.
+- **Capabilities (`?view=caps`)**: Visualize the **Capability – Eval – Env** triad, filter by verification status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), inspect **Workspace sources** (`baseware.json` vs static Python `@capability`), verify **Core connection check** and **Community driver verification**, and trigger **Run All Evals** with one click.
+- **Config (`?view=perception`)**: Open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
 - **Consolidation (`ludens consolidate` or Live UI)**: Runs a file-only turn (with device actuation disabled) that promotes `verified` capabilities into `skills/` SKILL cards, drops `unverified`/`stale`/`adapting`/`failed` entries from `skills/`, and refreshes `memory/current.md`.
 
 Continue to [Perception, Action & Performance Tuning](perception-and-action.md) to build your resident `perception.py` state machine and configure 30 Hz multimodal transport.

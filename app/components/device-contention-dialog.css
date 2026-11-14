@@ -1,0 +1,211 @@
+dialog.device-contention-dialog {
+  margin: auto;
+  padding: 0;
+  width: min(500px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 32px));
+  border-radius: var(--radius-lg, 12px);
+  border: 1px solid var(--border);
+  background: var(--card, var(--popover, #ffffff));
+  color: var(--foreground);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32), 0 6px 20px rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+}
+
+dialog.device-contention-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+dialog.device-contention-dialog:modal {
+  overscroll-behavior: contain;
+}
+
+dialog.device-contention-dialog::backdrop {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(4px);
+}
+
+.dcd-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dcd-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dcd-badge-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(245, 158, 11, 0.14);
+  color: rgb(217, 119, 6);
+  flex-shrink: 0;
+}
+
+:is(.dark) .dcd-badge-icon {
+  background: rgba(245, 158, 11, 0.18);
+  color: rgb(251, 191, 36);
+}
+
+.dcd-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--foreground);
+}
+
+.dcd-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 140ms ease, color 140ms ease;
+}
+
+.dcd-close-btn:hover {
+  background: var(--muted);
+  color: var(--foreground);
+}
+
+.dcd-close-btn:focus-visible,
+.dcd-btn:focus-visible {
+  outline: 2px solid var(--ring, #6366f1);
+  outline-offset: 2px;
+}
+
+.dcd-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px 20px;
+  overflow-y: auto;
+}
+
+.dcd-description {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted-foreground);
+}
+
+.dcd-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 45%, transparent);
+  font-size: 12.5px;
+}
+
+.dcd-facts dt {
+  color: var(--muted-foreground);
+  font-weight: 500;
+}
+
+.dcd-facts dd {
+  margin: 0;
+  color: var(--foreground);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  word-break: break-word;
+  text-align: right;
+}
+
+.dcd-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--foreground);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.dcd-error {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  background: rgba(239, 68, 68, 0.09);
+  color: rgb(185, 28, 28);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+:is(.dark) .dcd-error {
+  color: rgb(252, 165, 165);
+}
+
+.dcd-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
+}
+
+.dcd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 24px;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
+}
+
+.dcd-btn:hover:not(:disabled) {
+  background: var(--muted);
+}
+
+.dcd-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.dcd-btn-primary {
+  border-color: rgb(217, 119, 6);
+  background: rgb(217, 119, 6);
+  color: #ffffff;
+}
+
+.dcd-btn-primary:hover:not(:disabled) {
+  background: rgb(180, 83, 9);
+  border-color: rgb(180, 83, 9);
+}

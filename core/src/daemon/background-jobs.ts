@@ -1,8 +1,9 @@
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isPidAlive, probeBackgroundJob } from "./process-manager.ts";
+import type { ServiceLaunchOrigin } from "../core/query/types.ts";
+import { isPidAlive, probeBackgroundJob, readJobRecord } from "./process-manager.ts";
 
-export { isPidAlive };
+export { isPidAlive, readJobRecord };
 
 export interface BackgroundJobStatus {
   target: string;
@@ -10,6 +11,8 @@ export interface BackgroundJobStatus {
   pid: number | null;
   state: string | null;
   lastExitCode: number | null;
+  launchedBy?: ServiceLaunchOrigin;
+  appInstanceId?: string;
 }
 
 export function ludensSocketPath(service: "core" | "baseware", workspaceHash: string): string {
@@ -27,6 +30,11 @@ export function jobStateFilePath(logDir: string, name: string): string {
 }
 
 export async function readBackgroundJobState(stateFile: string, target: string): Promise<BackgroundJobStatus> {
-  const probe = await probeBackgroundJob(stateFile);
-  return { target, ...probe };
+  const [probe, record] = await Promise.all([probeBackgroundJob(stateFile), readJobRecord(stateFile)]);
+  return {
+    target,
+    ...probe,
+    ...(record?.launchedBy ? { launchedBy: record.launchedBy } : {}),
+    ...(record?.appInstanceId ? { appInstanceId: record.appInstanceId } : {}),
+  };
 }

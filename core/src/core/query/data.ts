@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
 import { join, basename, relative } from "node:path";
 import { connect } from "node:net";
@@ -8,9 +9,29 @@ import { prepareArchive } from "./prepare-run";
 import { controlArchiveBuild } from "./cold-build";
 import { latestGameRun } from "./initial-selection";
 import { readTimelineRecord, timelinePath, type TimelineRecordDetail } from "./timeline-record";
-import type { Event, Manifest, Project, RunData, LiveStatus } from "./types";
+import type {
+  Event,
+  Manifest,
+  Project,
+  ProjectCoreSummary,
+  ProjectWorkspaceDefaults,
+  RunData,
+  LiveStatus,
+} from "./types";
 import { decodeTimelineFrame } from "@ludens/protocol/timeline-media";
-import { ludensHome, listRegisteredWorkspaces, registeredWorkspace, readWorkspaceIdentity } from "@ludens/protocol/ludens";
+import {
+  isOmpEffort,
+  isOmpServiceTier,
+  ludensHome,
+  listRegisteredWorkspaces,
+  readGlobalConfig,
+  registeredWorkspace,
+  readWorkspaceIdentity,
+  type LudensConfig,
+} from "@ludens/protocol/ludens";
+import { resolveWorkspaceAddress } from "../storage/workspace-state";
+import { jobStateFilePath } from "../../daemon/background-jobs.ts";
+import { probeBackgroundJob, readJobRecord } from "../../daemon/process-manager.ts";
 export const globalHome = ludensHome();
 const safePart = (value: string) =>
   /^[a-zA-Z0-9._-]+$/.test(value) && value !== "." && value !== "..";
@@ -110,8 +131,83 @@ async function readEventLogBounds(logFile: string): Promise<{ startedAt?: string
     await handle?.close().catch(() => {});
   }
 }
+async function readWorkspaceDefaults(
+  workspace: string,
+  globalDefaults: LudensConfig["defaults"],
+): Promise<ProjectWorkspaceDefaults | undefined> {
+  let raw: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      raw = parsed as Record<string, unknown>;
+    }
+  } catch {
+    raw = null;
+  }
+  const model =
+    typeof raw?.model === "string" && raw.model.trim()
+      ? raw.model.trim()
+      : globalDefaults.model ?? undefined;
+  const serviceTier = isOmpServiceTier(raw?.serviceTier)
+    ? raw.serviceTier
+    : globalDefaults.serviceTier ?? undefined;
+  const effort = isOmpEffort(raw?.effort) ? raw.effort : globalDefaults.effort ?? undefined;
+  const maxSeconds =
+    typeof raw?.seconds === "number" && Number.isInteger(raw.seconds) && raw.seconds > 0
+      ? raw.seconds
+      : undefined;
+  const defaults: ProjectWorkspaceDefaults = {
+    ...(model !== undefined ? { model } : {}),
+    ...(serviceTier !== undefined ? { serviceTier } : {}),
+    ...(effort !== undefined ? { effort } : {}),
+    ...(maxSeconds !== undefined ? { maxSeconds } : {}),
+  };
+  return Object.keys(defaults).length > 0 ? defaults : undefined;
+}
+
+async function probeCoreSummary(workspace: string): Promise<ProjectCoreSummary> {
+  type ProbeLiveStatus = LiveStatus & {
+    consolidating?: boolean;
+    eventPool?: { pendingOutbound?: number };
+  };
+  const hostStateFile = jobStateFilePath(join(workspace, "logs", "background"), "host");
+  const [probe, record, address] = await Promise.all([
+    probeBackgroundJob(hostStateFile),
+    readJobRecord(hostStateFile),
+    resolveWorkspaceAddress(workspace).catch(() => null),
+  ]);
+  let live: ProbeLiveStatus | null = null;
+  if (address?.socket && (probe.pid !== null || existsSync(address.socket))) {
+    live = await Promise.race([
+      hostRequest<ProbeLiveStatus>(address.socket, { kind: "status", argv: [] }).catch(() => null),
+      new Promise<null>(resolveTimeout => setTimeout(() => resolveTimeout(null), 250)),
+    ]);
+  }
+  if (!live && probe.pid === null) {
+    return { online: false };
+  }
+  const launchedBy = live?.launchedBy ?? record?.launchedBy;
+  const appInstanceId = record?.appInstanceId;
+  return {
+    online: true,
+    ...(probe.pid !== null ? { pid: probe.pid } : {}),
+    ...(typeof live?.mode === "string" ? { mode: live.mode } : {}),
+    ...(live?.consolidating !== undefined ? { consolidating: Boolean(live.consolidating) } : {}),
+    ...(launchedBy ? { launchedBy } : {}),
+    ...(appInstanceId ? { appInstanceId } : {}),
+    ...(typeof live?.eventPool?.pendingOutbound === "number"
+      ? { pendingOutbound: live.eventPool.pendingOutbound }
+      : {}),
+    ...(live?.runId ? { runId: live.runId } : {}),
+    ...(live && "model" in live ? { model: live.model ?? null } : {}),
+  };
+}
+
 async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project[]> {
-  const registered = await listRegisteredWorkspaces(home);
+  const [registered, globalConfig] = await Promise.all([
+    listRegisteredWorkspaces(home),
+    readGlobalConfig(home).catch(() => ({ defaults: {} as LudensConfig["defaults"] })),
+  ]);
   const projects = await Promise.all(registered.map(async entry => {
     const project: Project = { id: entry.id, name: entry.name, available: entry.available, runs: [] };
     if (!entry.available) return project;
@@ -123,20 +219,26 @@ async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project
     let names: string[];
     try { names = (await readdir(roots[0], { withFileTypes: true })).filter(item => item.isDirectory()).map(item => item.name); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; names = []; }
-    const runs = await Promise.all(names.sort().reverse().map(async id => {
-      try {
-        const path = await resolveInRoots(id, roots);
-        const manifest: Manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
-        if (manifest.workspaceId && !archiveIds.has(manifest.workspaceId)) throw new Error("运行记录与工作区身份不一致");
-        const bounds = await readEventLogBounds(join(path, "events.jsonl"));
-        return { id, ...(manifest.kind ? { kind: manifest.kind } : {}), model: manifest.model,
-          seconds: manifest.seconds, drivers: manifest.drivers, ...bounds };
-      } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
-    }));
+    const [runs, core, defaults] = await Promise.all([
+      Promise.all(names.sort().reverse().map(async id => {
+        try {
+          const path = await resolveInRoots(id, roots);
+          const manifest: Manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
+          if (manifest.workspaceId && !archiveIds.has(manifest.workspaceId)) throw new Error("运行记录与工作区身份不一致");
+          const bounds = await readEventLogBounds(join(path, "events.jsonl"));
+          return { id, ...(manifest.kind ? { kind: manifest.kind } : {}), model: manifest.model,
+            seconds: manifest.seconds, drivers: manifest.drivers, ...bounds };
+        } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+      })),
+      probeCoreSummary(workspace),
+      readWorkspaceDefaults(workspace, globalConfig.defaults),
+    ]);
     project.runs = runs.filter(item => item !== null);
+    project.core = core;
+    if (defaults) project.defaults = defaults;
     return project;
   }));
-  return projects.filter(project => includeEmpty || project.runs.length > 0)
+  return projects.filter(project => includeEmpty || project.runs.length > 0 || Boolean(project.core?.online))
     .sort((a, b) => (latestGameRun(b)?.id ?? b.runs[0]?.id ?? "")
       .localeCompare(latestGameRun(a)?.id ?? a.runs[0]?.id ?? ""));
 }
@@ -177,10 +279,10 @@ export function hostRequest<T = LiveStatus>(
       }
     };
     socket.setEncoding("utf8");
-    socket.setTimeout(2000, () => fail(new Error("Host 响应超时")));
+    socket.setTimeout(2000, () => fail(new Error("Core 响应超时")));
     socket.on("connect", () => socket.write(JSON.stringify(request) + "\n"));
     socket.on("error", fail);
-    socket.on("close", () => fail(new Error("Host 已断开")));
+    socket.on("close", () => fail(new Error("Core 已断开")));
     socket.on("data", (data) => {
       buffer += data;
       const end = buffer.indexOf("\n");
@@ -253,15 +355,15 @@ export async function getRun(
       latest !== run
         ? "历史运行，仅供回放"
         : !live
-          ? "Host 离线"
+          ? "Core 离线"
           : !matched
-            ? "Host 属于其他运行"
+            ? "Core 属于其他运行"
             : !live.connected
               ? "设备连接已断开"
               : cycle.selectedEpoch !== cycle.cycles.at(-1)?.epoch ||
                   (live.mode === "auto" && cycle.selectedEpoch !== live.epoch)
                 ? "历史周期，仅供回放"
-                : "已连接当前 Host",
+                : "已连接当前 Core",
     updatedAt: new Date().toISOString(),
   };
   } finally { release(); }

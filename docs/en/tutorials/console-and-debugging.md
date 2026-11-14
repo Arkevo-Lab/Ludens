@@ -8,11 +8,11 @@ Ludens provides a unified **Console** (accessible inside the Desktop App or at `
 
 | Sidebar Item | Query | Primary Operations |
 | --- | --- | --- |
-| **Live** | `?view=live` | Click **Start Auto Run** or **Reclaim Control**, switch mounted device viewports (`[machineId]`), send async notes via **Event Pool**, triage outbound notices/requests (**Reply**, **Reply & Resume**, **Mark Handled**), interrupt mid-turn with **Steer Now**, run **Consolidate skills/ & memory/ notes**, and inspect **Stage & Telemetry** alongside live activity events |
+| **Live** | `?view=live` | Enter any workspace (even 0-run) with zero barrier and spawn Core + Baseware on demand when clicking **Start Auto Run**, manage all concurrent runs via the sidebar **Active Cores** list (`App`/`CLI` origin badges, `🆘` count, `■` stop), resolve **Device Contention** modals (`409 DEVICE_BUSY` -> Switch / Preempt), click **Reclaim Control**, switch mounted device viewports (`[machineId]`), send async notes via **Event Pool**, triage outbound notices/requests (**Reply**, **Reply & Resume**, **Mark Handled**), interrupt mid-turn with **Steer Now**, run **Consolidate skills/ & memory/ notes**, and inspect **Stage & Telemetry** alongside live activity events |
 | **Replay** | `?view=replay` | Scrub the bounded 30-second fMP4 frame window (60s cap) and 15-minute event window, **Jump to time** at millisecond precision, search across **All tracks** in the **Event Stream**, and inspect **Node details** (delivered screenshots, tool calls, and `observation_context` receipts) |
 | **Performance** | `?view=perf` | Monitor **Performance overview** (`Completed turns`, `P95`, `Median turn`, `Prompt cache hit`, `Decode speed`, `Duty cycle`, `Sampler rate`, `Autonomy ratio`) and inspect per-request latency and compaction history in **Request & Trace History** |
-| **Capabilities** | `?view=caps` | Inspect the **Capability – Eval – Env** triad, filter by status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), review **Workspace sources** (`baseware.json` vs static Python `@capability`), check **Host connection check** and **Community driver verification**, and click **Run All Evals** or individual eval runs |
-| **Config** | `?view=perception` | Manage workspace setup across 6 tabs: **Model & Budget**, **Target Device**, **Connection & Transport**, **Perception Recording** (`hotSeconds`, `videoSegmentSeconds`, `videoIdleSeconds`), **Services & Session** (**Start Workspace** / **Reload** / **Stop**, **Workspace Long-Term Memory (`MEMORY.md`)**, and Shiori thread summary), and **Loop Simulator** |
+| **Capabilities** | `?view=caps` | Inspect the **Capability – Eval – Env** triad, filter by status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), review **Workspace sources** (`baseware.json` vs static Python `@capability`), check **Core connection check** and **Community driver verification**, and click **Run All Evals** or individual eval runs |
+| **Config** | `?view=perception` | Manage workspace setup across 6 tabs: **Model & Budget**, **Target Device**, **Connection & Transport**, **Perception Recording** (`hotSeconds`, `videoSegmentSeconds`, `videoIdleSeconds`), **Services & Session** (**Start Workspace** / **Reload Core** / **Stop**, `emulator`/`baseware`/`core`/`app-daemon`/`pet` background job rows, **Workspace Long-Term Memory (`MEMORY.md`)**, and Shiori thread summary), and **Loop Simulator** |
 
 ### Global & Utility Views
 
@@ -21,7 +21,7 @@ Ludens provides a unified **Console** (accessible inside the Desktop App or at `
 | **Workspaces** | `?view=workspaces` | Browse registered workspaces, create or import workspaces, and switch active context (also reachable via `Cmd/Ctrl+K`; toggle sidebar with `Cmd/Ctrl+B`; navigate back/forward with `Cmd/Ctrl+[` and `Cmd/Ctrl+]`) |
 | **Devices** | `?view=baseware` | **Devices & Nodes · Baseware**: Manage **Controlled Devices** (`~/.ludens/machines.json` and `workspace-default`) and **Driver Packages** (`~/.ludens/drivers.json`), probe **Node & Controllers**, and inspect or revoke leases in **Daemon & Lease** |
 | **Docs** | `?view=docs` | Read synchronized English and Chinese documentation offline inside Console |
-| **Settings** | `?view=settings` | Configure machine-wide **General**, **Workspace Defaults**, **Model & Transport**, and optional **Desktop Pet** display and follow-target preferences |
+| **Settings** | `?view=settings` | Configure machine-wide **General**, **Workspace Defaults**, **Model & Transport**, and optional **Desktop Pet** display and `!auto` multi-Core auto-follow preferences |
 | **Developer** | `?view=dev` | **Loop Lab**: Simulate context-window growth, delivered frame tokens, and compaction thresholds across scenario presets |
 
 ## 2. Inspecting Evidence in Replay (`?view=replay`)
@@ -39,7 +39,7 @@ If a subtle issue only reproduces infrequently, record the exact timeline slice 
 ### Scenario A: Control Cycle Appears Stalled or Actuation Must Stop Now
 
 1. **Halt execution immediately**: Click **Reclaim Control** in Console **Live** (`?view=live`) or run `ludens auto off`. If Baseware itself still holds a target lock, run `baseware revoke` (or click revoke in **Devices** -> **Daemon & Lease**).
-2. **Inspect host and daemon state**: Run the status commands in the workspace directory:
+2. **Inspect Core and daemon state**: Run the status commands in the workspace directory:
 
 ```sh
 ludens status
@@ -49,7 +49,7 @@ ludens perception state
 baseware status
 ```
 
-3. **Check for a blocked perception worker**: If `perception.state` shows `error` or stays in `loading`, read the latest stderr under `logs/<run-id>/perception/<gen>/` (or Console **Config**), fix any import/runtime bug in `perception.py`, and run `ludens perception reload` (or click **Reload** in **Config** -> **Services & Session**).
+3. **Check for a blocked perception worker**: If `perception.state` shows `error` or stays in `loading`, read the latest stderr under `logs/<run-id>/perception/<gen>/` (or Console **Config**), fix any import/runtime bug in `perception.py`, and run `ludens perception reload` (or click **Reload Core** in **Config** -> **Services & Session**).
 4. **Recover a dropped device node**: Check **Devices** (`?view=baseware`) -> **Daemon & Lease** or run `ludens machine list` and `baseware reconnect [--machine <id>]`.
 5. **Clean restart preserving external target windows**:
 

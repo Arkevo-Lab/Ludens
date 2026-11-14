@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { PetState, PetTarget, PetTargetReceipt } from "@/lib/pet";
+import { PET_AUTO_TARGET, type PetState, type PetTarget, type PetTargetReceipt } from "@/lib/pet";
 import { createPetFollowResource, type PetFollowSnapshot } from "@/features/pet/pet-follow-resource";
 
 async function request(signal: AbortSignal, init?: RequestInit): Promise<unknown> {
@@ -21,11 +21,21 @@ async function readState(signal: AbortSignal): Promise<PetState> {
   return value;
 }
 
+export function isValidPetTargetReceipt(project: string | null, value: unknown): value is PetTargetReceipt {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as PetTargetReceipt;
+  if (!target(candidate.target)) return false;
+  if (project === PET_AUTO_TARGET) {
+    return candidate.target === null || candidate.target.project === PET_AUTO_TARGET;
+  }
+  return (candidate.target?.project ?? null) === project;
+}
+
 async function writeTarget(project: string | null, signal: AbortSignal): Promise<PetTargetReceipt> {
   const value = await request(signal, {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ project }),
-  }) as PetTargetReceipt | null;
-  if (!value || !target(value.target) || (value.target?.project ?? null) !== project) throw new Error("Invalid pet target receipt");
+  });
+  if (!isValidPetTargetReceipt(project, value)) throw new Error("Invalid pet target receipt");
   return value;
 }
 

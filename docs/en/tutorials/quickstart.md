@@ -27,7 +27,7 @@ After `export PATH`, `baseware`, `ludens`, and `ludens-app` are available in you
 
 ## 3. Three Ways to Launch Ludens
 
-All three workflows run on top of the `@ludens/core` `app-server` process supervisor and share the same `~/.ludens/` registry.
+All three workflows run on top of **App Daemon** (`ludens app-server`, which supervises concurrent per-workspace **Cores** following **1 Workspace = 1 Core**) and share the same `~/.ludens/` registry.
 
 ### Option A: Desktop App
 
@@ -46,17 +46,17 @@ Common flags for `ludens-app`:
 - `--background`: Launch in tray mode without opening the main window immediately
 - `--show-window`: Bring the Console window to focus on startup
 
-Inside the desktop window, open **Workspaces** (`?view=workspaces`) to create or switch a workspace, then click **Start Workspace** in **Config** (`?view=perception`) without leaving the UI. Closing the window hides it to the system tray (where the optional **Desktop Pet** widget can be toggled via **Settings** or suppressed with `LUDENS_DISABLE_COMPANION=1`); quitting (`⌘Q` on macOS or tray **Quit**) shuts down managed background processes. For distributable `.dmg` / `.exe` packages, run `npm --prefix app run desktop:dist`.
+Inside the desktop window, `ludens-app` automatically spawns and supervises **App Daemon** (`ludens app-server --port 0 --parent-watchdog`). Open **Workspaces** (`?view=workspaces`) to create or switch a workspace, and enter **Live** (`?view=live`) directly with zero barrier (even on a 0-run workspace): typing a goal prompt or clicking **Start Auto Run** spawns that workspace's **Core + Baseware** on demand (`launchedBy: "app"`) without running `ludens up` in a terminal or configuring services first (you can still explicitly click **Start Workspace / Reload Core / Stop** from **Config**, `?view=perception`). The sidebar **Active Cores** list shows all running Cores with `App` / `CLI` origin badges and inline stop (`■`) buttons. Closing the window (`×`) hides it to the system tray (keeping active Cores running; the optional **Desktop Pet** defaults to `!auto` multi-Core auto-follow, prioritizing pending `🆘` `pendingOutbound > 0`, then the focused window's Core, then a background **Auto Run** Core, and can be toggled in **Settings** or suppressed with `LUDENS_DISABLE_COMPANION=1`); quitting (`⌘Q` on macOS or tray **Quit**) stops **App Daemon** and cleanly tears down **only App-launched Cores (`launchedBy === "app"`)**, leaving independent `CLI`-launched Cores (`ludens up`, `launchedBy === "cli"`) untouched. For distributable `.dmg` / `.exe` packages, run `npm --prefix app run desktop:dist`.
 
 ### Option B: Browser Console (`ludens app-server` / `npm run dev`)
 
-Start the unified `app-server` (alias `ludens serve`) to serve `/api/*` and the static Console build (`app/out`):
+Start the unified multi-workspace **App Daemon** (`ludens app-server`, alias `ludens serve`) to serve `/api/*` and the static Console build (`app/out`):
 
 ```sh
 ludens app-server
 ```
 
-By default `ludens app-server` binds to `127.0.0.1:3015` (configurable via `--host`, `--port <0|1..65535>`, `--static-dir <path>`, `--trusted-origin <origin>`, and `--parent-watchdog`). Open [`http://127.0.0.1:3015`](http://127.0.0.1:3015) in your browser, select or create a workspace in **Workspaces** (`?view=workspaces`), and start it from **Config** (`?view=perception`). When iterating on frontend UI code with hot module reload, keep `ludens app-server` running and start `(cd app && npm run dev)` in another terminal.
+By default `ludens app-server` binds to `127.0.0.1:3015` (configurable via `--host`, `--port <0|1..65535>`, `--static-dir <path>`, `--trusted-origin <origin>`, and `--parent-watchdog`). Open [`http://127.0.0.1:3015`](http://127.0.0.1:3015) in your browser, select or create a workspace in **Workspaces** (`?view=workspaces`), and enter **Live** (`?view=live`) to spawn its Core on demand (or start it explicitly from **Config**, `?view=perception`). When iterating on frontend UI code with hot module reload, keep `ludens app-server` running and start `(cd app && npm run dev)` in another terminal.
 
 ### Option C: Headless CLI
 
@@ -81,15 +81,15 @@ If you move or import an existing directory later, register it with `ludens work
 
 Ludens separates supervision from direct operation across two explicit control modes:
 
-- **Manual Standby** (`manual`): You hold the active input lease. **Shiori** (Ludens's Agent Thread Core) stands by without dispatching actuation calls.
+- **Manual Standby** (`manual`): You hold the active input lease. **Shiori** (Ludens's Agent Thread Core) stays warm and ready in **Warm Standby** without dispatching actuation calls.
 - **Auto Run** (`auto`): Shiori holds the active **Control Cycle** (`epoch`), executing turns against the Baseware driver and the resident `perception.py` loop within your time and request budget.
 
 ### Operating from Console (`Live`, `?view=live`)
 
-1. Open **Live** (`?view=live`) in the Desktop App or browser Console.
-2. Enter an objective in the composer (for example, watching a desktop workflow or inspecting sensor streams) and click **Start Auto Run**.
+1. Open **Live** (`?view=live`) in the Desktop App or browser Console — 0-run workspaces enter Live directly without requiring a prior `ludens up`.
+2. Enter an objective in the composer (for example, watching a desktop workflow or inspecting sensor streams) and click **Start Auto Run**. If the workspace Core is offline, App Daemon spawns **Core + Baseware** on demand first. If another workspace's active Auto Run Core already holds the target physical device, Console prompts (`409 DEVICE_BUSY`) to **Cancel**, **Switch to holder**, or **Preempt & Start Here** (Warm Standby `manual` holders yield automatically).
 3. Queue non-blocking notes while the agent works using the **Event Pool** composer mode, or switch the composer to **Steer Now** to interrupt mid-turn with immediate guidance.
-4. Click **Reclaim Control** at any moment to immediately end Auto Run, invalidate the agent's control lease, and switch back to **Manual Standby**.
+4. Click **Reclaim Control** at any moment to immediately end Auto Run, invalidate the agent's control lease, and keep the Core resident in **Warm Standby** (`manual` **Manual Standby**) ready for instant resumption or model switching.
 5. After an active exploration batch, click **Consolidate skills/ & memory/ notes** to summarize durable workflows and findings into `skills/` and `memory/`.
 
 ### Operating from CLI

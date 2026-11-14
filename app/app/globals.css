@@ -5,9 +5,11 @@
 @import "../features/capabilities/capabilities-declarations.css";
 @import "../features/workspaces/context-picker.css";
 @import "../components/model-picker-dialog.css";
+@import "../components/device-contention-dialog.css";
 @import "../features/baseware/baseware-view.css";
 @import "../components/ui/settings-layout.css";
 @import "../shell/desktop-chrome.css";
+@import "../shell/active-cores.css";
 
 @custom-variant dark (&:is(.dark *));
 

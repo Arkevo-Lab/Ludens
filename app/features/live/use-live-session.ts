@@ -23,7 +23,7 @@ import {
   type StreamSegment,
 } from "@/features/live/shiori-segments";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
-import type { RunData, RunInfo } from "@/lib/types";
+import type { DeviceContentionConflict, RunData, RunInfo, ServiceLaunchOrigin } from "@/lib/types";
 
 export function canSwitchShioriModel(state: {
   isLiveRun: boolean;
@@ -67,6 +67,9 @@ export type LiveHostStatus = NonNullable<RunData["live"]> & {
   serviceTier?: ModelServiceTier | null;
   effort?: ModelEffort | null;
   hostOffline?: boolean;
+  coreOffline?: boolean;
+  launchedBy?: ServiceLaunchOrigin;
+  spawned?: boolean;
   queue?: { steering?: number };
   eventPool?: { pendingInbound?: number; pendingOutbound?: number; latestSeq?: number };
 };
@@ -112,6 +115,12 @@ export interface UseLiveSessionResult {
   activeEffort: ModelEffort | null;
   submitting: boolean;
   poolSubmitting: boolean;
+  spawningCore: boolean;
+  pendingContention: DeviceContentionConflict | null;
+  preemptError: string | null;
+  preemptSuccessSeq: number;
+  confirmPreempt: () => Promise<boolean>;
+  dismissContention: () => void;
   poolSnapshot: EventPoolSnapshot | null;
   poolEventsById: Map<string, PoolEvent>;
   resolveLivePoolEvent: (event: PoolEvent) => PoolEvent;
@@ -154,6 +163,7 @@ export function useLiveSession(options: {
   refresh: boolean;
   olderRunLoadFailedText?: string;
   onUpdated: () => void;
+  onRunSpawned?: (runId: string) => void;
 }): UseLiveSessionResult {
   const {
     project,
@@ -165,6 +175,7 @@ export function useLiveSession(options: {
     refresh,
     olderRunLoadFailedText = "Failed to load older run",
     onUpdated,
+    onRunSpawned,
   } = options;
 
   // 1. Structural stabilization of `RunData` to ignore 2.5s `updatedAt` churn
@@ -194,7 +205,7 @@ export function useLiveSession(options: {
       })
     | undefined;
 
-  const isSyntheticOffline = Boolean(live?.hostOffline);
+  const isSyntheticOffline = Boolean(live?.coreOffline ?? live?.hostOffline);
   const hostOnline = Boolean(isLiveRun && ((!isSyntheticOffline && live) || data.controlAllowed));
   const mode = live?.mode ?? (typeof control?.mode === "string" ? control.mode : "manual");
   const consolidating = Boolean(live?.consolidating ?? control?.consolidating);
@@ -539,9 +550,22 @@ export function useLiveSession(options: {
       ? reconciledSegmentsRef.current.segments
       : computedSegments;
 
-  // 5. Unified Mutations (`actions`)
+  // 5. Unified Mutations (`actions`) & Spawn / Contention Notifications
   const onUpdatedRef = useRef(onUpdated);
   onUpdatedRef.current = onUpdated;
+  const onRunSpawnedRef = useRef(onRunSpawned);
+  onRunSpawnedRef.current = onRunSpawned;
+  const handledSpawnSeqRef = useRef(0);
+  useEffect(() => {
+    if (snap.lastSpawnedRun && snap.lastSpawnedRun.seq > handledSpawnSeqRef.current) {
+      handledSpawnSeqRef.current = snap.lastSpawnedRun.seq;
+      onRunSpawnedRef.current?.(snap.lastSpawnedRun.runId);
+    }
+  }, [snap.lastSpawnedRun]);
+
+  const confirmPreempt = useCallback(() => engine.confirmPreempt(), [engine]);
+  const dismissContention = useCallback(() => engine.dismissContention(), [engine]);
+
   const latestContextRef = useRef({
     workspace,
     run: data.run,
@@ -570,6 +594,7 @@ export function useLiveSession(options: {
           baseUpdatedAt: ctx.baseUpdatedAt,
           baseServerModel: ctx.baseServerModel,
           command,
+          mightSpawnCore: !ctx.hostOnline && command.action !== "status" && command.action !== "auto_off",
           onUpdated: () => onUpdatedRef.current(),
         });
       },
@@ -581,11 +606,12 @@ export function useLiveSession(options: {
           run: ctx.run,
           baseUpdatedAt: ctx.baseUpdatedAt,
           baseServerModel: ctx.baseServerModel,
+          mightSpawnCore: !ctx.hostOnline,
           command: {
             action: "auto_on",
             ...(opts?.message ? { message: opts.message } : {}),
             seconds: opts?.seconds ?? null,
-            runId: ctx.run,
+            ...(ctx.run ? { runId: ctx.run } : {}),
             expectedEpoch: ctx.expectedEpoch,
           },
           onUpdated: () => onUpdatedRef.current(),
@@ -601,7 +627,7 @@ export function useLiveSession(options: {
           baseServerModel: ctx.baseServerModel,
           command: {
             action: "auto_off",
-            runId: ctx.run,
+            ...(ctx.run ? { runId: ctx.run } : {}),
             expectedEpoch: ctx.expectedEpoch ?? undefined,
           },
           onUpdated: () => onUpdatedRef.current(),
@@ -615,10 +641,11 @@ export function useLiveSession(options: {
           run: ctx.run,
           baseUpdatedAt: ctx.baseUpdatedAt,
           baseServerModel: ctx.baseServerModel,
+          mightSpawnCore: !ctx.hostOnline,
           command: {
             action: "consolidate",
             ...(typeof seconds === "number" ? { seconds } : {}),
-            runId: ctx.run,
+            ...(ctx.run ? { runId: ctx.run } : {}),
             expectedEpoch: ctx.expectedEpoch,
           },
           onUpdated: () => onUpdatedRef.current(),
@@ -635,6 +662,7 @@ export function useLiveSession(options: {
           expectedEpoch: ctx.expectedEpoch,
           message,
           fallbackSeconds,
+          mightSpawnCore: !ctx.hostOnline,
           onUpdated: () => onUpdatedRef.current(),
         });
       },
@@ -688,6 +716,7 @@ export function useLiveSession(options: {
           baseServerModel: ctx.baseServerModel,
           command: { action: "send", text, ...(title ? { title } : {}) },
           fromComposer: true,
+          mightSpawnCore: !ctx.hostOnline,
           onUpdated: () => onUpdatedRef.current(),
         });
       },
@@ -706,6 +735,7 @@ export function useLiveSession(options: {
             ...(resumeAuto ? { resumeAuto: true, seconds } : {}),
           },
           fromComposer: true,
+          mightSpawnCore: !ctx.hostOnline && Boolean(resumeAuto),
           onUpdated: () => onUpdatedRef.current(),
         });
       },
@@ -756,6 +786,12 @@ export function useLiveSession(options: {
     activeEffort,
     submitting: snap.submitting,
     poolSubmitting: snap.poolSubmitting,
+    spawningCore: snap.spawningCore,
+    pendingContention: snap.pendingContention,
+    preemptError: snap.preemptError,
+    preemptSuccessSeq: snap.preemptSuccessSeq,
+    confirmPreempt,
+    dismissContention,
     poolSnapshot,
     poolEventsById,
     resolveLivePoolEvent,

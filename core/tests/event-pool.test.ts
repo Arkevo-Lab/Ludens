@@ -284,7 +284,7 @@ test("readWorkspaceEventPool and mutateWorkspaceEventPool bridge online and offl
 
     // resumeAuto cannot be honored while the host is offline.
     await expect(mutateWorkspaceEventPool(identity.id, workspace, { action: "reply", replyTo: outbound.event.id, text: "resume", resumeAuto: true }, home))
-      .rejects.toMatchObject({ code: "HOST_OFFLINE" });
+      .rejects.toMatchObject({ code: "CORE_OFFLINE" });
 
     // Online host: reads and mutations go through the socket.
     const stop = await listen(socket, runtime);

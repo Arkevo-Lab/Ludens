@@ -1,4 +1,4 @@
-import type { PetState, PetTarget, PetTargetReceipt } from "@/lib/pet";
+import { PET_AUTO_TARGET, type PetState, type PetTarget, type PetTargetReceipt } from "@/lib/pet";
 
 export interface PetFollowSnapshot {
   state: PetState | null;
@@ -80,8 +80,20 @@ export function createPetFollowResource({ read, write, onChange, intervalMs = 25
       const receipt = await bounded(controller, signal => write(project, signal));
       if (!active || controller.signal.aborted || started !== generation) return;
       // A write receipt confirms the selection, never that a desktop has applied it.
-      update({ state: { target: receipt.target, targetConfigured: true, consumer: null, connected: null }, lastSaved: receipt.target,
-        lastReadAt: null, readError: "", requested: undefined });
+      const autoFollowing = project === PET_AUTO_TARGET;
+      update({
+        state: {
+          target: receipt.target,
+          targetConfigured: !autoFollowing,
+          consumer: null,
+          connected: null,
+          ...(autoFollowing ? { autoFollowing: true } : {}),
+        },
+        lastSaved: receipt.target,
+        lastReadAt: null,
+        readError: "",
+        requested: undefined,
+      });
       committed = true;
     } catch (error) {
       if (active && started === generation) update({ writeError: failure(error) });

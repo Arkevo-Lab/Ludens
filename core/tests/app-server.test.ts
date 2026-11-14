@@ -370,20 +370,22 @@ test("WorkspaceSupervisor tracks only owned services and never kills external un
   await registerWorkspace(ownedWs, home);
   await registerWorkspace(foreignWs, home);
 
+  const supervisor = new WorkspaceSupervisor({ home });
   const ownedJob = await startBackgroundJob({
     name: "host",
     command: [process.execPath, "-e", "setInterval(() => {}, 1000);"],
     cwd: ownedWs,
     env: { ...process.env, LUDENS_HOME: home },
+    launchedBy: "app",
+    appInstanceId: supervisor.instanceId,
   });
   const foreignJob = await startBackgroundJob({
     name: "host",
     command: [process.execPath, "-e", "setInterval(() => {}, 1000);"],
     cwd: foreignWs,
     env: { ...process.env, LUDENS_HOME: home },
+    launchedBy: "cli",
   });
-
-  const supervisor = new WorkspaceSupervisor({ home });
   try {
     expect(isPidAlive(ownedJob.pid)).toBe(true);
     expect(isPidAlive(foreignJob.pid)).toBe(true);

@@ -6,7 +6,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 
 ## 1. 工作区目录结构
 
-通过 `ludens init` 初始化后的工作区包含以下核心目录与文件：
+每个工作区遵循 **1 Workspace = 1 Core** 隔离原则，独立持有自己的 Core 运行时与状态；绑定不同设备或端口的工作区可在 App Daemon 下并发运行，执行**收回控制权**后 Core 保留在 **Warm Standby**（**手动待命**，`manual`）待命。通过 `ludens init` 初始化后的工作区包含以下核心目录与文件：
 
 | 路径 | 职责 |
 | --- | --- |
@@ -130,7 +130,7 @@ ludens eval history python/skills/visual_guard.py:eval_act_on_alert --limit 10
 
 ### 将真机失败转化为离线回归测试（`adapt` 与 `record_window`）
 
-为保证时间轴锁安全，只有常驻单写入者（`perception.py` / 宿主进程）会向 `.ludens/timeline/` 追加 `@record` 记录。在线运行探测或复合能力时，可通过 `record_window()` 包裹调用窗口（或在宿主的 `@record @capability` 中录制），随后回溯该区间的真实帧数据：
+为保证时间轴锁安全，只有常驻单写入者（`perception.py` / Core 进程）会向 `.ludens/timeline/` 追加 `@record` 记录。在线运行探测或复合能力时，可通过 `record_window()` 包裹调用窗口（或在 Core 的 `@record @capability` 中录制），随后回溯该区间的真实帧数据：
 
 ```python
 from ludens_tools import Client, record_window
@@ -155,8 +155,8 @@ ludens eval adapt python/skills/visual_guard.py:act_on_alert \
 
 ## 5. 在控制台管理能力、记忆与沉淀
 
-- **能力（Capabilities，`?view=caps`）**：直观检视 **Capability – Eval – Env** 拓扑关系，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）筛选，查看 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**宿主连接检查** 与 **社区驱动验证** 结果，并可一键点击运行全部或单项评测。
-- **配置（Config，`?view=perception`）**：在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 / 停止**。
+- **能力（Capabilities，`?view=caps`）**：直观检视 **Capability – Eval – Env** 拓扑关系，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）筛选，查看 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**Core 连接检查** 与 **社区驱动验证** 结果，并可一键点击运行全部或单项评测。
+- **配置（Config，`?view=perception`）**：在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
 - **记忆与技能沉淀（`ludens consolidate` 或运行页按钮）**：开启一次禁用所有设备访问的纯文件整理轮次，自动把 `verified` 能力晋升或保留到 `skills/` 技能卡片中，清除 `unverified`/`stale`/`adapting`/`failed` 条目，并刷新 `memory/current.md`。
 
 继续阅读 [感知、执行与性能调优](perception-and-action.md)，学习编写可热重载的常驻 `perception.py` 状态机并配置 30 Hz 多模态传输链路。
