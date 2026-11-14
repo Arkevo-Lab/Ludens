@@ -100,7 +100,7 @@ function BufferedObservationImage({ url, alt, prefetchUrls = [] }: { url: string
   const image = displayed?.images.get(displayed.key);
   const error = !pending && image?.error ? mediaFailureMessage(image.httpStatus ?? 0, rootT) : undefined;
   return <MediaRecovery key={url} kind="image" pending={pending} error={error} onRetry={() => setRevision(value => value + 1)}>
-    {image && !image.error ? <img src={image.src} width={image.width} height={image.height} alt={displayed!.value} />
+    {image && !image.error ? <img key={image.src} src={image.src} width={image.width} height={image.height} alt={displayed!.value} />
       : <span role="status">{t("buffered.loading")}</span>}
     {pending && image && !image.error && <small role="status">{t("buffered.pendingKeep")} {displayed!.value}</small>}
   </MediaRecovery>;

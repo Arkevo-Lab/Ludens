@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import {
   AlertCircle,
@@ -33,6 +34,7 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { useAnimatedPresence } from "@/components/use-motion-preferences";
 import { useTranslations } from "@/lib/locale";
 
 export type ModelServiceTier = "priority" | "ultrafast";
@@ -299,6 +301,39 @@ export function stepHighlightedIndex(
   }
   const nextPos = (pos + delta + selectableIndices.length) % selectableIndices.length;
   return selectableIndices[nextPos]!;
+}
+
+function ModelInlineOptionsDrawer({
+  expanded,
+  fullId,
+  children,
+}: {
+  expanded: boolean;
+  fullId: string;
+  children: ReactNode;
+}) {
+  const presence = useAnimatedPresence(expanded, 150);
+  const retainedChildrenRef = useRef(children);
+  if (expanded) {
+    retainedChildrenRef.current = children;
+  }
+  if (!presence.mounted) {
+    return null;
+  }
+  return (
+    <div
+      className="model-picker-inline-drawer"
+      data-model-inline-options={fullId}
+      data-motion-state={presence.state}
+      inert={!expanded || undefined}
+    >
+      <div className="model-picker-inline-drawer-inner">
+        <div className="model-picker-inline-drawer-body">
+          {expanded ? children : retainedChildrenRef.current}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 export function ModelPickerDialog({
@@ -603,7 +638,7 @@ export function ModelPickerDialog({
               disabled={loading}
               onClick={() => setReloadTick(v => v + 1)}
             >
-              <RefreshCw className={"size-3.5" + (loading ? " animate-spin" : "")} aria-hidden="true" />
+              <RefreshCw className={"size-3.5" + (loading ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
             </button>
           )}
           {inline ? (
@@ -749,7 +784,7 @@ export function ModelPickerDialog({
       <div id={listboxId} role="listbox" aria-label={t("title")} className="model-picker-list">
         {loading && !catalog ? (
           <div className="model-picker-state" role="status">
-            <Loader2 className="size-5 animate-spin text-muted-foreground" aria-hidden="true" />
+            <Loader2 className="size-5 motion-safe:animate-spin text-muted-foreground" aria-hidden="true" />
             <span>{t("loading")}</span>
           </div>
         ) : loadError && !catalog ? (
@@ -901,7 +936,7 @@ export function ModelPickerDialog({
                     {selectable && (
                       <ChevronDown
                         className={
-                          "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150" +
+                          "size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-[cubic-bezier(0.16,1,0.3,1)]" +
                           (isExpanded ? " rotate-180 text-foreground" : " opacity-60")
                         }
                         aria-hidden="true"
@@ -910,11 +945,7 @@ export function ModelPickerDialog({
                   </div>
                 </button>
 
-                {isExpanded && (
-                  <div
-                    className="model-picker-inline-drawer"
-                    data-model-inline-options={item.fullId}
-                  >
+                <ModelInlineOptionsDrawer expanded={isExpanded} fullId={item.fullId}>
                     <div className="model-picker-inline-controls">
                       {/* Effort Row */}
                       <div className="model-picker-inline-row" data-inline-row="effort">
@@ -1056,7 +1087,7 @@ export function ModelPickerDialog({
                       >
                         {isSelecting ? (
                           <>
-                            <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
+                            <Loader2 className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
                             <span>{t("applying")}</span>
                           </>
                         ) : isUnchangedCurrent ? (
@@ -1073,8 +1104,7 @@ export function ModelPickerDialog({
                         )}
                       </button>
                     </div>
-                  </div>
-                )}
+                </ModelInlineOptionsDrawer>
               </div>
             );
           })
@@ -1106,14 +1136,19 @@ export function ModelPickerDialog({
     </>
   );
 
+  const inlinePresence = useAnimatedPresence(Boolean(inline && open), 150);
+
   if (inline) {
-    if (!open) return null;
+    if (!inlinePresence.mounted) return null;
     return (
       <div
         role="dialog"
         aria-label={t("title")}
         className="model-picker-dialog flex flex-col gap-0 p-0 sm:max-w-[660px]"
         data-model-picker-dialog
+        data-inline="true"
+        data-motion-state={inlinePresence.state}
+        inert={!open || undefined}
         onKeyDown={handleKeyDown}
       >
         {dialogInner}
