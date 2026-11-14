@@ -10,7 +10,6 @@ import {
   Boxes,
   CheckCircle2,
   ChevronDown,
-  ChevronUp,
   Clock,
   Eye,
   FileCode2,
@@ -18,10 +17,12 @@ import {
   History,
   Monitor,
   Play,
+  RefreshCw,
   Sparkles,
   Timer,
   TrendingUp,
 } from "lucide-react";
+import { useAnimatedPresence } from "@/components/use-motion-preferences";
 import type {
   CapabilityEntry,
   CapabilityEnvEntry,
@@ -236,11 +237,10 @@ function TriadSummaryBar({
             >
               <BarChart3 className="size-3.5 text-primary" aria-hidden="true" />
               <span>{t(analyticsOpen ? "toggleAnalyticsHide" : "toggleAnalyticsShow")}</span>
-              {analyticsOpen ? (
-                <ChevronUp className="size-3.5" aria-hidden="true" />
-              ) : (
-                <ChevronDown className="size-3.5" aria-hidden="true" />
-              )}
+              <ChevronDown
+                className={`size-3.5 transition-transform duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${analyticsOpen ? "rotate-180" : ""}`}
+                aria-hidden="true"
+              />
             </button>
           )}
         </div>
@@ -1049,7 +1049,10 @@ function ConnectionCheck({ project, workspace }: { project: string; workspace: s
     : value.controlConnected === null ? "runtimeUnknown" : value.controlConnected ? "runtimeConnected" : "runtimeDisconnected";
   return <Card className="min-w-0" data-capability-runtime><CardContent className="min-w-0 space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-3"><div className="flex items-center gap-3"><Activity className="size-5 text-primary" /><h2 className="text-base font-semibold">{t("runtimeTitle")}</h2></div>
-      <Button type="button" variant="outline" size="sm" aria-disabled={loading} className="aria-disabled:opacity-50" onClick={() => void check()}>{t(loading ? "runtimeChecking" : "checkRuntime")}</Button></div>
+      <Button type="button" variant="outline" size="sm" aria-disabled={loading} className="aria-disabled:opacity-50" onClick={() => void check()}>
+        <RefreshCw className={`size-3.5 ${loading ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
+        {t(loading ? "runtimeChecking" : "checkRuntime")}
+      </Button></div>
     <p role="status" className="text-sm">{t(status)}</p><p className="text-xs leading-relaxed text-muted-foreground">{t("runtimeReadOnly")}</p>
     {error && <Alert variant="destructive"><AlertDescription>{t("runtimeReadFailed")}<details className="mt-2 text-xs"><summary>{t("errorDetails")}</summary><p className="mt-2 break-all">{error}</p></details></AlertDescription></Alert>}
     {value && <div className="space-y-1 text-xs text-muted-foreground"><p>{t("checkedAt")} <time dateTime={value.checkedAt}>{new Date(value.checkedAt).toLocaleString()}</time></p>
@@ -1065,7 +1068,12 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
   const caps = capsLoad.value;
   const [statusFilter, setStatusFilter] = useState<CapabilityEvalStatus | "all">("all");
   const [analyticsOpen, setAnalyticsOpen] = useState(true);
+  const [analyticsAnimated, setAnalyticsAnimated] = useState(false);
   const analyticsTouched = useRef(false);
+  const { mounted: analyticsMounted, state: analyticsState } = useAnimatedPresence(
+    analyticsOpen,
+    analyticsAnimated ? 180 : 0,
+  );
   const [runningEvalTarget, setRunningEvalTarget] = useState<string | null>(null);
   const [evalRunNotice, setEvalRunNotice] = useState<{ ok: boolean; message: string } | null>(null);
   const catalogFocus = useRetryFocus(!!catalogLoading, catalogError);
@@ -1125,11 +1133,17 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
   };
 
   return <div ref={catalogFocus.target} className="grid min-w-0 grid-cols-1 gap-4" tabIndex={-1} role="region" aria-label={t("overviewLabel")} aria-busy={capsLoad.loading}>
-    {catalogError && <Alert variant="destructive"><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0 flex-1"><p>{t("catalogFailed")}</p><details className="mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{catalogError}</pre></details></div>
-      <Button type="button" variant="outline" size="sm" aria-disabled={catalogLoading} className="aria-disabled:opacity-50" onClick={event => { if (!catalogLoading) { catalogFocus.remember(event.currentTarget); onRetryCatalog(); } }}>{t(catalogLoading ? "retrying" : "retryCatalog")}</Button></AlertDescription></Alert>}
+    {catalogError && <Alert variant="destructive"><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><div className="min-w-0 flex-1"><p>{t("catalogFailed")}</p><details className="triad-issues-disclosure mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{catalogError}</pre></details></div>
+      <Button type="button" variant="outline" size="sm" aria-disabled={catalogLoading} className="aria-disabled:opacity-50" onClick={event => { if (!catalogLoading) { catalogFocus.remember(event.currentTarget); onRetryCatalog(); } }}>
+        <RefreshCw className={`size-3.5 ${catalogLoading ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
+        {t(catalogLoading ? "retrying" : "retryCatalog")}
+      </Button></AlertDescription></Alert>}
     {project && workspace && <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-xs text-muted-foreground">{t("readOnlyRefreshHint")}</p>
-      <Button type="button" size="sm" variant="outline" aria-disabled={capsLoad.loading} className="aria-disabled:opacity-50" onClick={() => { if (!capsLoad.loading) capsLoad.retry(); }}>{t(capsLoad.loading ? "retrying" : capsLoad.error ? "retryRead" : "refresh")}</Button></div>}
-    {capsLoad.error && <Alert variant="destructive"><AlertDescription><p>{t("loadErrorTitle")}</p><details className="mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{capsLoad.error}</pre></details>{caps && <p className="mt-1">{t("showingCached")}</p>}</AlertDescription></Alert>}
+      <Button type="button" size="sm" variant="outline" aria-disabled={capsLoad.loading} className="aria-disabled:opacity-50" onClick={() => { if (!capsLoad.loading) capsLoad.retry(); }}>
+        <RefreshCw className={`size-3.5 ${capsLoad.loading ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
+        {t(capsLoad.loading ? "retrying" : capsLoad.error ? "retryRead" : "refresh")}
+      </Button></div>}
+    {capsLoad.error && <Alert variant="destructive"><AlertDescription><p>{t("loadErrorTitle")}</p><details className="triad-issues-disclosure mt-1 text-xs"><summary>{t("errorDetails")}</summary><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-all">{capsLoad.error}</pre></details>{caps && <p className="mt-1">{t("showingCached")}</p>}</AlertDescription></Alert>}
     {!caps ? !ready || capsLoad.loading ? <Card><CardContent role="status"><h3 className="text-sm font-semibold">{t(!ready ? "loadingWorkspaces" : "loadingTitle")}</h3><p className="mt-2 text-sm text-muted-foreground">{t("loadingDesc")}</p></CardContent></Card>
       : !catalogError && !capsLoad.error ? <Card><CardContent className="space-y-4"><h3 className="text-base font-semibold">{t("emptyTitle")}</h3><p className="text-sm text-muted-foreground">{t("emptyDesc")}</p><div className="flex flex-wrap gap-2">
         <NavigationLink href="/?view=workspaces&create=1" onNavigate={onNavigate} primary>{t("createWorkspace")}</NavigationLink><NavigationLink href="/?view=workspaces" onNavigate={onNavigate}>{t("viewWorkspaces")}</NavigationLink></div></CardContent></Card> : null : <>
@@ -1142,16 +1156,25 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
         analyticsOpen={analyticsOpen}
         onToggleAnalytics={() => {
           analyticsTouched.current = true;
+          setAnalyticsAnimated(true);
           setAnalyticsOpen(current => !current);
         }}
       />
 
-      {analyticsOpen && (
-        <TriadAnalyticsDeck
-          capabilities={workspaceItems}
-          envs={envs}
-          summary={evalSummary}
-        />
+      {analyticsMounted && (
+        <div
+          className="triad-analytics-collapse"
+          data-state={analyticsState}
+          data-animated={analyticsAnimated ? "true" : undefined}
+        >
+          <div className="triad-analytics-collapse-inner">
+            <TriadAnalyticsDeck
+              capabilities={workspaceItems}
+              envs={envs}
+              summary={evalSummary}
+            />
+          </div>
+        </div>
       )}
 
       <Card className="min-w-0" data-capability-source="workspace">
@@ -1198,10 +1221,10 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
             </div>
           </div>
           {evalRunNotice && (
-            <Alert className={evalRunNotice.ok ? "border-success/35 bg-success/5" : "border-destructive/40 bg-destructive/10"}>
+            <Alert className={`motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 ${evalRunNotice.ok ? "border-success/35 bg-success/5" : "border-destructive/40 bg-destructive/10"}`}>
               <AlertDescription className="flex items-center justify-between gap-2 text-xs">
                 <span>{evalRunNotice.message}</span>
-                <button type="button" onClick={() => setEvalRunNotice(null)} className="text-muted-foreground hover:text-foreground">×</button>
+                <button type="button" onClick={() => setEvalRunNotice(null)} className="text-muted-foreground transition-colors duration-150 hover:text-foreground">×</button>
               </AlertDescription>
             </Alert>
           )}
@@ -1257,7 +1280,7 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
         </CardContent>
       </Card>
 
-      {caps.issues.length > 0 && <details className="rounded-lg border p-4 text-xs"><summary className="cursor-pointer">{t("diagnosticsTitle")} ({caps.issues.length})</summary><div className="mt-3 space-y-2">{caps.issues.map((issue, index) => <p key={index} className="break-all">{issue.error}</p>)}</div></details>}
+      {caps.issues.length > 0 && <details className="triad-issues-disclosure rounded-lg border p-4 text-xs"><summary className="cursor-pointer">{t("diagnosticsTitle")} ({caps.issues.length})</summary><div className="mt-3 space-y-2">{caps.issues.map((issue, index) => <p key={index} className="break-all">{issue.error}</p>)}</div></details>}
       <p className="text-xs text-muted-foreground">{t("checkedAt")} <time dateTime={caps.checkedAt}>{new Date(caps.checkedAt).toLocaleString()}</time></p>
     </>}
     {project && workspace && <ConnectionCheck key={JSON.stringify([project, workspace])} project={project} workspace={workspace} />}

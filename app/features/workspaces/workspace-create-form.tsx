@@ -158,9 +158,9 @@ export function WorkspaceCreateForm({ defaultRoot, initialIntent, pending, error
         </div>
       </div>
 
-      <details open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)} className="group min-w-0 rounded-lg border">
+      <details open={advanced} onToggle={event => setAdvanced(event.currentTarget.open)} className="settings-disclosure group min-w-0 rounded-lg border">
         <summary className="flex cursor-pointer list-none items-center gap-2 rounded-lg px-3.5 py-3 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
-          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" aria-hidden="true" />{t("advanced")}
+          <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-[var(--ease-out-expo)] motion-reduce:transition-none group-open:rotate-90" aria-hidden="true" />{t("advanced")}
         </summary>
         <div className="grid gap-4 border-t p-3.5">
           <div className="grid gap-2">
