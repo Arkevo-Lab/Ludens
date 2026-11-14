@@ -132,7 +132,7 @@ export class PetSessionCoordinator implements LudensActivitySource {
       headers: { Origin: this.origin, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     })
-    if (!response.ok) throw new Error(`Ludens Pet 日志服务 HTTP ${response.status}`)
+    if (!response.ok) throw new Error(`桌宠日志服务 HTTP ${response.status}`)
     return response.json()
   }
   private async fetchCatalog(): Promise<Project[]> {
@@ -189,7 +189,7 @@ export class PetSessionCoordinator implements LudensActivitySource {
         if (this.stopped) return
         let next = state.target
         if (next !== null && (!next || typeof next.project !== 'string' || typeof next.workspace !== 'string' || typeof next.revision !== 'string'))
-          throw new Error('Ludens Pet 跟随目标无效')
+          throw new Error('桌宠跟随目标无效')
         // Keep the saved selection on the server, but never consume an offline,
         // unregistered, or replaced directory as though it were that workspace.
         if (state.targetUnavailable === true) next = null

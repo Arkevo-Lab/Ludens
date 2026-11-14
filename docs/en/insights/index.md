@@ -1,6 +1,6 @@
 # Insights · Why It Was Built This Way
 
-No dry parameter dictionaries here. Instead, these notes walk through the real issues we hit when running a coding agent inside real-time interactive environments — and why each design choice was made.
+No dry parameter dictionaries here. Instead, these notes walk through the real issues we hit when running Shiori (our OMP-based Agent Thread Core) inside real-time, cross-device interactive environments — and why each design choice was made.
 
 Many designs look complicated if you only read the code in isolation (e.g. why OMP has compaction and WebSocket transport patches). Once you switch to the actual setting — **continuous perception sampling at 30 Hz, the model reading selected multimodal observations turn by turn, and runs lasting seven or eight hours** — the trade-offs become straightforward.
 

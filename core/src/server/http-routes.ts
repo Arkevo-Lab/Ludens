@@ -359,7 +359,7 @@ export async function handleApiRequest(
             { headers: NO_STORE_HEADERS },
           );
         }
-        if (b.action !== "off") throw badRequest("仅支持交还控制权");
+        if (b.action !== "off") throw badRequest("仅支持收回控制权");
         return Response.json(
           await ctx.worker.call(
             "stop",

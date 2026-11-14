@@ -1,123 +1,166 @@
-# 常驻感知与动作状态机
+# 感知、执行与性能调优
 
-在实时交互环境中，常驻 `perception.py:Perception` 进程运行连续状态机，负责高频采样与进程内闭环控制，并将观测写入 `.ludens/timeline/`。各能力无需 IPC 即可共享内存、发出动作并在状态间转换，因此绑定 epoch 的控制程序运行在同一进程内。能力装饰器与时空轴信封约定见 [工作区与能力编程](workspace.md)。
+与其让耗时的多模态模型每一帧都参与“看图再点击”，Ludens 在每个工作区中运行一个常驻 Python 进程（`perception.py`）。在**自主运行**期间，它持续采集目标画面、录制 30 Hz fMP4 视频到 `.ludens/timeline/`，并在内存中运行可随时热重载的闭环状态机。
 
-下文中的 CLI 命令均在**目标工作区目录**下执行，假定仓库 `core/bin` 与 `baseware/bin` 已加入 `PATH`。跨目录操作时，在子命令前传入 `ludens --workspace /absolute/path/to/workspace`。
+关于为什么采样率、保留窗口与内存上限被严格拆分为三层，参见 [为什么感知参数要跨三层分治](../insights/perception-parameters.md)。
 
-## 常驻感知与历史读取
+## 1. 编写常驻 `perception.py`
 
-### 1. `perception.py:Perception` 生命周期
+工作区根目录的 `perception.py` 支持两种入口形式：定义一个包含 `start(self, context)`、带有 `@observe @record @capability` 的 `sample(self)` 与 `close(self)` 方法的 `Perception` 类；或者只声明一个顶层同步函数并标注 `@observe @record @capability`。
 
-`perception.py` 中的 `Perception` 类在独立的常驻 Python 进程中运行（模板见 [core/templates/perception.py](../../../core/templates/perception.py)）：
+请**不要**在 `Perception` 类上定义 `sample_hz` 属性，也**不要**在 `sample()` 内部人为添加 `time.sleep(...)` 降频。采样率统一由宿主基础设施环境变量 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz）控制；单帧采集耗时较长时，调度器会自动延后下一拍，绝不会重叠并发。
 
-- `start(self, context)`：进程启动或 `reload` 时执行一次，可在此加载深度学习权重、初始化状态或后台采样线程。`context` 包含 `workspace`、`runDir` 与 `generation`。
-- `sample(self)`：需标注 `@observe`、`@record` 与 `@capability`；其中 `@observe` 将其选为工作区的主观测能力。控制租约（`auto` epoch）活跃期间，调度器按宿主配置的频率 `LUDENS_PERCEPTION_SAMPLE_HZ`（默认 `30.0` Hz，同时作为录像编码的名义帧率；忽略工作区类上的 `sample_hz` 属性——详见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)）连续调用当前状态。若单次采样耗时超过周期，下一次采样会顺延而不会并发重叠或堆积补跑。
-- `close(self)`：在 `reload`、`stop` 或 Host 退出时调用，用于释放自建资源。
+`sample()`（以及状态机内部其余状态函数）返回的字典允许包含 `text`、`data`、`media`、`sampledAt`、`sources`、`space`、`timeline`、`effect` 与 `transition` 字段。
 
-常驻进程在同一个 Python 进程中运行连续状态机。任何活动能力都可以返回可选的 `effect`（`{"id": "controller/...", "arguments": {...}}` 或此类对象的列表）请求闭环执行，以及可选的 `transition`（`"method_name"` 或 `{"to": "method_name", "arguments": {...}}`）选择下一次 tick 调用的能力。转换目标在同一实例、模块或工作区内解析，无需跨进程，因此实例属性与模块全局变量可在 tick 之间共享内存上下文。
+### 闭环状态机示例
 
-**源码修改自动重载**：修改 `perception.py` 或其导入的工作区 `.py` 模块会自动重载常驻进程（非 Python 资源不会触发重载）；显式历史查询在重载后仍然可用，新 generation 会保留历史 generation。如需在不改源码的情况下显式重启，可执行 `ludens perception reload`。
-
-没有 `Perception` 类时，`perception.py` 也可定义任意名称的顶层 `@observe @record @capability` 函数。实时与离线时空轴默认读取唯一的 `@observe` 通道，包括其他工作区模块中的已记录能力；`@observe` 不会自动调度其他模块。没有标记时，默认通道仍为 `python/perception.py:Perception.sample`。重复标记会为每个冲突声明生成诊断，并阻止常驻进程开始运行。
-
-宿主进入 `auto` 时将控制 epoch 授予常驻进程，感知重载时保留该租约，交还控制时撤销租约。Shiori 的控制周期就是常驻进程的生命周期：连续采样与视频分段录制只在该租约活跃期间运行。进入 `auto` 会立即启动采样器；交还时会等待在途 tick 完成、刷出最后一条 `perception_stats`，并在周期 `control(manual)` 事件之前把活跃的 fMP4 视频分段封口为 `status: "ready"`，而 `manual` 待机期间时间线读取（`observe`）、`append` 与状态机 RPC 仍然可用、只是不采样。手动模式下没有租约时会跳过 controller effect；本地 `python/` effect 仍在进程内执行。常驻进程的 `state`、`transition` 和 `lease` RPC 分别查看当前能力、选择其下一组参数、更新 epoch/input generation。跨模块目标使用 `python/path.py:function`；后续不带路径的函数名会在当前活动模块中解析。只有 `@record` 状态会发布观测，活动状态变化不会改变默认观测通道。
+`perception.py` 中的所有状态函数均运行在同一进程内，通过 `self` 零拷贝共享上下文。返回结果中可通过 `effect` 立即触发能力调用（传单个对象 `{"id": "...", "arguments": {...}}` 或数组），并通过 `transition` 切换下一状态（传目标名称或 `{"to": "<target>", "arguments": {...}}`）：
 
 ```python
-from ludens_tools import capability, observe, record
+from ludens_tools import Client, capability, observe, record
 
 class Perception:
-    def start(self, context):
-        self.tracking = False
+    def start(self, context: dict) -> None:
+        self.client = Client()
+        self.alert_streak = 0
 
     @observe
     @record
     @capability
-    def sample(self):
-        """Observe the environment and enter tracking when a target appears."""
-        return {
-            "text": "target acquired",
-            "effect": {"id": "controller/pad.play", "arguments": {"inputs": [{"atMs": 0, "durationMs": 120, "key": "a"}]}},
-            "transition": {"to": "track", "arguments": {"target": "marker"}},
+    def sample(self) -> dict:
+        """采集主控制器画面，统计连续异常状态并在本地触发执行动作。"""
+        capture = self.client.call("controller/screenshot", {})
+        observations = capture.get("observations", [])
+        # 将 _detect_alert 替换为工作区实际的视觉检测逻辑
+        alert_active = self._detect_alert(capture)
+        self.alert_streak = self.alert_streak + 1 if alert_active else 0
+
+        response: dict = {
+            "text": f"state=watch streak={self.alert_streak}",
+            "data": {"state": "watch", "alert": alert_active, "streak": self.alert_streak},
+            "media": observations,
         }
+        if self.alert_streak >= 3:
+            response["effect"] = {"id": "controller/relay.trigger", "arguments": {"channel": 1}}
+            response["transition"] = {
+                "to": "python/perception.py:Perception.cooldown",
+                "arguments": {"remaining": 15},
+            }
+        return response
 
     @capability
-    def track(self, target: str):
-        """Track the target using state shared with sample in this process."""
-        self.tracking = True
-        return {"text": f"tracking {target}"}
+    def cooldown(self, remaining: int = 15) -> dict:
+        """保持高频观测的同时进行冷却计数，防止短时间内重复触发。"""
+        self.alert_streak = 0
+        if remaining <= 1:
+            return {"text": "state=watch", "transition": "python/perception.py:Perception.sample"}
+        return {
+            "text": f"state=cooldown remaining={remaining - 1}",
+            "transition": {
+                "to": "python/perception.py:Perception.cooldown",
+                "arguments": {"remaining": remaining - 1},
+            },
+        }
 
-    def close(self):
+    def close(self) -> None:
         pass
+
+    def _detect_alert(self, capture: dict) -> bool:
+        return False
 ```
 
-新工作区的 `Perception.sample()` 默认抛出 `NotImplementedError`，系统不会用默认截图替代未实现的感知；修改 Python 源码后，常驻进程会自动重载并保留持久历史。修改权重等非 Python 资源后，需要执行 `ludens perception reload`。已停止的常驻进程在源码修改后仍保持停止，直到显式重载。
-
-### 2. 感知管理与历史查询命令（`ludens observe`）
+可通过 CLI（`ludens perception`）或 Python（`Client().state()` / `Client().transition(...)`）实时查看与切换状态机：
 
 ```sh
-# Lifecycle, state-machine control, and auto-inject policy management
 ludens perception status
 ludens perception state
-ludens perception transition track --args '{"target":"marker"}'
-ludens perception reload
-ludens perception stop
-ludens perception inject          # Show current auto-inject policy (on / off)
-ludens perception inject off      # Stop auto-appending observations to model context, keep sampling and recording
-ludens perception inject on       # Resume auto-appending
-
-# Read timeline history (archived records only, never triggers resampling)
-ludens observe
-ludens observe --id <record-id> --images
-ludens observe --at 2026-10-27T01:00:00Z
-ludens observe --capability python/sensors.py:temperature
-ludens observe --capability '*' --start 2026-10-27T01:00:00Z --limit 8
+ludens perception transition python/perception.py:Perception.cooldown --args '{"remaining":10}'
+ludens perception inject on
 ```
 
-- **采样与自动注入解耦**：`ludens perception inject off` 仅停止在每轮 prompt 开始时向模型自动追加新观测和采样器状态；后台 `sample()`、视频录制与显式 `observe` 查询均照常运行，轮内观察始终由模型显式 `observe` 完成，工具结果不会被追加任何观察。`ludens perception stop` 则会彻底停止采样进程与时空轴 writer，直至下次 `reload`。
-- **查询维度与分页**：默认读取由 `@observe` 选定的主通道（模板中的 `Perception.sample`）的最新记录；`--capability` 可筛选其他 `@record` 能力或传 `'*'` 查询全轴；`--at` 查询 `recordedAt` 不晚于指定时刻的最后一条记录；`--start` / `--end` 按 `recordedAt` 闭区间升序分页（默认 `8` 条，上限 `64` 条，通过返回的 `nextAfter` 传给 `--after` 翻页）。
-- **终端图像交付**：在 Agent 的 `bash` 工具中加 `--images` 可通过 OMP 终端图像通道直接将图片送入模型（单页上限 32 张 / 40 MiB）。
+保持 `ludens perception inject on` 开启时，Shiori 会在每轮开始时自动接收一次最新的主通道观测，同时保持工具返回体精简以保护 Prompt 缓存命中率；若希望完全改为按需检索，可关闭为 `ludens perception inject off`。
 
-### 3. 查询返回结构与错误码
+## 2. 热重载与 `inputGeneration` 租约隔离
 
-CLI `ludens observe`、Python `Client().observe(query)` 与 OMP 原生 `observe` 工具返回相同的结构化信封 `{queryId, ok, query, records, hasMore, nextAfter?, availability?, error?}`。当 `ok: false` 时，`error.code` 明确区分原因：
+修改保存 `perception.py` 或其导入的任意工作区 `.py` 模块时，系统会自动热重载常驻进程；如果更新的是非 Python 资源文件（如权重或模板图片），可手动触发重载：
 
-| 错误码 | 触发场景 |
-| --- | --- |
-| `NOT_READY` | 查询最新记录，但所选能力尚未产出可用样本；主通道仍在加载时也返回此码。 |
-| `NOT_FOUND` | 指定的 `--id` 不存在，或 `--at` 时刻之前没有任何匹配记录。 |
-| `EXPIRED` | 时间或范围查询涉及已淘汰的非持久窗口，且无可读记录返回（若范围查询仅部分过期但仍有可读记录，则返回 `ok: true` 并标记 `availability.expired = true`）。未知 `--id` 始终返回 `NOT_FOUND`，不会推断它曾存在。 |
-| `UNAVAILABLE` | 感知进程（时空轴 writer）已停止或在查询中被替换，或最新主通道的采样器不可用（如加载、采样失败）。writer 仍运行时，显式历史查询不受采样器故障影响。 |
-| `QUERY_FAILED` | 参数非法、磁盘读取异常或冷视频帧解码失败。 |
+```sh
+ludens perception reload
+```
 
-### 4. 时空轴存储与编码预算环境变量
+在**自主运行**期间发生重载时，宿主会在当前控制周期 `epoch` 下递增 `inputGeneration`，立即把旧版本持有的设备输入归零并取消未完成动作，再无缝切换到新版状态机——整个过程不会丢失当前 `epoch`、时间/请求预算或 Shiori 会话线程。
 
-宿主进程支持以下环境变量配置时空轴窗口与视频编码参数（当前生效值可通过 `ludens perception status` 的 `history` 字段查看）：
+## 3. 查询 `.ludens/timeline/`（`Client.observe()` 与 `ludens observe`）
 
-采样率仅在对应环境变量未设置时使用默认值。空字符串、纯空白、非数值、零、负数、NaN 与无穷大会使工作进程启动失败，并返回指明变量名的校验错误；有效数字两侧的空白可以接受。
+在**自主运行**期间，每次 `@record` 采样都会将元数据与 30 Hz H.264 分片 fMP4 视频写入 `.ludens/timeline/`；即使切回**手动待命**，常驻进程也会保持待命状态以响应只读查询。
 
-| 环境变量 | 默认值 | 说明 |
+`Client().observe(query)` 支持以下查询组合（`limit` 范围 `1..64`）：
+
+| 查询模式 | 参数示例 | 行为说明 |
 | --- | --- | --- |
-| `LUDENS_PERCEPTION_SAMPLE_HZ` | `30` | `Perception.sample()` 的连续采样目标频率与录像名义帧率（有限正数）。 |
-| `LUDENS_PERCEPTION_PERSIST` | `1` | 设为 `0`（或 `false`）时仅保留内存/临时热窗口，进程停止或 `reload` 即清空。 |
-| `LUDENS_PERCEPTION_HOT_SECONDS` | `600` | 每通道热窗口保留秒数（10 分钟），窗口内原图可直接内存交付；可被工作区设置覆盖。 |
-| `LUDENS_PERCEPTION_HOT_BYTES` | `1073741824` | 热窗口全局字节预算（1 GiB），压力下优先收缩占用最大的通道。 |
-| `LUDENS_PERCEPTION_SEGMENT_SECONDS` | `3600` | 时空轴元数据 JSONL 与索引文件的切段时长（1 小时）。 |
-| `LUDENS_PERCEPTION_SEGMENT_BYTES` | `268435456` | 单段元数据与非视频媒体字节上限（256 MiB）。 |
-| `LUDENS_VIDEO_SEGMENT_SECONDS` | `300` | MP4 视频分段时长（5 分钟）；可被工作区设置覆盖。 |
-| `LUDENS_VIDEO_IDLE_SECONDS` | `10` | 停采后空闲收尾秒数；可被工作区设置覆盖，更改采样率或停止进程时也会收尾。 |
-| `LUDENS_VIDEO_QUEUE_BYTES` | `33554432` | 后台视频编码队列内存上限（32 MiB，含压缩输入与 RGB 缓冲）。 |
-| `LUDENS_VIDEO_QUEUE_FRAMES` | `64` | 后台视频编码队列最大待编码帧数。 |
-| `LUDENS_VIDEO_STREAMS` | `16` | 同时活跃的图像编码流数量上限（超出时最久未用流先收尾）。 |
-| `LUDENS_VIDEO_QUERY_BYTES` | `33554432` | 单次历史冷查询解码输出字节上限（32 MiB）。 |
+| 最新帧轮询 | `{"limit": 8, "ifNoneMatchSequence": seq}` | 获取最新若干条观测；若最新序号仍等于 `seq` 则直接返回 `{"unchanged": True}` |
+| 时间点定位 | `{"at": "2026-04-01T10:00:00Z"}` | 获取不晚于该带时区 ISO 时间戳的最新记录（不可与 `start`/`end`/`after` 同用） |
+| 时间区间分页 | `{"start": "...", "end": "...", "limit": 32}` | 按时间区间分页读取历史记录（可附带 `after` 序号游标） |
+| 精确 ID 或全通道 | `{"id": "<record-id>"}` 或 `{"capability": "*"}` | 按记录 ID 精确读取（不可与时间/序号过滤并用），或查询所有 `@record` 能力产生的时间轴记录 |
 
-工作区 `.ludens/settings.json` 可覆盖 `hotSeconds`、`videoSegmentSeconds`、`videoIdleSeconds`，优先级为设置文件 > 宿主环境变量 > 内置默认。Dashboard「感知」页独立编辑这些已保存覆盖值，不直接修改运行中的进程。可输入精确整数秒、选择预设或使用辅助滑条；选择继承会移除该字段的覆盖值。继承值不会被显示为已知的运行默认值。文件中已有的有效正数自定义值，包括小数或超出编辑器范围的值，仍会显示，并在编辑对应字段前保持不变。字节预算仍由环境变量控制。
+对应的终端命令：
 
-草稿按工作区身份和登记路径分别保存在当前浏览器标签页，可显式放弃。浏览器会话存储可用时，刷新页面也会恢复草稿；否则只在当前页面生命周期内保留。读取已保存设置会保留未完成的输入。保存仅写入修改过的字段，不重载感知。响应无法确认时保留草稿，并提供读取操作核对已保存值，不自动重复写入。请求携带预期工作区路径，旧草稿不会悄悄写入重新定位后的登记目录。
+```sh
+ludens observe --limit 5 --images
+ludens observe --capability '*' --start 2026-04-01T10:00:00Z --end 2026-04-01T10:05:00Z
+ludens observe --id <record-id>
+```
 
-保存后，可复制页面提供的工作区专属命令 `env -u LUDENS_SOCKET ludens --workspace '/absolute/workspace/path' perception reload`，在合适时机运行。清除继承的 `LUDENS_SOCKET` 可确保命令指向该工作区的宿主地址。再用“检查运行值”独立读取宿主状态。只有感知进程 ready，且 generation、PID 与完整加载参数均有证据时，才显示为当前运行值；停止或不完整的观测不能证明已应用。页面将显式保存的覆盖值与观测值比较，继承字段只显示观测到的值，不猜测其环境变量或默认值来源。带时间的检查是一次观测，不是持续监控，也不能证明后续保存已应用。没有运行宿主的已登记工作区仍可配置。
+在 Python 中建议检查 `res["ok"]`，常见返回错误码（`res["error"]["code"]`）包括：
 
-视频使用 fragmented MP4（`+frag_keyframe+empty_moov`），约每两秒采样量形成一个关键帧间隔。未收尾段中已完整落盘的片段可供读取，最新尚未落盘的帧明确返回不可读，不用邻帧替代。每段 `.mp4.json` 用 `readableBytes`、`lastReadablePts`（微秒 PTS）、`durationSeconds` 与 `frames` 发布完整片段的可读进度，收尾后更新为最终值。Dashboard 回放按固定字节范围读取，播放超出当前范围后加载新增片段；暂无可读帧时等待进度更新，错误状态不当作成功片段。热窗口按时间过期，字节超限时从占用最大的通道收缩；非持久模式的查询会报告被淘汰的历史缺口，`ludens perception status` 的 `history.budgetEvictions` 随当前进程实时更新。
+- `UNAVAILABLE`：常驻感知进程未运行、已报错停止或在查询途中被新世代替换
+- `NOT_READY`：进程仍在 `loading` 阶段，或当前世代尚未产出第一条主通道记录
+- `EXPIRED`：非持久化内存窗口模式（`LUDENS_PERCEPTION_PERSIST=0`）下请求的历史区间已被淘汰
+- `NOT_FOUND`：找不到匹配指定 `id` 或 `at` 时间点的记录
+- `QUERY_FAILED`：查询参数非法或媒体解码失败
 
-## 租约归属与输入 generation
+如需按窗口回放整段连续帧（例如配合 `with record_window() as win:` 或某条失败样本的 `record_id`），调用 `Client().replay(win)` 或 `Client().replay(around=record_id, before_seconds=2.0, after_seconds=2.0)`。
 
-统一常驻状态机在接管时采用宿主当前控制 `epoch`。`PerceptionRuntime` 在启动替换代码前授予 `inputGeneration`，并在等待旧 Python 进程退出前清空它。重载和 `stop()` 会释放当前设备输入（包含并发 CLI 输入），拒绝旧 generation 的调用，同时保留控制 `epoch`、OMP 会话与剩余预算。如果输入清理失败，Host 会交还控制。人工交还（`auto off`）、预算耗尽或设备断连时撤销租约，感知可继续运行但不再执行设备 effect。执行 `stop()` 后须显式运行 `ludens perception reload` 重启；已交还控制时须运行 `ludens auto on` 再次授予设备控制权。
+## 4. 存储保留参数与采样环境变量
+
+工作区级别的保留策略存放在 `.ludens/settings.json`，可在控制台 **配置（Config）**（`?view=perception`）的 **感知录制参数（Perception Recording）** 页签安全调整：
+
+| 配置键（`.ludens/settings.json`） | 环境变量回退 | 合法范围 | 默认值 | 说明 |
+| --- | --- | --- | --- | --- |
+| `hotSeconds` | `LUDENS_PERCEPTION_HOT_SECONDS` | `10..3600` | `600` | 热内存窗口中保留近期原始记录的秒数 |
+| `videoSegmentSeconds` | `LUDENS_VIDEO_SEGMENT_SECONDS` | `10..3600` | `300` | `.ludens/timeline/video/*.mp4` 视频分片的轮转时长（秒） |
+| `videoIdleSeconds` | `LUDENS_VIDEO_IDLE_SECONDS` | `1..600` | `10` | 视频轨空闲多少秒后自动封口落盘 |
+
+宿主机全局资源上限与采样频率变量（在启动 `ludens up` 或 `ludens run` 前由宿主机环境指定）：
+
+- `LUDENS_PERCEPTION_SAMPLE_HZ`：目标采样率上限（默认 `30.0` Hz）
+- `LUDENS_PERCEPTION_PERSIST`：是否持久化 `.ludens/timeline/`（默认 `1`/`true`；设为 `0`/`false` 仅保留热内存窗口）
+- `LUDENS_PERCEPTION_HOT_BYTES`（`1 GiB`）、`LUDENS_PERCEPTION_SEGMENT_SECONDS`（`3600`）、`LUDENS_PERCEPTION_SEGMENT_BYTES`（`256 MiB`）：热窗口与分片大小限制
+- `LUDENS_VIDEO_QUEUE_BYTES`（`32 MiB`）、`LUDENS_VIDEO_QUEUE_FRAMES`（`64`）、`LUDENS_VIDEO_STREAMS`（`16`）、`LUDENS_VIDEO_QUERY_BYTES`（`32 MiB`）：fMP4 编码队列与回放解码内存保护上限
+
+## 5. 多模态传输、图片 URL 外置与性能调优
+
+高频传递内联 Base64 图像会显著放大请求体积并增加连接开销。可通过控制台 **配置** -> **连接与多模态传输**（`?view=perception`）、全局 **设置** -> **模型与传输**（`?view=settings`）或 `ludens config set` 调整连接策略：
+
+```sh
+ludens config set defaults.connection.openaiWebsockets auto
+ludens config set defaults.connection.cacheRetention long
+ludens config set defaults.connection.appendOnlyContext auto
+ludens config set defaults.connection.imageUrls.enabled true
+ludens config set defaults.connection.imageUrls.backends '["provider-files","cloudflared","tailscale","uguu","tmpfiles","litterbox","0x0","catbox"]'
+```
+
+各字段合法取值如下：
+
+- `openaiWebsockets`：`auto`、`on` 或 `off`
+- `cacheRetention`：`auto`、`short`、`long` 或 `none`
+- `appendOnlyContext`：`auto`、`on` 或 `off`
+- `imageUrls.enabled`：`true` 或 `false`
+- `imageUrls.backends`：从 `"provider-files"`、`"cloudflared"`、`"tailscale"`、`"uguu"`、`"tmpfiles"`、`"litterbox"`、`"0x0"`、`"catbox"`、`"pinggy"`、`"localhost-run"` 中按优先级排列的回退链
+
+运行一段时间后，可结合控制台两个专职视图持续调优：
+
+- **性能（Performance，`?view=perf`）**：观测已完成轮次数、P95 与中位轮次延迟、Prompt 缓存命中率、解码速率、占空比、采样速率、自主运行占比以及单请求调用链。
+- **上下文容量推演（Loop Simulator）**（在 **配置 -> 上下文容量推演** 页签或 **开发者** `?view=dev` 打开）：在启动长周期任务前，基于不同预设模拟系统提示词、对话轮次、感知文本/图像与 `compactionThreshold` 对上下文峰值 Token 的影响。
+
+最后一步，前往 [控制台使用与排障](console-and-debugging.md)，掌握控制台全局操作、能力验证排查与守护进程健康检查方法。

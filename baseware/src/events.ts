@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { EventMetadata, RecordEvent } from "./protocol.ts";
 import type { EventChannel, EventSegment, EventSourceDescriptor } from "@ludens/protocol/event-sources";
 
-/** Device facts belong to this service, including calls from clients other than RSA. */
+/** Device facts belong to this service, including calls from clients other than Ludens. */
 export class EventLog {
   readonly source: EventSourceDescriptor;
   private active = new Map<EventChannel, { path: string; bucket: number; meta: EventSegment }>();

@@ -136,10 +136,12 @@ test("all relative Markdown file links across repository documentation resolve o
     ...globSync("docs/en/**/*.md", { cwd: repositoryRoot }),
     ...globSync("docs/zh/**/*.md", { cwd: repositoryRoot }),
     "README.md",
+    "README.zh.md",
     "protocol/README.md",
     "baseware/README.md",
     "core/README.md",
     "app/README.md",
+    "app/DESIGN.md",
     "app/AGENTS.md",
   ];
   const linkRe = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
@@ -171,15 +173,15 @@ test("localized catalogs use translated titles and disclose missing languages sy
     await writeFile(join(root, "en/reference/english-only.md"), "# English only\n");
     await writeFile(join(root, "zh/reference/chinese-only.md"), "# 仅中文\n");
     const en = await docGroups(root, "en"), zh = await docGroups(root, "zh");
-    assert.deepEqual(en.map(group => group.title), ["Tutorials", "Reference", "Insights"]);
-    assert.deepEqual(zh.map(group => group.title), ["教程", "参考", "分析"]);
+    assert.deepEqual(en.map(group => group.title), ["Concepts", "Tutorials", "Reference", "Insights"]);
+    assert.deepEqual(zh.map(group => group.title), ["核心概念", "教程", "参考", "洞察"]);
     for (let i = 0; i < en.length; i++) assert.notEqual(en[i].blurb, zh[i].blurb);
-    assert.deepEqual(en[1].docs, [
+    assert.deepEqual(en[2].docs, [
       { id: "reference/index", title: "Overview", lang: "en", fallback: false, availableLanguages: ["en", "zh"] },
       { id: "reference/chinese-only", title: "仅中文", lang: "zh", fallback: true, availableLanguages: ["zh"] },
       { id: "reference/english-only", title: "English only", lang: "en", fallback: false, availableLanguages: ["en"] },
     ]);
-    assert.deepEqual(zh[1].docs, [
+    assert.deepEqual(zh[2].docs, [
       { id: "reference/index", title: "概览", lang: "zh", fallback: false, availableLanguages: ["en", "zh"] },
       { id: "reference/chinese-only", title: "仅中文", lang: "zh", fallback: false, availableLanguages: ["zh"] },
       { id: "reference/english-only", title: "English only", lang: "en", fallback: true, availableLanguages: ["en"] },
@@ -218,7 +220,7 @@ test("document reads reject traversal and symlinks outside the docs tree", async
     await writeFile(join(directory, "outside.md"), "# Private title\nprivate fixture");
     await symlink(join(directory, "outside.md"), join(root, "en/reference/escape.md"));
     assert.equal((await readDoc("reference/index", root)).title, "Overview");
-    assert.deepEqual((await docGroups(root))[1].docs.map(doc => doc.id), ["reference/index"]);
+    assert.deepEqual((await docGroups(root))[2].docs.map(doc => doc.id), ["reference/index"]);
     assert.doesNotMatch(JSON.stringify(await docGroups(root)), /Private title|private fixture/);
     for (const id of ["reference/../outside", "../outside", "reference/index.md", "history/old", "reference/escape"]) {
       await assert.rejects(readDoc(id, root), /Unknown doc/);

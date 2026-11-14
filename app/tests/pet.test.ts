@@ -245,8 +245,8 @@ test("invalid saved target shapes remain read failures rather than being present
     for (const value of [{}, [], false, { ...saved.target, workspace: "relative" },
       { ...saved.target, revision: "" }, { ...saved.target, updatedAt: "invalid" }]) {
       await writeFile(join(root, "pet/target.json"), JSON.stringify(value));
-      await assert.rejects(petState(root), /无效的 Ludens Pet 跟随目标/);
-      await assert.rejects(setPetTarget("selected", true, root), /无效的 Ludens Pet 跟随目标/);
+      await assert.rejects(petState(root), /无效的桌宠跟随目标/);
+      await assert.rejects(setPetTarget("selected", true, root), /无效的桌宠跟随目标/);
       assert.deepEqual(JSON.parse(await readFile(join(root, "pet/target.json"), "utf8")), value);
     }
   } finally { await rm(root, { recursive: true, force: true }); }

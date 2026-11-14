@@ -1,6 +1,6 @@
 # Baseware 设计理念与能力契约
 
-Baseware 是 Ludens 的独立设备驱动服务：负责连接模拟器或桌面后端、发布统一的能力目录、仲裁设备控制权（`epoch`）、执行输入与采集，并将每一次调用与设备事实持久化为可核查的日志。至于如何感知画面、组合动作、沉淀技能或评判任务成败，则完全交由上层 Workspace 代码与 Ludens 决定。
+Baseware 是 Ludens 的**跨设备集成与兼容层**：负责连接硬件桥接、摄像头/传感器、桌面后端、模拟器或 MCP 端点、发布统一的能力目录、仲裁设备控制权（`epoch`）、执行输入与采集，并将每一次调用与设备事实持久化为可核查的日志。至于如何感知画面、组合动作、沉淀技能或评判任务成败，则完全交由上层 Workspace 代码与 Shiori 决定。
 
 ## 共用约定，保留设备语义
 
@@ -23,7 +23,7 @@ flowchart LR
 
 | 层级 | 核心职责 | 明确不做的事 |
 | --- | --- | --- |
-| **Driver** | 解析具体设备协议（TCP Bridge 或 stdio），声明真实可用能力，执行并释放底层输入，产出原始媒体字节与源序号。 | 不跨设备拼装杂糅能力，不解释游戏内存或任务状态。 |
+| **Driver** | 解析具体设备协议（TCP Bridge 或 stdio），声明真实可用能力，执行并释放底层输入，产出原始媒体字节与源序号。 | 不跨设备拼装杂糅能力，不解释目标内存或上层任务状态。 |
 | **Baseware** | 聚合发布能力目录，按 JSON Schema 校验参数，管理 `epoch` 控制租约，关联调用与设备事件，通过 CLI / API / MCP 暴露一致入口。 | 不替工作区建立永久截图档案，不内置重试策略或 Agent Loop。 |
 | **Workspace / Ludens** | 发现并组合能力，维护 `.ludens/timeline/` 感知历史，运行常驻感知/动作模型与 OMP 会话。 | 不绕过 Baseware 直接写模拟器控制状态。 |
 
@@ -69,7 +69,7 @@ TS/Python API 与 CLI 统一返回完整的 `ExecutionResult` 信封，而 MCP �
 ## 控制权独立于能力描述
 
 - **`requiresControl` 与 `readOnlyHint` 正交**：`requiresControl` 是 Baseware 的执行门禁，而非工具 schema 的业务参数。一项能力可以既是只读查询（`readOnlyHint: true`，例如读取当前手柄合成状态 `pad.state`），同时又要求调用方持有有效控制 `epoch`（`requiresControl: true`）。未显式声明只读的 CUA 工具默认要求控制权。
-- **租约持有与释放保护**：控制权由 Ludens Host 的持久连接申请并持有，单次 CLI / API / MCP 调用仅通过环境变量 `BASEWARE_EPOCH` 继承租约，绝不会因调用工具而自动夺取控制权。当租约到期、人工执行 `revoke` / `auto off` 或持有者断线时，Baseware 立即触发 Driver `release()`，包括仍在获取控制权的 Controller。获取和清理都有超时；若获取超时或清理失败，撤权后虽回到 `manual`，但会保持 `connected: false` 并拒绝后续接管。迟到的获取仅触发原 `epoch` 的补偿释放，不会恢复自动控制。
+- **租约持有与释放保护**：控制权由 Ludens Host 的持久连接申请并持有，单次 CLI / API / MCP 调用仅通过环境变量 `BASEWARE_EPOCH` 继承租约，绝不会因调用工具而自动夺取控制权。当租约到期、人工执行 `revoke` / `auto off` 或持有者断线时，Baseware 立即触发 Driver `release()`，包括仍在获取控制权的 Controller。获取和清理都有超时；若获取超时或清理失败，撤权后虽回到 `manual`，但会保持 `connected: false` 并拒绝后续控制租约申请。迟到的获取仅触发原 `epoch` 的补偿释放，不会恢复自动控制。
 - **连接级幂等**：同一 Driver 下的多项 Controller 共享同一设备连接，`acquire(epoch)` 与 `release(epoch)` 在 Driver 层保持幂等，不会因能力拆分为多个工具而重复握手。
 
 ## 媒体、时间与日志
@@ -117,8 +117,8 @@ Baseware 支持通过 `--driver <id> --driver-package <spec>` 加载外部驱动
 | `version` / `fallbackVersion` | 可选版本字符串；运行目录依次取 Provider 握手实际版本、声明版本、内置 fallback，最后为 `"unknown"`。 |
 | `transport` | `"bridge"`（默认，TCP 行协议）或 `"stdio"`（子进程标准输入输出）。 |
 | `defaultPort` | 可选整数（`1..65535`）；`bridge` 驱动必须由 `ludens.json.port` 或 `defaultPort` 提供合法端口。 |
-| `needsGame` | 可选布尔值，标识 Bridge 就绪前是否需要启动后端并加载游戏；可手动准备设备，或由启动器使用 `ludens.json.game` 启动。 |
-| `launchHint` | 设备准备与手动启动提示文本（在 Dashboard 与 CLI 帮助中展示）。 |
+| `needsGame` | 可选布尔值，标识 Bridge 就绪前是否需要启动并加载目标后端（如模拟器场景通过 `ludens.json.game`）；可手动准备设备，或由启动器使用 `ludens.json.game` 启动。 |
+| `launchHint` | 设备准备与手动启动提示文本（在控制台与 CLI 帮助中展示）。 |
 | `launchCommand` / `launchEnv` | 可选后端启动命令数组（不含游戏路径，由启动器追加）与环境变量映射（`LUDENS_BRIDGE_PORT` 由实际端口覆盖）。 |
 | `load({ port, command, clock })` | 异步工厂函数，连接设备并返回 `{ capabilities: { controllers }, onDisconnect, close }`，可另带 `version`；具体类型见 [registry.ts](../../../baseware/src/drivers/registry.ts)。 |
 
@@ -152,8 +152,8 @@ Baseware 将全局驱动库（`~/.ludens/drivers.json`，契约见 [drivers.ts](
    - `http` / `sse`：Streamable HTTP 或 Server-Sent Events MCP 端点。
 3. **多设备并发挂载与精确路由**：
    - 工作区通过 `machines.allowed` 声明允许访问的受控节点池，通过 `machines.active` 指定默认主控节点。
-   - 运行期可通过 `ludens machine list | use <id> | connect <id...> | disconnect <id>`（或控制台 `?view=baseware` 主从式节点中枢）在不重启 Host 与 Baseware 的前提下动态切换主控节点或并发挂载多台设备。
+   - 运行期可通过 `ludens machine list | use <id> | connect <id...> | disconnect <id>`（或控制台「设备（Devices）」视图（`?view=baseware`））在不重启 Host 与 Baseware 的前提下动态切换主控节点或并发挂载多台设备。
    - 并发挂载多台设备时，未带前缀的调用（如 `controller/screen.capture`）自动路由至当前主控节点；带节点前缀的调用（如 `controller/<machineId>/screen.capture` 或 `ludens_tools.call("controller/screen.capture", machine="<machineId>")`）精确路由至目标节点。
 4. **断联自愈同步与 3 次重连失败自动暂停**：
    - 当受控设备断联后重新启动时，Baseware 后台自愈循环会自动重连并广播 `baseware_reconnected` 事件。
-   - 当自主运行（`mode: "auto"`）期间主控设备发生断联，Ludens Host 会依次记录 `device_disconnected` 并执行最多 3 次自动重连尝试（`device_reconnect_attempt`）；若仍失败，则记录 `device_reconnect_failed` 与 `device_paused`，并自动暂停回 `manual` 模式。
+   - 当自主运行（`mode: "auto"`）期间主控设备发生断联，Ludens Host 会依次记录 `device_disconnected` 并执行最多 3 次自动重连尝试（`device_reconnect_attempt`）；若仍失败，则记录 `device_reconnect_failed` 与 `device_paused`，并自动暂停回 手动待命（`manual`）模式。

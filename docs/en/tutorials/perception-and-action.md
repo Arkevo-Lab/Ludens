@@ -1,123 +1,166 @@
-# Resident Perception-and-Action State Machine
+# Perception, Action & Performance Tuning
 
-In realtime interactive environments, the resident `perception.py:Perception` process runs a continuous state machine for high-frequency sampling and in-process closed-loop control, writing observations to `.ludens/timeline/`. Capabilities can share memory, emit effects, and transition between states without IPC, so epoch-bound control programs run in the same process. The capability decorators and timeline envelope conventions are covered in [Workspace and Capability Programming](workspace.md).
+Instead of burning slow multimodal LLM round trips on high-frequency visual checks, Ludens runs a persistent Python worker in each workspace (`perception.py`). During **Auto Run**, it continuously captures frames, records 30 Hz fMP4 video into `.ludens/timeline/`, and executes local state machines with automatic hot-reload.
 
-All CLI commands below run in the **target workspace directory**, assuming the repo's `core/bin` and `baseware/bin` are on `PATH`. For cross-directory operation, pass `ludens --workspace /absolute/path/to/workspace` before the subcommand.
+For background on why sampling cadence, operator windows, and host resource limits live at different layers, see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md).
 
-## Resident Perception and History Reads
+## 1. Writing Resident `perception.py`
 
-### 1. `perception.py:Perception` Lifecycle
+A workspace `perception.py` must expose either a `Perception` class with `start(self, context)`, `@observe @record @capability` method `sample(self)`, and `close(self)`, or a single top-level synchronous `@observe @record @capability` function.
 
-The `Perception` class in `perception.py` runs in a dedicated resident Python process (template: [core/templates/perception.py](../../../core/templates/perception.py)):
+Do **not** set a `sample_hz` attribute on `Perception` and do **not** put `time.sleep(...)` throttling inside `sample()`. Sampling frequency is governed by the host infrastructure (`LUDENS_PERCEPTION_SAMPLE_HZ`, default `30.0` Hz), and the scheduler automatically waits for slow captures without overlapping ticks.
 
-- `start(self, context)`: runs once when the process starts or on `reload`; load deep-learning weights, initialize state, or start background sampling threads here. `context` contains `workspace`, `runDir`, and `generation`.
-- `sample(self)`: must be annotated with `@observe`, `@record`, and `@capability`; `@observe` selects it as the workspace's main observation capability. While a control lease (`auto` epoch) is active, the scheduler calls the active state continuously at the host-configured rate `LUDENS_PERCEPTION_SAMPLE_HZ` (default `30.0` Hz, which also serves as the nominal frame rate for recording; `Perception.sample_hz` class attributes are ignored — see [Why Perception Parameters Are Stratified Across Three Layers](../insights/perception-parameters.md)). If a single sample takes longer than one period, the next sample is deferred rather than overlapping concurrently or catching up with a backlog.
-- `close(self)`: called on `reload`, `stop`, or Host exit to release self-owned resources.
+The `sample()` method (and any state target inside the resident worker) returns a dictionary whose allowed top-level keys are `text`, `data`, `media`, `sampledAt`, `sources`, `space`, `timeline`, `effect`, and `transition`.
 
-The resident runs a continuous state machine in one Python process. Any active capability may return an optional `effect` (`{"id": "controller/...", "arguments": {...}}`, or a list of such objects) to request closed-loop actuation, and an optional `transition` (`"method_name"` or `{"to": "method_name", "arguments": {...}}`) to select the capability called on the next tick. Transition targets resolve to capabilities on the same instance, module, or workspace without crossing a process boundary, so instance attributes and module globals provide shared-memory context across ticks.
+### Closed-Loop State Machine Example
 
-**Automatic reload on source edits**: edits to `perception.py` or its imported workspace `.py` modules automatically reload the resident process (non-Python assets never trigger a reload); explicit history queries survive the reload and the new generation preserves prior generations. For an explicit restart without editing sources, run `ludens perception reload`.
-
-Without a `Perception` class, `perception.py` may instead define a top-level `@observe @record @capability` function with any name. Default live and offline timeline reads select the unique `@observe` channel, including a recorded capability in another workspace module; `@observe` does not schedule that other module automatically. With no marker, the default remains `python/perception.py:Perception.sample`. Duplicate markers produce diagnostics for every conflicting declaration and prevent the resident from starting.
-
-The host grants the resident its control epoch on entering `auto`, preserves that lease across perception reloads, and revokes it on handback. Shiori's control cycle is the resident's lifecycle: continuous sampling and video segment recording run only while that lease is active. Entering `auto` starts the sampler immediately; handback joins the in-flight tick, flushes the final `perception_stats`, and seals the active fMP4 video segment to `status: "ready"` before the cycle's `control(manual)` event, while timeline reads (`observe`), `append`, and the state-machine RPCs remain available in `manual` standby without sampling. Controller effects are skipped in manual mode without a lease; local `python/` effects still execute in-process. The resident RPCs `state`, `transition`, and `lease` inspect the active capability, select its next arguments, and update the epoch/input generation respectively. Use `python/path.py:function` for a cross-module target; subsequent bare function names resolve in that active module. Only `@record` states publish observations, and the default observation channel does not change when the active state changes.
+All states inside `perception.py` execute in the same Python process, sharing `self` attributes zero-copy. You can emit immediate capability calls via `effect` (`{"id": "...", "arguments": {...}}` or a list of effect objects) and switch active state via `transition` (`"<target>"` or `{"to": "<target>", "arguments": {...}}`):
 
 ```python
-from ludens_tools import capability, observe, record
+from ludens_tools import Client, capability, observe, record
 
 class Perception:
-    def start(self, context):
-        self.tracking = False
+    def start(self, context: dict) -> None:
+        self.client = Client()
+        self.alert_streak = 0
 
     @observe
     @record
     @capability
-    def sample(self):
-        """Observe the environment and enter tracking when a target appears."""
-        return {
-            "text": "target acquired",
-            "effect": {"id": "controller/pad.play", "arguments": {"inputs": [{"atMs": 0, "durationMs": 120, "key": "a"}]}},
-            "transition": {"to": "track", "arguments": {"target": "marker"}},
+    def sample(self) -> dict:
+        """Capture a frame from the primary controller, track status transitions, and trigger alerts locally."""
+        capture = self.client.call("controller/screenshot", {})
+        observations = capture.get("observations", [])
+        # Replace inspect_alert_badge with your workspace's CV/detector logic
+        alert_active = self._detect_alert(capture)
+        self.alert_streak = self.alert_streak + 1 if alert_active else 0
+
+        response: dict = {
+            "text": f"state=watch streak={self.alert_streak}",
+            "data": {"state": "watch", "alert": alert_active, "streak": self.alert_streak},
+            "media": observations,
         }
+        if self.alert_streak >= 3:
+            response["effect"] = {"id": "controller/relay.trigger", "arguments": {"channel": 1}}
+            response["transition"] = {
+                "to": "python/perception.py:Perception.cooldown",
+                "arguments": {"remaining": 15},
+            }
+        return response
 
     @capability
-    def track(self, target: str):
-        """Track the target using state shared with sample in this process."""
-        self.tracking = True
-        return {"text": f"tracking {target}"}
+    def cooldown(self, remaining: int = 15) -> dict:
+        """Hold off repeat triggers while continuing observation sampling."""
+        self.alert_streak = 0
+        if remaining <= 1:
+            return {"text": "state=watch", "transition": "python/perception.py:Perception.sample"}
+        return {
+            "text": f"state=cooldown remaining={remaining - 1}",
+            "transition": {
+                "to": "python/perception.py:Perception.cooldown",
+                "arguments": {"remaining": remaining - 1},
+            },
+        }
 
-    def close(self):
+    def close(self) -> None:
         pass
+
+    def _detect_alert(self, capture: dict) -> bool:
+        return False
 ```
 
-A new workspace's `Perception.sample()` raises `NotImplementedError` by default; the system never substitutes a default screenshot for unimplemented perception. Editing Python source reloads the resident automatically while retaining persistent history. Changes to weights or other non-Python assets require `ludens perception reload`. A stopped resident stays stopped after edits until explicitly reloaded.
-
-### 2. Perception Management and History Query Commands (`ludens observe`)
+Inspect or switch the live state machine from CLI (`ludens perception`) or Python (`Client().state()` / `Client().transition(...)`):
 
 ```sh
-# Lifecycle, state-machine control, and auto-inject policy management
 ludens perception status
 ludens perception state
-ludens perception transition track --args '{"target":"marker"}'
-ludens perception reload
-ludens perception stop
-ludens perception inject          # Show current auto-inject policy (on / off)
-ludens perception inject off      # Stop auto-appending observations to model context, keep sampling and recording
-ludens perception inject on       # Resume auto-appending
-
-# Read timeline history (archived records only, never triggers resampling)
-ludens observe
-ludens observe --id <record-id> --images
-ludens observe --at 2026-10-27T01:00:00Z
-ludens observe --capability python/sensors.py:temperature
-ludens observe --capability '*' --start 2026-10-27T01:00:00Z --limit 8
+ludens perception transition python/perception.py:Perception.cooldown --args '{"remaining":10}'
+ludens perception inject on
 ```
 
-- **Sampling decoupled from auto-injection**: `ludens perception inject off` only stops auto-appending new observations and sampler state to the model at each prompt start; background `sample()`, video recording, and explicit `observe` queries keep running, mid-turn observation is always performed explicitly via `observe`, and tool results are never appended with observations. `ludens perception stop` halts the sampling process and timeline writer entirely until the next `reload`.
-- **Query dimensions and pagination**: reads the latest record of the main channel selected by `@observe` (the `Perception.sample` template) by default; `--capability` filters by another `@record` capability or takes `'*'` to query the whole timeline; `--at` returns the last record with `recordedAt` no later than the given time; `--start` / `--end` paginate in ascending `recordedAt` order over a closed interval (default `8` records, max `64`; pass the returned `nextAfter` to `--after` for the next page).
-- **Terminal image delivery**: adding `--images` in the agent's `bash` tool delivers images straight into the model through the OMP terminal image channel (max 32 images / 40 MiB per page).
+Keep `ludens perception inject on` enabled when Shiori should receive freshly sampled primary observations once per turn start while keeping tool replies lean and cache-friendly; toggle `ludens perception inject off` if you only want explicit `ludens observe` queries.
 
-### 3. Query Result Shape and Error Codes
+## 2. Hot-Reload & `inputGeneration` Lease Isolation
 
-CLI `ludens observe`, Python `Client().observe(query)`, and the OMP-native `observe` tool return the same structured envelope `{queryId, ok, query, records, hasMore, nextAfter?, availability?, error?}`. When `ok: false`, `error.code` distinguishes the cause:
+Saving `perception.py` or any `.py` module imported by it automatically reloads the resident Python worker. If you modify non-Python assets (such as template images or detector weights on disk), trigger a manual reload:
 
-| Error code | Trigger |
-| --- | --- |
-| `NOT_READY` | Querying the latest record, but the selected capability has not produced a usable sample yet; also returned while the main channel is still loading. |
-| `NOT_FOUND` | The specified `--id` does not exist, or there is no matching record before the `--at` time. |
-| `EXPIRED` | A time or range query touches an evicted non-persistent window and no readable record is returned (if a range query is only partially expired but still has readable records, it returns `ok: true` with `availability.expired = true` marked). An unknown `--id` always returns `NOT_FOUND` and is never assumed to have existed. |
-| `UNAVAILABLE` | The perception process (timeline writer) has stopped or was replaced during the query, or the latest main-channel sampler is unavailable (e.g. loading or sampling failure). While the writer is still running, explicit history queries are unaffected by sampler faults. |
-| `QUERY_FAILED` | Illegal arguments, disk read errors, or cold video-frame decode failures. |
+```sh
+ludens perception reload
+```
 
-### 4. Timeline Storage and Encoding-Budget Environment Variables
+During **Auto Run**, reloading increments `inputGeneration` under the active Control Cycle `epoch`, immediately zeroes held inputs and cancels in-flight actions from the old generation, and swaps in the new code without interrupting budgets or your Shiori thread.
 
-The host process supports the following environment variables for timeline windows and video encoding parameters (the effective values are visible in the `history` field of `ludens perception status`):
+## 3. Querying `.ludens/timeline/` (`Client.observe()` & `ludens observe`)
 
-The sampling rate defaults only when its environment variable is unset. Empty or whitespace-only values, non-numeric values, zero, negative numbers, NaN, and infinity fail worker startup with a variable-specific validation error; surrounding whitespace on a valid number is accepted.
+During **Auto Run**, every `@record` sample writes structured metadata and compressed 30 Hz H.264 fragmented MP4 segments under `.ludens/timeline/`. Even in **Manual Standby**, the resident worker stays warm to answer read-only history queries.
 
-| Environment variable | Default | Description |
+Supported query parameters for `Client().observe(query)` (`limit` `1..64`):
+
+| Query Pattern | Parameters | Behavior |
 | --- | --- | --- |
-| `LUDENS_PERCEPTION_SAMPLE_HZ` | `30` | Target continuous sampling frequency and nominal video frame rate for `Perception.sample()` (positive finite number). |
-| `LUDENS_PERCEPTION_PERSIST` | `1` | When set to `0` (or `false`), only the in-memory/temporary hot window is kept and is cleared when the process stops or on `reload`. |
-| `LUDENS_PERCEPTION_HOT_SECONDS` | `600` | Seconds retained per channel in the hot window (10 minutes); originals in the window are deliverable directly from memory; overridable by workspace settings. |
-| `LUDENS_PERCEPTION_HOT_BYTES` | `1073741824` | Global byte budget for the hot window (1 GiB); the largest channel shrinks first under pressure. |
-| `LUDENS_PERCEPTION_SEGMENT_SECONDS` | `3600` | Rotation interval for timeline metadata JSONL and index files (1 hour). |
-| `LUDENS_PERCEPTION_SEGMENT_BYTES` | `268435456` | Byte cap per segment for metadata and non-video media (256 MiB). |
-| `LUDENS_VIDEO_SEGMENT_SECONDS` | `300` | MP4 video segment duration (5 minutes); overridable by workspace settings. |
-| `LUDENS_VIDEO_IDLE_SECONDS` | `10` | Idle finalization seconds after sampling stops; overridable by workspace settings; also finalizes when the sampling rate changes or the process stops. |
-| `LUDENS_VIDEO_QUEUE_BYTES` | `33554432` | Memory cap for the background video-encoding queue (32 MiB, including compressed input and RGB buffers). |
-| `LUDENS_VIDEO_QUEUE_FRAMES` | `64` | Maximum pending frames in the background video-encoding queue. |
-| `LUDENS_VIDEO_STREAMS` | `16` | Cap on simultaneously active image-encoding streams (least-recently-used stream is finalized first when exceeded). |
-| `LUDENS_VIDEO_QUERY_BYTES` | `33554432` | Decoded-output byte cap per cold history query (32 MiB). |
+| Latest frames (poll-friendly) | `{"limit": 8, "ifNoneMatchSequence": seq}` | Returns up to `limit` newest frames, or `{"unchanged": True}` if sequence matches `seq` |
+| Point lookup | `{"at": "2026-04-01T10:00:00Z"}` | Returns the record at or immediately before the ISO timestamp (cannot combine with `start`/`end`/`after`) |
+| Time range | `{"start": "...", "end": "...", "limit": 32}` | Pages through records between two ISO timestamps (`after` optionally resumes from a sequence) |
+| Exact ID / channel | `{"id": "<record-id>"}` or `{"capability": "*"}` | Fetches a specific record ID (cannot combine with time/sequence filters) or expands across all recorded capabilities |
 
-The workspace `.ludens/settings.json` may override `hotSeconds`, `videoSegmentSeconds`, and `videoIdleSeconds`, with precedence: settings file > host environment variables > built-in defaults. Dashboard’s Perception page edits these saved overrides independently of the running process. Use exact integer seconds, presets, or the optional slider; choosing inheritance removes that field’s override. Inherited values are not presented as known runtime defaults. Valid positive custom values already in the file, including fractions or values beyond the editor range, remain visible and unchanged until that field is edited. Byte budgets remain controlled by environment variables.
+CLI equivalent:
 
-Drafts are separated by workspace identity and registered path, kept in the current browser tab, and can be discarded explicitly. When browser session storage is available, a page reload also restores them; otherwise only the current page lifetime is retained. Reading saved settings preserves unfinished input. Saving writes only changed fields and does not reload perception. A response that cannot be confirmed keeps the draft and offers a read to check the saved values rather than repeating the write. Requests include the expected workspace path, so an old draft cannot silently write to a newly relocated registration.
+```sh
+ludens observe --limit 5 --images
+ludens observe --capability '*' --start 2026-04-01T10:00:00Z --end 2026-04-01T10:05:00Z
+ludens observe --id <record-id>
+```
 
-After saving, copy the page’s workspace-specific `env -u LUDENS_SOCKET ludens --workspace '/absolute/workspace/path' perception reload` command and run it when appropriate. Clearing an inherited `LUDENS_SOCKET` ensures the command targets this workspace’s canonical host. Then use **Check running values** for a separate, read-only host status request. Current values require a ready perception process with an identified generation, PID, and complete loaded settings; stopped or incomplete observations never prove application. The page compares explicit saved overrides against the observed values, while inherited fields show the observed value without guessing its environment/default source. A timestamped check is an observation, not continuous monitoring or proof that a later save has been applied. Registered workspaces without a running host can still be configured.
+Check `res["ok"]` in Python when reading observations defensively. Typical `error.code` values from the host subsystem are:
 
-Video uses fragmented MP4 (`+frag_keyframe+empty_moov`), with roughly one keyframe interval every two seconds of sampled volume. In an unfinalized segment, fully persisted fragments are readable; the newest not-yet-persisted frames are explicitly reported as unreadable rather than substituted with neighboring frames. Each segment's `.mp4.json` publishes readable progress of complete fragments via `readableBytes`, `lastReadablePts` (microsecond PTS), `durationSeconds`, and `frames`, updated to final values on finalization. Dashboard playback reads in fixed byte ranges and loads new fragments after playing past the current range; when no frame is readable yet it waits for progress updates instead of treating the error state as a successful fragment. The hot window expires by time and shrinks the largest channel first when over budget; queries in non-persistent mode report evicted history gaps, and `ludens perception status`'s `history.budgetEvictions` updates live with the current process.
+- `UNAVAILABLE`: Perception worker is stopped, in an error state, or replaced mid-query
+- `NOT_READY`: Worker is still `loading` or no sample has completed in the active generation yet
+- `EXPIRED`: Requested non-latest interval already evicted from the non-persistent memory buffer (`LUDENS_PERCEPTION_PERSIST=0`)
+- `NOT_FOUND`: No record matches the requested `id` or `at` timestamp
+- `QUERY_FAILED`: Invalid query parameter combination or media decode error
 
-## Lease Authority and Input Generations
+To inspect a contiguous slice of frames (for example after `with record_window() as win:` or from a timeline `record_id`), use `Client().replay(win)` or `Client().replay(around=record_id, before_seconds=2.0, after_seconds=2.0)`.
 
-The unified resident state machine adopts the current host control `epoch` on takeover. `PerceptionRuntime` grants its `inputGeneration` before starting replacement code and clears it before waiting for old Python shutdown. Reload and `stop()` release current device inputs, including concurrent CLI inputs, and reject calls from the old generation while preserving the control `epoch`, OMP session, and remaining budget. If input cleanup fails, the Host hands control back. Human handoff (`auto off`), budget exhaustion, or device disconnect revokes the lease while perception may continue without device effects. After `stop()`, use an explicit `ludens perception reload` to restart; after handback, use `ludens auto on` to grant device control again.
+## 4. Storage Retention & Sampling Environment Variables
+
+Operator retention windows live in `.ludens/settings.json` and can be adjusted safely from Console **Config** (`?view=perception`) under **Perception Recording**:
+
+| Setting Key (`.ludens/settings.json`) | Env Fallback | Valid Range | Default | Purpose |
+| --- | --- | --- | --- | --- |
+| `hotSeconds` | `LUDENS_PERCEPTION_HOT_SECONDS` | `10..3600` | `600` | Seconds of raw recent records kept in the hot memory window |
+| `videoSegmentSeconds` | `LUDENS_VIDEO_SEGMENT_SECONDS` | `10..3600` | `300` | Rotation duration (seconds) for `.ludens/timeline/video/*.mp4` segments |
+| `videoIdleSeconds` | `LUDENS_VIDEO_IDLE_SECONDS` | `1..600` | `10` | Idle timeout before flushing/sealing an inactive video track |
+
+Host infrastructure resource ceilings and rate controls (set in the host environment when starting `ludens up` or `ludens run`):
+
+- `LUDENS_PERCEPTION_SAMPLE_HZ`: Target sampling ceiling (`30.0` by default)
+- `LUDENS_PERCEPTION_PERSIST`: Persistent `.ludens/timeline/` storage (`1`/`true` by default; `0`/`false` for RAM-only hot window)
+- `LUDENS_PERCEPTION_HOT_BYTES` (`1 GiB`), `LUDENS_PERCEPTION_SEGMENT_SECONDS` (`3600`), `LUDENS_PERCEPTION_SEGMENT_BYTES` (`256 MiB`): Timeline segment budgets
+- `LUDENS_VIDEO_QUEUE_BYTES` (`32 MiB`), `LUDENS_VIDEO_QUEUE_FRAMES` (`64`), `LUDENS_VIDEO_STREAMS` (`16`), `LUDENS_VIDEO_QUERY_BYTES` (`32 MiB`): fMP4 encoder and replay decode guardrails
+
+## 5. Multimodal Transport, Image URLs & Performance Tuning
+
+Large inline base64 images increase request payload size and affect transport reliability. Tune Shiori's multimodal connection in Console **Config** -> **Connection & Transport** (`?view=perception`), globally in **Settings** -> **Model & Transport** (`?view=settings`), or via `ludens config set`:
+
+```sh
+ludens config set defaults.connection.openaiWebsockets auto
+ludens config set defaults.connection.cacheRetention long
+ludens config set defaults.connection.appendOnlyContext auto
+ludens config set defaults.connection.imageUrls.enabled true
+ludens config set defaults.connection.imageUrls.backends '["provider-files","cloudflared","tailscale","uguu","tmpfiles","litterbox","0x0","catbox"]'
+```
+
+Supported values per field:
+
+- `openaiWebsockets`: `"auto"`, `"on"`, or `"off"`
+- `cacheRetention`: `"auto"`, `"short"`, `"long"`, or `"none"`
+- `appendOnlyContext`: `"auto"`, `"on"`, or `"off"`
+- `imageUrls.enabled`: `true` or `false`
+- `imageUrls.backends`: ordered fallback list selected from `"provider-files"`, `"cloudflared"`, `"tailscale"`, `"uguu"`, `"tmpfiles"`, `"litterbox"`, `"0x0"`, `"catbox"`, `"pinggy"`, `"localhost-run"`
+
+After running cycles, review latency and context behavior in Console:
+
+- **Performance (`?view=perf`)**: Track completed turns, P95 and median turn latency, prompt cache hit rate, decode speed, duty cycle, sampler rate, autonomy ratio, and per-request trace history.
+- **Loop Simulator** (**Config -> Loop Simulator** tab or **Developer** `?view=dev`): Model how system prompts, conversation turns, perception text/images, and `compactionThreshold` affect peak context tokens across presets before running long overnight tasks.
+
+Next, learn how to operate every Console view and diagnose stalled control cycles or failed checks in [Console Operations & Debugging](console-and-debugging.md).

@@ -1,6 +1,6 @@
 # Injection Converges to a Single Per-Turn Channel
 
-If an agent just sits in a terminal doing Q&A, it knows when the environment changed. But our agents are dropped into a game environment that **samples continuously at 30Hz and hands over device control per turn**: by the time the model finishes a batch of tool calls, the world on screen may already be a different one. "The model must hold the latest frame before deciding" thus became a hard requirement — this note covers the second injection channel we built to satisfy it, and why we ended up deleting it entirely.
+If an agent just sits in a terminal doing Q&A, it knows when the environment changed. But our agents are running inside a real-time interactive environment (robotics, monitoring, desktop workflows, or real-time games) that **samples continuously at 30 Hz under per-cycle control leases**: by the time the model finishes a batch of tool calls, the world on screen may already be a different one. "The model must hold the latest frame before deciding" thus became a hard requirement — this note covers the second injection channel we built to satisfy it, and why we ended up deleting it entirely.
 
 ## What the original design intended
 
@@ -19,13 +19,13 @@ Sounds reasonable on paper, but in practice it introduced four clear flaws.
 
 **2. Non-deterministic attribution.** The frame was attached to whichever tool in the batch **finished last**. With `read` + `bash` in the same batch, whoever returns later carries the frame; a slight timing difference between runs lands the same frame in a different tool's result, muddying log attribution and session replay.
 
-**3. Uncontrolled frequency.** Auto queries use latest mode, where the spacetime axis returns only the **newest** record (the `_select` in `core/python/ludens_tools/_observation_history.py`), and deduplication only checks whether the newest main-sample ID changed. With the sampler running at 30Hz by default, new frames inevitably arrive between boundaries — so **every tool batch triggered an injection**. In a simulated 300-second takeover, 27 of 31 injected frames came from the end-of-batch channel.
+**3. Uncontrolled frequency.** Auto queries use latest mode, where the spacetime axis returns only the **newest** record (the `_select` in `core/python/ludens_tools/_observation_history.py`), and deduplication only checks whether the newest main-sample ID changed. With the sampler running at 30Hz by default, new frames inevitably arrive between boundaries — so **every tool batch triggered an injection**. In a simulated 300-second control cycle, 27 of 31 injected frames came from the end-of-batch channel.
 
 **4. Persistent context growth.** The enriched tool results were persisted into session history, while Ludens sets the provider image-count budget to `Infinity` (see the caching discussion in [OMP background compaction rework](omp-compaction.md)). Once a frame entered history, only compaction could clear it — one of the most expensive operations in the system.
 
 ## Running the numbers
 
-Once this mechanism was built into the Loop injection workbench (dashboard developer panel, `?view=dev&panel=loop`), the numbers spoke for themselves. Same parameters (300s budget, 30-request cap, 8 tool batches per turn, ~1.1k tokens per image):
+Once this mechanism was built into the Loop injection workbench (Console **Developer** view, `?view=dev&panel=loop`), the numbers spoke for themselves. Same parameters (300s budget, 30-request cap, 8 tool batches per turn, ~1.1k tokens per image):
 
 | Strategy | Injected frames | Delivered frame tokens | Peak wire | Retained perception share of peak |
 | --- | --- | --- | --- | --- |

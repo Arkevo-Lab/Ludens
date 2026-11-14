@@ -519,7 +519,7 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
 
   assert.match(runningHtml, /data-model-picker-trigger/);
   assert.match(runningHtml, /data-locked="true"/);
-  assert.match(runningHtml, /Pause auto loop before switching models/);
+  assert.match(runningHtml, /Reclaim control before switching models/);
   assert.doesNotMatch(runningHtml, /感知注入/);
   assert.doesNotMatch(runningHtml, /Inject:\s*(ON|OFF)/i);
 

@@ -44,7 +44,7 @@ In `pi-coding-agent` (`session-maintenance.ts` / `speculation-lead.ts`), we remo
 
 ### 2. If the background is still computing at the threshold (`pendingSpec`), wait for it instead of restarting
 
-If the background candidate is still in flight when the threshold is reached, it has likely been running for fifty or sixty seconds and is about to finish. Aborting it to open a fresh foreground request only wastes that work. We now wait out the in-flight background request with `untilAborted` and validate + splice; the wait is bound to the control cycle's cancellation signal, so budget expiry or human handoff still interrupts cleanly and never commits late.
+If the background candidate is still in flight when the threshold is reached, it has likely been running for fifty or sixty seconds and is about to finish. Aborting it to open a fresh foreground request only wastes that work. We now wait out the in-flight background request with `untilAborted` and validate + splice; the wait is bound to the control cycle's cancellation signal, so budget expiry or Reclaim Control still interrupts cleanly and never commits late.
 
 ### 3. Isolate the background compaction request from the foreground WebSocket connection
 

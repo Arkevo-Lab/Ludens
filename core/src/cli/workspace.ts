@@ -17,17 +17,17 @@ ludens down [--keep-emulator] [--dashboard] [--pet]
 These commands use <workspace>/ludens.json. Paths are relative to that workspace.
 init uses the configured workspaceRoot unless --workspace selects a directory.
 An explicit directory does not require --name. Global defaults are copied at creation only.
-New hosts start in manual mode; use ludens auto on to let the agent act.
-Ludens Pet is off by default. init --pet enables it in ludens.json.
+New hosts start in manual standby; run ludens auto on to start Auto Run.
+Desktop Pet is off by default. init --pet enables it in ludens.json.
 up --pet or --no-pet overrides that setting for this launch without changing ludens.json.
---no-pet leaves any already running shared Pet open.
+--no-pet leaves any already running shared Desktop Pet open.
 Repeated up reuses running services; down then up applies configuration changes.
-down stops this workspace's managed host, Baseware and emulator (save your game first).
-Use down --keep-emulator before changing host settings to preserve the current game.
-The shared Dashboard stays up unless --dashboard is given by its owning workspace.
-Ludens Pet is shared across workspaces; down --pet stops its managed background job.
-A Ludens Pet app opened separately is reused and stays open after down.
-Choose which workspace Ludens Pet follows in the Dashboard; up preserves that selection.
+down stops this workspace's managed host, Baseware and target emulator/process (persist unsaved target state first).
+Use down --keep-emulator before changing host settings to keep the current target process running.
+The shared Console stays up unless --dashboard is given by its owning workspace.
+Desktop Pet is shared across workspaces; down --pet stops its managed background job.
+A Desktop Pet opened separately is reused and stays open after down.
+Choose which workspace Desktop Pet follows in the Console; up preserves that selection.
 The driver manifest decides the bridge port, backend startup and preparation hints; see baseware driver list.`;
 
 export async function workspaceCommand(command: string, args: string[], selectedWorkspace: string, explicitWorkspace = false) {

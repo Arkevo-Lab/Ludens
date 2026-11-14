@@ -1,162 +1,155 @@
-# 安装与工作区启停
+# 快速开始
 
-本篇介绍如何安装 Ludens 各组件、配置 Python 运行时、启动一等 **Ludens 桌面端（Desktop UI）** 或统一 **App Daemon**（`ludens app-server`），以及在界面内按需拉起或通过 `ludens init / up / auto / down` 管理工作区 **Core** 的日常生命周期。模拟器与桌面驱动的具体准备步骤见 [设备与驱动准备](devices.md)，单组件前台调试、包脚本约定与测试见 [控制台调试与验证](debugging-and-verification.md)。
+本教程带你完成环境安装与构建，掌握桌面端应用、本地浏览器控制台和无头 CLI 三种启动方式，学习开启**自主运行**、通过**事件池**与 **Steer Now** 协同干预，以及随时**收回控制权**的完整流程。
 
-除显式 `cd` 到目标工作区外，文内命令均在仓库根目录执行。应用全局目录默认为 `~/.ludens`，可通过 `LUDENS_HOME` 指定绝对路径；工作区可以放在任意目录，配置、会话、录制与历史均随工作区保存。源码仓库不承载运行状态；ROM、固件、密钥与游戏存档也应保存在仓库外。
+## 1. 环境前置条件
 
-## 安装
+开始安装前，请确认系统已备齐以下运行环境与凭据：
 
-### 1. 环境前提与凭据
+- **Bun** `1.4+`
+- **Node.js** `22.13+`（或 `24+`）
+- **Python** `3.12+` 与 **uv**
+- **已配置好的模型 / OMP 认证凭据**（用于驱动底层 LLM 推理）
 
-- **操作系统**：支持 macOS、Linux 与 Windows（使用内置 `cua` 驱动接管本机桌面时需按上游 Cua Driver 要求授予对应系统权限）。
-- **工具链**：准备 **Bun 1.4+**、**Python 3.12+**、**Node.js 22.x（22.13 起）或 24+** 与 **uv**。可选桌宠共用同一套 JavaScript workspace 安装（Electron 是 `app` 的 devDependency）。
-- **模型凭据**：启动 Agent 前需在本机完成 **OMP 模型登录**。Ludens 固定使用 **OMP 18.18.8** 并直接复用其凭据存储，默认模型为 `openai-codex/gpt-6.1-sol`。
+## 2. 克隆仓库、安装依赖与构建
 
-### 2. 安装核心组件
-
-在仓库根目录使用根 `bun.lock` 一次安装 JavaScript workspaces，再构建静态网页控制台导出产物（`app/out`）。Bun 会按根 `package.json` 自动应用 [core/patches/](../../../core/patches/) 下的 OMP 依赖补丁。Ludens Python 运行时保留独立的 `uv.lock`，桌面端与桌宠共用 `app` workspace 安装。不要在 `app` 中运行 `npm ci`：npm 会选择根 workspace，而根目录使用 Bun，不维护 npm 锁文件。
+在仓库根目录执行安装构建，并将各子包的命令行工具加入 `PATH`：
 
 ```sh
+git clone https://github.com/Arkevo-Lab/Ludens.git && cd Ludens
 bun install --frozen-lockfile
 uv sync --project core/python --frozen
 (cd app && npm run build)
-
 export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 ```
 
-`export PATH` 仅对当前终端生效；新开终端请同步配置 shell profile 或使用 `baseware/bin/baseware`、`core/bin/ludens`、`app/bin/ludens-app` 绝对路径。生产态下由 `@ludens/core` 的 `ludens app-server`（别名 `ludens serve`）直接承载 `/api/*` 与 `app/out`，无需运行 Next.js 服务端进程。
+执行完 `export PATH` 后即可在当前终端直接调用 `baseware`、`ludens` 与 `ludens-app`。如需长期生效，可将带有仓库绝对路径的 `export PATH=...` 写入 `~/.zshrc` 或 `~/.bashrc`。
 
-### 3. Python 运行时解析规则
+## 3. 三种启动方式
 
-[core/python/pyproject.toml](../../../core/python/pyproject.toml) 与 `uv.lock` 管理正式 `ludens-tools` 包（导入名 `ludens_tools`）以及 PyAV、Pillow、jsonschema 等媒体与校验依赖。`ludens_tools` 仅提供能力声明、客户端与试验登记辅助，执行生命周期与评分由 Shiori 统一管理。
+三种启动方式底层统一运行在 **App Daemon**（`ludens app-server`，按 **1 Workspace = 1 Core** 并发监管各个工作区 **Core**）之上，并共享同一个 `~/.ludens/` 全局注册表。
 
-框架按以下优先级选择 Python 解释器：
+### 方式 A：桌面端应用（Desktop App）
 
-1. 显式环境变量 `LUDENS_PYTHON`；
-2. 仓库内置虚拟环境 `core/python/.venv/bin/python`；
-3. 系统 `PATH` 中的 `python3`。
-
-OMP 原生 shell 会自动注入 `LUDENS_PYTHON`。在工作区脚本中若需复用 `ludens_tools` 及框架依赖，应调用 `"$LUDENS_PYTHON" script.py`；直接运行裸 `python3` 仍遵循用户 login shell，不等同于框架虚拟环境。若将 `LUDENS_PYTHON` 指向外部训练环境（如包含 PyTorch 的 conda/venv），需在该环境中预先安装 `core/python` 包及其依赖。
-
-`ludens up` 与界面内拉起工作区 Core 新建后台服务时会保留当前 Shell 环境中的 `LUDENS_PYTHON`。若服务已经运行，修改终端环境不会更新它；需停止并重新启动相关服务后才会使用新解释器。完成以上安装（及下方桌面应用／桌宠构建）后，若尚未准备目标模拟器或桌面驱动，请先转入 [设备与驱动准备](devices.md)，准备就绪后再回到本页执行 [工作区启动与停止](#工作区启动与停止)。
-
-## 可选桌宠
-
-仅需网页访问时，通过 `ludens app-server` 在浏览器中打开控制台即可，无需安装 Electron。若希望使用自包含的一等 **Ludens 桌面端（Desktop UI）**（主控制台窗口 + 系统托盘 + **Ludens Pet** 桌面伴侣），在仓库根目录构建 Electron 桌面外壳（亦可通过 `desktop:dist` 打包可分发的 macOS `.dmg` 或 Windows NSIS `.exe` 安装包）：
+先构建一次桌面端外壳，再启动原生应用窗口：
 
 ```sh
 (cd app && npm run desktop:build)
-app/bin/ludens-app --show-window
-
-# 可选：生成原生桌面安装包（.dmg / .exe）
-(cd app && npm run desktop:dist)
+ludens-app --show-window
 ```
 
-在未显式传入 `--dashboard <url>` 时，`ludens-app` 会自动在后台拉起并监管 **App Daemon**（`ludens app-server --port 0 --parent-watchdog`），由 App Daemon 按 **1 Workspace = 1 Core** 并发管理多个工作区的 Core 与 Baseware。用户无需预先打开终端或执行 `ludens up`：在应用界面内打开任意工作区（包括 0-Run 空工作区）即可零门槛进入 Live，在输入框直接发送目标消息或点击 `▶` 即自动按需拉起该工作区的 **Core + Baseware**；暂停（`auto off`）后 Core 保持 **Warm Standby** 常驻待命。侧栏「活跃 Core」列表实时展示所有在线 Core 的 `App` / `CLI` 启动来源与单点停止按钮（`■`）；点击主窗口关闭按钮（`×`）仅隐藏至系统托盘并保持 **Ludens Pet** 与全部运行中 Core 在线；显式执行退出（`⌘Q` 或托盘 **Quit**）则会关闭 `App Daemon` 并**仅回收由当前 App 实例拉起的 Core（`launchedBy: "app"`）**，由终端拉起的 `CLI` headless Core（`launchedBy: "cli"`）保持继续运行（`--parent-watchdog` 同时监听父进程 `stdin` EOF，即使桌面外壳异常退出也不会遗留属于 App 的孤儿进程）。
+`ludens-app` 常用启动参数：
 
-**Ludens Pet** 桌宠默认启用 **`!auto` 多 Core 自动跟随模式**，在多个并发 Core 之间优先跳转存在待响应 `🆘` 出站求助（`pendingOutbound > 0`）的工作区，其次跟随当前窗口焦点工作区的在线 Core 或后台活跃 `Auto` Core；所有 Core 停止时进入待命。若通过无头 CLI 编排工作区，可在 `ludens init --name <name> --driver ...` 中追加 `--pet` 或在 `ludens.json` 设置 `"pet": true`，让 `ludens up` 按需拉起共享桌面伴侣并连接本地 App Daemon。也可用互斥的 `ludens up --pet` 或 `ludens up --no-pet` 仅覆盖当次启动而不写回 `ludens.json`（`pet: false` 与 `--no-pet` 均不会关闭已运行的桌面端，需从托盘菜单选择 Quit 退出）。单独启动参数或桌宠冒烟测试见 [Ludens Pet 桌面伴侣](debugging-and-verification.md#3-ludens-pet-桌面伴侣)。
+- `--workspace <path>`：直接打开指定工作区目录
+- `--server <url>`（别名 `--dashboard <url>`）：连接已启动的远程或本地 `app-server`
+- `--profile <path>`：自定义 Electron 用户数据目录
+- `--background`：以后台托盘模式启动，暂不弹出主窗口
+- `--show-window`：启动时立即显示并聚焦控制台窗口
 
-## 工作区启动与停止
+桌面应用会自动拉起并监管 **App Daemon**（`ludens app-server --port 0 --parent-watchdog`）。在窗口中打开 **工作区（Workspaces）**（`?view=workspaces`）切换或新建工作区后，即可零门槛直接进入 **运行（Live）**（`?view=live`，即使 0 条历史运行记录也能直接进入）：输入任务目标并发送或点击 **启动自主运行**，App Daemon 会自动按需拉起该工作区的 **Core + Baseware**（标记为 `launchedBy: "app"`），无需先开终端执行 `ludens up` 或先去配置页手动启动（仍可在 **配置（Config）** `?view=perception` 点击 **启动工作区 / 热重载 Core / 停止**）。侧边栏「**活跃 Core**」列表会实时汇总全部运行中的 Core，展示 `App` / `CLI` 启动来源徽章与单点停止按钮（`■`）。关闭主窗口（`×`）时应用收起至系统托盘并保持所有运行中的 Core 继续工作（可选**桌宠**默认开启 `!auto` 多 Core 自动追踪，按待处理 `🆘` `pendingOutbound > 0` → 当前聚焦工作区 Core → 后台**自主运行** Core 的优先级跟随；可在 **设置** 中开关或通过 `LUDENS_DISABLE_COMPANION=1` 禁用）；完全退出应用（macOS `⌘Q` 或托盘 **Quit**）时会停止 App Daemon 并**仅清理 App 拉起的 Core（`launchedBy === "app"`）**，由 `CLI`（`ludens up`、`launchedBy === "cli"`）启动的后台 Core 会保持不受影响。如需打包原生 `.dmg` 或 `.exe` 安装包，运行 `npm --prefix app run desktop:dist`。
 
-### 1. 初始化与生命周期命令
+### 方式 B：本地浏览器控制台（`ludens app-server` / `npm run dev`）
 
-先按 [设备与驱动准备](devices.md) 准备好目标环境。以下以内置桌面驱动（`--driver cua`）为例在显式目录创建工作区；外部模拟器或桥接驱动需额外传入 `--driver <id> --driver-package '<spec>'`（见 [外部驱动包发现与接入](devices.md#外部驱动包发现与接入)）：
+启动统一多工作区 **App Daemon**（`ludens app-server`，别名 `ludens serve`），同时提供 `/api/*` 接口与静态前端控制台（`app/out`）：
 
 ```sh
-ludens init --name my-task --workspace /absolute/path/to/workspace --driver cua --seconds 1800
-cd /absolute/path/to/workspace
-ludens up --dry-run
-ludens up
-ludens services
-ludens controller list
-ludens auto on
+ludens app-server
 ```
 
-省略 `--workspace` 时，`ludens init --name my-task --driver ...` 使用全局配置的 `workspaceRoot/my-task`；初始父目录为 `$LUDENS_HOME/workspaces`。显式相对路径以当前 shell 目录解析；要初始化当前目录，请使用 `ludens init --workspace . --driver ...`，也支持前置 `ludens --workspace . init --driver ...`。已有工作区使用下文的 `open` 或 `import`，不要重新初始化。只指定名称而不传显式目录时，如 shell 从另一工作区继承了 `LUDENS_WORKSPACE`，请先取消该变量。
+`ludens app-server` 默认监听 `127.0.0.1:3015`（支持 `--host`、`--port <0|1..65535>`、`--static-dir <path>`、`--trusted-origin <origin>` 与 `--parent-watchdog`）。在浏览器打开 [`http://127.0.0.1:3015`](http://127.0.0.1:3015)，前往 **工作区（Workspaces）**（`?view=workspaces`）选择或新建工作区后即可直接进入 **运行（Live）** 按需拉起 Core（或前往 **配置（Config）** `?view=perception` 显式启动工作区）。若你在开发前端界面并需要热更新，保持 `ludens app-server` 运行并在另一终端启动 `(cd app && npm run dev)` 即可。
 
-已有外部驱动工作区还需按 [外部驱动迁移说明](devices.md#外部驱动包发现与接入) 添加 `driverPackage`。
+### 方式 C：无头 CLI 模式
 
-常用工作区与控制命令速查：
+也可以完全在终端中初始化并拉起工作区。以下示例使用 Ludens 内置的桌面自动化驱动（`cua`）：
 
-| 命令 | 行为与边界 |
-| --- | --- |
-| `ludens init --name <name> [--workspace <path>] --driver <id>` | 创建工作区配置、稳定身份与缺失的模板并登记；无显式目录时必须给名称。全局创建默认值写入 `ludens.json`，以后修改全局默认值不改已有工作区。加 `--pet` 显式启用已安装的桌宠。 |
-| `ludens config [show]` · `ludens config set <workspaceRoot\|defaults.field> <value>` | 查看全局配置，或设置未来工作区的父目录及默认配置。 |
-| `ludens workspace open <path>` · `ludens workspace list` | 登记已有工作区，或列出当前全局 home 的登记项。 |
-| `ludens workspace forget <id>` | 只移除索引；不删目录、会话或日志，不停止服务。 |
-| `ludens app-server [--port <n>] [--host <addr>] [--static-dir <dir>] [--parent-watchdog]` | 启动统一的多工作区 **App Daemon**（别名 `ludens serve`，默认 `127.0.0.1:3015`），在同一进程内承载 `/api/*`、`WorkspaceSupervisor`（管理多 Core 并发、设备冲突仲裁与 `launchedBy` 边界）与静态控制台构建产物（`app/out`）；传 `--port 0` 分配临时端口，传 `--parent-watchdog` 在父进程 `stdin` 关闭时自动退出并仅回收由该 App 实例拉起的 Core。 |
-| `ludens up --dry-run` | 校验配置并打印完整进程启动计划，不实际拉起服务；需要新启动 `app-server` 时，实际 `ludens up` 才执行静态构建检查。 |
-| `ludens up [--pet / --no-pet]` | 通过纯 TS `WorkspaceSupervisor` 以 `CLI` 来源（`launchedBy: "cli"`）按需启动或复用模拟器、Baseware、工作区 **Core**（`ludens run`）与 App Daemon（`ludens app-server`）；按 `pet` 设置启用桌宠，也可用互斥的 `--pet` / `--no-pet` 仅覆盖本次启动，不写回配置。新启动的 Core 处于 `manual`（Warm Standby）模式；若复用已在 `auto` 运行的 Core 则继续原控制周期。不同设备/端口的工作区可同时运行；若同物理设备被处于 Warm Standby 的 Core 占用则自动让位，被活跃 `Auto` Core 占用则会返回冲突。CLI 拉起的 Core 不会在桌面 App 退出时被回收。重复 `up` 不会热加载修改后的 `ludens.json`，复用现有 `app-server` 也不会热更新其静态前端产物。 |
-| `ludens services` | 查询当前工作区关联的后台受管任务 PID、状态与最近退出码。 |
-| `ludens auto on [--message '文本'] [--seconds <n>]` | 开启新控制周期（生成新 `epoch`，重置请求预算）并向模型发起推理。省略 `--seconds <n>` 时默认不设时间上限、持续运行直到手动执行 `auto off`；显式传入 `--seconds <n>` 时按指定秒数限时运行。`--message` 仅在该次接管的首轮附加一次，后续续轮不重复注入。 |
-| `ludens auto timer <seconds\|off>` | 在不新开 `epoch`、不释放设备控制权的前提下，就地设置、顺延或清除（`off`）当前活动周期的自动停止倒计时。 |
-| `ludens auto off` | 立即撤销设备操作权并取消 Ludens 管理的在途调用，Core 保持 **Warm Standby**（`manual`）常驻待命且模拟器保持运行；需等待当前周期清理完毕后方可再次 `auto on`。 |
-| `ludens model [<provider/id> [--service-tier none\|priority\|ultrafast] [--effort none\|minimal\|low\|medium\|high\|xhigh\|max]]` | 不带参数时打印当前工作区 Core 生效的 OMP `provider/id` 模型（`--device-only` 模式下为 `none`），`ludens status` 报告实际生效的服务档位与推理强度；传入 `<provider/id>` 时校验已鉴权且具备图像输入能力的 OMP 模型，并**仅在 `manual` 暂停模式下**就地更新当前会话（`auto` 自动运行、`consolidate` 记忆整理期间或携带 `BASEWARE_EPOCH` 的智能体周期内均会拒绝）。追加 `--service-tier none\|priority\|ultrafast` 可选择 Standard（清除 `serviceTier`）、Fast（`priority`）或 Ultra（`ultrafast`），追加 `--effort none\|minimal\|low\|medium\|high\|xhigh\|max` 可覆盖或重置（`none`）推理强度；模型不支持的档位或强度会自动回退至 Standard / 模型原生默认强度。Fast/Ultra 为付费加速档位，可能增加用量费用。跨 Core 重启保留配置请同步更新 `ludens.json`（或通过控制台 `ModelPickerDialog` 切换）。 |
-| `ludens down --keep-emulator` | 交还控制权并停止 Core 与 Baseware，保留模拟器窗口与游戏现场；适合修改 `ludens.json`（如预算或传输参数）后重新拉起 Core。 |
-| `ludens down [--dashboard] [--pet]` | 停止本工作区受管的 Core、Baseware 与模拟器（**执行前请先在游戏内保存进度**）。默认保留共享的 App Daemon（Dashboard）与已运行的 Ludens Pet；附加 `--dashboard`（仅限启动它的工作区）或 `--pet` 可一并关闭对应共享服务。 |
+```sh
+ludens init --name my-agent --driver cua
+cd "$HOME/.ludens/workspaces/my-agent"
+ludens up
+```
 
-跨目录操作工作区时，可在任意命令前传入 `ludens --workspace /absolute/path/to/workspace <subcommand>` 或设置环境变量 `LUDENS_WORKSPACE`。
+如果需要接入外部硬件桥接、仿真器、视频采集流或远程 SSH 设备，请传入 `--driver <id> --driver-package <spec>`，详见 [设备接入与 Baseware](devices.md)。
 
-### 全局设置与默认目录
+`ludens init` 与 `ludens up` 常用参数：
 
-`$LUDENS_HOME/config.json` 的结构为 `{ "version": 1, "workspaceRoot": "/absolute/path", "defaults": { ... } }`。`defaults` 支持 `model`、`serviceTier`（`priority` \| `ultrafast`，不设即 Standard）、`effort`（`minimal` \| `low` \| `medium` \| `high` \| `xhigh` \| `max`，不设即跟随模型原生默认强度）、`seconds`、`requests`、`compactionThreshold`、`dashboard`、`pet` 以及 `connection`（`openaiWebsockets`、`cacheRetention`、`appendOnlyContext`、`imageUrls.enabled`、`imageUrls.backends`）。创建类字段在初始化工作区时写入，而 `defaults.connection` 同时作为未在 `ludens.json` 中显式覆盖对应 `connection` 字段的工作区的默认模型传输策略。修改父目录只影响之后新建的工作区，不搬动已登记目录：
+- `ludens init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]`
+- `ludens up [--dry-run] [--dashboard | --no-dashboard] [--pet | --no-pet]`（`--dry-run` 仅打印启动计划不实际拉起进程；`--no-dashboard` 跳过启动本地控制台端口；`--pet` / `--no-pet` 控制是否附带可选桌宠）
+
+如果需要把磁盘上已有的目录纳入管理或迁移旧版工作区，可执行 `ludens workspace open <dir> [--new-id]` 或 `ludens workspace import <dir> [--legacy-state <dir>] [--previous-workspace <dir>]`。
+
+## 4. 启动自主运行、事件池协作与收回控制权
+
+Ludens 将人工监管与智能体自主执行划分为两个清晰的控制模式：
+
+- **手动待命**（`manual`）：设备操作权由你持有，**Shiori**（Ludens 的 Agent 线程核心）处于 **Warm Standby** 待命状态，不会下发执行动作。
+- **自主运行**（`auto`）：Shiori 获得当前**控制租约 (Epoch)** / **控制周期**，在设定的时间与请求预算内持续驱动 `perception.py` 与 Baseware 设备执行闭环任务。
+
+### 在控制台（**运行**，`?view=live`）操作
+
+1. 在桌面应用或浏览器控制台打开 **运行（Live）**（`?view=live`）——0-Run 工作区无需先运行 `ludens up` 即可零门槛进入。
+2. 在底部输入框填写初始任务目标（例如巡检特定桌面流程或监测传感器状态流），点击 **启动自主运行**。若该工作区 Core 尚未启动，App Daemon 会自动按需拉起 **Core + Baseware**；若另一工作区正在同一物理设备上执行**自主运行**，控制台会弹出冲突提示（`409 DEVICE_BUSY`），供你选择取消、切换到持有工作区或**抢占接管**（处于手动待命热备中的 Core 会自动让位）。
+3. 运行过程中，可通过输入框的 **事件池（Event Pool）** 模式追加不打断当前推理的异步指令；若需立即纠偏，则切换为 **即时插话（Steer Now）** 直接中断并引导当前轮次。
+4. 任意时刻点击 **收回控制权**，即可立刻中止自主运行并吊销智能体控制租约，同时将 Core 保留在 **Warm Standby**（**手动待命**，`manual`）以便随时续跑或切换模型。
+5. 一轮探索结束后，点击 **整理 skills/ 与 memory/ 笔记**，将有效经验沉淀到工作区的 `skills/` 与 `memory/`。
+
+### 使用 CLI 操作
+
+**运行**页的全部动作都有一一对应的 CLI 命令（在工作区目录下执行，或通过 `--workspace <path>` 指定目录）：
+
+```sh
+ludens status
+ludens auto on --message "探索目标环境并编写经验证的 Python 能力函数" --seconds 600
+ludens event send "当前序列结束后顺便核对状态面板"
+ludens steer "立刻暂停执行动作并汇报当前遥测"
+ludens auto off
+ludens consolidate
+```
+
+其他常用生命周期命令：
+
+- `ludens auto timer <seconds|off>`：在线调整或清除当前自主运行的剩余倒计时
+- `ludens event list | reply | ack`：查看、回复或确认双向事件池中的消息
+- `ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]`：查看或动态切换当前工作区的模型与推理档位
+- `ludens services`：查看当前工作区受管后台服务的运行状态
+- `ludens down [--keep-emulator] [--dashboard] [--pet]`：停止当前工作区（`--keep-emulator` 保留已启动的目标进程；`--dashboard` / `--pet` 一并关闭共享的控制台或可选桌宠进程）
+
+## 5. 工作区配置（`ludens.json`）与全局默认参数
+
+`ludens init` 会在工作区根目录生成 `ludens.json`，所有配置项也可在控制台 **配置（Config）**（`?view=perception`）中直接编辑：
+
+| 配置字段 | 默认值 | 说明 |
+| --- | --- | --- |
+| `driver` / `driverPackage` | `cua` / 未设置 | 驱动标识符，以及可选的外部驱动包或清单路径 |
+| `game` / `port` / `cuaCommand` | 未设置 | 可选目标程序路径、控制器端口或自定义 CUA 启动命令 |
+| `model` | `openai-codex/gpt-6.1-sol` | Shiori 使用的主推理模型（`provider/model`） |
+| `serviceTier` / `effort` | 未设置 | 可选服务档位（`none`、`priority`、`ultrafast`）与推理力度（`none`..`max`） |
+| `seconds` / `requests` | `1800` / `1000` | 单次自主运行的默认时长预算（秒）与请求上限 |
+| `compactionThreshold` | 未设置 | 触发后台上下文压缩的 Token 阈值 |
+| `connection` | 继承全局 | 多模态传输参数（`openaiWebsockets`、`cacheRetention`、`appendOnlyContext`、`imageUrls`） |
+| `machines` | 未设置 | 多节点白名单与当前活跃节点（`{ active?, allowed }`） |
+| `dashboard` | `true` | `ludens up` 时是否自动拉起本地控制台端口 |
+| `pet` | `false` | 当前工作区是否启用可选桌宠开关 |
+| `logging` | `{ "diagnostics": "normal" }` | 运行归档日志详略等级（`"normal"` 或 `"full"`） |
+
+使用 `ludens config` 管理全局默认值（默认存储在 `~/.ludens/`，可通过 `LUDENS_HOME` 环境变量重定向）：
 
 ```sh
 ludens config show
-ludens config set workspaceRoot "$HOME/Ludens Workspaces"
+ludens config set workspaceRoot "$HOME/ludens-workspaces"
+ludens config set defaults.model "openai-codex/gpt-6.1-sol"
 ludens config set defaults.seconds 1800
+ludens config set defaults.requests 1000
 ludens config set defaults.pet false
-ludens config set defaults.connection.openaiWebsockets auto
-ludens config set defaults.connection.cacheRetention long
-ludens config set defaults.connection.appendOnlyContext on
 ludens config set defaults.connection.imageUrls.enabled true
-ludens config set defaults.connection.imageUrls.backends uguu,tmpfiles
-ludens init --name desktop-task --driver cua
-ludens workspace list
 ```
 
-Dashboard 的“工作区”页提供创建（可选目录）、登记已有目录、移除索引和设置默认父目录；“设置”页支持统一配置全局默认与单工作区覆盖的模型连接与多模态传输选项。CLI、Dashboard 与桌宠应使用相同的 `LUDENS_HOME`；修改环境变量后需重新启动相应进程才会生效。
+## 6. 日志检视与后续学习
 
-### 已有工作区登记与迁移
+每次运行都会在 `logs/<run-id>/` 下持久化结构化事件流，并将连续观测与 30 Hz fMP4 视频写入 `.ludens/timeline/`。你可以在控制台 **回放（Replay）**（`?view=replay`）中同步时间线复盘，或在终端用 `ludens logs events --run <run-dir>` 与 `ludens logs read --run <run-dir> ...` 检索原始记录。
 
-- **重新登记**：已有 `.ludens/workspace.json` 的工作区执行 `ludens workspace open <path>`。全局 registry 只保存 `{id, workspace, name, updatedAt}`，丢失后可逐个 `open` 重建，不影响工作区内的历史。
-- **移动目录**：先停止该工作区的受管服务，搬动完整目录，再 `ludens workspace open /new/path` 更新索引。持久 ID 不变；不要让原目录和副本同时使用同一 ID。
-- **复制成独立实验**：先停止副本目录对应的 Core 与 Baseware，再执行 `ludens workspace open /path/to/copy --new-id`，分配新 ID 并清除当前会话续接选择，保留历史会话与录制。身份文件的 `historyIds` 记录可读取的旧身份，历史记录不会用于连接原工作区的活跃 Core；原工作区不变。
-- **导入旧布局**：显式执行下面的 `import`。`--legacy-state` 指向原来的 `artifacts/rsa/ws-...` 状态目录；若目录已搬动，用 `--previous-workspace` 提供旧的绝对工作区路径。导入负责将旧外部状态纳入新布局；日常运行不隐式读取旧缓存或旧注册目录。
+继续阅读后续教程：
 
-```sh
-ludens workspace import /absolute/path/to/workspace \
-  --legacy-state /absolute/path/to/old-artifacts/rsa/ws-name-hash \
-  --previous-workspace /previous/absolute/workspace
-```
-
-导入前停止相关服务并备份工作区及旧状态目录。无外部旧状态时可省略 `--legacy-state`，未移动目录时可省略 `--previous-workspace`。更新源码本身不会迁移或启动已有工作区。
-
-该导入命令只迁入会话、会话选择与技能版本快照，保留外部源文件。旧版运行日志与录像引用的绝对路径不会被重写，外部媒体也不会自动复制；搬动目录后，这些旧记录可能无法回放。需要保留旧回放时，先保留原目录及其外部依赖。新格式生成的工作区记录支持整体搬动后重新登记。
-
-### 2. `ludens.json` 配置参考
-
-`ludens.json` 由 [core/src/daemon/launcher.ts](../../../core/src/daemon/launcher.ts) 解析校验，未知字段会直接报错：
-
-| 字段 | 默认值 | 说明 |
-| --- | --- | --- |
-| `driver` | 必填 | 驱动 ID；当前仅 `cua` 内置，模拟器 ID 须与外部包导出的 `id` 一致。 |
-| `driverPackage` | 无 | 外部驱动包地址（npm spec、`github:org/repo#rev` 或 `file:path`）；模拟器驱动必填，`cua` 可省略。接入方式见 [设备与驱动准备](devices.md#外部驱动包发现与接入)。 |
-| `game` | 无 | 支持自动启动的 bridge 驱动可选（`needsGame: true`，路径相对工作区）；省略时连接已手动启动的模拟器。不支持自动启动的驱动与 stdio 驱动不接受此字段。 |
-| `port` | 随驱动 | 显式端口优先，否则取驱动 manifest 的 `defaultPort`；stdio 驱动不使用。 |
-| `cuaCommand` | `"cua-driver"` | 仅 stdio 驱动有效，指定后端可执行文件路径或命令名。 |
-| `model` | `"openai-codex/gpt-6.1-sol"` | 具备图像输入能力的 OMP `provider/model` 标识；也可在暂停状态下通过控制台 `ModelPickerDialog` 或 `ludens model [<provider/id>]` 浏览与切换。 |
-| `serviceTier` | 不设（Standard） | 可选的 OMP 服务档位（`priority` 对应 Fast，`ultrafast` 对应 Ultra），与所选 `model` 一并生效；仅当模型目录在 `supportedServiceTiers` 中列出该档位时才可选用，否则运行时降级为 Standard 并报告实际生效档位。Fast/Ultra 为付费加速档位，可能增加用量费用。暂停状态下也可通过控制台 `ModelPickerDialog` 或 `ludens model [<provider/id>] [--service-tier ...]` 切换。 |
-| `effort` | 不设（模型默认） | 可选的 OMP 推理强度（`minimal`、`low`、`medium`、`high`、`xhigh`、`max`），与所选 `model` 一并生效；仅当模型目录在 `supportedEfforts` 中列出该强度时才可选用，否则运行时回退至模型的原生 `defaultEffort`。暂停状态下也可通过控制台 `ModelPickerDialog` 或 `ludens model [<provider/id>] [--effort ...]` 切换。 |
-| `seconds` | `1800` | 单次 `auto on` 控制周期的时长预算（秒），每次接管重置。 |
-| `requests` | `1000` | 单次 `auto on` 控制周期的模型请求次数上限，与 `seconds` 先到即交还控制。 |
-| `compactionThreshold` | 不设 | OMP 上下文压缩触发阈值（token 数）；省略时跟随所选模型的 OMP 原生阈值（`contextWindow - reserve`）。 |
-| `connection` | 继承 `defaults.connection` | 可选的模型传输与多模态缓存覆盖项（`openaiWebsockets`：`"auto" \| "on" \| "off"`，`cacheRetention`：`"auto" \| "short" \| "long" \| "none"`，`appendOnlyContext`：`"auto" \| "on" \| "off"`，`imageUrls`：`{ enabled?: boolean, backends?: string[] }`）；详见 [WS 恢复测试依据](../insights/ws-recovery.md#三层多模态传输架构对比-有状态-ws-增量-vs-无状态-http-kv-缓存-vs-图床-url-卸载)。 |
-| `dashboard` | `true` | `ludens up` 时是否确保本地 Dashboard 服务运行。 |
-| `pet` | `false` | 是否在 `ludens up` 时拉起共享 Ludens Pet；需先安装可选组件并确保 Dashboard 可用。`ludens init --pet` 会写入 `true`，已有显式 `true` 不变；`ludens up --pet` / `--no-pet` 仅覆盖当次启动。 |
-| `logging.diagnostics` | `"normal"` | 日志详细度，可选 `"normal"` 或 `"full"`；详见 [记录模式](../reference/logging.md#记录模式)。 |
-
-### 3. 会话续接与后台服务目录
-
-- **会话续接**：工作区 OMP 会话保存在 `.ludens/shiori/sessions/`，当前默认续接指针位于 `.ludens/shiori/current-session.json`。重启 Core 默认续接原会话并开启新的 `logs/<run-id>/` 目录。前台 `ludens run` 可传 `--new-session` 开启全新上下文（保留工作区文件），或传 `--resume /absolute/path/to/session.jsonl` 切换到同工作区的指定历史会话。
-- **后台服务日志**：[core/src/daemon/](../../../core/src/daemon/) 中的纯 TypeScript 跨平台监管器将工作区受管进程的标准输出（`<name>.log`）与后台任务状态（`<name>.job.json`，不再依赖 Python 后台启动脚本）写入 `<workspace>/logs/background/`；共享 Ludens Pet 的日志位于 `$LUDENS_HOME/pet/background/`（任务标识 `dev.ludens.pet`），偏好位于 `$LUDENS_HOME/pet/profile/`。独立 Baseware 未指定 `--data-dir` 时写入 `$LUDENS_HOME/logs/baseware/<socket-name>/`，工作区编排仍显式使用 `<workspace>/logs/baseware/`。通过无头 CLI 拉起的后台 Core（`launchedBy: "cli"`）脱离终端运行且在桌面 App 退出时保持存活（不注册开机自启或崩溃死循环重启），而由桌面端 `ludens-app` 经 App Daemon 按需或手动拉起的 Core（`launchedBy: "app"`）会在应用退出时被干净回收；排障时先查看 `ludens services`（或控制台**配置与服务 → 后台服务与会话**）及对应日志。
+- [设备接入与 Baseware](devices.md) — 接入外部硬件驱动、远程 SSH/桥接节点并配置多机工具路由
+- [工作区、能力与自验证](workspace.md) — 编写 `MEMORY.md`、`skills/`、`@capability` 并运行 `ludens eval`
+- [感知、执行与性能调优](perception-and-action.md) — 编写热重载 `perception.py` 状态机并调优多模态传输延迟
+- [控制台使用与排障](console-and-debugging.md) — 全面使用控制台各视图并诊断控制周期卡顿或能力自检失败

@@ -44,18 +44,18 @@ const { values } = parseArgs({
 if (values.help) {
   console.log(
     [
-      'Ludens — Desktop console & Shiori game AI host',
+      'Ludens — Desktop Console & Multimodal Harness Host',
       '',
       '--workspace PATH   Initial workspace to register/select on launch',
       '--server URL       Connect to an external local Ludens server (e.g. next dev)',
       '--dashboard URL    Alias for --server',
       '--profile PATH     Custom desktop profile directory (default: ~/.ludens/desktop/profile)',
-      '--background       Start hidden in the system tray + Companion without opening the main window',
+      '--background       Start hidden in the system tray + Desktop Pet without opening the main window',
       '--show-window      Open the main window on launch (default unless --background is passed)',
       '--help             Show this help message',
       '',
       'By default, Ludens launches and supervises its own local `ludens app-server` instance.',
-      'Closing the window hides to Tray + Companion; quitting stops managed game AI services.',
+      'Closing the window hides to Tray + Desktop Pet; quitting stops managed workspace services.',
     ].join('\n'),
   )
   app.exit(0)

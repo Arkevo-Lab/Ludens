@@ -29,7 +29,7 @@ When switching beyond `openai-codex` to OpenAI-compatible or Anthropic HTTP SSE 
 | **Tier 2 · Stateless HTTP SSE + Inline Base64 + Prefix KV Cache** | Re-uploads all historical base64 images (`8–15 MB+`) | Many OpenAI-compatible gateways re-decode and run vision preprocessing on **all `N` images** before checking the token KV cache | Hits prefix KV cache (`cache_read_input_tokens`) only if `messages[]` prefix is byte-identical | Upload bandwidth grows linearly (`O(N)`); gateways without image-hash short-circuiting add `N × 300–400 ms` (`20s+` TTFB) even when `cache_read` reports 99% token hits. |
 | **Tier 3 · Stateless HTTP SSE + Image URL Offloading (`blob-broker`)** | Replaces inline `data:image/...;base64` with compact `https://...` URLs (`~400 KB`, **~95% wire reduction**) | Gateway still fetches or validates the `N` image URLs and runs vision preprocessing unless it caches vision embeddings by URL/hash | Preserves prefix KV cache when combined with `appendOnlyContext` and `cacheRetention` | Solves client uplink bandwidth bottlenecks (`8.9 MB → 403 KB`), but **cannot fix** stateless gateways that re-run vision preprocessing on every historical image before checking the token KV cache. |
 
-Because of these architectural differences, Ludens surfaces `connection` settings at both the global (`defaults.connection`) and workspace (`ludens.json` `connection`) levels, as well as in the Dashboard **Settings** view:
+Because of these architectural differences, Ludens surfaces `connection` settings at both the global (`defaults.connection`) and workspace (`ludens.json` `connection`) levels, as well as in the Console **Settings** view:
 
 - **`openaiWebsockets` (`"auto" | "on" | "off"`)**: Controls stateful WebSocket delta transport for providers that support it (`openai-codex` defaults to WebSocket delta in `"auto"`, while `openai` defaults to SSE unless `"on"`).
 - **`cacheRetention` (`"auto" | "short" | "long" | "none"`)**: Controls prompt prefix KV cache retention (`"long"` enables 1h extended cache on Anthropic and 24h retention on OpenAI).
@@ -69,7 +69,7 @@ During implementation we built an offline transport-layer test suite ([core/test
 (cd core && bun run omp:test:transport)
 (cd core && bun run typecheck)
 
-# Generate run records viewable in the Dashboard:
+# Generate run records viewable in the Console:
 cd core && bun test tests/ws-recovery.test.ts
 ```
 
@@ -89,6 +89,6 @@ The suite covers **13 scenario classes** (including the R3 `Agent.prompt` end-to
 | Single frame `> 15 MiB` or remote `1009` | Single outbound frame over limit | Switch to SSE and flag size-blocked (no repeated handshakes while blocked); only a completed native context compaction clears the block and restores WS. |
 | Cumulative history `> 15 MiB` but small round delta | Large history, small current increment | Evaluated by actual outbound frame size — continues using incremental WS. |
 | `1009` after a tool was delivered | Size over-limit hit after tool submission | Current request does not replay the tool, and records the size block; SSE continues until compaction completes, then WS recovers. |
-| Human handoff or budget-expiry cancellation | `AbortSignal` fires mid-handshake / mid-output / mid-error | Exit immediately as `aborted` — no extra SSE requests, no pollution of the next round's transport state machine. |
+| Reclaim Control or budget-expiry cancellation | `AbortSignal` fires mid-handshake / mid-output / mid-error | Exit immediately as `aborted` — no extra SSE requests, no pollution of the next round's transport state machine. |
 
 Before every planned OMP upgrade, run `bun run omp:test:transport` and `cd core && bun test tests/ws-recovery.test.ts` first, and check whether upstream changes broke any of these controlled recovery behaviors. The virtual clock and transport fixtures do not measure real reconnect latency and do not prove production never drops; for long runs, scheduling, and throughput, consult actual run logs.

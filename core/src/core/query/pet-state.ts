@@ -59,7 +59,7 @@ function readTarget(root: string): PetTarget | null | undefined {
       typeof target.workspace !== "string" || !isAbsolute(target.workspace) ||
       typeof target.revision !== "string" || !target.revision ||
       typeof target.updatedAt !== "string" || !Number.isFinite(Date.parse(target.updatedAt)))
-    throw new Error("无效的 Ludens Pet 跟随目标");
+    throw new Error("无效的桌宠跟随目标");
   return target as PetTarget;
 }
 function write(root: string, name: string, value: unknown) {
@@ -108,7 +108,7 @@ export async function petState(root = globalHome, now?: number): Promise<PetStat
     const value = read<unknown>(root, consumerFile);
     if (value === undefined) return { ...targetState, consumer: null, connected: false };
     if (!validConsumer(value) || typeof (value as PetConsumer).seenAt !== "string" ||
-        !Number.isFinite(Date.parse((value as PetConsumer).seenAt))) throw new Error("无效的 Ludens Pet 状态");
+        !Number.isFinite(Date.parse((value as PetConsumer).seenAt))) throw new Error("无效的桌宠状态");
     const rawConsumer = value as PetConsumer & { autoFollowing?: boolean };
     const { autoFollowing: consumerAutoFollowing, ...consumer } = rawConsumer;
     const age = observedAt - Date.parse(consumer.seenAt);
@@ -176,7 +176,7 @@ export async function setPetTarget(
     project === null || isAutoTarget ? select() : withWorkspaceRegistrationLock(root, project, select));
 }
 export async function recordPetConsumer(input: unknown, root = globalHome): Promise<PetConsumerReceipt> {
-  if (!validConsumer(input)) throw new Error("无效的 Ludens Pet 状态");
+  if (!validConsumer(input)) throw new Error("无效的桌宠状态");
   const value = input;
   const consumer: PetConsumer = {
     instanceId: value.instanceId,

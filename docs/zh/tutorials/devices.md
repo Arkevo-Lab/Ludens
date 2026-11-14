@@ -1,64 +1,136 @@
-# 设备与驱动准备
+# 设备接入与 Baseware
 
-各 Driver 仅暴露设备的原生输入与采集能力，不包含游戏策略、跨屏坐标融合或自动存读档逻辑。本页承接 [基础组件安装](quickstart.md#安装)；完成设备与驱动准备后，继续按 [工作区启动与停止](quickstart.md#工作区启动与停止) 创建并启动工作区。
+**Baseware** 是 Ludens 的**跨设备集成层**。它将本机桌面自动化、摄像头与传感器数据流、机器人与嵌入式硬件桥接、仿真器以及远程 MCP 端点封装为统一的控制器契约（`baseware.json`），同时基于单一 `epoch` 控制租约仲裁所有有副作用的输入，确保执行**收回控制权**后外部设备不会继续收到残留动作。
 
-主仓仅内置 `cua` 桌面驱动；模拟器与自定义设备驱动均通过外部驱动包（`--driver-package`）按需加载，主仓不包含具体模拟器本体、原生桥或构建补丁。
+底层协议细节与错误码定义请参见 [Baseware 参考手册](../reference/baseware.md) 与 [Driver Bridge 协议](../reference/driver-bridge-protocol.md)。
 
-## Cua
+## 1. 开箱即用的桌面目标（`cua`）
 
-桌面环境使用上游原装 [Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver)：
-
-1. 安装 Cua Driver，并在 macOS **系统设置 → 隐私与安全性**中为 `CuaDriver.app` 授予**辅助功能（Accessibility）**与**屏幕录制（Screen Recording）**权限。
-2. Baseware 通过持久 `cua-driver mcp` 子进程（stdio 传输）接入驱动，无需设置 `game` 或桥端口；若 `cua-driver` 不在 `PATH` 中，可在 `ludens init --cua-command` 或 `ludens.json` 的 `cuaCommand` 指定绝对路径。
-3. 所有工具保持上游原生命名与 JSON 参数结构（如 `ludens controller controller/get_desktop_state --args '{}'`），契约边界见 [Baseware 设计理念与能力契约](../reference/baseware.md)。
-
-**桌面环境边界**：多个 Cua 工作区共享同一宿主机真实桌面，如需隔离桌面请使用独立 OS 会话或虚拟机。人工交还控制权会立即拒绝新输入并请求取消，但已进入操作系统底层的单次原生调用可能先执行完毕；`ludens down` 不会关闭共享的 `CuaDriver.app` 或用户的桌面应用。
-
-## 外部驱动包发现与接入
-
-在标有 **驱动包地址** 的输入框中填写完整地址。窄屏下验证按钮位于全宽输入框下方。编辑地址会取消进行中的验证并清除结果，迟到的响应不会用于验证另一个地址。
-
-Dashboard 的 **工作区 → 新建工作区 → 社区驱动包** 表单只在点击 **验证驱动包** 后校验包。成功表示注册声明已导入并通过校验，不会连接设备、构建模拟器，也不证明游戏可运行。创建是另一次显式操作，可能再次下载或导入包。填写名称，检查目录和驱动专属选项后创建；完成卡片提供限定工作区的 `up` 命令，准备好后可在终端执行。
-
-已有工作区按下文修改配置，不要再次初始化。在 **能力目录（`?view=caps`）** 页面，**工作区来源** 区分已保存的 `baseware.json` 设备快照与静态 Python 声明。缺少快照时应查看服务配置，不能据此认定在线设备没有能力。**宿主连接检查** 在进入页面及手动点击时读取所选工作区的 Host 状态。报告的控制连接是宿主最后获知的状态，也包含控制错误后的不确定情况；它不验证物理硬件、游戏画面或单项能力执行。
-
-非内置驱动必须通过 `--driver-package` 显式选择外部包；当前仅 `cua` 桌面接入内置。包地址支持 npm 包名、`github:org/repo#rev`、GitHub HTTPS URL、`git@github.com:org/repo.git#rev` 或 `file:path`。SSH 地址保留 SSH 传输，缓存按传输方式、仓库与 revision 区分。初始化工作区前，可用 `baseware driver discover` 或 Dashboard 工作区新建弹窗（`?view=workspaces&create=1`）校验包的 `DriverRegistration` 声明：
+Ludens 内置了基于 `stdio` MCP 传输的 `cua`（`builtin:cua`）桌面自动化驱动，以及默认受控节点 `local-desktop`，无需任何外部驱动包即可启动：
 
 ```sh
-baseware driver discover --package 'github:org/repo#rev'
-ludens init --name my-task --driver <id> --driver-package 'github:org/repo#rev'
+ludens init --name desktop-monitor --driver cua
+cd "$HOME/.ludens/workspaces/desktop-monitor"
+ludens up
 ```
 
-- **路径解析**：`ludens init` 与 `ludens up` 中的相对 `file:` 路径均以目标工作区目录为基准解析并归一化；`baseware driver discover` 的相对 `file:` 按当前 shell 目录解析；Dashboard 网页端的外部驱动校验要求 `file:` 使用绝对路径。
-- **实际来源**：catalog 的 `drivers[].source`、Baseware `service_start.driverSource` 与 Ludens `manifest.drivers[].source` 记录加载器实际解析的来源：GitHub `resolvedCommit`、npm `resolvedVersion` 或本地入口 `entrySha256`。入口哈希不覆盖依赖，`provider.version` 仍表示设备或协议版本；字段详见 [包地址与缓存机制](../reference/baseware.md#1-包地址与缓存机制)。
-- **信任边界**：发现阶段虽不调用驱动的 `load()`，但会下载安装依赖并导入包入口代码；仅对可信来源执行发现与初始化。驱动包规范详见 [Driver 包与启动描述](../reference/baseware.md#driver-包与启动描述) 与 [Driver Bridge 协议](../reference/driver-bridge-protocol.md)。
+如需指定自定义 CUA 服务启动命令，可在 `ludens init` 时传入 `--cua-command <path>`，或在 `ludens.json` 中配置 `cuaCommand`（直接调试时则传给 `baseware serve --driver cua --cua-command <path>`）。
 
-**已有外部驱动工作区迁移**：先执行 `ludens auto off`，再执行 `ludens down --keep-emulator`；在原 `ludens.json` 增加或更新匹配驱动的 `driverPackage`（固定目标版本或 commit SHA），然后 `ludens up --dry-run` / `ludens up`。不重新执行 `ludens init`，原工作区文件与存档继续保留。已经运行的服务不会因源码更新自动换包。仅连接已手动准备的模拟器而不自动启动游戏文件时，省略 `game`。
+工作区启动后，可在终端核验控制器列表与参数 Schema：
 
-## 受控节点池与多设备挂载
+```sh
+ludens controller list
+ludens controller controller/screenshot --help
+```
 
-Ludens 不再局限于绑定单一静态地址，而是在 `~/.ludens/machines.json` 中维护持久化的**受控节点池（Machine Pool）**，并支持单个工作区并发挂载多台设备：
+## 2. 五种传输协议与外部驱动包
 
-1. **在 CLI 中查看与切换节点**（在已启动的工作区环境中执行）：
-   ```bash
-   ludens machine list
-   ludens machine use gba-mgba
-   ludens machine connect gba-mgba-2
-   ludens machine disconnect gba-mgba-2
-   ```
-2. **在管理台（`?view=baseware`）中管理驱动与节点**：
-   - 打开 **Baseware** 视图，在**受控设备**标签页（`data-baseware-section="machine-pool"`）以扁平列表查看 `~/.ludens/machines.json` 全局节点和工作区 `ludens.json` 隐式直连节点（`workspace-default`，可一键**存入节点池**），通过紧凑标签区分**当前使用**、**工作区直连**与**在线/待命**状态，并支持一键**设为当前**、并发挂载与探测。
-   - 切换至**驱动包**标签页（`data-baseware-section="driver-library"`）查看所有内置、已在 `~/.ludens/drivers.json` 注册，以及从工作区或缓存自动发现的驱动包（**注册状态**与**当前使用状态**相互独立展示）；点击**添加驱动包**（`data-baseware-add-driver`）可校验并纳入全局驱动库，也可直接点击**纳入全局库**或**新建设备**就地预填建模。
-   - 点击 **新建受控节点**（`data-baseware-add-machine`）从驱动库模板预填或自定义端点，或点击任意设备的**查看详情**打开右侧/模态 `<dialog>` 详情抽屉（`data-baseware-section="controllers-catalog"`），查看控制器接口目录并在 `<details>` 折叠区检查实时 Baseware 守护进程租约与 CLI 路由命令。
-3. **在 Python (`ludens_tools`) 中定向操控指定设备**：
-   ```python
-   import ludens_tools
+Baseware 将全局驱动清单（`~/.ludens/drivers.json`）与全局受控节点池（`~/.ludens/machines.json`）解耦管理，原生支持五种传输协议：
 
-   # 查看当前工作区挂载的设备列表
-   print(ludens_tools.machines())
+| 传输方式 | 典型受控目标 | 关键参数 / CLI 选项 |
+| --- | --- | --- |
+| `stdio` | 本机 MCP 桌面驱动（`cua`）或本地子进程驱动 | `--driver cua [--cua-command <path>]` 或 `--transport stdio` |
+| `bridge` | 本机或局域网 TCP 行协议硬件桥 / 仿真器 | `--transport bridge --host <host> --port <n>` |
+| `ssh` | 通过 SSH 标准输入输出隧道托管的远程设备（`ssh -o BatchMode=yes`） | `--transport ssh --ssh-host <host> --ssh-user <user> --ssh-port <n> --ssh-identity <path> --ssh-command <cmd>` |
+| `http` | Streamable HTTP MCP 设备或服务端点 | `--transport http --url <url>` |
+| `sse` | Server-Sent Events MCP 端点 | `--transport sse --url <url>` |
 
-   # 默认调用主控设备，或通过 machine="<machineId>" 定向调用任意已挂载节点
-   ludens_tools.call("controller/capture_frame", {}, machine="gba-mgba")
-   ludens_tools.call("controller/tap_button", {"button": "A"}, machine="gba-mgba-2")
-   ```
+### 安装与校验外部驱动包
 
+外部驱动通过 `--driver <id> --driver-package <spec>` 加载（或在控制台 **设备** 页面登记到 `~/.ludens/drivers.json`）。`<spec>` 支持三种地址格式：
+
+1. **npm 包**：例如 `@scope/driver-pkg@1.2.0`（由 Bun 缓存在 `~/.local/state/ludens/baseware/drivers/` 或 `$XDG_STATE_HOME/ludens/baseware/drivers/`）
+2. **GitHub 仓库**：例如 `github:org/repo#commit-sha`、HTTPS 地址或 `git@github.com:org/repo.git#rev`（生产与评测建议锁定具体 commit SHA）
+3. **本地目录或入口文件**：例如 `file:/abs/path/to/driver` 或 `file:./drivers/my-driver`
+
+在正式引入工作区前，可先静态校验驱动包的 `DriverRegistration` 声明是否合规（不会调用连接真机的 `load()`）：
+
+```sh
+baseware driver discover --package 'file:/path/to/my-driver'
+```
+
+`baseware driver discover` 会安装依赖、加载入口模块并输出 JSON 格式的 `DriverManifest`。需要留意：`discover` 过程中包安装脚本与模块顶层代码仍会在本机执行，请仅加载来自可信来源的驱动包。
+
+## 3. 在控制台（**设备**，`?view=baseware`）管理驱动与节点
+
+打开控制台侧栏的 **设备（Devices）**（`?view=baseware`，页头显示 **设备与节点 · Baseware**），无需手写 JSON 即可可视化管理驱动与受控设备：
+
+- **驱动包（Driver Packages）** 页签：列出全局已安装驱动以及工作区本地引用的 `file:` 驱动源码；点击 **添加驱动包** 可将 npm、GitHub 或本地路径写入 `~/.ludens/drivers.json`。
+- **受控设备（Controlled Devices）** 页签：展示 `~/.ludens/machines.json` 中的全部节点及默认合成的 `workspace-default` 端点；点击 **新建受控节点** 可按 `stdio`、`bridge`、`ssh`、`http` 或 `sse` 填写主机、端口、URL 或 SSH 配置。
+- **节点检视与控制器（Node & Controllers）** 详情页签：选中任意节点即可测试连通性、将该节点设为当前工作区的主设备或并发挂载多个节点、查看实时暴露的控制器 JSON Schema 并执行测试调用。
+- **守护进程与租约（Daemon & Lease）** 详情页签：查看 Baseware 套接字状态、当前 `epoch` 控制租约归属、重连计数，或立即吊销设备控制权。
+
+也可以在工作区的 **配置（Config）**（`?view=perception`）中的 **目标设备（Target Device）** 页签固定或调整当前工作区的默认目标。
+
+## 4. 多节点并发挂载与跨设备路由
+
+单个工作区可以在 `ludens.json` 中声明允许挂载的节点池（`machines.allowed`）与当前主节点（`machines.active`）：
+
+```json
+{
+  "driver": "cua",
+  "machines": {
+    "active": "local-desktop",
+    "allowed": ["local-desktop", "lab-bench-ssh", "edge-sensor-http"]
+  }
+}
+```
+
+### 运行期热切换与并发挂载（CLI）
+
+无需重启工作区或 Baseware，即可在终端动态挂载多个受控节点并切换主设备：
+
+```sh
+ludens machine list
+ludens machine connect local-desktop lab-bench-ssh
+ludens machine use lab-bench-ssh
+ludens machine disconnect edge-sensor-http
+```
+
+直接操作 Baseware 服务时对应命令为 `baseware machine list`、`baseware machine use <id>`、`baseware machine connect <id> [<id2> ...]` 与 `baseware machine disconnect <id>`。
+
+### 跨节点控制器调用路由
+
+当工作区同时挂载了多个节点时，支持两种路由写法：
+
+- **默认主节点路由（无节点前缀）**：`controller/<tool>` 自动发送给当前活跃的主节点（`active`）。
+- **显式指定节点路由（带节点前缀）**：`controller/<machineId>/<tool>` 无论当前主节点是谁，都会精确路由到指定节点。
+
+CLI 示例：
+
+```sh
+ludens controller controller/screenshot
+ludens controller controller/lab-bench-ssh/gpio.read --args '{"pin":4}'
+ludens controller controller/gpio.read --machine lab-bench-ssh --args '{"pin":4}'
+```
+
+Python `ludens_tools` 同样提供对应的多节点 API（`machines()`、`use_machine()`、`connect_machines()`、`disconnect_machines()` 以及 `call(..., machine=...)`）：
+
+```python
+from ludens_tools import call, connect_machines, machines, use_machine
+
+connect_machines("local-desktop", "lab-bench-ssh")
+print(machines())
+
+# 保持 local-desktop 为主设备的同时，定向读取远程节点传感器
+telemetry = call("controller/gpio.read", {"pin": 4}, machine="lab-bench-ssh")
+use_machine("lab-bench-ssh")
+```
+
+## 5. 独立调试 Baseware 与断线恢复
+
+在脱离完整工作区、单独排查某个硬件驱动或通道时，可以在前台直接拉起 Baseware 进程：
+
+```sh
+baseware serve --driver cua --machine-id local-desktop --diagnostics full
+```
+
+常用维护与恢复命令：
+
+- `baseware status` / `baseware list`：查看当前接入的驱动、在线节点及已导出控制器数量
+- `baseware export [--output baseware.json]`：导出实时控制器目录快照
+- `baseware reconnect [--machine <id>]`：对断连节点手动触发重连
+- `baseware revoke`：立即吊销当前硬件控制租约（触发 `DISOWN` / `release()`）
+- `baseware mcp`：将 Baseware 节点池作为标准 MCP `stdio` 服务对外暴露
+
+在**自主运行**期间若主设备意外断开，Baseware 后台同步循环会持续探测恢复并在重连后恢复通知；Ludens 也会先尝试自动重连，若连续重试仍失败则安全暂停并回退到**手动待命**模式。如需结合控制台与日志进一步定位连接异常，请继续阅读 [控制台使用与排障](console-and-debugging.md)。
