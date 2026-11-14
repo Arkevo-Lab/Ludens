@@ -7,8 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { readArchiveJson } from "@/lib/archive-client";
+import type { ReplayRpcQuery } from "@ludens/protocol/app-rpc";
 import type { ReplayItem, ReplaySearchResult, ReplayTrack } from "@/lib/replay-types";
 import { useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { replayRpcParams } from "@/features/replay/replay-evidence-model";
 import { replayElapsedInput } from "@/features/replay/replay-navigation";
 import { replayItemActive } from "@/features/replay/replay-model";
 import { useRetryFocus } from "@/components/use-retry-focus";
@@ -38,6 +41,9 @@ export function ReplayEventSearch({ scope, startAt, at, refreshRevision = 0, ite
   inputId: string; inputRef: Ref<HTMLInputElement>;
 }) {
   const t = useTranslations("replayNavigation"), timeline = useTranslations("timelinePlayer");
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
   const [query, setQuery] = useState("");
   const [track, setTrack] = useState<Track>("all");
   const [state, setState] = useState<SearchState | null>(null);
@@ -78,13 +84,21 @@ export function ReplayEventSearch({ scope, startAt, at, refreshRevision = 0, ite
     let pagesScanned = 0;
     try {
       for (;;) {
-        const params = new URLSearchParams(scope);
-        params.set("mode", "search"); params.set("q", next.query); params.set("track", next.track);
+        const rpcQuery: ReplayRpcQuery = {
+          mode: "search",
+          q: next.query,
+          track: next.track,
+        };
         if (next.cursor) {
           if (cursors.has(next.cursor)) throw new Error(timeline("paginationStalled"));
-          cursors.add(next.cursor); params.set("cursor", next.cursor);
+          cursors.add(next.cursor);
+          rpcQuery.cursor = next.cursor;
         }
-        const page = await readArchiveJson<ReplaySearchResult>(`/api/replay?${params}`, controller.signal);
+        const page = await readArchiveJson<ReplaySearchResult>(async signal => {
+          const caller = rpcRef.current;
+          if (!caller) throw new Error("RPC client is unavailable");
+          return (await caller.call("replay/get", replayRpcParams(scope, rpcQuery), { signal })) as ReplaySearchResult;
+        }, controller.signal);
         if (controller.signal.aborted || request.current !== controller) return;
         pagesScanned += 1;
         const mergedItems = [...new Map([...next.items, ...page.items].map(item => [item.id, item])).values()];
@@ -126,7 +140,7 @@ export function ReplayEventSearch({ scope, startAt, at, refreshRevision = 0, ite
         debounceTimer.current = null;
       }
     };
-  }, [scope, refreshRevision, track, query, scan]);
+  }, [scope, refreshRevision, track, query, scan, rpc?.reconnectGeneration ?? 0]);
 
   useEffect(() => () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);

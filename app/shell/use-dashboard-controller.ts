@@ -7,7 +7,7 @@ import type { ReplayOverviewResult } from "@/lib/replay-types";
 import { initialSelection, latestGameRun } from "@/lib/initial-selection";
 import { workspaceRunEntry } from "@/lib/workspace-run-entry";
 import { cleanViewSearchParams, hasSelectedEvidence, latestLiveUrl, liveContext, resolveLiveSelection, type PausedLiveSelection } from "@/lib/live-follow";
-import { ReadPoller } from "@/lib/read-poller";
+import { useLudensEvent, useLudensRpc } from "@/lib/ludens-rpc";
 import { analysisRequest, runAnalysisSnapshot, type RunReadSnapshot } from "@/lib/run-analysis-selection";
 import { useActivityFeed } from "@/features/live/use-activity-feed";
 import { useRetryFocus } from "@/components/use-retry-focus";
@@ -121,10 +121,13 @@ export function useDashboardController() {
   const [pausedSelection, setPausedSelection] = useState<PausedLiveSelection | null>(null);
   const [snapshotRevision, setSnapshotRevision] = useState(0);
   const [latestRequest, setLatestRequest] = useState<{ revision: number; location: string } | null>(null);
+  const rpc = useLudensRpc();
   const returnButton = useRef<HTMLButtonElement>(null);
   const returnFocus = useRef(false);
-  const runPoller = useRef<{ reader: ReadPoller; key: string } | null>(null);
-  const [runReading, setRunReading] = useState<{ reader: ReadPoller; key: string } | null>(null);
+  const runRequest = useRef<{ controller: AbortController; key: string } | null>(null);
+  const [runReadingKey, setRunReadingKey] = useState<string | null>(null);
+  const [runRefreshTick, setRunRefreshTick] = useState(0);
+  const runEventQueued = useRef(false);
   const runRetryFocus = useRef<{ control: HTMLButtonElement; key: string } | null>(null);
   const runContent = useRef<HTMLElement>(null);
   const automatic = useRef(refresh);
@@ -270,67 +273,112 @@ export function useDashboardController() {
   }, [pageVisible]);
   useEffect(() => {
     const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       setCatalogLoading(true);
       try {
-        const value = await json<Project[]>("/api/catalog?includeEmpty=1", controller.signal);
+        const value = (await rpc.call(
+          "catalog/get",
+          { includeEmpty: true },
+          { signal: controller.signal },
+        )) as Project[];
         if (controller.signal.aborted) return;
         setProjects(value);
         setCatalogError("");
       } catch (e) {
-        if (!controller.signal.aborted) setCatalogError(String(e));
+        if (!controller.signal.aborted) {
+          setCatalogError(e instanceof Error ? e.message : String(e));
+        }
       } finally {
         if (!controller.signal.aborted) {
           catalogRetryPending.current = false;
           setCatalogReady(true);
           setCatalogLoading(false);
-          if (typeof document === "undefined" || document.visibilityState !== "hidden") {
-            timer = setTimeout(load, 5000);
-          }
         }
       }
     };
     void load();
     return () => {
       controller.abort();
-      clearTimeout(timer);
     };
-  }, [catalogRevision]);
+  }, [catalogRevision, rpc, rpc.reconnectGeneration]);
+
+  const catalogEventQueued = useRef(false);
+  useLudensEvent(
+    ["catalog", "workspace", "core", "run"],
+    () => {
+      if (catalogEventQueued.current) return;
+      catalogEventQueued.current = true;
+      queueMicrotask(() => {
+        catalogEventQueued.current = false;
+        setCatalogRevision(value => value + 1);
+      });
+    },
+  );
+
   useEffect(() => {
-    if (view === "workspaces" || view === "baseware" || view === "settings" || view === "dev" || view === "replay" || view === "docs" || view === "caps" || view === "perception" || !selection.project || !run) return;
-    const params = new URLSearchParams({
-      project: selection.project,
-      run,
-      ...(effectiveEpoch ? { epoch: effectiveEpoch } : {}),
-      ...(beforeCall ? { beforeCall } : {}),
-      ...(requestedCall ? { call: requestedCall } : {}),
-      ...(selectedImage ? { image: selectedImage } : {}),
-    });
-    const reader = new ReadPoller(async signal => {
-      setRunReading({ reader, key });
+    if (
+      view === "workspaces" ||
+      view === "baseware" ||
+      view === "settings" ||
+      view === "dev" ||
+      view === "replay" ||
+      view === "docs" ||
+      view === "caps" ||
+      view === "perception" ||
+      !selection.project ||
+      !run
+    ) {
+      return;
+    }
+    const controller = new AbortController();
+    runRequest.current = { controller, key };
+    setRunReadingKey(key);
+
+    const loadRun = async () => {
       try {
-        const next = await json<RunData>(
-          "/api/run?" + params,
-          signal,
+        const beforeCallNum =
+          beforeCall && Number.isFinite(Number(beforeCall)) ? Number(beforeCall) : undefined;
+        const page = {
+          ...(beforeCallNum !== undefined ? { beforeCall: beforeCallNum } : {}),
+          ...(requestedCall ? { call: requestedCall } : {}),
+          ...(selectedImage ? { image: selectedImage } : {}),
+        };
+        const next = (await json<RunData>(
+          signal =>
+            rpc.call(
+              "run/get",
+              {
+                project: selection.project,
+                run,
+                ...(effectiveEpoch ? { epoch: effectiveEpoch } : {}),
+                ...(Object.keys(page).length > 0 ? { page } : {}),
+              },
+              { signal },
+            ) as unknown as Promise<RunData>,
+          controller.signal,
           progress => setPreparing({ key, progress }),
-        );
-        if (signal.aborted) return 2500;
+        ));
+        if (controller.signal.aborted) return;
         setLoaded({ key, scope: readScope, revision: snapshotRevision, data: next });
         setPreparing(null);
         setRunFailure(null);
       } catch (e) {
-        if (!signal.aborted) setRunFailure({ key, message: String(e) });
+        if (!controller.signal.aborted) {
+          setRunFailure({ key, message: e instanceof Error ? e.message : String(e) });
+        }
       } finally {
-        if (!signal.aborted && runPoller.current?.reader === reader) setRunReading(null);
+        if (!controller.signal.aborted && runRequest.current?.controller === controller) {
+          setRunReadingKey(null);
+        }
       }
-      return 2500;
-    }, automatic.current);
-    runPoller.current = { reader, key };
-    void reader.readOnce();
+    };
+
+    void loadRun();
     return () => {
-      reader.dispose();
-      if (runPoller.current?.reader === reader) runPoller.current = null;
+      controller.abort();
+      if (runRequest.current?.controller === controller) {
+        runRequest.current = null;
+      }
     };
   }, [
     selection.project,
@@ -343,21 +391,43 @@ export function useDashboardController() {
     view,
     followed.archiveRevision,
     snapshotRevision,
+    runRefreshTick,
+    rpc,
+    rpc.reconnectGeneration,
   ]);
-  useEffect(() => { runPoller.current?.reader.setEnabled(pollingEnabled); }, [pollingEnabled]);
-  const retryingRun = runReading?.key === key && runReading.reader === runPoller.current?.reader;
+
+  useLudensEvent(
+    ["run", "core", "observation"],
+    () => {
+      if (!pollingEnabled || runEventQueued.current) return;
+      runEventQueued.current = true;
+      queueMicrotask(() => {
+        runEventQueued.current = false;
+        setRunRefreshTick(value => value + 1);
+      });
+    },
+    {
+      enabled: pollingEnabled && Boolean(selection.project && run),
+      workspaceId: selection.project,
+      runId: run,
+    },
+  );
+
+  const retryingRun = runReadingKey === key && runRequest.current?.key === key;
   const refreshRun = useCallback(() => {
     if (!run) {
       refreshCatalog();
       return;
     }
-    void runPoller.current?.reader.readOnce();
+    setRunRefreshTick(value => value + 1);
   }, [run, refreshCatalog]);
   const retryRun = (control: HTMLButtonElement) => {
-    const pending = runPoller.current;
-    if (!pending || pending.key !== key || retryingRun) return;
-    runRetryFocus.current = (view === "live" || (analysingRun && !data)) && document.activeElement === control ? { control, key } : null;
-    void pending.reader.readOnce();
+    if (retryingRun) return;
+    runRetryFocus.current =
+      (view === "live" || (analysingRun && !data)) && document.activeElement === control
+        ? { control, key }
+        : null;
+    setRunRefreshTick(value => value + 1);
   };
   useEffect(() => {
     const release = (event: Event) => {
@@ -494,33 +564,35 @@ export function useDashboardController() {
     if (!data?.controlAllowed || !auto) return;
     setStopping(true);
     try {
-      const response = await fetch("/api/control", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project: data.project,
-          run: data.run,
-          epoch: data.selectedEpoch,
-          action: "off",
-        }),
+      await rpc.call("run/stop", {
+        project: data.project,
+        run: data.run,
+        epoch: data.selectedEpoch,
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? dt("handoverFailed"));
-      const next = await json<RunData>(
-        "/api/run?" +
-          new URLSearchParams({
-            project: data.project,
-            run: data.run,
-            ...(data.selectedEpoch ? { epoch: data.selectedEpoch } : {}),
-            ...(beforeCall ? { beforeCall } : {}),
-            ...(requestedCall ? { call: requestedCall } : {}),
-            ...(selectedImage ? { image: selectedImage } : {}),
-          }),
-      );
+      const beforeCallNum =
+        beforeCall && Number.isFinite(Number(beforeCall)) ? Number(beforeCall) : undefined;
+      const page = {
+        ...(beforeCallNum !== undefined ? { beforeCall: beforeCallNum } : {}),
+        ...(requestedCall ? { call: requestedCall } : {}),
+        ...(selectedImage ? { image: selectedImage } : {}),
+      };
+      const next = (await json<RunData>(
+        signal =>
+          rpc.call(
+            "run/get",
+            {
+              project: data.project,
+              run: data.run,
+              ...(data.selectedEpoch ? { epoch: data.selectedEpoch } : {}),
+              ...(Object.keys(page).length > 0 ? { page } : {}),
+            },
+            { signal },
+          ) as unknown as Promise<RunData>,
+      ));
       setLoaded({ key, scope: readScope, revision: snapshotRevision, data: next });
       setRunFailure(null);
     } catch (e) {
-      setRunFailure({ key, message: String(e) });
+      setRunFailure({ key, message: e instanceof Error ? e.message : String(e) });
     } finally {
       setStopping(false);
     }

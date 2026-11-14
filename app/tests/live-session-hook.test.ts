@@ -18,7 +18,6 @@ import {
   type RuntimeControlCommand,
 } from "../features/live/live-session-store";
 import { buildCodexSegments, reconcileSegments } from "../features/live/shiori-segments";
-import { ReadPoller } from "../lib/read-poller";
 import type { Call, Observation, RunData, RunInfo, SpanStats } from "../lib/types";
 
 const SCOPE_RUN_2: ActivityScope = { project: "diablo3", runId: "run-2", epoch: null };
@@ -997,64 +996,6 @@ test("LiveMediaCache coalesces concurrent reads, protects mounted refCount > 0 f
   leaseB.release();
   leaseC.release();
   cache.clear(true);
-});
-
-test("ReadPoller supports immediate nudge() and hidden-document backoff", async () => {
-  const originalDoc = (globalThis as { document?: unknown }).document;
-  try {
-    let ticks = 0;
-    const poller = new ReadPoller(async () => {
-      ticks += 1;
-      return 60_000;
-    }, true);
-    void poller.readOnce();
-
-    await flushMicrotasks();
-    assert.equal(ticks, 1);
-
-    // nudge() wakes a parked 60s timer immediately without disposing the poller
-    poller.nudge();
-    await flushMicrotasks();
-    assert.equal(ticks, 2);
-    poller.dispose();
-
-    // Hidden document multiplies delay (>= 10,000ms floor), visible wakes immediately
-    const listeners = new Map<string, () => void>();
-    const fakeDoc = {
-      visibilityState: "hidden",
-      addEventListener: (event: string, cb: () => void) => {
-        listeners.set(event, cb);
-      },
-      removeEventListener: (event: string) => {
-        listeners.delete(event);
-      },
-    };
-    (globalThis as { document?: unknown }).document = fakeDoc;
-
-    let hiddenTicks = 0;
-    const visPoller = new ReadPoller(async () => {
-      hiddenTicks += 1;
-      return 30;
-    }, true);
-    void visPoller.readOnce();
-
-    await flushMicrotasks();
-    assert.equal(hiddenTicks, 1);
-
-    // After 80ms while hidden, the 30ms delay was backed off to 10,000ms so no second tick runs
-    await new Promise(resolve => setTimeout(resolve, 80));
-    assert.equal(hiddenTicks, 1, "hidden tab must back off short poll intervals to >= 10s");
-
-    // Becoming visible wakes the poller immediately
-    fakeDoc.visibilityState = "visible";
-    listeners.get("visibilitychange")?.();
-    await flushMicrotasks();
-    assert.equal(hiddenTicks, 2, "tab becoming visible must wake ReadPoller immediately");
-
-    visPoller.dispose();
-  } finally {
-    (globalThis as { document?: unknown }).document = originalDoc;
-  }
 });
 
 test("mergeMonotonicBlocks keeps unfiltered monotonic cache pure and preserves unchanged block references", () => {

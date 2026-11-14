@@ -24,8 +24,10 @@ import {
 } from "@/components/ui/settings-primitives";
 import { Switch } from "@/components/ui/switch";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import type { Project } from "@/lib/types";
 import type { GlobalDefaultsResult, WorkspaceSettings } from "@/lib/workspaces";
+import type { WorkspaceDefaults } from "@ludens/protocol/ludens";
 import type { PetFollow } from "@/features/pet/pet-follow";
 
 type SettingsCategoryId = "general" | "defaults" | "transport" | "pet";
@@ -128,18 +130,24 @@ export function GlobalDefaultsCard() {
   });
   const [draft, setDraft] = useState(saved);
   const versionRef = useRef(0);
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
 
   useEffect(() => {
     const controller = new AbortController();
     const version = ++versionRef.current;
     setLoading(true);
     setReadError(null);
-    void fetch("/api/workspaces", { signal: controller.signal, cache: "no-store" })
-      .then(async response => {
-        const value = await response.json();
-        if (!response.ok) throw new Error(value?.error ?? t("loadFailed"));
-        return value as WorkspaceSettings;
-      })
+    const caller = rpcRef.current;
+    if (!caller) {
+      setLoading(false);
+      setReadError(t("loadFailed"));
+      return () => controller.abort();
+    }
+    void caller
+      .call("workspaces/getSettings", undefined, { signal: controller.signal })
+      .then(value => value as WorkspaceSettings)
       .then(settings => {
         if (controller.signal.aborted || version !== versionRef.current) return;
         const d = settings.config.defaults;
@@ -163,7 +171,7 @@ export function GlobalDefaultsCard() {
         if (!controller.signal.aborted && version === versionRef.current) setLoading(false);
       });
     return () => controller.abort();
-  }, [t]);
+  }, [t, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
 
   const dirty =
     draft.model.trim() !== saved.model.trim() ||
@@ -176,28 +184,27 @@ export function GlobalDefaultsCard() {
 
   const saveDefaults = async () => {
     if (saving || !dirty) return;
+    const caller = rpcRef.current;
+    if (!caller) {
+      setWriteError("RPC client is unavailable");
+      return;
+    }
     setSaving(true);
     setWriteError(null);
     setSavedNotice(false);
     try {
-      const response = await fetch("/api/workspaces", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "globalDefaults",
-          defaults: {
-            model: draft.model.trim() || null,
-            serviceTier: draft.serviceTier,
-            effort: draft.effort,
-            seconds: draft.seconds.trim() ? Number(draft.seconds.trim()) : null,
-            requests: draft.requests.trim() ? Number(draft.requests.trim()) : null,
-            compactionThreshold: draft.compactionThreshold.trim() ? Number(draft.compactionThreshold.trim()) : null,
-            pet: draft.pet,
-          },
-        }),
+      const value = await caller.call("workspaces/mutate", {
+        action: "updateGlobalDefaults",
+        defaults: {
+          model: draft.model.trim() || null,
+          serviceTier: draft.serviceTier,
+          effort: draft.effort,
+          seconds: draft.seconds.trim() ? Number(draft.seconds.trim()) : null,
+          requests: draft.requests.trim() ? Number(draft.requests.trim()) : null,
+          compactionThreshold: draft.compactionThreshold.trim() ? Number(draft.compactionThreshold.trim()) : null,
+          pet: draft.pet,
+        } as unknown as Partial<WorkspaceDefaults>,
       });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value?.error ?? t("saveFailed"));
       const d = (value as GlobalDefaultsResult).config.defaults;
       const next = {
         model: d.model ?? "",

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { BookOpen, Check, Copy, List, RefreshCw, Search, X } from "lucide-react";
 import type { DocCodeBlock, DocDetail, DocGroupInfo } from "@/lib/docs";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { useReadResource } from "@/components/use-read-resource";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -105,8 +106,17 @@ export function DocsView({ search, navigate }: {
   const retryFocus = useRef<{ resource: "index" | "article"; control: HTMLElement; target: HTMLElement | null } | null>(null);
   const [menu, setMenu] = useState<"docs" | "headings" | null>(null);
   const [filter, setFilter] = useState("");
-  const groupsLoad = useReadResource<DocGroupInfo[]>(`/api/docs?lang=${docLang}`, t("loadFailed"));
-  const docLoad = useReadResource<DocDetail>(docId ? `/api/docs?lang=${docLang}&doc=${encodeURIComponent(docId)}` : null, t("loadFailed"));
+  const rpc = useOptionalLudensRpc();
+  const groupsLoad = useReadResource<DocGroupInfo[]>(
+    rpc ? `docs:groups:${docLang}` : null,
+    rpc ? signal => rpc.call("docs/groups", { lang: docLang }, { signal }) as Promise<DocGroupInfo[]> : null,
+    t("loadFailed"),
+  );
+  const docLoad = useReadResource<DocDetail>(
+    rpc && docId ? `docs:read:${docLang}:${docId}` : null,
+    rpc && docId ? signal => rpc.call("docs/read", { id: docId, lang: docLang }, { signal }) as unknown as Promise<DocDetail> : null,
+    t("loadFailed"),
+  );
   const groups = groupsLoad.value;
   const doc = docLoad.value;
   const headings = doc?.headings.filter(heading => heading.level > 1 && heading.level < 4) ?? [];

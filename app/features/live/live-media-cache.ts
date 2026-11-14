@@ -50,7 +50,7 @@ function makeAbortError(): Error {
  * Guarantees:
  * - Mounted images hold `refCount > 0` and are NEVER revoked by LRU eviction (`URL.revokeObjectURL` only runs when `refCount === 0`).
  * - In-flight requests for the same URL are coalesced; underlying `fetch` only aborts when ALL subscribers abort.
- * - Queued requests scrolled past before starting are cancelled in `O(1)` without touching `/api/media` or `dashboardWorker`.
+ * - Queued requests scrolled past before starting are cancelled in `O(1)` without hitting the media server or worker.
  * - Failed HTTP / network reads are NEVER negative-cached so explicit retries always hit the server cleanly.
  */
 export class LiveMediaCache {
@@ -179,7 +179,7 @@ export class LiveMediaCache {
     }
   }
 
-  /** Evicts a corrupt/undecodable entry so subsequent retries fetch cleanly from `/api/media`. */
+  /** Evicts a corrupt/undecodable entry so subsequent retries fetch cleanly from media transport. */
   invalidate(url: string, expectedObjectUrl?: string): void {
     const entry = this.entries.get(url);
     if (!entry) return;

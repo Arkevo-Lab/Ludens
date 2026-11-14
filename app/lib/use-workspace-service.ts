@@ -1,6 +1,8 @@
 "use client";
 
+import type { WorkspacesServiceControlParams } from "@ludens/protocol/app-rpc";
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useOptionalLudensRpc, type LudensRpcCaller } from "@/lib/ludens-rpc";
 import type {
   WorkspaceServiceControlResult,
   WorkspaceStudioSnapshot,
@@ -15,16 +17,8 @@ export interface WorkspaceServiceSnapshot {
   error: string | null;
 }
 
-export interface WorkspaceServiceRequestBody {
-  action: "workspaceServiceControl";
-  id: string;
-  service: {
-    operation: WorkspaceServiceOperation;
-  };
-}
-
 export interface RunWorkspaceServiceOptions {
-  fetchImpl?: typeof fetch;
+  rpc?: LudensRpcCaller;
   signal?: AbortSignal;
   fallbackError?: string;
   onSuccess?: (result: WorkspaceServiceControlResult) => void;
@@ -42,7 +36,7 @@ export interface UseWorkspaceServiceOptions {
     result: WorkspaceServiceControlResult,
   ) => void;
   fallbackError?: string;
-  fetchImpl?: typeof fetch;
+  rpc?: LudensRpcCaller;
 }
 
 export interface UseWorkspaceServiceResult extends WorkspaceServiceSnapshot {
@@ -63,14 +57,13 @@ export const IDLE_WORKSPACE_SERVICE_SNAPSHOT: WorkspaceServiceSnapshot = Object.
   error: null,
 });
 
-export function buildWorkspaceServiceRequestBody(
+export function buildWorkspaceServiceParams(
   workspaceId: string,
   operation: WorkspaceServiceOperation,
-): WorkspaceServiceRequestBody {
+): WorkspacesServiceControlParams {
   return {
-    action: "workspaceServiceControl",
-    id: workspaceId.trim(),
-    service: { operation },
+    workspaceId: workspaceId.trim(),
+    action: operation,
   };
 }
 
@@ -92,10 +85,10 @@ export function formatWorkspaceServiceFailure(
 }
 
 export async function requestWorkspaceServiceControl(
+  rpc: LudensRpcCaller,
   workspaceId: string,
   operation: WorkspaceServiceOperation,
   options?: {
-    fetchImpl?: typeof fetch;
     signal?: AbortSignal;
     fallbackError?: string;
   },
@@ -105,36 +98,11 @@ export async function requestWorkspaceServiceControl(
     throw new Error(options?.fallbackError?.trim() || "Workspace ID is required");
   }
 
-  const fetchFn = options?.fetchImpl ?? fetch;
-  const response = await fetchFn("/api/workspaces", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(buildWorkspaceServiceRequestBody(id, operation)),
-    signal: options?.signal,
-  });
-
-  let payload: Record<string, unknown> | null = null;
-  let rawText = "";
-  try {
-    rawText = await response.text();
-    if (rawText.trim()) {
-      const parsed: unknown = JSON.parse(rawText);
-      if (parsed && typeof parsed === "object") {
-        payload = parsed as Record<string, unknown>;
-      }
-    }
-  } catch {
-    payload = null;
-  }
-
-  if (!response.ok) {
-    const serverError =
-      (typeof payload?.error === "string" && payload.error.trim()) ||
-      rawText.trim() ||
-      options?.fallbackError?.trim() ||
-      `Workspace service request failed (HTTP ${response.status})`;
-    throw new Error(serverError);
-  }
+  const payload = await rpc.call(
+    "workspaces/serviceControl",
+    buildWorkspaceServiceParams(id, operation),
+    { signal: options?.signal },
+  );
 
   const exitCode =
     typeof payload?.exitCode === "number"
@@ -174,7 +142,7 @@ interface WorkspaceServiceEntry {
 }
 
 export function createWorkspaceServiceStore(
-  defaultFetch?: typeof fetch,
+  defaultRpc?: LudensRpcCaller,
 ): WorkspaceServiceStore {
   const entries = new Map<string, WorkspaceServiceEntry>();
 
@@ -252,6 +220,17 @@ export function createWorkspaceServiceStore(
         return null;
       }
 
+      const rpc = options?.rpc ?? defaultRpc;
+      if (!rpc) {
+        updateSnapshot(id, {
+          pendingOperation: null,
+          busy: false,
+          lastResult: null,
+          error: options?.fallbackError || "RPC client is unavailable",
+        });
+        return null;
+      }
+
       updateSnapshot(id, {
         pendingOperation: operation,
         busy: true,
@@ -260,8 +239,7 @@ export function createWorkspaceServiceStore(
       });
 
       try {
-        const result = await requestWorkspaceServiceControl(id, operation, {
-          fetchImpl: options?.fetchImpl ?? defaultFetch,
+        const result = await requestWorkspaceServiceControl(rpc, id, operation, {
           signal: options?.signal,
           fallbackError: options?.fallbackError,
         });
@@ -308,8 +286,10 @@ export function useWorkspaceService({
   onSuccess,
   onStudioSnapshot,
   fallbackError,
-  fetchImpl,
+  rpc,
 }: UseWorkspaceServiceOptions): UseWorkspaceServiceResult {
+  const rpcCtx = useOptionalLudensRpc();
+  const activeRpc = rpc ?? rpcCtx ?? undefined;
   const normalizedWorkspaceId = workspaceId?.trim() ?? "";
   const activeWorkspaceIdRef = useRef(normalizedWorkspaceId);
   activeWorkspaceIdRef.current = normalizedWorkspaceId;
@@ -326,13 +306,13 @@ export function useWorkspaceService({
     onSuccess,
     onStudioSnapshot,
     fallbackError,
-    fetchImpl,
+    activeRpc,
   });
   callbacksRef.current = {
     onSuccess,
     onStudioSnapshot,
     fallbackError,
-    fetchImpl,
+    activeRpc,
   };
 
   const subscribe = useCallback(
@@ -359,7 +339,7 @@ export function useWorkspaceService({
     (operation: WorkspaceServiceOperation) => {
       const dispatchedId = workspaceId?.trim() ?? "";
       return defaultWorkspaceServiceStore.runOperation(workspaceId, operation, {
-        fetchImpl: callbacksRef.current.fetchImpl,
+        rpc: callbacksRef.current.activeRpc,
         fallbackError: callbacksRef.current.fallbackError,
         onSuccess: result => {
           if (!mountedRef.current || activeWorkspaceIdRef.current !== dispatchedId) return;
