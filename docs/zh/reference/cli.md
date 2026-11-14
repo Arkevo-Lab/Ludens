@@ -2,11 +2,11 @@
 
 本文档汇总 Ludens 仓库三个可执行入口暴露的全部用户级子命令、参数开关、默认值与环境变量：
 
-- `ludens`（[`core/bin/ludens`](../../../core/bin/ludens)）：工作区与全局配置管理、Shiori Agent 线程核心守护进程、运行时控制、感知与自验证（Eval）工具、日志归档读取以及控制台后端服务（`app-server`）。
+- `ludens`（[`core/bin/ludens`](../../../core/bin/ludens)）：统一操作者与运行时 CLI —— 负责全局配置与工作区注册表、单例 App-Server 守护进程（`ludens daemon`）、工作区生命周期（`init`/`up`/`services`/`down`）、Shiori 运行时控制（`status`/`auto`/`steer`/`consolidate`/`stop`/`model`，同时支持本地 UDS 与 `--remote ws(s)://...`）、感知与自验证（Eval）工具、日志归档读取以及控制台后端服务（`ludens app-server`）。
 - `baseware`（[`baseware/bin/baseware`](../../../baseware/bin/baseware)）：独立运行的 **Baseware** 跨设备集成层守护进程、驱动包发现与管理、多机路由、原生控制器直调以及 MCP 暴露入口。
-- `ludens-app`（[`app/bin/ludens-app`](../../../app/bin/ludens-app)，Windows [`app/bin/ludens-app.cmd`](../../../app/bin/ludens-app.cmd)）：承载控制台（Console）与可选桌宠（Desktop Pet）的 Electron 桌面端入口。
+- `ludens-app`（[`app/bin/ludens-app`](../../../app/bin/ludens-app)，Windows [`app/bin/ludens-app.cmd`](../../../app/bin/ludens-app.cmd)）：零监听 TCP 端口的 Electron 桌面壳（`ludens-app://console/` + `ludens-media://local/media?...`），通过 IPC UDS RPC 连接 `app-server.sock` 并承载控制台与可选桌宠。
 
-> **全局工作区前缀**：任意 `ludens` 子命令均可在子命令名之前附加 `--workspace <path>`（例如 `ludens --workspace /path/to/ws status`），用于覆盖 `LUDENS_WORKSPACE` 与当前工作目录。
+> **全局前缀与远程参数**：`ludens` 子命令支持 `--workspace <path>`（置于子命令前或部分操作者命令中，覆盖 `LUDENS_WORKSPACE` 与当前工作目录），以及 `--remote <ws(s)://...>` 与 `--token <secret>`（覆盖 `LUDENS_REMOTE_URL` 与 `LUDENS_REMOTE_TOKEN`），将操作者命令统一经 WebSocket JSON-RPC 路由至远端 App-Server，而非本机 `app-server.sock`。
 
 ---
 
@@ -16,12 +16,12 @@
 
 ### `ludens config`
 
-查看或更新供新建与启动工作区继承的全局默认配置。
+查看或更新供新建与启动工作区继承的全局默认配置（支持 `--remote` 与 `--token`）。
 
 ```bash
-ludens config [show]
-ludens config set workspaceRoot <directory>
-ludens config set defaults.<field> <value>
+ludens config [show] [--remote <url>] [--token <secret>]
+ludens config set workspaceRoot <directory> [--remote <url>] [--token <secret>]
+ludens config set defaults.<field> <value> [--remote <url>] [--token <secret>]
 ```
 
 支持的 `defaults.<field>` 配置项：
@@ -44,12 +44,12 @@ ludens config set defaults.<field> <value>
 
 ### `ludens workspace`
 
-管理全局注册表中的工作区条目。
+管理全局注册表中的工作区条目（`list`、`open`、`forget` 均支持 `--remote`；`import` 与 `--new-id` 作用于本机文件系统）。
 
 ```bash
-ludens workspace list
-ludens workspace open <directory> [--new-id]
-ludens workspace forget <id>
+ludens workspace list [--remote <url>] [--token <secret>]
+ludens workspace open <directory> [--new-id] [--remote <url>] [--token <secret>]
+ludens workspace forget <id> [--remote <url>] [--token <secret>]
 ludens workspace import <directory> [--legacy-state <directory>] [--previous-workspace <directory>]
 ```
 
@@ -57,11 +57,27 @@ ludens workspace import <directory> [--legacy-state <directory>] [--previous-wor
 
 ## 工作区生命周期与控制台服务
 
-实现位于 [`core/src/cli/workspace.ts`](../../../core/src/cli/workspace.ts)、[`core/src/cli/main.ts`](../../../core/src/cli/main.ts)、[`core/src/cli/app-server-cli.ts`](../../../core/src/cli/app-server-cli.ts) 与 [`core/src/daemon/launcher.ts`](../../../core/src/daemon/launcher.ts)。
+实现位于 [`core/src/cli/workspace.ts`](../../../core/src/cli/workspace.ts)、[`core/src/cli/daemon-cli.ts`](../../../core/src/cli/daemon-cli.ts)、[`core/src/cli/main.ts`](../../../core/src/cli/main.ts)、[`core/src/cli/app-server-cli.ts`](../../../core/src/cli/app-server-cli.ts) 与 [`core/src/daemon/launcher.ts`](../../../core/src/daemon/launcher.ts)。
+
+### `ludens daemon`
+
+查看、启动、停止或重启按 `LUDENS_HOME` 隔离的单例 `ludens app-server` 守护进程（默认监听 `<home>/run/app-server.sock`，若路径接近 96 字节 `APP_SERVER_SUN_PATH_LIMIT` 上限则回退至 `/tmp/ludens-app-<uid>-<sha256_12>.sock`）。
+
+```bash
+ludens daemon status
+ludens daemon start [--listen <unix://PATH|ws://HOST:PORT>] [--auth <none|token>] \
+  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>]
+ludens daemon stop [--keep-cores | --stop-cores]
+ludens daemon restart [--listen <unix://PATH|ws://HOST:PORT>] [--auth <none|token>] \
+  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>]
+```
+
+- `ludens daemon stop` 默认先停止受管工作区 Core 再关闭 App-Server（对应 `--stop-cores`）；传入 `--keep-cores` 可仅停止 App-Server 并保留活跃 Core。
+- `--listen ws://HOST:PORT` 绑定非回环地址时，必须配合 `--auth token` 使用。
 
 ### `ludens init`
 
-初始化工作区目录并生成 `ludens.json`。
+初始化工作区目录并生成 `ludens.json`（搭配 `--remote` 时可在远端 App-Server 创建工作区）。
 
 ```bash
 ludens init --driver <id> \
@@ -80,29 +96,36 @@ ludens init --driver <id> \
 
 ### `ludens up` / `ludens services` / `ludens down`
 
-按 **1 Workspace = 1 Core** 隔离统一拉起、检查与关闭受管工作区进程（Baseware、承载 **Shiori** 的工作区 **Core**，标记为 `launchedBy: "cli"` 以免受桌面端退出影响、可选目标应用/模拟器启动命令、**App Daemon** 与可选桌宠）。
+按 **1 Workspace = 1 Core** 隔离统一拉起、检查与关闭受管工作区进程（Baseware、承载 **Shiori** 的工作区 **Core**，标记为 `launchedBy: "cli"`、可选目标应用/模拟器启动命令、单例 **App Daemon** 与可选桌宠），支持本地 `app-server.sock` 与 `--remote`。
 
 ```bash
-ludens up [--dry-run] [--dashboard | --no-dashboard] [--pet | --no-pet]
-ludens services
-ludens down [--keep-emulator] [--dashboard] [--pet]
+ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] \
+  [--dashboard | --no-dashboard] [--pet | --no-pet] [--remote <url>] [--token <secret>]
+ludens services [--remote <url>] [--token <secret>]
+ludens down [--services <emulator,baseware,core>] [--keep-emulator] \
+  [--dashboard] [--pet] [--remote <url>] [--token <secret>]
 ```
 
-- `--dashboard` / `--no-dashboard` 控制是否同时启动多工作区控制台 **App Daemon**（`ludens app-server`）与控制台页面。
+- `--preempt` 自动抢占同一物理设备上冲突的工作区 Core。
+- `--services` 将 `up` / `down` 作用域限定到指定组件（`emulator`、`baseware`、`core`）。
+- `--dashboard` / `--no-dashboard` 控制是否确保本地 `ludens app-server` 守护进程就绪。
 - `--pet` / `--no-pet` 控制在 `up` / `down` 时是否联动可选桌宠窗口。
 - `--keep-emulator` 在停止 Ludens 各守护进程的同时保留外部目标应用/模拟器进程。
 
 ### `ludens app-server` / `ludens serve`
 
-启动统一的多工作区 **App Daemon**（提供控制台 HTTP + WebSocket 接口、多 Core 编排、物理设备冲突仲裁以及文档与回放 API）。
+启动统一的多工作区 **App Daemon**，提供 UDS NDJSON 与 WebSocket `/rpc` JSON-RPC 2.0（`@ludens/protocol/app-rpc`）、`EventHub` 实时事件推送、HMAC capability ticket `/media`（`mt=`、`206 Range`）、`/health` 以及静态 Vite SPA（`app/out`，`/api/*` 返回 `404`）。
 
 ```bash
-ludens app-server [--host 127.0.0.1] [--port <0|1..65535>] [-p <port>] \
+ludens app-server [--listen <unix://PATH | ws://HOST:PORT>] \
+  [--auth <none|token>] [--token <secret> | --token-env <var>] \
   [--static-dir <path>] [--trusted-origin <origin>] [--parent-watchdog] [-h | --help]
 ludens serve ...   # app-server 的别名
 ```
 
-默认值：`--host 127.0.0.1`、`--port 3015`（传入 `0` 可自动分配空闲端口）。`--trusted-origin <origin>` 支持重复传入；`--parent-watchdog` 将服务生命周期绑定到父进程标准输入。
+- 不传 `--listen` 时默认仅监听 UDS（`app-server.sock`，**0 个监听 TCP 端口**）且 `--auth none`。
+- 非回环 `ws://HOST:PORT` 绑定未指定 `--auth token`（配合 `--token` 或 `--token-env`）时拒绝启动。
+- `--trusted-origin <origin>` 支持重复传入；`--parent-watchdog` 将服务生命周期绑定到父进程标准输入，启动完成后向 stdout 输出单行 JSON 就绪握手信息。
 
 ### `ludens run`
 
@@ -128,19 +151,20 @@ ludens [--workspace <path>] run \
 
 ## 实时控制、事件池、感知、控制器与多机路由
 
-以下命令通过工作区 Unix Domain Socket 与运行中的核心守护进程通信（详见 [`core/src/cli/control-cli.ts`](../../../core/src/cli/control-cli.ts)、[`core/src/cli/event-cli.ts`](../../../core/src/cli/event-cli.ts) 与 [`core/src/daemon/transport.ts`](../../../core/src/daemon/transport.ts)）。
+操作者控制命令（`status`、`auto`、`steer`、`consolidate`、`stop`、`model`）优先通过本地 `app-server.sock` 或 `--remote ws(s)://... [--token ...]` 通信，并在需要直连运行时（如传入 `LUDENS_SOCKET`）时直连工作区 Core Socket（`core.sock`）；Shiori 运行时内部命令（`event`、`perception`、`observe`、`controller`、`machine`）继续通过工作区 Unix Domain Socket 直连 Core（详见 [`core/src/cli/control-cli.ts`](../../../core/src/cli/control-cli.ts)、[`core/src/cli/operator-rpc.ts`](../../../core/src/cli/operator-rpc.ts)、[`core/src/cli/event-cli.ts`](../../../core/src/cli/event-cli.ts) 与 [`core/src/daemon/transport.ts`](../../../core/src/daemon/transport.ts)）。
 
 ### 状态、自主运行与干预（Steer）
 
 ```bash
-ludens status
-ludens auto on [--message <text>] [--seconds <n>]
-ludens auto timer <seconds|off|unbounded|none>
-ludens auto off
-ludens steer [--message <text> | <text>]
-ludens consolidate [--seconds <n>]
+ludens status [--remote <url>] [--token <secret>]
+ludens auto on [--message <text>] [--seconds <n>] [--remote <url>] [--token <secret>]
+ludens auto timer <seconds|off|unbounded|none> [--remote <url>] [--token <secret>]
+ludens auto off [--remote <url>] [--token <secret>]
+ludens steer [--message <text> | <text>] [--remote <url>] [--token <secret>]
+ludens consolidate [--seconds <n>] [--remote <url>] [--token <secret>]
+ludens stop [--remote <url>] [--token <secret>]
 ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
-  [--effort none|minimal|low|medium|high|xhigh|max]
+  [--effort none|minimal|low|medium|high|xhigh|max] [--remote <url>] [--token <secret>]
 ```
 
 - `ludens auto on` 开启**自主运行（Auto Run）**控制周期（`--seconds` 设置定时周期时长）。
@@ -148,6 +172,7 @@ ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
 - `ludens auto off` 执行**收回控制权（Reclaim Control）**，将 Shiori 切回**手动待命（Manual Standby / `manual`）**并在 Baseware 侧撤销设备控制租约。
 - `ludens steer` 向 Shiori 发送高优引导指令（打断或排队注入）。
 - `ludens consolidate` 触发记忆整理任务（`--seconds` 默认 `600` 秒）。
+- `ludens stop` 干净停止工作区 Core 守护进程。
 - `ludens model` 在手动待命期间切换模型、Service Tier 或推理深度（Effort）。
 
 ### `ludens event`（Event Pool 事件池）
@@ -275,7 +300,7 @@ baseware mcp                               # 通过标准输入输出以 MCP 协
 
 ## `ludens-app` 桌面端 CLI
 
-实现位于 [`app/desktop/main.ts`](../../../app/desktop/main.ts)。启动承载控制台（Console）与可选桌宠的 Electron 桌面壳。
+实现位于 [`app/desktop/main.ts`](../../../app/desktop/main.ts)。启动零监听 TCP 端口的 Electron 桌面壳，通过 `AppServerHost`（`ensureLocalAppDaemon`）走 UDS `app-server.sock`、使用 `ludens-app://console/` 加载打包 Vite SPA、使用 `ludens-media://local/media?...` 加载本地媒体，并通过 `ActiveCoreQuitGuard` 与可选桌宠（`PetSessionCoordinator`）运行。
 
 ```bash
 ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
@@ -285,7 +310,7 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 | 参数 | 用途 |
 | --- | --- |
 | `--workspace <path>` | 打开并聚焦指定工作区目录 |
-| `--server <url>` / `--dashboard <url>` | 连接已在运行的 `ludens app-server` HTTP 地址（`--dashboard` 为命令行别名） |
+| `--server <url>` / `--dashboard <url>` | 覆盖 `ludens-app://console/`，连接外部 Vite 开发或远端渲染地址（亦可设 `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL`） |
 | `--profile <path>` | 覆盖 Electron 用户数据目录路径 |
 | `--background` | 以后台/托盘常驻模式启动，不自动弹出主窗口 |
 | `--show-window` | 启动时立即显示并聚焦控制台窗口 |
@@ -328,7 +353,12 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 | `LUDENS_APP_INDEX_MAX_RUNS` | `3` | 同时常驻内存的 Run 索引数量上限 |
 | `LUDENS_APP_INDEX_IDLE_MS` | `300000` | 控制台 Run 索引空闲驱逐超时（毫秒） |
 | `LUDENS_APP_INDEX_ROOT` | 工作区 `.dashboard-index` | 覆盖控制台可重建索引存放根目录 |
-| `LUDENS_STATIC_DIR` | — | `app-server` 托管的 Next.js 静态控制台构建产物目录 |
+| `LUDENS_REMOTE_URL` | — | 统一 CLI 操作者命令默认接入的 `--remote ws(s)://...` 地址 |
+| `LUDENS_REMOTE_TOKEN` | — | 与 `LUDENS_REMOTE_URL` / `--remote` 配套的默认鉴权 Token |
+| `LUDENS_APP_TOKEN` | — | 启停鉴权版 `app-server` 或 `ludens daemon start --token-env LUDENS_APP_TOKEN` 时传递/读取的 Token 环境变量 |
+| `LUDENS_STATIC_DIR` | — | `app-server` 托管的 Vite 静态 SPA 控制台构建产物目录（`app/out`） |
+| `LUDENS_APP_SERVER_URL` | — | `app/scripts/dev.mjs` / `vite.config.ts` 代理转发的上游 `app-server` 地址 |
+| `LUDENS_APP_DEV_URL` | — | `ludens-app` 加载外部开发渲染地址（别名 `LUDENS_DEV_URL`） |
 | `LUDENS_BUN` | — | 覆盖 Bun 可执行文件路径 |
 | `LUDENS_APP_SERVER_BIN` | — | `ludens-app` 拉起 `app-server` 时的二进制路径覆盖 |
 | `LUDENS_DISABLE_COMPANION` | — | 禁止 Electron 桌面端自动拉起可选桌宠窗口 |
