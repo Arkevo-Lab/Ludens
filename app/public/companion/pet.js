@@ -20,6 +20,7 @@ let flipped = false;
 let held = null;
 let interactive = false;
 let hideTimer;
+let activityClassTimer;
 let line = 0;
 let activityId = null;
 const activityActions = document.querySelector('#activity-actions');
@@ -36,6 +37,7 @@ bridge?.onActivity(event => {
   if (event.type !== 'show' || typeof event.displayId !== 'string') return;
   stopGame();
   clearTimeout(hideTimer);
+  clearTimeout(activityClassTimer);
   activityId = event.displayId;
   activityInput = event.input;
   renderLogContent(message, event.input, copy.activity);
@@ -135,7 +137,7 @@ bridge?.onPose?.(value => {
   poses.choose(value.state, value.effect);
 });
 const poseTimer = setInterval(() => poses.refresh(), 1000);
-window.addEventListener('pagehide', () => { clearInterval(poseTimer); stopGame(); });
+window.addEventListener('pagehide', () => { clearInterval(poseTimer); clearTimeout(hideTimer); clearTimeout(activityClassTimer); stopGame(); });
 
 function hit(point) {
   const rect = portrait.getBoundingClientRect();
@@ -166,13 +168,31 @@ function speak() {
   if (activityId) { activityOpen.focus(); return; }
   line++;
   clearTimeout(hideTimer);
+  clearTimeout(activityClassTimer);
+  bubble.classList.remove('activity');
   lastSpeech = { kind: 'line', index };
   message.textContent = formatSpeech(lastSpeech);
   bubble.classList.add('open');
   bubble.setAttribute('aria-hidden', 'false');
   hideTimer = setTimeout(hideBubble, 5000);
 }
-function hideBubble() { poses.activity(null); activityId = null; activityInput = null; lastSpeech = null; if (bubble.contains(document.activeElement)) pet.focus(); activityActions.hidden = true; delete message.dataset.blockId; bubble.classList.remove('open', 'activity'); bubble.setAttribute('aria-hidden', 'true'); update(lastPoint); }
+function hideBubble() {
+  poses.activity(null);
+  activityId = null;
+  activityInput = null;
+  lastSpeech = null;
+  if (bubble.contains(document.activeElement)) pet.focus();
+  activityActions.hidden = true;
+  delete message.dataset.blockId;
+  clearTimeout(activityClassTimer);
+  bubble.classList.remove('open');
+  bubble.setAttribute('aria-hidden', 'true');
+  if (bubble.classList.contains('activity')) {
+    if (reducedMotion.matches) bubble.classList.remove('activity');
+    else activityClassTimer = setTimeout(() => { bubble.classList.remove('activity'); }, 200);
+  }
+  update(lastPoint);
+}
 let gameActive = false, gameFrame = 0, gameScoreValue = 0, bestScore = 0;
 let gameStartedAt = 0, gameEndsAt = 0, targetExpiresAt = 0, nextSpawnAt = 0, lastHudAt = 0, lastSpot = -1;
 const gameSpots = [[7, 20], [79, 18], [9, 59], [77, 57]];
@@ -235,6 +255,8 @@ function finishGame() {
   stopGame();
   bestScore = Math.max(bestScore, score);
   poses.interact(score >= 10 ? '10-success' : '11-failure', 1800);
+  clearTimeout(activityClassTimer);
+  bubble.classList.remove('activity');
   lastSpeech = { kind: 'game', score };
   message.textContent = formatSpeech(lastSpeech);
   bubble.classList.add('open');

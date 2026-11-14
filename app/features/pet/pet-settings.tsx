@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 import { useActivityPreferences, useDesktopCompanion, usePetSound, usePetVisibility } from "@/features/pet/pet-hooks";
 import type { BlockKind, DesktopCompanion, PetSoundSettings } from "@/lib/desktop";
 import type { Project } from "@/lib/types";
@@ -16,6 +17,7 @@ import {
 import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { useTranslations } from "@/lib/locale";
+import "@/features/pet/pet-settings.css";
 
 function SettingSwitchRow({
   label,
@@ -72,7 +74,7 @@ function ResourceFailureBanner({
   return (
     <>
       {writePending && (
-        <p role="status" className="text-xs text-muted-foreground">{t("savingLabel")}</p>
+        <p role="status" className="pet-settings-status text-xs text-muted-foreground">{t("savingLabel")}</p>
       )}
       {readError && (
         <Alert variant="destructive">
@@ -142,9 +144,10 @@ export function PetSettings({ follow, projects }: { follow: PetFollow; projects:
   const prefsDisabled = prefs.pending || !!prefs.readError || !!prefs.writeError;
   const soundDisabled = sound.pending || !!sound.readError || (!!sound.writeError && sound.writeError.code !== "invalidFile");
   const companionBusy = visibility.loading || visibility.pending || prefs.loading || prefs.pending;
+  const companionReading = visibility.loading || prefs.loading;
   const companionError = visibility.readError || prefs.readError;
   const companionReadLabel = t(
-    visibility.loading || prefs.loading
+    companionReading
       ? "readingSettings"
       : companionError
         ? "retryRead"
@@ -155,13 +158,13 @@ export function PetSettings({ follow, projects }: { follow: PetFollow; projects:
   );
 
   return (
-    <div className="grid min-w-0 gap-6">
+    <div className="pet-settings-root grid min-w-0 gap-6">
       <PetFollowSettings follow={follow} projects={projects} />
 
       {!bridge && (
         <div
           data-pet-availability
-          className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/40 px-3.5 py-2.5 text-xs text-muted-foreground"
+          className="pet-settings-hydrated flex flex-wrap items-center justify-between gap-3 rounded-md bg-muted/40 px-3.5 py-2.5 text-xs text-muted-foreground"
         >
           <span role={checkedAvailability ? "status" : undefined}>
             {!ready
@@ -183,7 +186,7 @@ export function PetSettings({ follow, projects }: { follow: PetFollow; projects:
 
       {bridge && (
         <>
-          <div className="grid min-w-0 gap-3">
+          <div className="pet-settings-hydrated grid min-w-0 gap-3">
             <SettingsSection
               title={t("companionTitle")}
               description={`${t("companionDesc")} · ${t("logsDesc")}`}
@@ -201,6 +204,10 @@ export function PetSettings({ follow, projects }: { follow: PetFollow; projects:
                     prefs.retry();
                   }}
                 >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={"size-3.5" + (companionReading ? " motion-safe:animate-spin" : "")}
+                  />
                   {companionReadLabel}
                 </Button>
               }
@@ -309,7 +316,7 @@ export function PetSettings({ follow, projects }: { follow: PetFollow; projects:
             />
           </div>
 
-          <div data-pet-resource="sound" role="region" aria-label={t("soundTitle")} className="grid min-w-0 gap-3">
+          <div data-pet-resource="sound" role="region" aria-label={t("soundTitle")} className="pet-settings-hydrated grid min-w-0 gap-3">
             <SettingsSection
               title={t("soundTitle")}
               description={t("soundDesc")}
@@ -325,6 +332,10 @@ export function PetSettings({ follow, projects }: { follow: PetFollow; projects:
                     if (!sound.loading && !sound.pending) sound.retry();
                   }}
                 >
+                  <RefreshCw
+                    aria-hidden="true"
+                    className={"size-3.5" + (sound.loading ? " motion-safe:animate-spin" : "")}
+                  />
                   {soundReadLabel}
                 </Button>
               }
