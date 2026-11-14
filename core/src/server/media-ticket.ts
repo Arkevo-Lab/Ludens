@@ -46,6 +46,7 @@ export function verifyMediaTicket(
   } catch {
     return false;
   }
+  if (providedDigest.toString("base64url") !== signatureStr) return false;
 
   const expectedDigest = createHmac("sha256", secret).update(`${expiresStr}.${nonce}`).digest();
   if (providedDigest.length !== expectedDigest.length) return false;

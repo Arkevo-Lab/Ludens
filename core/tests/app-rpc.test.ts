@@ -48,8 +48,16 @@ test("media-ticket mints, verifies in constant time, and rejects expired or tamp
   expect(verifyMediaTicket(secret, "bad.ticket", now)).toBe(false);
 
   const [exp, nonce, sig] = ticket.split(".");
-  const tamperedSig = `${sig!.slice(0, -1)}${sig!.endsWith("A") ? "B" : "A"}`;
-  expect(verifyMediaTicket(secret, `${exp}.${nonce}.${tamperedSig}`, now)).toBe(false);
+  const tamperedHeadSig = `${sig![0] === "A" ? "B" : "A"}${sig!.slice(1)}`;
+  expect(verifyMediaTicket(secret, `${exp}.${nonce}.${tamperedHeadSig}`, now)).toBe(false);
+
+  // Flip only an unused trailing padding bit (same decoded bytes, non-canonical base64url).
+  const b64u = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+  const lastIdx = b64u.indexOf(sig!.at(-1)!);
+  expect(lastIdx).toBeGreaterThanOrEqual(0);
+  const tamperedPaddingSig = `${sig!.slice(0, -1)}${b64u[lastIdx ^ 1]}`;
+  expect(Buffer.from(tamperedPaddingSig, "base64url")).toEqual(Buffer.from(sig!, "base64url"));
+  expect(verifyMediaTicket(secret, `${exp}.${nonce}.${tamperedPaddingSig}`, now)).toBe(false);
   expect(verifyMediaTicket(secret, `${Number(exp) + 1}.${nonce}.${sig}`, now)).toBe(false);
 });
 
