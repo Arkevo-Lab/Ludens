@@ -37,7 +37,25 @@
     color: var(--muted-foreground);
     white-space: nowrap;
     text-align: start;
-    transition: background-color 140ms ease, color 140ms ease;
+    transition:
+      background-color var(--duration-fast) var(--ease-out-expo),
+      color var(--duration-fast) var(--ease-out-expo);
+  }
+
+  .settings-nav-item::before {
+    content: "";
+    position: absolute;
+    inset-block: auto 0;
+    inset-inline: 0.5rem;
+    block-size: 0;
+    border-block-end: 2px solid var(--gold);
+    pointer-events: none;
+    opacity: 0;
+    transform: scaleY(0.35);
+    transform-origin: center;
+    transition:
+      opacity var(--duration-fast) var(--ease-out-expo),
+      transform var(--duration-fast) var(--ease-out-expo);
   }
 
   .settings-nav-item:hover:not(:disabled) {
@@ -52,12 +70,8 @@
   }
 
   .settings-nav-item[aria-current="page"]::before {
-    content: "";
-    position: absolute;
-    inset-block: auto 0;
-    inset-inline: 0.5rem;
-    block-size: 0;
-    border-block-end: 2px solid var(--gold);
+    opacity: 1;
+    transform: scaleY(1);
   }
 
   .settings-nav-item:focus-visible {
@@ -99,7 +113,7 @@
       padding: 0.4375rem 0.75rem;
     }
 
-    .settings-nav-item[aria-current="page"]::before {
+    .settings-nav-item::before {
       inset-block: 0.375rem;
       inset-inline: 0 auto;
       inline-size: 0;
@@ -113,6 +127,10 @@
     .settings-nav-item[aria-current="page"] {
       outline: 1px solid Highlight;
       outline-offset: -1px;
+    }
+
+    .settings-nav-item:not([aria-current="page"])::before {
+      border-color: transparent;
     }
 
     .settings-nav-item[aria-current="page"]::before {
@@ -357,6 +375,7 @@
     line-height: 1.4;
     color: var(--muted-foreground);
     min-inline-size: 0;
+    transition: color var(--duration-fast) var(--ease-out-expo);
   }
 
   .settings-save-status[data-dirty="true"] {
@@ -390,7 +409,40 @@
     border-radius: var(--radius-sm);
     background: var(--surface-inset);
     color: var(--muted-foreground);
-    transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease, opacity 150ms ease;
+    transition:
+      color var(--duration-fast) var(--ease-out-expo),
+      border-color var(--duration-fast) var(--ease-out-expo),
+      background-color var(--duration-fast) var(--ease-out-expo),
+      transform var(--duration-instant) var(--ease-out-expo),
+      opacity var(--duration-fast) var(--ease-out-expo);
+  }
+
+  .settings-copy-button:active {
+    transform: scale(0.95);
+  }
+
+  .settings-copy-icons {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 0.875rem;
+    height: 0.875rem;
+  }
+
+  .settings-copy-icon {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    transform: scale(0.75);
+    transition:
+      opacity var(--duration-fast) var(--ease-out-expo),
+      transform var(--duration-fast) var(--ease-out-expo);
+  }
+
+  .settings-copy-icon[data-active="true"] {
+    opacity: 1;
+    transform: scale(1);
   }
 
   .settings-copy-button:hover {
@@ -429,11 +481,15 @@
     white-space: nowrap;
     pointer-events: none;
     opacity: 0;
-    transition: opacity 150ms ease;
+    transform: translateY(3px);
+    transition:
+      opacity var(--duration-fast) var(--ease-out-expo),
+      transform var(--duration-fast) var(--ease-out-expo);
   }
 
   .settings-copy-tip[data-visible] {
     opacity: 1;
+    transform: translateY(0);
   }
 
   .settings-copy-button[data-failed] + .settings-copy-tip[data-visible] {
@@ -488,7 +544,7 @@
     color: var(--muted-foreground);
     cursor: pointer;
     user-select: none;
-    transition: color 140ms ease;
+    transition: color var(--duration-fast) var(--ease-out-expo);
   }
 
   .settings-disclosure-summary::-webkit-details-marker {
@@ -533,13 +589,20 @@
     block-size: 0;
   }
 
+  .settings-disclosure[open]::details-content {
+    block-size: auto;
+  }
+
   @media (prefers-reduced-motion: no-preference) {
     .settings-disclosure-chevron {
-      transition: rotate 0.2s ease;
+      transition: rotate var(--duration-fast) var(--ease-out-expo);
     }
 
     .settings-disclosure::details-content {
-      transition: block-size 0.24s ease-in-out, content-visibility 0.24s ease-in-out allow-discrete;
+      transition:
+        block-size var(--duration-normal) var(--ease-out-expo),
+        content-visibility var(--duration-normal) var(--ease-out-expo);
+      transition-behavior: allow-discrete;
     }
   }
 }

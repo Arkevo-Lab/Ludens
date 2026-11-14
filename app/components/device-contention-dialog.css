@@ -9,11 +9,34 @@ dialog.device-contention-dialog {
   color: var(--foreground);
   box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32), 0 6px 20px rgba(0, 0, 0, 0.14);
   overflow: hidden;
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  pointer-events: none;
+  transition-property: opacity, transform, overlay, display;
+  transition-duration: var(--duration-normal);
+  transition-timing-function: var(--ease-out-expo);
+  transition-behavior: allow-discrete;
 }
 
 dialog.device-contention-dialog[open] {
   display: flex;
   flex-direction: column;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+dialog.device-contention-dialog[open][data-closing="true"] {
+  opacity: 0;
+  transform: translateY(6px) scale(0.98);
+  pointer-events: none;
+}
+
+@starting-style {
+  dialog.device-contention-dialog[open] {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
 }
 
 dialog.device-contention-dialog:modal {
@@ -25,6 +48,25 @@ dialog.device-contention-dialog::backdrop {
   overscroll-behavior: contain;
   background: rgba(15, 23, 42, 0.56);
   backdrop-filter: blur(4px);
+  opacity: 0;
+  transition-property: opacity, overlay, display;
+  transition-duration: var(--duration-normal);
+  transition-timing-function: var(--ease-out-expo);
+  transition-behavior: allow-discrete;
+}
+
+dialog.device-contention-dialog[open]::backdrop {
+  opacity: 1;
+}
+
+dialog.device-contention-dialog[open][data-closing="true"]::backdrop {
+  opacity: 0;
+}
+
+@starting-style {
+  dialog.device-contention-dialog[open]::backdrop {
+    opacity: 0;
+  }
 }
 
 .dcd-header {
@@ -81,7 +123,7 @@ dialog.device-contention-dialog::backdrop {
   color: var(--muted-foreground);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: background-color var(--duration-fast) var(--ease-out-expo), color var(--duration-fast) var(--ease-out-expo);
 }
 
 .dcd-close-btn:hover {
@@ -187,7 +229,7 @@ dialog.device-contention-dialog::backdrop {
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
-  transition: background-color 140ms ease, border-color 140ms ease, opacity 140ms ease;
+  transition: background-color var(--duration-fast) var(--ease-out-expo), border-color var(--duration-fast) var(--ease-out-expo), opacity var(--duration-fast) var(--ease-out-expo);
 }
 
 .dcd-btn:hover:not(:disabled) {

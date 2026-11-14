@@ -336,11 +336,18 @@ export function InlineCopyButton({
         className="settings-copy-button"
         onClick={() => void handleCopy()}
       >
-        {status === "copied" ? (
-          <Check aria-hidden="true" className="size-3.5" />
-        ) : (
-          <Copy aria-hidden="true" className="size-3.5" />
-        )}
+        <span className="settings-copy-icons" aria-hidden="true">
+          <Copy
+            aria-hidden="true"
+            data-active={status !== "copied" ? "true" : undefined}
+            className="settings-copy-icon size-3.5"
+          />
+          <Check
+            aria-hidden="true"
+            data-active={status === "copied" ? "true" : undefined}
+            className="settings-copy-icon size-3.5"
+          />
+        </span>
       </button>
       <span role="status" className="settings-copy-tip" data-visible={tipText ? "" : undefined}>
         {tipText}

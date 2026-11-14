@@ -1,5 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
+import { prefersReducedMotion } from "@/components/use-motion-preferences";
 import { useLocale, useTranslations } from "@/lib/locale";
 import type { LiveStatus, Project, RunData } from "@/lib/types";
 export { synthesizeEmptyRunData } from "@/features/live/empty-run-data";
@@ -197,12 +199,46 @@ export function useDashboardController() {
     if (url.origin !== window.location.origin) return;
     const next = url.pathname + url.search;
     if (next === window.location.pathname + window.location.search) return;
-    if (options?.replace) {
-      window.history.replaceState(null, "", next);
-    } else {
-      window.history.pushState(null, "", next);
+
+    const currentView = parseViewParam(new URLSearchParams(window.location.search).get("view"));
+    const nextView = parseViewParam(url.searchParams.get("view"));
+    const commit = () => {
+      if (options?.replace) {
+        window.history.replaceState(null, "", next);
+      } else {
+        window.history.pushState(null, "", next);
+      }
+      window.dispatchEvent(new PopStateEvent("popstate"));
+    };
+
+    const doc =
+      typeof document !== "undefined"
+        ? (document as Document & {
+            startViewTransition?: (callback: () => void | Promise<void>) => {
+              finished?: Promise<void>;
+            };
+          })
+        : null;
+
+    if (
+      nextView !== currentView &&
+      doc &&
+      typeof doc.startViewTransition === "function" &&
+      doc.visibilityState !== "hidden" &&
+      !prefersReducedMotion()
+    ) {
+      try {
+        const transition = doc.startViewTransition(() => {
+          flushSync(commit);
+        });
+        transition.finished?.catch(() => {});
+        return;
+      } catch {
+        // Fall through to synchronous navigation when View Transitions cannot start.
+      }
     }
-    window.dispatchEvent(new PopStateEvent("popstate"));
+
+    commit();
   }, []);
   const navigate = (patch: Record<string, string | null>, options?: { replace?: boolean }) => {
     const rawParams = new URLSearchParams(window.location.search);
