@@ -1,10 +1,11 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
+import { NodeUdsRpcClient, WsAppRpcClient } from "../src/cli/app-rpc-client.ts";
 import {
   isPidAlive,
   probeBackgroundJob,
@@ -38,17 +39,21 @@ async function waitForCondition(check: () => boolean | Promise<boolean>, timeout
   throw new Error(`Condition did not become true within ${timeoutMs}ms`);
 }
 
-test("startAppServer rejects non-loopback hosts and localRequest enforces Host + trustedOrigins CSRF rules", async () => {
-  await expect(startAppServer({ host: "0.0.0.0", port: 0 })).rejects.toThrow("non-loopback host");
-  await expect(startAppServer({ host: "192.168.1.50", port: 0 })).rejects.toThrow("non-loopback host");
+test("startAppServer enforces non-loopback WS token guard and localRequest enforces Host + trustedOrigins CSRF rules", async () => {
+  await expect(
+    startAppServer({ unixSocketPath: false, wsListen: { host: "0.0.0.0", port: 0 } }),
+  ).rejects.toThrow("non-loopback host");
+  await expect(
+    startAppServer({ unixSocketPath: false, wsListen: { host: "192.168.1.50", port: 0 }, auth: { mode: "none" } }),
+  ).rejects.toThrow("non-loopback host");
 
   expect(() =>
-    localRequest(new Request("http://evil.example/api/health", { headers: { host: "evil.example" } })),
+    localRequest(new Request("http://evil.example/health", { headers: { host: "evil.example" } })),
   ).toThrow("只允许本地访问");
 
   expect(() =>
     localRequest(
-      new Request("http://127.0.0.1:41234/api/pet", {
+      new Request("http://127.0.0.1:41234/rpc", {
         method: "POST",
         headers: { host: "127.0.0.1:41234", origin: "http://evil.example" },
       }),
@@ -58,7 +63,7 @@ test("startAppServer rejects non-loopback hosts and localRequest enforces Host +
 
   expect(() =>
     localRequest(
-      new Request("http://127.0.0.1:41234/api/pet", {
+      new Request("http://127.0.0.1:41234/rpc", {
         method: "POST",
         headers: { host: "127.0.0.1:41234", origin: "http://127.0.0.1:3099/" },
       }),
@@ -68,7 +73,7 @@ test("startAppServer rejects non-loopback hosts and localRequest enforces Host +
 
   expect(() =>
     localRequest(
-      new Request("http://[::1]:41234/api/pet", {
+      new Request("http://[::1]:41234/rpc", {
         method: "POST",
         headers: { host: "[::1]:41234", origin: "http://[::1]:41234" },
       }),
@@ -77,7 +82,7 @@ test("startAppServer rejects non-loopback hosts and localRequest enforces Host +
   ).not.toThrow();
 });
 
-test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, static SPA assets, traversal blocks, and trustedOrigins", async () => {
+test("app-server serves unified UDS/WS RPC, HTTP /media Range 206, zero /api/* routes, static SPA security headers, and traversal blocks", async () => {
   const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-app-server-test-")));
   const home = join(rootDir, "home");
   const wsDir = join(rootDir, "workspace-alpha");
@@ -85,14 +90,14 @@ test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, sta
   const outsideSecret = join(rootDir, "outside-secret.txt");
 
   await mkdir(wsDir, { recursive: true });
-  await mkdir(join(staticDir, "_next", "static", "chunks"), { recursive: true });
+  await mkdir(join(staticDir, "assets"), { recursive: true });
   await mkdir(join(staticDir, "companion"), { recursive: true });
   await writeFile(outsideSecret, "TOP_SECRET_DATA", "utf8");
   await writeFile(join(staticDir, "index.html"), "<!doctype html><title>Ludens Console</title>", "utf8");
   await writeFile(join(staticDir, "companion", "index.html"), "<!doctype html><title>Companion</title>", "utf8");
   await writeFile(
-    join(staticDir, "_next", "static", "chunks", "app.js"),
-    "console.log('ludens-chunk');",
+    join(staticDir, "assets", "app-bundle.js"),
+    "console.log('ludens-vite-chunk');",
     "utf8",
   );
   await symlink(outsideSecret, join(staticDir, "escape-link.txt"));
@@ -105,7 +110,7 @@ test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, sta
   const identity = await ensureWorkspaceIdentity(wsDir);
   await registerWorkspace(wsDir, home);
 
-  // Seed a run with a timeline MP4 video to exercise /api/replay HTTP 206 Partial Content end-to-end.
+  // Seed a run with a timeline MP4 video to exercise replay + /media HTTP 206 Partial Content end-to-end.
   const runId = "2026-01-01T00-00-00.000Z";
   const runDir = join(wsDir, "logs", runId);
   const timelineVideoDir = join(wsDir, ".ludens", "timeline", "video");
@@ -137,145 +142,179 @@ test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, sta
       atMs: 3000,
       at: "2026-01-01T00:00:03.000Z",
       trace: { epoch: "ep-1", observationId: "obs-1" },
-      data: { modelMedia: { asset: "video/clip.mp4", mediaType: "video/mp4" } },
+      data: { observationId: "obs-1", modelMedia: { asset: "video/clip.mp4", mediaType: "video/mp4" } },
     },
-    { seq: 4, type: "control", atMs: 4000, at: "2026-01-01T00:00:04.000Z", trace: { epoch: "ep-1" }, data: { mode: "manual", epoch: "ep-1" } },
-    { seq: 5, type: "run_end", atMs: 5000, at: "2026-01-01T00:00:05.000Z", data: { mode: "manual" } },
+    {
+      seq: 4,
+      type: "model_start",
+      atMs: 3500,
+      at: "2026-01-01T00:00:03.500Z",
+      trace: { epoch: "ep-1", modelCallId: "mc-1" },
+      data: { observations: ["obs-1"] },
+    },
+    { seq: 5, type: "control", atMs: 4000, at: "2026-01-01T00:00:04.000Z", trace: { epoch: "ep-1" }, data: { mode: "manual", epoch: "ep-1" } },
+    { seq: 6, type: "run_end", atMs: 5000, at: "2026-01-01T00:00:05.000Z", data: { mode: "manual" } },
   ];
   await writeFile(join(runDir, "events.jsonl"), `${events.map(e => JSON.stringify(e)).join("\n")}\n`, "utf8");
 
   const trustedDevOrigin = "http://127.0.0.1:3099";
   const server = await startAppServer({
-    host: "127.0.0.1",
-    port: 0,
     home,
+    wsListen: { host: "127.0.0.1", port: 0 },
+    auth: { mode: "none" },
     staticDir,
     trustedOrigins: [trustedDevOrigin],
   });
 
+  const udsClient = new NodeUdsRpcClient({ socketPath: server.socketPath! });
+  const wsClient = new WsAppRpcClient({ url: server.wsUrl! });
+
   try {
     expect(server.port).toBeGreaterThan(0);
     expect(server.port).not.toBe(3015);
+    expect(server.socketPath).toBeTruthy();
 
-    // 1. /api/health
-    const healthRes = await fetch(`${server.url}/api/health`);
+    // UDS socket mode is 0o600 on POSIX.
+    if (process.platform !== "win32") {
+      const sockStat = await stat(server.socketPath!);
+      expect(sockStat.mode & 0o777).toBe(0o600);
+    }
+
+    // 1. /health HTTP endpoint
+    const healthRes = await fetch(`${server.url}/health`);
     expect(healthRes.status).toBe(200);
     expect(healthRes.headers.get("cache-control")).toBe("no-store");
     expect(await healthRes.json()).toEqual({
       ok: true,
       pid: process.pid,
-      home,
-      managedWorkspaces: [],
+      authRequired: false,
     });
 
-    // 2. /api/catalog
-    const catalogRes = await fetch(`${server.url}/api/catalog?includeEmpty=1`);
-    expect(catalogRes.status).toBe(200);
-    const catalogJson = (await catalogRes.json()) as Array<{ id: string; runs: Array<{ id: string }> }>;
-    expect(catalogJson.map(p => p.id)).toContain(identity.id);
-    expect(catalogJson.find(p => p.id === identity.id)?.runs.map(r => r.id)).toContain(runId);
+    // Legacy /api/* routes are deleted and must return 404 (never SPA index.html).
+    for (const legacyPath of ["/api/health", "/api/catalog", "/api/pet", "/api/workspaces"]) {
+      const legacyRes = await fetch(`${server.url}${legacyPath}`);
+      expect(legacyRes.status).toBe(404);
+    }
 
-    // 3. /api/workspaces (GET settings + GET studio)
-    const wsRes = await fetch(`${server.url}/api/workspaces`);
-    expect(wsRes.status).toBe(200);
-    const wsSettings = (await wsRes.json()) as { home: string; workspaces: Array<{ id: string }> };
+    // 2. UDS & WS RPC initialize + core queries
+    await udsClient.connect();
+    await wsClient.connect();
+    const udsInit = await udsClient.initialize({ clientInfo: { name: "test-uds", version: "1.0.0" } });
+    expect(udsInit.transport).toBe("uds");
+    expect(udsInit.authenticated).toBe(true);
+    expect(udsInit.home).toBe(home);
+    expect(udsInit.media.basePath).toBe("/media");
+    expect(udsInit.media.liveStreamCapabilities).toEqual(["none"]);
+
+    const wsInit = await wsClient.initialize({ clientInfo: { name: "test-ws", version: "1.0.0" } });
+    expect(wsInit.transport).toBe("ws");
+    expect(wsInit.authenticated).toBe(true);
+
+    // catalog/get via WS RPC
+    const catalog = (await wsClient.call("catalog/get", { includeEmpty: true })) as Array<{
+      id: string;
+      runs: Array<{ id: string }>;
+    }>;
+    expect(catalog.map(p => p.id)).toContain(identity.id);
+    expect(catalog.find(p => p.id === identity.id)?.runs.map(r => r.id)).toContain(runId);
+
+    // workspaces/getSettings + workspaces/getStudio via WS RPC
+    const wsSettings = (await wsClient.call("workspaces/getSettings")) as {
+      home: string;
+      workspaces: Array<{ id: string }>;
+    };
     expect(wsSettings.home).toBe(home);
     expect(wsSettings.workspaces.map(w => w.id)).toContain(identity.id);
 
-    const studioRes = await fetch(`${server.url}/api/workspaces?studio=${encodeURIComponent(identity.id)}`);
-    expect(studioRes.status).toBe(200);
-    const studioJson = (await studioRes.json()) as { id: string; config: { driver: string } };
-    expect(studioJson.id).toBe(identity.id);
-    expect(studioJson.config.driver).toBe("cua");
+    const studio = (await wsClient.call("workspaces/getStudio", { workspaceId: identity.id })) as {
+      id: string;
+      config: { driver: string };
+    };
+    expect(studio.id).toBe(identity.id);
+    expect(studio.config.driver).toBe("cua");
 
-    // 4. /api/docs (docGroups + readDoc)
-    const docsGroupRes = await fetch(`${server.url}/api/docs?lang=zh`);
-    expect(docsGroupRes.status).toBe(200);
-    const docGroups = (await docsGroupRes.json()) as Array<{ id: string; docs: Array<{ id: string }> }>;
+    // docs/groups + docs/read
+    const docGroups = (await wsClient.call("docs/groups", { lang: "zh" })) as Array<{
+      id: string;
+      docs: Array<{ id: string }>;
+    }>;
     expect(docGroups.length).toBeGreaterThan(0);
     const firstDocId = docGroups[0]?.docs[0]?.id;
     expect(firstDocId).toBeTruthy();
-    const docDetailRes = await fetch(`${server.url}/api/docs?doc=${encodeURIComponent(firstDocId!)}&lang=en`);
-    expect(docDetailRes.status).toBe(200);
-    const docDetail = (await docDetailRes.json()) as { id: string; html: string };
+    const docDetail = (await wsClient.call("docs/read", { id: firstDocId!, lang: "en" })) as {
+      id: string;
+      html: string;
+    };
     expect(docDetail.id).toBe(firstDocId);
     expect(docDetail.html.length).toBeGreaterThan(0);
 
-    // 5. CSRF enforcement, X-Forwarded-Host DNS-rebinding guard, & JSON validation
-    const rebindProxiedGet = await fetch(`${server.url}/api/workspaces`, {
-      headers: { "X-Forwarded-Host": "evil.attacker.example:3015" },
-    });
-    expect(rebindProxiedGet.status).toBe(403);
-
-    const nullJsonPut = await fetch(`${server.url}/api/workspaces`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Origin: server.url },
-      body: "null",
-    });
-    expect(nullJsonPut.status).toBe(400);
-
-    const malformedJsonPut = await fetch(`${server.url}/api/workspaces`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Origin: server.url },
-      body: "{bad-json",
-    });
-    expect(malformedJsonPut.status).toBe(400);
-
-    const untrustedPut = await fetch(`${server.url}/api/pet`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Origin: "http://evil.example" },
-      body: JSON.stringify({ project: identity.id }),
-    });
-    expect(untrustedPut.status).toBe(403);
-    expect((await untrustedPut.json()).error).toContain("只允许同源控制请求");
-
-    // Mutation with trusted dev proxy Origin succeeds!
-    const trustedPut = await fetch(`${server.url}/api/pet`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Origin: trustedDevOrigin },
-      body: JSON.stringify({ project: identity.id }),
-    });
-    expect(trustedPut.status).toBe(200);
-    const putReceipt = (await trustedPut.json()) as { target: { project: string; revision: string } };
+    // 3. pet/setTarget + pet/recordConsumer + pet/getState over RPC
+    const putReceipt = (await wsClient.call("pet/setTarget", { project: identity.id })) as {
+      target: { project: string; revision: string };
+    };
     expect(putReceipt.target.project).toBe(identity.id);
 
-    // Mutation with same-origin succeeds!
-    const petHeartbeat = await fetch(`${server.url}/api/pet`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Origin: server.url },
-      body: JSON.stringify({
-        instanceId: "desktop-pet-test",
-        pid: process.pid,
-        revision: putReceipt.target.revision,
-        workspace: wsDir,
-        runId: null,
-        phase: "idle",
-        error: null,
-      }),
+    await wsClient.call("pet/recordConsumer", {
+      instanceId: "desktop-pet-test",
+      pid: process.pid,
+      revision: putReceipt.target.revision,
+      workspace: wsDir,
+      runId: null,
+      phase: "idle",
+      error: null,
     });
-    expect(petHeartbeat.status).toBe(200);
-
-    const petGet = await fetch(`${server.url}/api/pet`);
-    expect(petGet.status).toBe(200);
-    expect(await petGet.json()).toMatchObject({
+    const pet = await wsClient.call("pet/getState");
+    expect(pet).toMatchObject({
       target: { project: identity.id },
       connected: true,
     });
 
-    // 6. /api/replay overview + HTTP Range 206 Partial Content + 416 + HEAD
-    const replayOverviewRes = await fetch(
-      `${server.url}/api/replay?project=${encodeURIComponent(identity.id)}&run=${encodeURIComponent(runId)}&mode=overview`,
-    );
-    expect(replayOverviewRes.status).toBe(200);
-    const overview = (await replayOverviewRes.json()) as { cycles: Array<{ epoch: string }> };
-    expect(overview.cycles.map(c => c.epoch)).toEqual(["ep-1"]);
+    // 4. replay/get uses /media?... URLs + /media HTTP Range 206 Partial Content + 416 + HEAD + CORS/CORP
+    const replayOverview = (await wsClient.call("replay/get", {
+      project: identity.id,
+      run: runId,
+      query: { mode: "overview" },
+    })) as { cycles: Array<{ epoch: string }> };
+    expect(replayOverview.cycles.map(c => c.epoch)).toEqual(["ep-1"]);
 
-    const replayMediaUrl = `${server.url}/api/replay?project=${encodeURIComponent(identity.id)}&run=${encodeURIComponent(runId)}&mode=media&id=model-media:3`;
-    const rangeRes = await fetch(replayMediaUrl, { headers: { Range: "bytes=2-5" } });
+    const replayFrames = (await wsClient.call("replay/get", {
+      project: identity.id,
+      run: runId,
+      query: { mode: "frames", epoch: "ep-1", start: 0, end: 10_000 },
+    })) as { items: unknown[] };
+    expect(Array.isArray(replayFrames.items)).toBe(true);
+
+    const replayEvents = (await wsClient.call("replay/get", {
+      project: identity.id,
+      run: runId,
+      query: {
+        mode: "events",
+        epoch: "ep-1",
+        start: Date.parse("2026-01-01T00:00:00.000Z"),
+        end: Date.parse("2026-01-01T00:00:06.000Z"),
+      },
+    })) as { items: Array<{ id: string; track: string }> };
+    const modelItem = replayEvents.items.find(item => item.track === "model");
+    expect(modelItem).toBeTruthy();
+
+    const replayDetail = (await wsClient.call("replay/get", {
+      project: identity.id,
+      run: runId,
+      query: { mode: "detail", epoch: "ep-1", id: modelItem!.id },
+    })) as { observations?: Array<{ url?: string }> };
+    expect(replayDetail.observations?.[0]?.url).toContain("/media?kind=replay");
+    expect(replayDetail.observations?.[0]?.url).not.toContain("/api/");
+
+    const replayMediaUrl = `${server.url}/media?kind=replay&project=${encodeURIComponent(identity.id)}&run=${encodeURIComponent(runId)}&mode=media&id=model-media:3`;
+    const rangeRes = await fetch(replayMediaUrl, {
+      headers: { Range: "bytes=2-5", Origin: trustedDevOrigin },
+    });
     expect(rangeRes.status).toBe(206);
     expect(rangeRes.headers.get("accept-ranges")).toBe("bytes");
     expect(rangeRes.headers.get("content-range")).toBe("bytes 2-5/10");
     expect(rangeRes.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(rangeRes.headers.get("cross-origin-resource-policy")).toBe("cross-origin");
+    expect(rangeRes.headers.get("access-control-allow-origin")).toBe(trustedDevOrigin);
     expect(await rangeRes.text()).toBe("2345");
 
     const headRangeRes = await fetch(replayMediaUrl, { method: "HEAD", headers: { Range: "bytes=2-5" } });
@@ -287,6 +326,29 @@ test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, sta
     expect(badRangeRes.status).toBe(416);
     expect(badRangeRes.headers.get("content-range")).toBe("bytes */10");
 
+    // media/resolve on UDS returns local file path, while WS rejects with -32001 UNAUTHORIZED.
+    const resolvedUds = await udsClient.call("media/resolve", {
+      kind: "replay",
+      project: identity.id,
+      run: runId,
+      mode: "media",
+      id: "model-media:3",
+    });
+    expect("file" in resolvedUds && resolvedUds.file).toBe(join(timelineVideoDir, "clip.mp4"));
+    let mediaWsError: unknown;
+    try {
+      await wsClient.call("media/resolve", {
+        kind: "replay",
+        project: identity.id,
+        run: runId,
+        mode: "media",
+        id: "model-media:3",
+      });
+    } catch (error) {
+      mediaWsError = error;
+    }
+    expect(mediaWsError).toMatchObject({ code: -32001 });
+
     // Direct unit check on byteRange + fileResponse edge cases
     expect(() => byteRange("bytes=0-", 0)).toThrow();
     const directMediaResp = await fileResponse(
@@ -296,11 +358,14 @@ test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, sta
     expect(directMediaResp.status).toBe(206);
     expect(await directMediaResp.text()).toBe("789");
 
-    // 7. Static SPA serving, immutable _next/static caching, companion subroute, and traversal rejection
+    // 5. Static SPA serving, immutable /assets/* caching, security headers, and traversal rejection
     const rootHtml = await fetch(`${server.url}/`);
     expect(rootHtml.status).toBe(200);
     expect(rootHtml.headers.get("content-type")).toContain("text/html");
     expect(rootHtml.headers.get("cache-control")).toBe("no-cache");
+    expect(rootHtml.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    expect(rootHtml.headers.get("x-frame-options")).toBe("DENY");
+    expect(rootHtml.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
     expect(await rootHtml.text()).toContain("Ludens Console");
 
     const spaFallback = await fetch(`${server.url}/workspaces/some-client-route`);
@@ -312,13 +377,13 @@ test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, sta
     expect(companionHtml.status).toBe(200);
     expect(await companionHtml.text()).toContain("Companion");
 
-    const nextAsset = await fetch(`${server.url}/_next/static/chunks/app.js`);
-    expect(nextAsset.status).toBe(200);
-    expect(nextAsset.headers.get("content-type")).toContain("javascript");
-    expect(nextAsset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
-    expect(await nextAsset.text()).toContain("ludens-chunk");
+    const viteAsset = await fetch(`${server.url}/assets/app-bundle.js`);
+    expect(viteAsset.status).toBe(200);
+    expect(viteAsset.headers.get("content-type")).toContain("javascript");
+    expect(viteAsset.headers.get("cache-control")).toBe("public, max-age=31536000, immutable");
+    expect(await viteAsset.text()).toContain("ludens-vite-chunk");
 
-    const missingJs = await fetch(`${server.url}/_next/static/chunks/missing.js`);
+    const missingJs = await fetch(`${server.url}/assets/missing.js`);
     expect(missingJs.status).toBe(404);
 
     // Encoded slash traversal, normalized fetch traversal, & symlink escape must never expose outside files
@@ -341,15 +406,14 @@ test("app-server serves core HTTP API routes, HTTP Range 206 replay streams, sta
     );
     expect(directRawTraversal.status).toBe(403);
 
-    // 8. POST /api/app-server/shutdown triggers async graceful close after returning { ok: true }
-    const shutdownRes = await fetch(`${server.url}/api/app-server/shutdown`, {
-      method: "POST",
-      headers: { Origin: server.url },
-    });
-    expect(shutdownRes.status).toBe(200);
-    expect(await shutdownRes.json()).toEqual({ ok: true });
+    // 6. RPC daemon/shutdown triggers async graceful close cleanly and removes runtime file
+    const shutdownResult = await wsClient.call("daemon/shutdown", { stopCores: false });
+    expect(shutdownResult).toEqual({ ok: true, stopped: [] });
     await server.closed;
+    expect(await Bun.file(server.runtimeFilePath).exists()).toBe(false);
   } finally {
+    await wsClient.close().catch(() => {});
+    await udsClient.close().catch(() => {});
     await server.close({ emergency: true }).catch(() => {});
     await rm(rootDir, { recursive: true, force: true });
   }
@@ -416,7 +480,7 @@ test("WorkspaceSupervisor tracks only owned services and never kills external un
   }
 });
 
-test("CLI ludens app-server --port 0 --parent-watchdog emits JSON handshake and cleans up supervised child tree on stdin EOF", async () => {
+test("CLI ludens app-server --listen ws://127.0.0.1:0 --parent-watchdog emits JSON handshake and cleans up supervised child tree on stdin EOF", async () => {
   const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-watchdog-cli-")));
   const home = join(rootDir, "home");
   const wsDir = join(rootDir, "managed-ws");
@@ -493,14 +557,19 @@ test("CLI ludens app-server --port 0 --parent-watchdog emits JSON handshake and 
   });
 
   const mainCli = resolve(import.meta.dir, "../src/cli/main.ts");
-  const child = spawn(process.execPath, [mainCli, "app-server", "--port", "0", "--parent-watchdog"], {
-    cwd: rootDir,
-    env: { ...process.env, LUDENS_HOME: home },
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    [mainCli, "app-server", "--listen", "ws://127.0.0.1:0", "--parent-watchdog"],
+    {
+      cwd: rootDir,
+      env: { ...process.env, LUDENS_HOME: home },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
 
   let emulatorPid = 0;
   let subchildPid = 0;
+  let rpcClient: WsAppRpcClient | null = null;
 
   try {
     // 1. Read single-line JSON readiness handshake from stdout
@@ -529,36 +598,38 @@ test("CLI ludens app-server --port 0 --parent-watchdog emits JSON handshake and 
 
     const handshake = JSON.parse(handshakeLine) as {
       ready: boolean;
+      socketPath: string | null;
+      wsUrl: string;
       url: string;
       host: string;
       port: number;
       pid: number;
       home: string;
+      authMode: string;
     };
     expect(handshake).toEqual({
       ready: true,
+      socketPath: expect.any(String),
+      wsUrl: `ws://127.0.0.1:${handshake.port}/rpc`,
       url: `http://127.0.0.1:${handshake.port}`,
       host: "127.0.0.1",
       port: expect.any(Number),
       pid: child.pid!,
       home,
+      authMode: "none",
     });
     expect(handshake.port).toBeGreaterThan(0);
     expect(handshake.port).not.toBe(3015);
 
-    // 2. Trigger workspace up via HTTP PUT /api/workspaces (workspaceServiceControl).
-    // Even though ludens.json has dashboard:true, pet:true, WorkspaceSupervisor forces dashboard:false, pet:false
-    // and binds the spawned emulator job to this app-server's lifecycle!
-    const upRes = await fetch(`${handshake.url}/api/workspaces`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json", Origin: handshake.url },
-      body: JSON.stringify({
-        action: "workspaceServiceControl",
-        id: wsIdentity.id,
-        service: { operation: "up" },
-      }),
+    // 2. Trigger workspace up via WS JSON-RPC workspaces/serviceControl.
+    rpcClient = new WsAppRpcClient({ url: handshake.wsUrl });
+    await rpcClient.connect();
+    await rpcClient.initialize();
+    const upResult = await rpcClient.call("workspaces/serviceControl", {
+      workspaceId: wsIdentity.id,
+      action: "up",
     });
-    expect(upRes.status).toBe(200);
+    expect(upResult).toBeDefined();
 
     // Verify emulator + its grandchild process are alive and tracked by app-server's WorkspaceSupervisor
     const emulatorStateFile = join(wsDir, "logs", "background", "emulator.job.json");
@@ -573,8 +644,8 @@ test("CLI ludens app-server --port 0 --parent-watchdog emits JSON handshake and 
     expect(subchildPid).toBeGreaterThan(0);
     expect(isPidAlive(subchildPid)).toBe(true);
 
-    const healthDuring = await (await fetch(`${handshake.url}/api/health`)).json();
-    expect(healthDuring.managedWorkspaces).toEqual([wsIdentity.id]);
+    const statusDuring = await rpcClient.call("daemon/status");
+    expect(statusDuring.managedWorkspaces).toEqual([wsIdentity.id]);
 
     // 3. Close child stdin to simulate parent crash / SIGKILL EOF!
     const exitPromise = new Promise<number | null>(resolveExit => {
@@ -595,6 +666,7 @@ test("CLI ludens app-server --port 0 --parent-watchdog emits JSON handshake and 
     // External unmanaged job must remain alive!
     expect(isPidAlive(externalJob.pid)).toBe(true);
   } finally {
+    await rpcClient?.close().catch(() => {});
     if (child.pid && isPidAlive(child.pid)) {
       try {
         child.kill("SIGKILL");

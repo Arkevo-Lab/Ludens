@@ -1363,6 +1363,7 @@ export async function controlWorkspaceService(
         ? ([requestedService] as const)
         : undefined;
   const preempt = Boolean(raw.preempt);
+  const keepEmulator = Boolean(raw.keepEmulator) || Boolean(services?.length && !services.includes("emulator"));
   const entry = await registeredWorkspace(id, home);
 
   if (supervisor) {
@@ -1379,7 +1380,7 @@ export async function controlWorkspaceService(
               ...(services?.length ? { services } : {}),
             })
           : operation === "down"
-            ? await supervisor.down(entry.workspace, { keepEmulator: false })
+            ? await supervisor.down(entry.workspace, { keepEmulator })
             : await supervisor.reload(entry.workspace, {
                 workspaceId: entry.id,
                 launchedBy: "app",
