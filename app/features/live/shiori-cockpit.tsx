@@ -39,6 +39,7 @@ import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
 import { summarizePoolEventPreview } from "@ludens/protocol/event-pool";
 import { DeviceContentionDialog } from "@/components/device-contention-dialog";
 import { PixelMark } from "@/components/ui/pixel-mark";
+import { prefersSmoothScrollBehavior, useAnimatedPresence } from "@/components/use-motion-preferences";
 import {
   ModelEffortBadge,
   ModelPickerDialog,
@@ -240,10 +241,12 @@ function FallbackEventPoolPanel({ snapshot, focusedEventId, onFocusEvent, onLoca
 const CodexPoolReceiptCard = memo(function CodexPoolReceiptCard({
   segment,
   poolById,
+  streamEnter,
   onJumpSource,
 }: {
   segment: Extract<StreamSegment, { kind: "pool_receipt" }>;
   poolById: Map<string, PoolEvent>;
+  streamEnter?: boolean;
   onJumpSource: (event: PoolEvent) => void;
 }) {
   const t = useTranslations("shioriCockpit");
@@ -264,6 +267,7 @@ const CodexPoolReceiptCard = memo(function CodexPoolReceiptCard({
       className="codex-pool-receipt"
       data-actor={segment.actor}
       data-pool-receipt={segment.ids.join(",")}
+      data-stream-enter={streamEnter ? "true" : undefined}
       id={segment.id}
     >
       <span className="codex-pool-receipt-icon" aria-hidden="true">
@@ -333,9 +337,11 @@ function formatStopReason(reason: string | null, t: (key: string) => string): st
 const CodexSessionDivider = memo(function CodexSessionDivider({
   segment,
   highlighted,
+  streamEnter,
 }: {
   segment: Extract<StreamSegment, { kind: "session_divider" }>;
   highlighted?: boolean;
+  streamEnter?: boolean;
 }) {
   const t = useTranslations("shioriCockpit");
   const isPostCycle = Boolean(segment.epoch?.startsWith("post:"));
@@ -357,6 +363,7 @@ const CodexSessionDivider = memo(function CodexSessionDivider({
       data-segment-anchor={!isPostCycle && segment.epoch ? `${segment.runId}#${segment.epoch}` : segment.runId}
       data-active={segment.isActive || undefined}
       data-highlighted={highlighted || undefined}
+      data-stream-enter={streamEnter ? "true" : undefined}
     >
       {segment.gapSeconds != null && segment.gapSeconds >= 5 && (
         <div className="codex-session-gap" data-session-gap>
@@ -399,6 +406,20 @@ const CodexSessionDivider = memo(function CodexSessionDivider({
   );
 });
 
+function CodexStepPreDisclosure({ open, text }: { open: boolean; text: string }) {
+  const presence = useAnimatedPresence(open, 150);
+  const retainedTextRef = useRef(text);
+  if (open) retainedTextRef.current = text;
+  if (!presence.mounted) return null;
+  return (
+    <div className="codex-disclosure-grid" data-motion-state={presence.state}>
+      <div className="codex-disclosure-grid-inner">
+        <pre className="codex-step-pre">{open ? text : retainedTextRef.current}</pre>
+      </div>
+    </div>
+  );
+}
+
 function CodexStepGroup({
   steps,
   forceExpanded,
@@ -417,6 +438,7 @@ function CodexStepGroup({
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
   const containsSelected = Boolean(selectedBlock && steps.some(s => s.id === selectedBlock));
   const isExpanded = forceExpanded || open || containsSelected;
+  const listPresence = useAnimatedPresence(steps.length > 0 && isExpanded, 160);
 
   if (steps.length === 0) return null;
 
@@ -437,68 +459,74 @@ function CodexStepGroup({
         type="button"
         className="codex-step-group-toggle"
         data-step-group-toggle=""
+        aria-expanded={isExpanded}
         onClick={() => setOpen(prev => !prev)}
       >
         <span>
           {t("collapsedStepsPrefix").replace("{count}", String(steps.length))}
           {breakdown.length > 0 ? ` · ${breakdown.join(" / ")}` : ""}
         </span>
-        {isExpanded ? (
-          <ChevronDown className="size-3.5" aria-hidden="true" />
-        ) : (
-          <ChevronRight className="size-3.5" aria-hidden="true" />
-        )}
+        <ChevronRight
+          className={"size-3.5 codex-disclosure-chevron" + (isExpanded ? " is-open" : "")}
+          aria-hidden="true"
+        />
       </button>
 
-      {isExpanded && (
-        <div className="codex-step-list">
-          {steps.map(step => {
-            const { badge, detail } = summarizeStepBlock(step);
-            const isStepOpen = expandedStepId === step.id || selectedBlock === step.id;
-            const fullText =
-              step.text ||
-              (step.tool?.result !== undefined
-                ? printable(step.tool.result)
-                : step.data !== undefined
-                  ? printable(step.data)
-                  : "");
-            const view = fullText ? activityContentView(fullText, true) : null;
+      {listPresence.mounted && (
+        <div
+          className="codex-disclosure-grid"
+          data-motion-state={listPresence.state}
+          inert={!isExpanded || undefined}
+        >
+          <div className="codex-disclosure-grid-inner">
+            <div className="codex-step-list">
+              {steps.map(step => {
+                const { badge, detail } = summarizeStepBlock(step);
+                const isStepOpen = expandedStepId === step.id || selectedBlock === step.id;
+                const fullText =
+                  step.text ||
+                  (step.tool?.result !== undefined
+                    ? printable(step.tool.result)
+                    : step.data !== undefined
+                      ? printable(step.data)
+                      : "");
+                const view = fullText ? activityContentView(fullText, true) : null;
 
-            return (
-              <div
-                key={step.id}
-                id={step.id}
-                className="codex-step-item"
-                data-selected={selectedBlock === step.id || undefined}
-                data-status={step.status}
-              >
-                <div className="codex-step-row">
-                  <button
-                    type="button"
-                    className="codex-step-main"
-                    onClick={() => {
-                      setExpandedStepId(prev => (prev === step.id ? null : step.id));
-                      onSelect?.(step);
-                    }}
+                return (
+                  <div
+                    key={step.id}
+                    id={step.id}
+                    className="codex-step-item"
+                    data-selected={selectedBlock === step.id || undefined}
+                    data-status={step.status}
                   >
-                    <span className="codex-step-badge" data-kind={step.kind}>
-                      {badge}
-                    </span>
-                    <span className="codex-step-detail">{detail}</span>
-                  </button>
-                  <div className="codex-step-meta">
-                    <time className="font-mono text-[11px] text-muted-foreground">
-                      {clockTime(step.at)}
-                    </time>
-                  </div>
-                </div>
+                    <div className="codex-step-row">
+                      <button
+                        type="button"
+                        className="codex-step-main"
+                        onClick={() => {
+                          setExpandedStepId(prev => (prev === step.id ? null : step.id));
+                          onSelect?.(step);
+                        }}
+                      >
+                        <span className="codex-step-badge" data-kind={step.kind}>
+                          {badge}
+                        </span>
+                        <span className="codex-step-detail">{detail}</span>
+                      </button>
+                      <div className="codex-step-meta">
+                        <time className="font-mono text-[11px] text-muted-foreground">
+                          {clockTime(step.at)}
+                        </time>
+                      </div>
+                    </div>
 
-                {isStepOpen && view && (
-                  <pre className="codex-step-pre">{view.text}</pre>
-                )}
-              </div>
-            );
-          })}
+                    {view && <CodexStepPreDisclosure open={isStepOpen} text={view.text} />}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -514,6 +542,7 @@ const CodexInputCard = memo(function CodexInputCard({
   bgBlock,
   at,
   isSelected,
+  streamEnter,
   onInspectInput,
   onOpenReplayAt,
 }: {
@@ -525,11 +554,13 @@ const CodexInputCard = memo(function CodexInputCard({
   bgBlock?: ActivityBlock;
   at: string;
   isSelected: boolean;
+  streamEnter?: boolean;
   onInspectInput: (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => void;
   onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
 }) {
   const t = useTranslations("shioriCockpit");
   const [expandedPayload, setExpandedPayload] = useState(false);
+  const payloadPresence = useAnimatedPresence(expandedPayload, 160);
 
   const perception = call?.perception;
   const snapshot = perception?.snapshot;
@@ -600,6 +631,7 @@ const CodexInputCard = memo(function CodexInputCard({
       data-call-id={call?.id}
       data-run-segment={run}
       data-selected={isSelected || undefined}
+      data-stream-enter={streamEnter ? "true" : undefined}
       onClick={() => onInspectInput(run, segId, call, observations[0]?.id, at)}
     >
       <header className="codex-input-header">
@@ -708,37 +740,43 @@ const CodexInputCard = memo(function CodexInputCard({
             <button
               type="button"
               className="codex-input-payload-toggle"
+              aria-expanded={expandedPayload}
               onClick={event => {
                 event.stopPropagation();
                 setExpandedPayload(prev => !prev);
               }}
             >
-              {expandedPayload ? (
-                <ChevronDown className="size-3" aria-hidden="true" />
-              ) : (
-                <ChevronRight className="size-3" aria-hidden="true" />
-              )}
+              <ChevronRight
+                className={"size-3 codex-disclosure-chevron" + (expandedPayload ? " is-open" : "")}
+                aria-hidden="true"
+              />
               <span>{t("inputExpandPayload")}</span>
             </button>
           </div>
 
-          {expandedPayload && (
-            <pre
-              className="codex-input-payload-pre"
+          {payloadPresence.mounted && (
+            <div
+              className="codex-disclosure-grid"
+              data-motion-state={payloadPresence.state}
+              inert={!expandedPayload || undefined}
               onClick={event => event.stopPropagation()}
             >
-              {printable(
-                call
-                  ? {
-                      callIndex: call.index,
-                      callId: call.id,
-                      ...(call.inputText ? { inputText: call.inputText } : {}),
-                      ...(call.inputObservations.length > 0 ? { inputObservations: call.inputObservations } : {}),
-                      ...(call.perception ? { perception: call.perception } : {}),
-                    }
-                  : (bgBlock?.data ?? bgBlock),
-              )}
-            </pre>
+              <div className="codex-disclosure-grid-inner">
+                <pre className="codex-input-payload-pre">
+                  {printable(
+                    call
+                      ? {
+                          callIndex: call.index,
+                          callId: call.id,
+                          ...(call.inputText ? { inputText: call.inputText } : {}),
+                          ...(call.inputObservations.length > 0 ? { inputObservations: call.inputObservations } : {}),
+                          ...(call.perception ? { perception: call.perception } : {}),
+                        }
+                      : (bgBlock?.data ?? bgBlock),
+                  )}
+                </pre>
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -752,6 +790,7 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
   showAllSteps,
   isLastSegment,
   selectedStepId,
+  streamEnter,
   onInspectBlock,
 }: {
   segment: Extract<StreamSegment, { kind: "turn" }>;
@@ -759,6 +798,7 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
   showAllSteps: boolean;
   isLastSegment: boolean;
   selectedStepId?: string;
+  streamEnter?: boolean;
   onInspectBlock: (runId: string, block: ActivityBlock, siblingSteps: ActivityBlock[]) => void;
 }) {
   const paragraphs = segment.responseText
@@ -767,7 +807,11 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
   const ownerRunId = segment.runId || fallbackRunId;
 
   return (
-    <article id={segment.responseBlock?.id} className="codex-turn-assistant">
+    <article
+      id={segment.responseBlock?.id}
+      className="codex-turn-assistant"
+      data-stream-enter={streamEnter ? "true" : undefined}
+    >
       <CodexStepGroup
         steps={segment.steps}
         forceExpanded={showAllSteps}
@@ -835,6 +879,7 @@ function LiveStopTimerControl({
   const t = useTranslations("shioriCockpit");
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
+  const popoverPresence = useAnimatedPresence(open, 140);
   const [busy, setBusy] = useState(false);
   const [customMinutes, setCustomMinutes] = useState("30");
   const [err, setErr] = useState<string | null>(null);
@@ -913,10 +958,12 @@ function LiveStopTimerControl({
         <ChevronDown className="size-3 shrink-0 opacity-70" aria-hidden="true" />
       </button>
 
-      {open && (
+      {popoverPresence.mounted && (
         <div
           className="codex-runtime-timer-popover"
           data-placement={placement}
+          data-motion-state={popoverPresence.state}
+          inert={!open || undefined}
           role="dialog"
           aria-label={t("timerLiveMenuTitle")}
         >
@@ -1728,6 +1775,30 @@ export function ShioriComposer({
 
   const modelShort = shortModelLabel(activeModel, t("deviceOnly"));
 
+  const menuPresence = useAnimatedPresence(Boolean(isLiveRun && menuOpen), 140);
+  const durationPresence = useAnimatedPresence(Boolean(isLiveRun && durationMenuOpen), 140);
+  const outboundTrayPresence = useAnimatedPresence(
+    Boolean(isLiveRun && pendingOutboundEvents.length > 0),
+    140,
+  );
+  const retainedOutboundEventsRef = useRef<PoolEvent[]>([]);
+  if (pendingOutboundEvents.length > 0) {
+    retainedOutboundEventsRef.current = pendingOutboundEvents;
+  }
+  const visibleOutboundEvents =
+    pendingOutboundEvents.length > 0
+      ? pendingOutboundEvents
+      : outboundTrayPresence.mounted
+        ? retainedOutboundEventsRef.current
+        : [];
+  const replyBarPresence = useAnimatedPresence(Boolean(isLiveRun && replyTarget), 140);
+  const retainedReplyTargetRef = useRef<PoolEvent | null>(null);
+  if (replyTarget) {
+    retainedReplyTargetRef.current = replyTarget;
+  }
+  const activeReplyTarget =
+    replyTarget ?? (replyBarPresence.mounted ? retainedReplyTargetRef.current : null);
+
   if (!isLiveRun) {
     return (
       <div ref={composerDockRef} className="codex-composer-wrap" data-shiori-composer="readonly">
@@ -1747,8 +1818,13 @@ export function ShioriComposer({
 
   return (
     <div ref={composerDockRef} className="codex-composer-wrap" data-shiori-composer={effectiveTab}>
-      {menuOpen && (
-        <div className="codex-preset-popover" role="menu">
+      {menuPresence.mounted && (
+        <div
+          className="codex-preset-popover"
+          data-motion-state={menuPresence.state}
+          inert={!menuOpen || undefined}
+          role="menu"
+        >
           <div className="codex-preset-popover-title">{t("quickPromptsTitle")}</div>
           {presets.map(preset => (
             <button
@@ -1792,8 +1868,13 @@ export function ShioriComposer({
         </div>
       )}
 
-      {durationMenuOpen && (
-        <div className="codex-preset-popover codex-duration-popover" role="menu">
+      {durationPresence.mounted && (
+        <div
+          className="codex-preset-popover codex-duration-popover"
+          data-motion-state={durationPresence.state}
+          inert={!durationMenuOpen || undefined}
+          role="menu"
+        >
           <div className="codex-preset-popover-title">{t("durationMenuTitle")}</div>
           {durationPresets.map(opt => {
             const active = durationSeconds === opt.seconds;
@@ -1846,9 +1927,14 @@ export function ShioriComposer({
         </div>
       )}
 
-      {pendingOutboundEvents.length > 0 && (
-        <div className="codex-pool-tray" data-event-pool-tray>
-          {pendingOutboundEvents.map(item => {
+      {outboundTrayPresence.mounted && visibleOutboundEvents.length > 0 && (
+        <div
+          className="codex-pool-tray"
+          data-event-pool-tray
+          data-motion-state={outboundTrayPresence.state}
+          inert={pendingOutboundEvents.length === 0 || undefined}
+        >
+          {visibleOutboundEvents.map(item => {
             const isHelp = item.kind === "help_request";
             return (
               <div
@@ -1941,18 +2027,23 @@ export function ShioriComposer({
           </div>
         )}
 
-        {replyTarget && (
-          <div className="codex-reply-context-bar" data-reply-context={replyTarget.id}>
+        {replyBarPresence.mounted && activeReplyTarget && (
+          <div
+            className="codex-reply-context-bar"
+            data-reply-context={activeReplyTarget.id}
+            data-motion-state={replyBarPresence.state}
+            inert={!replyTarget || undefined}
+          >
             <div className="codex-reply-context-main">
               <CornerUpLeft className="size-3.5 text-primary shrink-0" aria-hidden="true" />
               <strong className="shrink-0">
                 {t("poolReplyingTo").replace(
                   "{kind}",
-                  replyTarget.kind === "help_request" ? t("poolHelpRequestBadge") : t("poolNoticeBadge"),
+                  activeReplyTarget.kind === "help_request" ? t("poolHelpRequestBadge") : t("poolNoticeBadge"),
                 )}
               </strong>
               <span className="codex-reply-context-quote">
-                {replyTarget.title || replyTarget.text}
+                {activeReplyTarget.title || activeReplyTarget.text}
               </span>
             </div>
             <div className="codex-reply-context-right">
@@ -2186,7 +2277,7 @@ export function ShioriComposer({
       )}
       {!error && spawningCore && (
         <p className="codex-composer-feedback" role="status" data-live-spawning-core="">
-          <RefreshCw className="inline size-3 animate-spin mr-1.5" aria-hidden="true" />
+          <RefreshCw className="inline size-3 motion-safe:animate-spin mr-1.5" aria-hidden="true" />
           {t("spawningCoreStatus")}
         </p>
       )}
@@ -2564,7 +2655,7 @@ export function ShioriWorkbench({
   };
 
   const scrollToBottom = useCallback(
-    (behavior: ScrollBehavior = "smooth") => {
+    (behavior: ScrollBehavior = prefersSmoothScrollBehavior()) => {
       rawScrollToBottom({
         behavior,
         onBeforeScroll: () => {
@@ -2596,7 +2687,7 @@ export function ShioriWorkbench({
       pauseFollow({ manualHold: false });
       const top =
         container.scrollTop + (targetEl.getBoundingClientRect().top - container.getBoundingClientRect().top) - 72;
-      container.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+      container.scrollTo({ top: Math.max(0, top), behavior: prefersSmoothScrollBehavior() });
       flashPoolEvent(eventId);
       return true;
     },
@@ -2825,10 +2916,10 @@ export function ShioriWorkbench({
               (targetEl!.getBoundingClientRect().top - container.getBoundingClientRect().top) -
               16,
           );
-          container.scrollTo({ top: refinedTop, behavior: "smooth" });
+          container.scrollTo({ top: refinedTop, behavior: prefersSmoothScrollBehavior() });
         });
       } else {
-        container.scrollTo({ top: rawTargetTop, behavior: "smooth" });
+        container.scrollTo({ top: rawTargetTop, behavior: prefersSmoothScrollBehavior() });
       }
 
       const highlightId =
@@ -3044,6 +3135,97 @@ export function ShioriWorkbench({
       ? `${stateTitle} · ${t(live.launchedBy === "cli" ? "coreOriginCli" : "coreOriginApp")}`
       : stateTitle;
 
+  const runScopeKey = `${project}/${data.run}`;
+  const seenSegmentsScopeRef = useRef<string>("");
+  const seenSegmentsInitializedRef = useRef(false);
+  const seenSegmentIdsRef = useRef<Set<string>>(new Set());
+  const enteringSegmentIdsRef = useRef<Set<string>>(new Set());
+
+  const sameRunScope = seenSegmentsScopeRef.current === runScopeKey;
+  const canDetectStreamEntries = sameRunScope && seenSegmentsInitializedRef.current;
+  let lastSeenSegmentIdx = -1;
+  if (canDetectStreamEntries) {
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (seenSegmentIdsRef.current.has(segments[i]!.id)) {
+        lastSeenSegmentIdx = i;
+        break;
+      }
+    }
+  }
+  const isSegmentStreamEntering = (segId: string, segIdx: number): boolean => {
+    if (!canDetectStreamEntries) return false;
+    if (enteringSegmentIdsRef.current.has(segId)) return true;
+    if (seenSegmentIdsRef.current.has(segId)) return false;
+    if (lastSeenSegmentIdx >= 0) {
+      return segIdx > lastSeenSegmentIdx;
+    }
+    return !feed.historical && segments.length <= 3;
+  };
+
+  useEffect(() => {
+    if (seenSegmentsScopeRef.current !== runScopeKey) {
+      seenSegmentsScopeRef.current = runScopeKey;
+      seenSegmentsInitializedRef.current = !feed.loading || segments.length > 0;
+      seenSegmentIdsRef.current = new Set(segments.map(seg => seg.id));
+      enteringSegmentIdsRef.current = new Set();
+      return;
+    }
+    if (!seenSegmentsInitializedRef.current) {
+      if (!feed.loading || segments.length > 0) {
+        seenSegmentsInitializedRef.current = true;
+        for (const seg of segments) {
+          seenSegmentIdsRef.current.add(seg.id);
+        }
+      }
+      return;
+    }
+    let lastSeenIdx = -1;
+    for (let i = segments.length - 1; i >= 0; i--) {
+      if (seenSegmentIdsRef.current.has(segments[i]!.id)) {
+        lastSeenIdx = i;
+        break;
+      }
+    }
+    for (let i = 0; i < segments.length; i++) {
+      const segId = segments[i]!.id;
+      if (seenSegmentIdsRef.current.has(segId)) continue;
+      const enteredLive =
+        lastSeenIdx >= 0
+          ? i > lastSeenIdx
+          : !feed.historical && segments.length <= 3;
+      if (enteredLive) {
+        enteringSegmentIdsRef.current.add(segId);
+      }
+      seenSegmentIdsRef.current.add(segId);
+    }
+  }, [runScopeKey, segments, feed.loading, feed.historical]);
+
+  const hasServiceError = Boolean(isLiveRun && project && workspaceService.error);
+  const serviceErrorPresence = useAnimatedPresence(hasServiceError, 140);
+  const retainedServiceErrorRef = useRef<string | null>(null);
+  if (hasServiceError && workspaceService.error) {
+    retainedServiceErrorRef.current = workspaceService.error;
+  }
+  const displayedServiceError =
+    workspaceService.error ?? (serviceErrorPresence.mounted ? retainedServiceErrorRef.current : null);
+
+  const showJumpLocateToast = Boolean(
+    jumpTarget && lastJumpedSeqRef.current !== jumpTarget.seq && jumpTarget.value && loadingOlderRun,
+  );
+  const jumpToastPresence = useAnimatedPresence(showJumpLocateToast, 140);
+
+  const poolToastPresence = useAnimatedPresence(Boolean(pendingPoolLocateEvent), 140);
+  const retainedPoolLocateRef = useRef<PoolEvent | null>(null);
+  if (pendingPoolLocateEvent) {
+    retainedPoolLocateRef.current = pendingPoolLocateEvent;
+  }
+  const displayedPoolLocate =
+    pendingPoolLocateEvent ?? (poolToastPresence.mounted ? retainedPoolLocateRef.current : null);
+
+  const showFollowPill = !isFollowing || feed.historical;
+  const followPillPresence = useAnimatedPresence(showFollowPill, 140);
+  const backdropPresence = useAnimatedPresence(dockOpen && isOverlayDock, 180);
+
   return (
     <div className="codex-workbench" data-dock-open={dockOpen || undefined}>
       {/* ── LEFT / CENTER MAIN PANE: CODEX CHAT STREAM + FLOATING PILL COMPOSER ── */}
@@ -3163,8 +3345,13 @@ export function ShioriWorkbench({
         </header>
 
         {/* Workspace Service Error Alert (Codex-style clean header when Core is idle/offline without errors) */}
-        {isLiveRun && project && workspaceService.error && (
-          <div className="codex-host-offline-bar" data-has-error="true">
+        {serviceErrorPresence.mounted && displayedServiceError && (
+          <div
+            className="codex-host-offline-bar"
+            data-has-error="true"
+            data-motion-state={serviceErrorPresence.state}
+            inert={!hasServiceError || undefined}
+          >
             <div className="codex-host-offline-error" role="alert" data-live-service-error="">
               <div className="codex-host-offline-error-head">
                 <div className="codex-host-offline-error-title">
@@ -3182,23 +3369,28 @@ export function ShioriWorkbench({
                   <X className="size-3.5" aria-hidden="true" />
                 </button>
               </div>
-              <pre className="codex-host-offline-error-pre">{workspaceService.error}</pre>
+              <pre className="codex-host-offline-error-pre">{displayedServiceError}</pre>
             </div>
           </div>
         )}
 
         {/* Scrollable Chat Stream + Safely Anchored Scroll-to-Bottom Button */}
         <div className="codex-chat-scroll-stage">
-          {jumpTarget && lastJumpedSeqRef.current !== jumpTarget.seq && jumpTarget.value && loadingOlderRun && (
-            <div className="codex-jump-toast" role="status">
+          {jumpToastPresence.mounted && (
+            <div className="codex-jump-toast" data-motion-state={jumpToastPresence.state} role="status">
               <span className="codex-thinking-dot" />
               <span>{t("locatingSegmentBanner")}</span>
             </div>
           )}
-          {pendingPoolLocateEvent && (
-            <div className="codex-jump-toast" role="status" data-pool-locating={pendingPoolLocateEvent.id}>
+          {poolToastPresence.mounted && displayedPoolLocate && (
+            <div
+              className="codex-jump-toast"
+              data-motion-state={poolToastPresence.state}
+              role="status"
+              data-pool-locating={displayedPoolLocate.id}
+            >
               <span className="codex-thinking-dot" />
-              <span>{t("locatingPoolEventBanner").replace("{seq}", String(pendingPoolLocateEvent.seq))}</span>
+              <span>{t("locatingPoolEventBanner").replace("{seq}", String(displayedPoolLocate.seq))}</span>
             </div>
           )}
           <div ref={streamRef} className="codex-chat-scroll" {...scrollContainerProps}>
@@ -3290,12 +3482,14 @@ export function ShioriWorkbench({
               )
             ) : (
               segments.map((seg, segIdx) => {
+                const streamEnter = isSegmentStreamEntering(seg.id, segIdx);
                 if (seg.kind === "session_divider") {
                   return (
                     <CodexSessionDivider
                       key={seg.id}
                       segment={seg}
                       highlighted={highlightedSegmentId === seg.id}
+                      streamEnter={streamEnter}
                     />
                   );
                 }
@@ -3313,6 +3507,7 @@ export function ShioriWorkbench({
                       className={`codex-turn-user${livePoolItem && poolFlashId === livePoolItem.id ? " is-pool-target-flash" : ""}`}
                       data-pool-event-id={livePoolItem?.id}
                       data-pool-seq={livePoolItem?.seq}
+                      data-stream-enter={streamEnter ? "true" : undefined}
                     >
                       <div className="codex-user-bubble" data-mode={seg.mode} data-withdrawn={isWithdrawn || undefined}>
                         {seg.mode !== "start" &&
@@ -3373,6 +3568,7 @@ export function ShioriWorkbench({
                       key={seg.id}
                       segment={seg}
                       poolById={poolEventsById}
+                      streamEnter={streamEnter}
                       onJumpSource={locatePoolEventInStream}
                     />
                   );
@@ -3392,6 +3588,7 @@ export function ShioriWorkbench({
                       data-pool-stream-card={liveEvent.id}
                       data-pool-event-id={liveEvent.id}
                       data-pool-seq={liveEvent.seq}
+                      data-stream-enter={streamEnter ? "true" : undefined}
                     >
                       <header className="codex-outbound-header">
                         <div className="codex-outbound-badges">
@@ -3485,6 +3682,7 @@ export function ShioriWorkbench({
                       bgBlock={seg.bgBlock}
                       at={seg.at}
                       isSelected={isInputSelected}
+                      streamEnter={streamEnter}
                       onInspectInput={handleInspectInput}
                       onOpenReplayAt={onOpenReplayAt}
                     />
@@ -3499,6 +3697,7 @@ export function ShioriWorkbench({
                     showAllSteps={showAllSteps}
                     isLastSegment={segIdx === segments.length - 1}
                     selectedStepId={activeBlockId}
+                    streamEnter={streamEnter}
                     onInspectBlock={handleInspectBlock}
                   />
                 );
@@ -3516,12 +3715,14 @@ export function ShioriWorkbench({
         </div>
 
           {/* Floating Follow-Latest / Unread Activity Pill (anchored inside scroll stage above composer) */}
-          {(!isFollowing || feed.historical) && (
+          {followPillPresence.mounted && (
             <button
               type="button"
               className="codex-follow-pill codex-scroll-bottom-btn"
               data-live-follow-pill=""
               data-has-unread={unreadCount > 0 ? "true" : undefined}
+              data-motion-state={followPillPresence.state}
+              inert={!showFollowPill || undefined}
               aria-label={
                 unreadCount > 0
                   ? t("followPillUnreadLabel").replace(
@@ -3530,7 +3731,7 @@ export function ShioriWorkbench({
                     )
                   : t("scrollToBottomAria")
               }
-              onClick={() => scrollToBottom("smooth")}
+              onClick={() => scrollToBottom(prefersSmoothScrollBehavior())}
             >
               {unreadCount > 0 ? (
                 <>
@@ -3580,27 +3781,30 @@ export function ShioriWorkbench({
           externalMode={workflowCommand?.mode ?? null}
           externalDraft={workflowCommand?.prompt ?? null}
           onExternalConsumed={() => setWorkflowCommand(null)}
-          onMessageSubmitted={() => scrollToBottom("smooth")}
+          onMessageSubmitted={() => scrollToBottom(prefersSmoothScrollBehavior())}
           onReturnLatest={onReturnLatest}
           onUpdated={onUpdated}
         />
       </section>
 
       {/* ── RIGHT WORKBENCH DOCK: LIVE VIEWPORT + COMPACT HOST OPS + TELEMETRY ── */}
-      {dockOpen && isOverlayDock && (
+      {backdropPresence.mounted && (
         <div
           className="codex-dock-backdrop"
           data-dock-backdrop
+          data-motion-state={backdropPresence.state}
           aria-hidden="true"
           onClick={closeDock}
         />
       )}
-      {dockOpen && (
-        <aside
-          className="codex-right-dock"
-          data-overlay={isOverlayDock ? "true" : undefined}
-          aria-label={t("stageColumnAria")}
-        >
+      <aside
+        className="codex-right-dock"
+        data-dock-state={dockOpen ? "open" : "closed"}
+        data-overlay={isOverlayDock ? "true" : undefined}
+        aria-hidden={!dockOpen || undefined}
+        inert={!dockOpen || undefined}
+        aria-label={t("stageColumnAria")}
+      >
           <header className="codex-dock-header">
             <div className="codex-dock-seg" role="tablist" aria-label={t("stageColumnAria")}>
               <button
@@ -3795,7 +3999,7 @@ export function ShioriWorkbench({
                         data-dock-service-op="up"
                       >
                         {workspaceService.pendingOperation === "up" ? (
-                          <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
+                          <RefreshCw className="size-3.5 motion-safe:animate-spin shrink-0" aria-hidden="true" />
                         ) : (
                           <Play className="size-3.5 fill-current shrink-0" aria-hidden="true" />
                         )}
@@ -3818,7 +4022,7 @@ export function ShioriWorkbench({
                         data-dock-service-op="reload"
                       >
                         {workspaceService.pendingOperation === "reload" ? (
-                          <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
+                          <RefreshCw className="size-3.5 motion-safe:animate-spin shrink-0" aria-hidden="true" />
                         ) : (
                           <RotateCcw className="size-3.5 shrink-0" aria-hidden="true" />
                         )}
@@ -3838,7 +4042,7 @@ export function ShioriWorkbench({
                         data-dock-service-op="down"
                       >
                         {workspaceService.pendingOperation === "down" ? (
-                          <RefreshCw className="size-3.5 animate-spin shrink-0" aria-hidden="true" />
+                          <RefreshCw className="size-3.5 motion-safe:animate-spin shrink-0" aria-hidden="true" />
                         ) : (
                           <Square className="size-3 fill-current shrink-0" aria-hidden="true" />
                         )}
@@ -3857,7 +4061,6 @@ export function ShioriWorkbench({
             )}
           </div>
         </aside>
-      )}
       <DeviceContentionDialog
         conflict={pendingContention}
         busy={spawningCore || sessionSubmitting}

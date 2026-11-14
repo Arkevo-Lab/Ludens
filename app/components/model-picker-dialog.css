@@ -15,6 +15,25 @@
       0 0 0 1px rgba(255, 255, 255, 0.03) inset;
   }
 
+  .model-picker-dialog[data-inline="true"] {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    transition:
+      opacity 150ms var(--ease-out-expo),
+      transform 150ms var(--ease-out-expo);
+  }
+  @starting-style {
+    .model-picker-dialog[data-inline="true"] {
+      opacity: 0;
+      transform: translateY(6px) scale(0.99);
+    }
+  }
+  .model-picker-dialog[data-inline="true"][data-motion-state="closed"] {
+    opacity: 0;
+    transform: translateY(6px) scale(0.99);
+    pointer-events: none;
+  }
+
   .model-picker-header {
     display: flex;
     align-items: center;
@@ -77,7 +96,10 @@
     background: transparent;
     color: var(--muted-foreground);
     cursor: pointer;
-    transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+    transition:
+      background-color var(--duration-fast) var(--ease-out-expo),
+      color var(--duration-fast) var(--ease-out-expo),
+      border-color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-icon-btn:hover:not(:disabled) {
     border-color: var(--border-subtle);
@@ -140,7 +162,7 @@
     background: var(--surface-inset);
     color: var(--foreground);
     font-size: 13px;
-    transition: border-color 120ms ease, box-shadow 120ms ease;
+    transition: border-color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-search-input::placeholder {
     color: var(--subtle);
@@ -164,6 +186,9 @@
     background: transparent;
     color: var(--muted-foreground);
     cursor: pointer;
+    transition:
+      background-color var(--duration-instant) var(--ease-out-expo),
+      color var(--duration-instant) var(--ease-out-expo);
   }
   .model-picker-clear-btn:hover {
     background: var(--accent);
@@ -185,7 +210,10 @@
     white-space: nowrap;
     flex-shrink: 0;
     cursor: pointer;
-    transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+    transition:
+      border-color var(--duration-fast) var(--ease-out-expo),
+      color var(--duration-fast) var(--ease-out-expo),
+      background-color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-auth-toggle:hover {
     color: var(--foreground);
@@ -226,7 +254,10 @@
     white-space: nowrap;
     flex-shrink: 0;
     cursor: pointer;
-    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+    transition:
+      background-color var(--duration-fast) var(--ease-out-expo),
+      border-color var(--duration-fast) var(--ease-out-expo),
+      color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-provider-tab:hover {
     background: var(--accent);
@@ -285,7 +316,9 @@
     border: 1px solid transparent;
     background: transparent;
     overflow: hidden;
-    transition: border-color 140ms ease, background-color 140ms ease, box-shadow 140ms ease;
+    transition:
+      border-color var(--duration-fast) var(--ease-out-expo),
+      background-color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-card[data-current="true"]:not([data-expanded="true"]) {
     border-color: color-mix(in srgb, var(--sage, #12e28c) 36%, var(--border-subtle));
@@ -319,7 +352,7 @@
     color: var(--foreground);
     text-align: left;
     cursor: pointer;
-    transition: background-color 100ms ease;
+    transition: background-color var(--duration-instant) var(--ease-out-expo);
   }
   .model-picker-card:not([data-expanded="true"]):not([data-current="true"]) .model-picker-item:hover:not(:disabled),
   .model-picker-card:not([data-expanded="true"]):not([data-current="true"]) .model-picker-item[data-highlighted="true"]:not(:disabled) {
@@ -463,25 +496,41 @@
 
   /* ── Inline Effort + Speed Drawer Inside Expanded Model Card ── */
   .model-picker-inline-drawer {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-rows: 1fr;
     flex-shrink: 0;
-    gap: 9px;
-    padding: 10px 12px 11px;
     border-top: 1px solid color-mix(in srgb, var(--border-subtle) 85%, transparent);
     background: color-mix(in srgb, var(--surface-inset) 82%, #080a0f);
-    animation: model-picker-drawer-in 140ms cubic-bezier(0.16, 1, 0.3, 1);
+    opacity: 1;
+    transition:
+      grid-template-rows 150ms var(--ease-out-expo),
+      opacity var(--duration-fast) var(--ease-out-expo),
+      border-top-color var(--duration-fast) var(--ease-out-expo);
+  }
+  @starting-style {
+    .model-picker-inline-drawer {
+      grid-template-rows: 0fr;
+      opacity: 0;
+      border-top-color: transparent;
+    }
+  }
+  .model-picker-inline-drawer[data-motion-state="closed"] {
+    grid-template-rows: 0fr;
+    opacity: 0;
+    border-top-color: transparent;
+    pointer-events: none;
   }
 
-  @keyframes model-picker-drawer-in {
-    from {
-      opacity: 0;
-      transform: translateY(-3px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  .model-picker-inline-drawer-inner {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .model-picker-inline-drawer-body {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 10px 12px 11px;
   }
 
   .model-picker-inline-controls {
@@ -551,10 +600,9 @@
     white-space: nowrap;
     cursor: pointer;
     transition:
-      background-color 110ms ease,
-      border-color 110ms ease,
-      color 110ms ease,
-      box-shadow 110ms ease;
+      background-color var(--duration-fast) var(--ease-out-expo),
+      border-color var(--duration-fast) var(--ease-out-expo),
+      color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-seg-pill:hover:not(:disabled):not([aria-checked="true"]) {
     color: var(--foreground);
@@ -648,7 +696,10 @@
     white-space: nowrap;
     flex-shrink: 0;
     cursor: pointer;
-    transition: filter 120ms ease, background-color 120ms ease, border-color 120ms ease;
+    transition:
+      filter var(--duration-fast) var(--ease-out-expo),
+      background-color var(--duration-fast) var(--ease-out-expo),
+      border-color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-inline-apply:hover:not(:disabled) {
     filter: brightness(1.08);
@@ -757,6 +808,9 @@
     font-size: 12px;
     font-weight: 500;
     cursor: pointer;
+    transition:
+      border-color var(--duration-fast) var(--ease-out-expo),
+      background-color var(--duration-fast) var(--ease-out-expo);
   }
   .model-picker-retry-btn:hover {
     border-color: color-mix(in srgb, var(--primary) 40%, var(--border-subtle));
@@ -827,6 +881,23 @@
     }
     .model-picker-shortcuts {
       display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .model-picker-dialog[data-inline="true"],
+    .model-picker-icon-btn,
+    .model-picker-search-input,
+    .model-picker-clear-btn,
+    .model-picker-auth-toggle,
+    .model-picker-provider-tab,
+    .model-picker-card,
+    .model-picker-item,
+    .model-picker-inline-drawer,
+    .model-picker-seg-pill,
+    .model-picker-inline-apply,
+    .model-picker-retry-btn {
+      transition: none;
     }
   }
 }
