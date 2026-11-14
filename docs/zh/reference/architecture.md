@@ -1,6 +1,6 @@
 # 架构与边界
 
-Ludens（RSA，Recursive Self-Adaptation）将设备驱动、Agent 执行运行时与工作区自适应代码解耦：Baseware 负责硬件与模拟器接口，Shiori（基于 OMP）负责控制周期与会话调度，而具体的感知建模、动作组合与经验沉淀则完全由工作区代码（Workspace）定义与演进。
+Ludens 是面向复杂端到端任务（如机器人操控、安防巡检、桌面与软件自动化、实时游戏等）的多模态跨设备 Harness，它将设备驱动、Agent 执行运行时与工作区自适应代码解耦：Baseware（跨设备集成层）负责硬件、模拟器与各类设备接口，Shiori（Agent 线程核心，基于 OMP 18.18.8）负责控制周期与会话调度，而具体的感知建模、动作组合与经验沉淀则完全由工作区代码（Workspace）定义与演进。
 
 ## 组件与进程
 
@@ -8,9 +8,9 @@ Ludens（RSA，Recursive Self-Adaptation）将设备驱动、Agent 执行运行�
 | --- | --- |
 | `baseware/` | **独立设备服务**：加载内置或外部 Driver，提供统一 Controller 能力目录、控制权租约（`epoch`）仲裁、输入取消与设备事实日志，对外暴露 CLI、TS/Python API 与 MCP 接口。 |
 | `core/` | **自适应 Harness 与统一 App-Server**（`@ludens/core`）：管理工作区配置与生命周期、纯 TypeScript 跨平台 `WorkspaceSupervisor`、能力发现与路由、常驻感知与动作（`perception.py`）Python 子进程、工作区内生的能力评估（`ludens eval`）、运行日志归档，以及本地 HTTP `/api/*` 与静态前端承载服务（`ludens app-server` / `ludens serve`）。 |
-| **Shiori** | **唯一执行内核（职责名）**：由 Ludens Host Runtime 实现，统一管控控制周期、时间/请求预算、信号取消与退出清理。Agent 模式挂载 **OMP 18.18.8**；普通评测程序、Verifier 与 Metric 共用同一生命周期而不启动模型。 |
-| `app/` | **静态控制台构建产物（`@ludens/app`，`app/out`）**：纯静态 React/Next 导出包，生产态直接由 `ludens app-server` 承载（零 Next.js 服务端进程；开发态 `npm run dev` 将 `/api/*` 代理至后台 `ludens app-server` 以获得前端 HMR），提供实时活动流、一键工作区启停控件（`useWorkspaceService`）、时空轴视频回放、运行统计、文档浏览、能力目录与人工交还入口。 |
-| `app/desktop/` | **一等 Ludens 桌面端与桌宠伴侣（`ludens-app`）**：自包含 Electron 宿主（`AppServerHost`），启动时自动拉起并监管 `ludens app-server --port 0 --parent-watchdog --static-dir <app/out>`；主窗口承载完整控制台，同时驱动原生透明 **Ludens Pet** 桌宠窗口与系统托盘；点击窗口关闭按钮（`×`）仅隐藏至托盘与桌宠，显式退出（`⌘Q` / 托盘 **Quit** / 父进程 `stdin` EOF 监听）时干净终止 `app-server` 及其监管的全部游戏 AI 子进程。 |
+| **Shiori** | **Agent 线程核心（唯一执行内核职责名）**：由 Ludens Host Runtime 实现，统一管控控制周期、时间/请求预算、信号取消与退出清理。Agent 模式挂载 **OMP 18.18.8**；普通评测程序、Verifier 与 Metric 共用同一生命周期而不启动模型。 |
+| `app/` | **静态控制台构建产物（`@ludens/app`，`app/out`）**：纯静态 React/Next 导出包，生产态直接由 `ludens app-server` 承载（零 Next.js 服务端进程；开发态 `npm run dev` 将 `/api/*` 代理至后台 `ludens app-server` 以获得前端 HMR），提供实时活动流、一键工作区启停控件（`useWorkspaceService`）、时空轴视频回放、运行统计、文档浏览、能力目录与收回控制权入口。 |
+| `app/desktop/` | **一等 Ludens 桌面端应用（`ludens-app`）**：自包含 Electron 宿主（`AppServerHost`），启动时自动拉起并监管 `ludens app-server --port 0 --parent-watchdog --static-dir <app/out>`；主窗口承载完整控制台，同时驱动可选原生透明 **桌宠（Desktop Pet）** 小组件与系统托盘；点击窗口关闭按钮（`×`）仅隐藏至托盘与桌宠，显式退出（`⌘Q` / 托盘 **Quit** / 父进程 `stdin` EOF 监听）时干净终止 `app-server` 及其监管的全部受管工作区与智能体子进程。 |
 
 ```mermaid
 flowchart LR
@@ -23,12 +23,12 @@ flowchart LR
     P --> C
     C --> B[Baseware service]
     B --> Dvr[Driver]
-    Dvr --> E[Emulator / desktop / device]
+    Dvr --> E[Hardware / desktop / simulator / device]
     H --> L[workspace/logs & .ludens]
     B --> L
     L --> R[Core query Worker & cold-index Builder]
     R --> Srv
-    Srv --> A[Ludens Pet desktop-pet incremental bubbles]
+    Srv --> A[Optional Desktop Pet incremental bubbles]
 ```
 
 各组件拥有独立的 `package.json` / `pyproject.toml` 与锁文件。Ludens Harness 仅依赖 Baseware 的客户端与类型契约，不直接导入任何具体 Driver 实现；`ludens app-server`（响应前端 `workspaceServiceControl`）与无头 `ludens up` 共用 `core/src/daemon/` 中的纯 TypeScript `WorkspaceSupervisor` 编排本机进程，不再依赖 Python 后台启动脚本。
@@ -39,12 +39,12 @@ flowchart LR
 
 | 包 / 目录 | 分层与职责 |
 | --- | --- |
-| `protocol/`（`@ludens/protocol`） | **契约基座**：RPC Schema、运行事件类型、Timeline / Archive 格式与 Dashboard 活动投影；其余包只通过 workspace 导入消费。 |
+| `protocol/`（`@ludens/protocol`） | **共享契约层**：RPC Schema、运行事件类型、Timeline / Archive 格式与控制台活动投影；其余包只通过 workspace 导入消费。 |
 | `core/src/core/shiori/` | **控制内核**：`epoch` 控制租约、时间/请求预算、程序执行与取消；不依赖 OMP、CLI 或 Socket。 |
 | `core/src/core/storage/` | **工作区与事实存储**：`.ludens/` 身份与状态、`logs/<run-id>/` 事件流与归档。 |
 | `core/src/core/subsystems/` | **工作区常驻与设备子系统**：Python 感知/动作 Worker、`@capability` 发现、Baseware 设备会话。 |
 | `core/src/core/agent-omp/` | **OMP AgentRunner 实现**：OMP 会话组装、Ludens 扩展与模型 Trace 记录，通过窄接口 `ExtensionHost` 暴露宿主能力。 |
-| `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、原生 TypeScript Worker 与冷构建子进程、活动/回放/遥测投影，供 `app-server` 与 Ludens Pet 消费。 |
+| `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、原生 TypeScript Worker 与冷构建子进程、活动/回放/遥测投影，供 `app-server` 与可选桌宠消费。 |
 | `core/src/server/`、`core/src/daemon/`、`core/src/perf/`、`core/src/cli/` | **外壳层**：统一 `ludens app-server`（`/api/*` 路由、静态 `app/out` 承载、`--parent-watchdog`）、Unix Socket RPC 守护进程与纯 TS `WorkspaceSupervisor`、子系统性能基线（`perf`）、无头 CLI 前端。 |
 | `app/shell/` + `app/features/` + `app/lib/` + `app/perf/` | **静态控制台视图、交互 Hook 与性能基线**（循环工作台位于 `shell/`，统一生命周期封装 `useWorkspaceService` 位于 `lib/`，`index-memory` 基线位于 `perf/`）：外壳（`console-shell`、侧边栏、选择上下文）叠加按业务域切分的 `live`、`replay`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
 
@@ -53,7 +53,7 @@ flowchart LR
 
 1. **统一 Controller 抽象**：Driver 对外暴露的所有能力统称为 **Controller**（包括执行输入的控制器与采集画面/状态的传感器）。每项能力遵循 CUA 原生工具结构：`name`、`description`、`inputSchema`、可选 `outputSchema` / `annotations` 以及 MCP `CallToolResult` 返回值。设计依据见 [Baseware 设计理念与能力契约](baseware.md)，类型定义见 [baseware/src/contracts.ts](../../../baseware/src/contracts.ts) 与 [baseware/src/catalog.ts](../../../baseware/src/catalog.ts)。
 2. **双命名空间聚合与按需发现**：Ludens 将设备能力（`controller/<id>`）与工作区 Python 装饰器能力（`python/<path>:<fn>`）合并至 `ludens controller` 目录。为避免撑爆模型上下文，所有设备能力与 MCP 工具**均不默认注入 OMP 的模型工具列表**，而是由 Agent 通过 `baseware.json`、`ludens controller` 或 `ludens_tools.Client` 按需发现与调用。
-3. **纯粹的硬件边界**：Driver 仅忠实映射硬件接口（如双屏独立截图 `screen.top.capture` / `screen.bottom.capture`、原生触屏坐标 `touch.down / move / up`），跨屏图像拼接、坐标转换与游戏策略一律留在工作区代码中实现。
+3. **纯粹的硬件边界**：Driver 仅忠实映射硬件接口（如双屏独立截图 `screen.top.capture` / `screen.bottom.capture`、原生触屏坐标 `touch.down / move / up`），跨屏图像拼接、坐标转换与具体任务策略一律留在工作区代码中实现。
 
 ## 控制权与生命周期
 
@@ -63,7 +63,7 @@ flowchart LR
 - `ludens auto timer <seconds|off>` 就地更新 Baseware 的 `lease_duration` 与 Shiori 的活动停止计时器，并记录 `control_budget`，不会生成新的 `epoch`。
 - Ludens Host 通过持久连接向 Baseware 持有该 `epoch`，并将 `BASEWARE_EPOCH` 注入工作区进程环境。
 - 查询能力目录与 `--help` 无需控制权；具体能力是否要求控制权由其 `requiresControl` 属性声明（部分只读状态查询同样要求有效 `epoch`）。通过 CLI 调用工作区 `python/...` 能力同样要求处于活跃控制周期。
-- 当发生人工交还（`ludens auto off`）、预算耗尽、宿主断线或设备断开时，Baseware 立即废止旧 `epoch`、中断在途动作并执行设备释放（清零按键与触点），清理完毕后回到 `manual` 状态。
+- 当发生人工收回控制权（`ludens auto off`）、预算耗尽、宿主断线或设备断开时，Baseware 立即废止旧 `epoch`、中断在途动作并执行设备释放（清零按键与触点），清理完毕后回到 `manual` 状态。
 
 ### 2. 手柄异步时间表（`pad.play`）
 
@@ -79,7 +79,7 @@ ludens controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":
 
 ### 3. 常驻状态机与输入重置
 
-统一常驻 `perception.py` 状态机在接管时采用宿主当前控制 `epoch`，并在每次重载时采用新的 `inputGeneration`。当自动重载轮换 generation 或在 `auto` 周期内执行显式 `ludens perception reload` 时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。常驻进程从属于该控制周期：连续采样与 fMP4 视频录制只在控制租约活跃期间运行，`Runtime.stop()` 会等待感知租约撤销——停止采样器、刷出最后一条 `perception_stats` 并封口活跃视频分段——之后才记录周期 `control(manual)` 交还事件；`manual` 待机期间常驻进程保持热备，可继续服务时间线读取但不采样。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
+统一常驻 `perception.py` 状态机在进入自主运行时采用宿主当前控制 `epoch`，并在每次重载时采用新的 `inputGeneration`。当自动重载轮换 generation 或在 `auto` 周期内执行显式 `ludens perception reload` 时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。常驻进程从属于该控制周期：连续采样与 fMP4 视频录制只在控制租约活跃期间运行，`Runtime.stop()` 会等待感知租约撤销——停止采样器、刷出最后一条 `perception_stats` 并封口活跃视频分段——之后才记录周期 `control(manual)` 切换事件；在手动待命（`manual`）期间常驻进程保持热备，可继续服务时间线读取但不采样。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
 
 ## 会话与 Loop
 
@@ -88,16 +88,16 @@ ludens controller controller/pad.play --args '{"inputs":[{"atMs":0,"durationMs":
 Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens/shiori/sessions/`），并在 `Settings.isolated()` 基础上采用**最小覆盖原则（Superset Shell）**：
 
 - 保留 OMP 原生系统提示词（若工作区存在 `AGENTS.md`，通过原生 `contextFiles` 注入）。
-- 显式启用 OMP 原生工具 `read`、`write`、`edit`、`bash`、`wait`，并注册自定义工具 `observe`。
+- 显式启用 OMP 原生工具 `read`、`write`、`edit`、`bash`、`wait`，并注册自定义工具 `observe` 与 `event_pool`。
 - 仅覆盖宿主契约必需项：关闭 `retry.modelFallback`（保证所选视觉模型粘性）、关闭 `title.refreshOnReplan` 与 `cacheWarming`（确保每次模型请求严格归属控制周期）、将 `PROVIDER_IMAGE_BUDGETS` 设为 `Infinity`（在压缩前保留历史图像，避免中途丢图破坏 Prompt Cache 前缀）、经 `tier.openai` 应用实际生效的 OMP 服务档位（`priority` 对应 Fast、`ultrafast` 对应 Ultra、`none` 对应 Standard）并经 `defaultThinkingLevel` 与 `session.setThinkingLevel(..., false)` 权威同步推理强度，以及应用可选的 `compactionThreshold`。详见 [core/src/core/agent-omp/session.ts](../../../core/src/core/agent-omp/session.ts)。
-- 仅枚举支持图像的 OMP 模型并严格限制在暂停态切换：`availableModels`（见 [dashboard-protocol.ts](../../../core/src/core/query/dashboard-protocol.ts)）读取 OMP `ModelRegistry` 与 `discoverAuthStorage`（按工作区解析或回退至全局 `defaults`），仅返回具备图像输入能力（`input.includes("image")`）的模型并将已配置凭据的 Provider 排在前面，每个模型携带由 OMP `shouldSendServiceTier` 派生的专属 `supportedServiceTiers` 以及由 `model.thinking` 派生的 `supportedEfforts` 与 `defaultEffort`（不使用写死的模型名单，且有意排除 OMP `"auto"` 分类器档位以避免产生控制周期外的隐式请求）。目录与 Shiori 会话均通过 `createOmpModelRegistry`（[models.ts](../../../core/src/core/agent-omp/models.ts)）构建注册表，并额外加载 `openai-codex` 的 `/models` 发现缓存（仅在 OMP 缓存过期时重新拉取）：Codex 按模型在 `service_tiers` 中声明 `ultrafast`，缺少该缓存行时 Ultra 永不出现，已保存的 `ultrafast` 会静默按 Standard 运行。`ModelPickerDialog` 在选中模型卡片内就地展开推理强度（Effort）与响应速度（Speed）内联抽屉，仅提供所选模型实际支持的强度与 Standard/Fast/Ultra 速度档位，再由 `Runtime.setModel`（通过 `ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]` 与 [runtime-control.ts](../../../core/src/core/query/runtime-control.ts) 中的 Dashboard `set_model` 暴露）原子提交模型与可选的速度、强度；仅在 `mode === "manual"` 且无进行中轮次、记忆整理或在途调用时放行，显式禁止 `auto` 运行期间中途热切换模型；校验通过后以 `{ ...found, imageCountBudget: Infinity }` 及 `setThinkingLevel` 更新 OMP 会话并写入 `shiori` `session` 事件，使 `Runtime.status()` 报告实际生效档位与强度（不支持时降级为 Standard / 模型默认强度）并与实时运行／活动投影即时同步（Dashboard `set_model` 在宿主在线处于 `manual` 态或宿主离线时均会将 `model`、`serviceTier` 与 `effort` 原子写回 `ludens.json`；Fast/Ultra 为付费加速档位，可能增加用量费用）。
+- 仅枚举支持图像的 OMP 模型并严格限制在手动待命（manual）切换：`availableModels`（见 [dashboard-protocol.ts](../../../core/src/core/query/dashboard-protocol.ts) 与 [available-models.ts](../../../core/src/core/query/available-models.ts)）读取 OMP `ModelRegistry` 与 `discoverAuthStorage`（按工作区解析或回退至全局 `defaults`），仅返回具备图像输入能力（`input.includes("image")`）的模型并将已配置凭据的 Provider 排在前面，每个模型携带由 OMP `shouldSendServiceTier` 派生的专属 `supportedServiceTiers` 以及由 `model.thinking` 派生的 `supportedEfforts` 与 `defaultEffort`（不使用写死的模型名单，且有意排除 OMP `"auto"` 分类器档位以避免产生控制周期外的隐式请求）。目录与 Shiori 会话均通过 `createOmpModelRegistry`（[models.ts](../../../core/src/core/agent-omp/models.ts)）构建注册表，并额外加载 `openai-codex` 的 `/models` 发现缓存（仅在 OMP 缓存过期时重新拉取）：Codex 按模型在 `service_tiers` 中声明 `ultrafast`，缺少该缓存行时 Ultra 永不出现，已保存的 `ultrafast` 会静默按 Standard 运行。`ModelPickerDialog` 在选中模型卡片内就地展开推理强度（Effort）与响应速度（Speed）内联抽屉，仅提供所选模型实际支持的强度与 Standard/Fast/Ultra 速度档位，再由 `Runtime.setModel`（通过 `ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]` 与 [runtime-control.ts](../../../core/src/core/query/runtime-control.ts) 中的控制台 `set_model` 暴露）原子提交模型与可选的速度、强度；仅在 `mode === "manual"` 且无进行中轮次、记忆整理或在途调用时放行，显式禁止 `auto` 运行期间中途热切换模型；校验通过后以 `{ ...found, imageCountBudget: Infinity }` 及 `setThinkingLevel` 更新 OMP 会话并写入 `shiori` `session` 事件，使 `Runtime.status()` 报告实际生效档位与强度（不支持时降级为 Standard / 模型默认强度）并与实时运行／活动投影即时同步（控制台 `set_model` 在宿主在线处于 `manual` 态或宿主离线时均会将 `model`、`serviceTier` 与 `effort` 原子写回 `ludens.json`；Fast/Ultra 为付费加速档位，可能增加用量费用）。
 
 在 `auto` 控制周期内，外层循环按以下步骤运转：
 
-1. **发起轮次**：使用 [continue.md](../../../core/prompts/continue.md) 发起 OMP `prompt`（首次接管若带 `auto on --message` 则附加一次性提醒）。
+1. **发起轮次**：使用 [continue.md](../../../core/prompts/continue.md) 发起 OMP `prompt`（开启自主运行若带 `auto on --message` 则附加一次性提醒）。
 2. **常驻状态机与模型推理并行运转**：模型推理期间环境持续运行——在周期控制租约之下，常驻 `Perception.sample()` 按宿主配置的频率（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30` Hz）持续采样写入 `.ludens/timeline/`，其进程内能力在同一进程中持续读取时空轴并执行高频闭环控制；取舍见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)。
 3. **自动上下文交付**：Ludens 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../../core/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
-4. **续轮或交还**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工交还或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
+4. **续轮或收回控制权**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工收回控制权或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
 
 ### 2. 上下文压缩与传输恢复
 
@@ -111,7 +111,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 - **存储与并发**：`.ludens/event-pool.json` 是带单调 `seq` 的版本化文档。每次读-改-写都会获取跨进程锁目录（`event-pool.json.lock`，获取上限 5 秒、15 秒后回收陈旧锁），并通过临时文件 + `rename` 原子发布，因此 CLI、Host、Query Worker 与 Web 控制台都不会读到半写文件。待处理事件永不裁剪；仅保留最近 200 条已处理事件。
 - **契约**：方向为 `inbound`（`message`、`reply`）与 `outbound`（`help_request`、`notice`）；状态为 `pending` / `handled`；执行者为 `shiori` / `human`。每条事件携带 `id`、`seq`、`text`、可选 `title`、`replyTo`、`pauseRequested`、`runId` / `epoch`，以及 `createdAt` / `handledAt` / `handledBy`。人类回复一条待处理的出站事件时，会在同一次加锁写入中把该请求标记为已处理（`handledBy: "human"`）。
 - **CLI**：`ludens event list [--direction inbound|outbound] [--status pending|handled] [--limit <n>]`、`ludens event send [--title <text>] [--message <text> | <text>]`、`ludens event reply <event-id> [...]`、`ludens event ack <event-id>...`。Host 在线时命令经宿主 Socket 路由，否则直接写入 `.ludens/event-pool.json`，因此在 `manual` 待机或 Host 已停止时留下的消息会在下一个周期被拾取。变更类命令仅限人类：在智能体周期内（存在 `BASEWARE_EPOCH`）会被拒绝，并引导智能体改用 `event_pool` 工具。
-- **Shiori 工具**：`event_pool({ action: "read" | "ack" | "emit" })`。`read` 返回待处理的入站消息/回复（全部或指定 `ids`；`includeHandled` 可读历史），默认将其标记已读，`ack: false` 则在忙碌时暂缓；`ack` 显式将入站事件标记为已处理；`emit` 发布出站 `help_request`（默认）或 `notice`。`pause` 默认为 `false`，保持游戏异步进行；只有 `pause: true`——仅用于彻底受阻的智能体——会以 `awaiting human` 停止自动循环并交还设备控制权，直到人类恢复。
+- **Shiori 工具**：`event_pool({ action: "read" | "ack" | "emit" })`。`read` 返回待处理的入站消息/回复（全部或指定 `ids`；`includeHandled` 可读历史），默认将其标记已读，`ack: false` 则在忙碌时暂缓；`ack` 显式将入站事件标记为已处理；`emit` 发布出站 `help_request`（默认）或 `notice`。`pause` 默认为 `false`，保持自主循环异步进行；只有 `pause: true`——仅用于彻底受阻的智能体——会以 `awaiting human` 停止自主运行并撤销设备控制权、回到手动待命，直到人类恢复。
 - **轮首摘要**：`before_agent_start` 仅在 `pendingInbound > 0` 时追加紧凑的入站摘要：每条包含 `id`、`seq`、`kind`、可选 `title` 与 72 字符单行预览。事件池空闲时不追加任何字节，从而保留 provider 前缀 KV 缓存；完整正文通过 `event_pool({ action: "read" })` 按需拉取。
 - **界面**：Web 控制台通过 `GET/POST /api/event-pool` 读写同一存储，驱动出站托盘、会话流卡片、标题栏待处理徽章与回复输入框。CLI 与控制台是对同一加锁文件的对等写入方。
 - **双时序投影与全览**：每个生命周期投影为两条流消息。消息 1（人工消息或 `outbound_event` 卡片）严格锚定在 `createdAt`（`T_send` / `T_emit`），绝不追加到流尾。消息 2（`pool_receipt`）由 `pool_event` 的 `action: "handled"` 投影而来，锚定在 `handledAt`（`T_read`）。人工可通过 `ack` 与 `actor: "human"` 撤回未读的待处理入站消息，显示为已撤回而非已读取。Live 工作台右侧检查器坞在 `Stage & Telemetry` 与 `Event Pool` 分段头之间切换；专用的事件池全览列出留存事件，线程头快捷入口可打开它，每条事件的定位到会话流操作会跳转到其流内位置。
@@ -121,7 +121,7 @@ Ludens Host 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens
 ## 可核查的运行事实
 
 - **多源事实解耦**：Baseware 独立持久化设备控制与执行事实（`logs/baseware/`），Ludens 记录模型调用、工具执行、能力调用与感知交付（`logs/<run-id>/`），Shiori 挂载局部 OpenTelemetry provider 记录 `agentLoop` 遥测。
-- **Dashboard 隔离读取**：`ludens app-server` 将归档解析与索引维护放在独立的 Worker 线程（`core/src/core/query/`）中，冷历史目录由限流为全局单实例的临时 Builder 子进程构建并原子发布至 `.dashboard-index/`；`core/src/server/` 中的 `/api/*` 路由与 Ludens Pet 仅通过有界 RPC 读取投影结果，生产态不运行任何 Next.js 服务端进程。详见 [日志与调用链](logging.md#消费与指标解释)。
+- **控制台隔离读取**：`ludens app-server` 将归档解析与索引维护放在独立的 Worker 线程（`core/src/core/query/`）中，冷历史目录由限流为全局单实例的临时 Builder 子进程构建并原子发布至 `.dashboard-index/`；`core/src/server/` 中的 `/api/*` 路由与可选桌宠仅通过有界 RPC 读取投影结果，生产态不运行任何 Next.js 服务端进程。详见 [日志与调用链](logging.md#消费与指标解释)。
 
 ## TypeScript 与 Python
 
@@ -132,9 +132,9 @@ Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python
 
 ## 能力持久化边界
 
-全局 `LUDENS_HOME`（默认 `~/.ludens`）保存应用配置、`registry/<id>.json` 工作区索引、驱动缓存与共享桌宠状态。注册项只包含 `{id, workspace, name, updatedAt}`；工作区的 `.ludens/workspace.json` 持有稳定身份，目录移动后通过 `ludens workspace open` 更新索引。会话和历史均保存在工作区，registry 可重建。详见 [两层目录结构](../tutorials/workspace.md#1-工作区目录结构)。
+全局 `LUDENS_HOME`（默认 `~/.ludens`）保存应用配置、`registry/<id>.json` 工作区索引、驱动缓存与共享桌宠状态。注册项只包含 `{id, workspace, name, updatedAt}`；工作区的 `.ludens/workspace.json` 持有稳定身份，目录移动后通过 `ludens workspace open` 更新索引。会话和历史均保存在工作区，registry 可重建。详见 [两层目录结构](../tutorials/workspace.md)。
 
-登记创建、移动、移除与桌宠目标选择共用按工作区划分的锁。同时需要两把锁时，先获取登记锁，再获取桌宠目标锁。移除先读取当前登记，仅清除与之匹配的原始桌宠目标，再删除登记文件；目标不可读或不可写时，在删除前阻止移除。重新登记不会恢复已清除的目标。其他目标、消费者心跳文件、工作区内容及运行中的服务均不受影响。普通桌宠状态轮询保持只读，只有已存目标发生目录移动时才加锁重新读取并更新。Dashboard 操作结果直接报告已提交配置或实际移除的登记，不依赖后续目录或消费者状态读取。
+登记创建、移动、移除与桌宠目标选择共用按工作区划分的锁。同时需要两把锁时，先获取登记锁，再获取桌宠目标锁。移除先读取当前登记，仅清除与之匹配的原始桌宠目标，再删除登记文件；目标不可读或不可写时，在删除前阻止移除。重新登记不会恢复已清除的目标。其他目标、消费者心跳文件、工作区内容及运行中的服务均不受影响。普通桌宠状态轮询保持只读，只有已存目标发生目录移动时才加锁重新读取并更新。控制台操作结果直接报告已提交配置或实际移除的登记，不依赖后续目录或消费者状态读取。
 
 桌宠目标 PUT 与心跳 POST 分别独立返回已提交的 `{ target }` 和 `{ consumer }`。状态 GET 在心跳记录不可读时仍保留已保存目标（`connected: null` 并附 `consumerError`），不会声称桌面端未连接。登记目录离线、缺失或身份不符时，仍保留已保存目标并标注 `targetUnavailable: true`；桌面端暂时停止消费该来源，不清除选择。心跳的 `targetRevision` 表示正在尝试的目标，`revision` 表示已加载的来源。只有尝试目标匹配时才归属应用错误，正在跟随则必须有匹配的已加载 revision。 状态读取会等待该 worker 已接收的目标写入结束，避免恢复读取先报告旧选择，排队中的写入随后才完成。`targetConfigured` 区分尚未设置目标文件与显式保存停止；只有后者会阻止启动时的 `ifUnset` 自动选择。
 
@@ -151,4 +151,4 @@ Ludens 由 TypeScript 宿主（`core/src/`）与 Python 工具包（`core/python
 
 ## 统一时空轴与回放
 
-感知采样、常驻动作、模型推理与设备执行共享工作区的绝对墙钟时间坐标，并通过 `recordId`、事件序号、`modelCallId`、`toolCallId`、`actionId` 及 `trace` 树精确关联。Dashboard 回放器在同一时间游标下同步渲染 `.ludens/timeline/` 中的全量连续采样画面（包含未被模型采纳的中间帧）、动作时间跨度与模型调用详情；历史回放纯属只读投影，不会触发设备操作或改变 Ludens Pet 的实时跟随目标。
+感知采样、常驻动作、模型推理与设备执行共享工作区的绝对墙钟时间坐标，并通过 `recordId`、事件序号、`modelCallId`、`toolCallId`、`actionId` 及 `trace` 树精确关联。控制台回放器在同一时间游标下同步渲染 `.ludens/timeline/` 中的全量连续采样画面（包含未被模型采纳的中间帧）、动作时间跨度与模型调用详情；历史回放纯属只读投影，不会触发设备操作或改变 桌宠的实时跟随目标。

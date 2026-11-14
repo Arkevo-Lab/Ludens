@@ -32,7 +32,7 @@ The current directory is the default workspace. Run logs go to <workspace>/logs/
 --diagnostics normal|full selects recording detail at startup (default normal).
 Perception starts empty. Implement workspace/perception.py and use ludens perception reload.
 ludens perception inject off disables automatic context attachment while sampling and recording continue.
-Hardware is provided by an independent Baseware service. Its default socket is derived from the workspace.`;
+Hardware and device bridges are provided by an independent Baseware integration service. Its default socket is derived from the workspace.`;
 
 async function main() {
   const args = process.argv.slice(2);

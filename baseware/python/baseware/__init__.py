@@ -17,7 +17,7 @@ class BasewareError(RuntimeError):
 class Client:
     """Use the caller's socket, epoch and trace; each request owns one connection.
 
-    RSA keeps the control lease alive separately. This client neither acquires
+    Ludens keeps the control lease alive separately. This client neither acquires
     a lease automatically nor retries commands after a connection failure.
     """
 

@@ -29,7 +29,7 @@
 | **第二层 · 无状态 HTTP SSE + 内联 Base64 + 前缀 KV 缓存** | 每轮重传全部历史 Base64 图片（`8–15 MB+`） | 许多 OpenAI 兼容网关在查对 Token KV 缓存**之前**，会先把 `messages[]` 里的 **全部 `N` 张图片**重新解码并跑一遍视觉预处理 | 仅当 `messages[]` 前缀字节完全一致时命中前缀 KV 缓存（`cache_read_input_tokens`） | 上行带宽随轮次线性膨胀（`O(N)`）；未做图片哈希短路的无状态网关即使 `cache_read` 命中率达 99%，仍会因逐图预处理额外消耗 `N × 300–400 ms`（首包等待 `20s+`）。 |
 | **第三层 · 无状态 HTTP SSE + 图床 URL 卸载（`blob-broker`）** | 将内联 `data:image/...;base64` 替换为短链接 `https://...`（`~400 KB`，**出站体积缩减约 95%**） | 除非服务端按图片 URL/哈希缓存视觉特征，否则网关仍需拉取或校验这 `N` 个 URL 并逐张运行视觉预处理 | 配合 `appendOnlyContext` 与 `cacheRetention` 可保持前缀 KV 缓存命中 | 彻底解决客户端上行带宽瓶颈（如 `8.9 MB → 403 KB`），但**无法消除**无状态网关在进入 LLM KV 缓存前对历史图片逐张重复做视觉预处理的固定延迟。 |
 
-基于上述架构差异，Ludens 在全局默认配置（`defaults.connection`）、工作区配置（`ludens.json` 的 `connection`）以及 Dashboard **设置**页同步暴露了模型连接与多模态传输配置：
+基于上述架构差异，Ludens 在全局默认配置（`defaults.connection`）、工作区配置（`ludens.json` 的 `connection`）以及 控制台 **设置**页同步暴露了模型连接与多模态传输配置：
 
 - **`openaiWebsockets`（`"auto" | "on" | "off"`）**：控制支持有状态 WebSocket 的提供商是否启用增量传输（`"auto"` 下 `openai-codex` 默认启用 WebSocket 增量，`openai` 除非设为 `"on"` 默认走 SSE）。
 - **`cacheRetention`（`"auto" | "short" | "long" | "none"`）**：控制提示词前缀 KV 缓存驻留策略（`"long"` 启用 Anthropic 1 小时扩展缓存与 OpenAI 24 小时缓存驻留）。
@@ -63,13 +63,13 @@
 
 这种跑五六个小时才撞上一次的网络边界问题，如果每次改完代码都去跑八小时实机实验，根本没法高效调试。
 
-所以我们在架构实现期用 TDD 的思路，写了一套完全离线的传输层测试（[core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)）和配套的性能套件（[ws-recovery.ts](../../../core/tests/ws-recovery.test.ts)）：直接在进程内用夹具接管 `streamOpenAICodexResponses` 底层的 WebSocket 与 HTTP，并用虚拟时钟秒级快进 60 秒冷却期，不用连真模型、也不用消耗在线 Token：
+所以我们在架构实现期用 TDD 的思路，写了一套完全离线的传输层测试（[core/tests/omp-websocket.test.ts](../../../core/tests/omp-websocket.test.ts)）和配套的性能套件（[ws-recovery.ts](../../../core/tests/ws-recovery.test.ts)）：直接在进程内用夹具拦截模拟 `streamOpenAICodexResponses` 底层的 WebSocket 与 HTTP，并用虚拟时钟秒级快进 60 秒冷却期，不用连真模型、也不用消耗在线 Token：
 
 ```sh
 (cd core && bun run omp:test:transport)
 (cd core && bun run typecheck)
 
-# 生成可直接在 Dashboard 看板里查看的运行记录：
+# 生成可直接在控制台查看的运行记录：
 cd core && bun test tests/ws-recovery.test.ts
 ```
 
@@ -89,6 +89,6 @@ cd core && bun test tests/ws-recovery.test.ts
 | 单帧 `> 15 MiB` 或远端返回 `1009` | 单次出站数据帧超限 | 切换至 SSE 并标记尺寸阻断（期间不重复握手）；仅在原生上下文压缩完成后解除阻断并恢复 WS。 |
 | 累计历史 `> 15 MiB` 但本轮 delta 较小 | 历史体积大、当前增量小 | 按实际发送的增量帧大小判定，继续使用增量 WS。 |
 | 工具已交付后收到 `1009` | 工具提交后触发尺寸超限 | 当前请求不重放工具，同时记录尺寸阻断；后续使用 SSE 直至压缩完成后恢复 WS。 |
-| 人工交还或预算到期取消 | 握手中 / 部分输出 / 报错同时触发 `AbortSignal` | 立即以 `aborted` 退出，不发起额外 SSE 请求，不污染下一轮传输状态机。 |
+| 人工收回控制权或预算到期取消 | 握手中 / 部分输出 / 报错同时触发 `AbortSignal` | 立即以 `aborted` 退出，不发起额外 SSE 请求，不污染下一轮传输状态机。 |
 
 以后每次准备升级 OMP 版本时，先跑一遍 `bun run omp:test:transport` 和 `cd core && bun test tests/ws-recovery.test.ts`，检查这些受控恢复行为是否被上游改动破坏。虚拟时钟与传输夹具不衡量真实重连耗时，也不证明线上永不掉线；长跑、调度与吞吐仍需查看实际运行日志。

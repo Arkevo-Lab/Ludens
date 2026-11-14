@@ -6,7 +6,7 @@ Zero-dependency contract layer for the Ludens workspace. Every other package (`b
 
 | Entry | Contents |
 | --- | --- |
-| `@ludens/protocol/activity` | Activity block / projection / changes DTOs and the `ActivityChangesClient` contract shared by Dashboard and Ludens Pet. |
+| `@ludens/protocol/activity` | Activity block / projection / changes DTOs and the `ActivityChangesClient` contract shared by Console and Desktop Pet. |
 | `@ludens/protocol/event-sources` | Multi-source event fact declarations (`{sourceId, root, format, recordingId, windows}`) and on-demand merging. |
 | `@ludens/protocol/log-archive` | Content-addressed structured archive (`.ludens/archive/`) reader/writer. |
 | `@ludens/protocol/ludens` | Shared Ludens domain types. |

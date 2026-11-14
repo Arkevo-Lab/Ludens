@@ -156,7 +156,7 @@ export class LudensActivityController {
         if (active) this.enqueue(active)
       } else if (snapshot.activity === 'manual' && this.prefs.blocks.system) {
         const manual: LogBlock = { id: 'connected:manual', kind: 'system', at: snapshot.current.updatedAt ?? '',
-          title: snapshot.current.epoch === null ? '已连接，等待 AI 接管' : '本轮已结束，控制权已交还',
+          title: snapshot.current.epoch === null ? '已连接 · 手动待命' : '本轮已结束，控制权已收回',
           text: '', status: 'complete' }
         this.enqueue(manual)
       }

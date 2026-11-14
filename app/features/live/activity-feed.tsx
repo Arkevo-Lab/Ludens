@@ -37,8 +37,8 @@ const sourceNames: Record<string, string> = {
   shiori: "Shiori",
   ludens: "Ludens",
   baseware: "Baseware",
-  pet: "Ludens Pet",
-  dashboard: "Dashboard",
+  pet: "Desktop Pet",
+  dashboard: "Console",
 };
 
 function BlockIcon({ kind }: { kind: LogBlock["kind"] }) {

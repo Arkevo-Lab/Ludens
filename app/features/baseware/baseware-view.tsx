@@ -319,8 +319,8 @@ export function BasewareView({
   const daemon = snapshot?.daemon;
   const deviceGuideHref = useMemo(() => {
     const base = project
-      ? `/?workspace=${encodeURIComponent(project)}&view=docs&doc=tutorials/devices.md`
-      : "/?view=docs&doc=tutorials/devices.md";
+      ? `/?workspace=${encodeURIComponent(project)}&view=docs&doc=tutorials/devices`
+      : "/?view=docs&doc=tutorials/devices";
     return `${base}&docLang=${locale}`;
   }, [project, locale]);
 

@@ -1,6 +1,6 @@
 # Baseware Design Philosophy and Capability Contract
 
-Baseware is Ludens' standalone device-driver service: it connects to an emulator or desktop backend, publishes a unified capability catalog, arbitrates device control (`epoch`), executes input and capture, and persists every call and device fact as verifiable logs. How frames are perceived, actions composed, skills accumulated, or task success judged is entirely left to upper-layer Workspace code and the Ludens.
+Baseware is Ludens's **Cross-device Integration Layer**: it connects to hardware bridges, sensors/cameras, desktop backends, simulators, or MCP endpoints, publishes a unified capability catalog, arbitrates device control (`epoch`), executes input and capture, and persists every call and device fact as verifiable logs. How frames are perceived, actions composed, skills accumulated, or task success judged is entirely left to upper-layer Workspace code and Shiori.
 
 ## Shared conventions, device semantics preserved
 
@@ -23,7 +23,7 @@ flowchart LR
 
 | Layer | Core responsibility | Explicitly out of scope |
 | --- | --- | --- |
-| **Driver** | Parse a specific device protocol (TCP Bridge or stdio), declare genuinely available capabilities, execute and release low-level input, produce raw media bytes and source sequence numbers. | No cross-device capability stitching, no interpretation of game memory or task state. |
+| **Driver** | Parse a specific device protocol (TCP Bridge or stdio), declare genuinely available capabilities, execute and release low-level input, produce raw media bytes and source sequence numbers. | No cross-device capability stitching, no interpretation of target application memory or task state. |
 | **Baseware** | Aggregate and publish the capability catalog, validate parameters against JSON Schema, manage `epoch` control leases, correlate calls with device events, expose a consistent entry point via CLI / API / MCP. | No permanent screenshot archive for the workspace, no built-in retry policy or Agent Loop. |
 | **Workspace / Ludens** | Discover and compose capabilities, maintain the `.ludens/timeline/` perception history, run resident perception/action models and OMP sessions. | Never write emulator control state bypassing Baseware. |
 
@@ -69,7 +69,7 @@ The TS/Python API and CLI uniformly return the full `ExecutionResult` envelope, 
 ## Control is independent of capability description
 
 - **`requiresControl` is orthogonal to `readOnlyHint`**: `requiresControl` is Baseware's execution gate, not a business parameter of the tool schema. A capability can be both a read-only query (`readOnlyHint: true`, e.g. reading the current gamepad composite state `pad.state`) and require the caller to hold a valid control `epoch` (`requiresControl: true`). CUA tools that do not explicitly declare read-only access require control by default.
-- **Lease holding and release protection**: control is requested and held by the Ludens Host's persistent connection; a single CLI / API / MCP call only inherits the lease via the `BASEWARE_EPOCH` environment variable and never seizes control automatically by calling a tool. When the lease expires, a human runs `revoke` / `auto off`, or the holder disconnects, Baseware immediately triggers the Driver `release()`, including Controllers still acquiring control. Both acquisition and cleanup have timeouts; if acquisition times out or cleanup fails, the state returns to `manual` after revocation but stays `connected: false` and refuses subsequent takeovers. A late acquisition only triggers compensating release of the original `epoch` and does not restore automatic control.
+- **Lease holding and release protection**: control is requested and held by the Ludens Host's persistent connection; a single CLI / API / MCP call only inherits the lease via the `BASEWARE_EPOCH` environment variable and never seizes control automatically by calling a tool. When the lease expires, a human runs `revoke` / `auto off`, or the holder disconnects, Baseware immediately triggers the Driver `release()`, including Controllers still acquiring control. Both acquisition and cleanup have timeouts; if acquisition times out or cleanup fails, the state returns to `manual` after revocation but stays `connected: false` and refuses subsequent Auto Run leases. A late acquisition only triggers compensating release of the original `epoch` and does not restore automatic control.
 - **Connection-level idempotency**: multiple Controllers under one Driver share the same device connection; `acquire(epoch)` and `release(epoch)` stay idempotent at the Driver layer and never repeat the handshake just because capabilities are split into multiple tools.
 
 ## Media, time, and logs
@@ -99,7 +99,7 @@ Baseware loads external driver packages via `--driver <id> --driver-package <spe
 
 `<spec>` supports three formats:
 
-1. **npm package**: e.g. `@scope/pkg@1.2.0`, installed by Bun into a cache directory outside the repo (default `~/.local/state/ludens/baseware/drivers/`; under `ludens/baseware/drivers/` of `XDG_STATE_HOME` when set);
+1. **npm package**: e.g. `@scope/pkg@1.2.0`, installed by Bun into a cache directory outside the repo (default `~/.ludens/cache/drivers/`, or `$LUDENS_HOME/cache/drivers/` when `LUDENS_HOME` is set);
 2. **GitHub repo**: e.g. `github:org/repo#commit-sha`, a full GitHub HTTPS URL, or `git@github.com:org/repo.git#rev`. SSH addresses keep SSH transport; the cache distinguishes transport, repo, and revision. After checkout and dependency installation, the entry point is resolved via `package.json` `exports`;
 3. **Local directory or entry file**: `file:/absolute/path` or `file:relative/path`; relative paths in the Baseware CLI resolve from the current directory, relative paths in Ludens workspace config resolve from the workspace root.
 
@@ -117,8 +117,8 @@ An external driver package must export a `DriverRegistration` (as the `default` 
 | `version` / `fallbackVersion` | Optional version strings; the run directory takes the Provider handshake's actual version first, then the declared version, then the built-in fallback, finally `"unknown"`. |
 | `transport` | `"bridge"` (default, TCP line protocol) or `"stdio"` (child-process stdio). |
 | `defaultPort` | Optional integer (`1..65535`); a `bridge` driver must get a legal port from `ludens.json.port` or `defaultPort`. |
-| `needsGame` | Optional boolean: whether the backend must be started and a game loaded before Bridge readiness; the device may be prepared manually, or the launcher may start it with `ludens.json.game`. |
-| `launchHint` | Device-preparation and manual-start hint text (shown in the Dashboard and CLI help). |
+| `needsGame` | Optional boolean: whether the target backend must be started and loaded (such as an emulator target via `ludens.json.game`) before Bridge readiness; the device may be prepared manually, or the launcher may start it with `ludens.json.game`. |
+| `launchHint` | Device-preparation and manual-start hint text (shown in the Console and CLI help). |
 | `launchCommand` / `launchEnv` | Optional backend launch command array (excluding the game path, appended by the launcher) and environment-variable map (`LUDENS_BRIDGE_PORT` is overridden with the actual port). |
 | `load({ port, command, clock })` | Async factory function: connects the device and returns `{ capabilities: { controllers }, onDisconnect, close }`, optionally with `version`; exact types in [registry.ts](../../../baseware/src/drivers/registry.ts). |
 
@@ -152,8 +152,8 @@ Baseware separates the global driver registry (`~/.ludens/drivers.json`, contrac
    - `http` / `sse`: Streamable HTTP or Server-Sent Events MCP endpoints.
 3. **Concurrent multi-device mounting and routing**:
    - A workspace binds an authorized node pool (`machines.allowed`) and a primary target (`machines.active`).
-   - At runtime, `ludens machine list | use <id> | connect <id...> | disconnect <id>` (or the Dashboard `?view=baseware` Master-Detail Machine Hub) switches the primary machine or mounts multiple machines concurrently without restarting the Host or Baseware.
+   - At runtime, `ludens machine list | use <id> | connect <id...> | disconnect <id>` (or the Console **Devices** view, `?view=baseware`) switches the primary machine or mounts multiple machines concurrently without restarting the Host or Baseware.
    - When multiple machines are mounted, unprefixed controller calls (`controller/screen.capture`) route to the active primary machine, while prefixed calls (`controller/<machineId>/screen.capture` or `ludens_tools.call("controller/screen.capture", machine="<machineId>")`) route to the specified machine.
 4. **Auto-resync and 3-attempt reconnect-then-pause resilience**:
    - When a mounted device disconnects and restarts, Baseware's background resync loop automatically reconnects the provider and broadcasts `baseware_reconnected`.
-   - When the primary device disconnects during an autonomous run (`mode: "auto"`), the Ludens Host records `device_disconnected`, attempts up to 3 automatic reconnections (`device_reconnect_attempt`), and if all attempts fail, records `device_reconnect_failed` and `device_paused` while transitioning back to `manual` mode.
+   - When the primary device disconnects during an Auto Run (`mode: "auto"`), the Ludens Host records `device_disconnected`, attempts up to 3 automatic reconnections (`device_reconnect_attempt`), and if all attempts fail, records `device_reconnect_failed` and `device_paused` while transitioning back to `manual` mode.

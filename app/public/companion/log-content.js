@@ -1,4 +1,4 @@
-/* Present the existing RSA block kinds; source text is always inserted as text. */
+/* Present the existing Ludens block kinds; source text is always inserted as text. */
 function renderLogContent(target, input, copy) {
   const block = input.block;
   const kind = block?.kind ?? 'text';
@@ -32,8 +32,8 @@ function renderLogContent(target, input, copy) {
   icon.append(path);
   let title = block?.title ?? input.title;
   if (id === 'connected:manual') {
-    if (title === '本轮已结束，控制权已交还') title = copy.returned;
-    else if (title === '已连接，等待 AI 接管') title = copy.waiting;
+    if (title === '本轮已结束，控制权已收回') title = copy.returned;
+    else if (title === '已连接 · 手动待命') title = copy.waiting;
   }
   const header = el('div', 'log-header');
   const heading = el('span', 'log-title', title);

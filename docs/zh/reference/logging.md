@@ -1,6 +1,6 @@
 # 日志与调用链
 
-离线分析器、Dashboard 网页控制台与 Ludens Pet 桌宠共同消费同一套持久化运行事实。系统的记录准则是：**连续高频能力按需留档数据并定期汇总统计，主动决策与设备变更完整记录事件，内部嵌套调用链按诊断级别追踪**。
+离线分析器、网页控制台与 可选桌宠（Desktop Pet）共同消费同一套持久化运行事实。系统的记录准则是：**连续高频能力按需留档数据并定期汇总统计，主动决策与设备变更完整记录事件，内部嵌套调用链按诊断级别追踪**。
 
 ## 记录模式
 
@@ -17,7 +17,7 @@
 
 为避免 30Hz 常驻循环刷爆事件流，连续采样与动作循环采用 **5 秒固定窗口统计 + 故障区间（Fault Span）合并**：
 
-- **5 秒窗口统计**：控制租约（`auto` epoch）活跃期间，常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数与 `sleepStarved` 失步计数、窗口实际采样率 `realizedHz` 与占空比 `utilization`、`history` 热缓冲水位 `hotRecords/hotBytes/hotLimitBytes`、代次累计 `lifetime` 快照，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`。进程正常停止时自动补写尾段统计；交还时撤销租约会在周期 `control(manual)` 事件之前刷出最后一个窗口（`reason: "stopped"`），`manual` 待机期间不产生采样统计。
+- **5 秒窗口统计**：控制租约（`auto` epoch）活跃期间，常驻感知每 5 秒写入 `perception_stats`（按能力 ID 与 `codeSHA` 汇总窗口内的调用次数、异常数、耗时 `total/min/max`、采样尝试/完成/录制数与 `sleepStarved` 失步计数、窗口实际采样率 `realizedHz` 与占空比 `utilization`、`history` 热缓冲水位 `hotRecords/hotBytes/hotLimitBytes`、代次累计 `lifetime` 快照，以及视频编码器累计计数与当前队列快照）；Baseware 独立写入 `device_sampling_stats`。进程正常停止时自动补写尾段统计；收回控制权时撤销租约会在周期 `control(manual)` 事件之前刷出最后一个窗口（`reason: "stopped"`），手动待命（`manual`）期间不产生采样统计。
 - **故障区间合并**：连续感知首次出错时立即写入 `perception_fault` / `device_sampling_error`，后续同类重试错误仅累加区间内的 `fault.count`，即便成功与失败交替出现也不会每帧反复开关故障事件。待观察到恢复成功且历经至少一个完整 5 秒窗口无同类错误（或进程正常停止）时，闭合该故障区间。
 
 ## 文件与事件身份
@@ -71,10 +71,10 @@
 | `command / execution / execution_error` | Baseware 设备操作请求与终态；同次调用产出的媒体摘要直接内嵌于 `execution.observations`。 |
 | `action_start / action_end` | 已提交异步手柄动作（`pad.play`）的独立硬件执行生命周期，携带 `actionId` 并沿用提交时的 `trace / epoch`，不会挂到后续的 `pad.wait / status` 请求下。 |
 | `perception_status / perception_fault / perception_fault_end / perception_stats` | 常驻 `perception.py` 进程的生命周期（含从 `loading` 切入 `ready / error / unimplemented` 时的 `startupDurationMs` 冷启动耗时）、故障区间与 5 秒统计；生命周期与故障事件进入 Activity 与桌宠；统计保留在诊断分类。 |
-| `control / runtime_stats` | 控制权变迁（`auto` 启动与携带 `elapsedMs` 接管总时长的 `manual` 交还）以及可选的周期性 Host 运行时快照（`activeCalls`、队列水位及进程内存 `rss / heapUsed / heapTotal`）。 |
+| `control / runtime_stats` | 控制周期变迁（`auto` 自主运行启动与携带 `elapsedMs` 周期总时长的 `manual` 切换）以及可选的周期性 Host 运行时快照（`activeCalls`、队列水位及进程内存 `rss / heapUsed / heapTotal`）。 |
 | `background_start / background_result` | OMP 原生异步 `bash` 任务（`async`）或命名服务（`service`）的启动与完成通知，按 `jobId` 或 `service name + PID` 配对并保留启动时的 `trace / epoch`。 |
 
-**Python 异常链归并规则**：`python_call_end.outcome = "error"` 仅代表该层函数抛出异常（外层调用方可能已 `try/except` 捕获）。分析器与 Dashboard 按显式 Python 父子关系将相邻未捕获的异常归并为一条异常链（`localPythonExceptionGroups`），一旦祖先调用成功返回即截断，不会用内部捕获的异常覆写外层工具的成功状态。
+**Python 异常链归并规则**：`python_call_end.outcome = "error"` 仅代表该层函数抛出异常（外层调用方可能已 `try/except` 捕获）。分析器与控制台按显式 Python 父子关系将相邻未捕获的异常归并为一条异常链（`localPythonExceptionGroups`），一旦祖先调用成功返回即截断，不会用内部捕获的异常覆写外层工具的成功状态。
 
 ## 感知与模型真实输入
 
@@ -94,14 +94,14 @@
 1. **Shiori OTel 遥测**：[shiori.ts](../../../core/src/core/agent-omp/shiori.ts) 挂载局部 OpenTelemetry provider（设置 `captureMessageContent = "none"` 避免重复复制正文），在单次 `agentLoop` 结束时写入 `shiori_run_end` 汇总。
 2. **HTTP 与 WebSocket 传输追踪**：[trace.ts](../../../core/src/core/agent-omp/trace.ts) 记录完整的请求载荷、传输协议（WS full / WS delta / HTTP SSE）与阶段耗时：
    - **HTTP 响应头等待**：从请求发出（dispatch）到收到 HTTP 响应头的耗时（流式接收完成由 `http_end` 之后的内容流结束标识）。
-   - **WS 首事件等待**：WebSocket 模式下出站 `response.create` 仅为发送完成，Dashboard 统计从出站完成到收到**第一个入站服务端事件**的耗时作为首包响应指标。
+   - **WS 首事件等待**：WebSocket 模式下出站 `response.create` 仅为发送完成，控制台统计从出站完成到收到**第一个入站服务端事件**的耗时作为首包响应指标。
 3. **后台预测压缩追踪**：通过 `diagnostics_channel("omp.compaction.speculation")` 为每个后台压缩候选分配唯一 `operationId`，全链路记录 `started → armed / failed / cancelled` 及阈值阶段的 `waiting / applied / invalidated`，其内部发起的 HTTP 请求与重试均挂载在该 `operationId` 与原控制 `epoch` 下。
 
 ## 消费与指标解释
 
-### 1. Dashboard Worker 与三层可重建索引（`.dashboard-index/`）
+### 1. 控制台 Worker 与三层可重建索引（`.dashboard-index/`）
 
-Dashboard 将日志解析与索引构建完全隔离在 Next.js 请求上下文之外的独立 Node Worker 中。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.ludens/archive/` 或 `.ludens/timeline/`），包含三部分：
+控制台将日志解析与索引构建完全隔离在 Next.js 请求上下文之外的独立 Node Worker 中。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.ludens/archive/` 或 `.ludens/timeline/`），包含三部分：
 
 1. **源事件位置与关系目录**：每条事件仅保存文件字节偏移、时间戳（取 `origin.at ?? at`）、类型与调用身份；模型、Span、动作与观测的关联表均指向源事件字节偏移。
 2. **Activity 按需展示配方**：仅保存每个展示块（Thinking / Text / Tool / System / Diagnostic）对应的源事件偏移或 `streams/` 截止字节数；前端或桌宠请求时才按配方从原件组装文本，不在索引中冗余存储完整正文。
@@ -112,16 +112,16 @@ Dashboard 将日志解析与索引构建完全隔离在 Next.js 请求上下文�
 - **页缓存与租约淘汰**：索引按每页最多 1024 条或 256 KiB 分页落盘。查询 Worker 维护默认 **256 MiB** 的共享页缓存（可通过 `LUDENS_APP_INDEX_CACHE_BYTES` 调整），最多保留 **3 个**闲置 run（`LUDENS_APP_INDEX_MAX_RUNS`），闲置 **5 分钟**（`LUDENS_APP_INDEX_IDLE_MS`）且无在途读取租约时自动释放内存。
 - **单实例冷构建 Builder**：首次打开尚未建立索引的历史大型 run 时，查询 Worker 启动全局唯一的临时 Builder 子进程（目标工作集默认 **2 GiB**，由 `LUDENS_APP_BUILD_BYTES` 控制），单遍扫描固定截止点的事件流并批量生成 `generations/<id>/`，完成后通过原子替换 `.dashboard-index/active.json` 发布并退出子进程以归还 OS 内存。构建期间接口返回 HTTP `202 ARCHIVE_PREPARING` 及实时进度；关闭浏览器标签页仅取消当前 HTTP 查询，不会中断后台有限构建任务。
 
-### 3. 控制台 HTTP 接口与 Ludens Pet 增量跟随
+### 3. 控制台 HTTP 接口与可选桌宠增量跟随
 
-- **`/api/activity`**：提供 `changes`（基于不透明游标的增量块更新，供网页与 Ludens Pet 共用）、`history`（按类别与全文关键词分页检索）与 `block`（单块详情展开）。Ludens Pet 仅消费所跟随工作区最新运行的实时 `changes` 增量，并在 `workspace/logs/consumers/` 下记录自身消费水位。
+- **`/api/activity`**：提供 `changes`（基于不透明游标的增量块更新，供网页与桌宠共用）、`history`（按类别与全文关键词分页检索）与 `block`（单块详情展开）。桌宠仅消费所跟随工作区最新运行的实时 `changes` 增量，并在 `workspace/logs/consumers/` 下记录自身消费水位。
 - **`/api/diagnostics`**：专供 `full` 模式诊断事件按 `epoch`、时间窗、`traceId / spanId / actionId` 分页查询（单页上限 500 条），不混入普通 Activity 流或桌宠气泡。
 
 ## 经历回放
 
 ### 1. 时空轴播放器与帧预读缓冲
 
-Dashboard 回放视图（`/api/replay`）将 `.ludens/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
+控制台回放视图（`/api/replay`）将 `.ludens/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
 
 - **时间窗与双帧预读**：事件按最多 60 秒窗口、每页 500 条游标分页；画面使用解码缓冲 Hook——待目标时刻的所有屏幕画面加载完毕后原子切换，同时向后预读最多 2 帧（上限 8 张图 / 32 MiB 预读缓存），切换工作区或离开页面时立即释放图像内存。
 - **时钟与解码器状态**：显式时间轴跳转增加时钟版本并精确对齐解码器；已提交的 URL 位置会被确认，避免属性回写造成第二次 seek。连续播放容忍瞬时偏差和普通解码等待。任何真实 `waiting` 事件都会同时冻结共享时钟与解码器，直到恢复，即使 `readyState` 仍报告数据充足。仅当播放且全局就绪时，超过 1 秒的偏差持续存在 1 秒才触发重同步；稀疏尾部的精确恢复只作用于最后 100ms 的采样区域。
@@ -129,7 +129,7 @@ Dashboard 回放视图（`/api/replay`）将 `.ludens/timeline/` 的连续采样
 
 ### 2. 离线日志读取与运行分析工具
 
-从仓库根目录可在不启动 Host 或 Dashboard 的情况下直接读取归档与生成统计报告：
+从仓库根目录可在不启动 Host 或控制台的情况下直接读取归档与生成统计报告：
 
 ```sh
 # Emit the full JSON statistics report for a given run and control cycle

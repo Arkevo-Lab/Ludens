@@ -71,7 +71,7 @@ describe('Ludens incremental activity source', () => {
     const delta = page(directory, { mode: 'delta', cursor: 'opaque:43', hasMore: true,
       blocks: [{ ...first.blocks[0], revision: 43, text: 'complete text', status: 'complete' }],
       projection: { ...first.projection, revision: 43 },
-      current: { ...first.current, activity: 'manual', phase: '已交还控制权', observationId: null } })
+      current: { ...first.current, activity: 'manual', phase: '控制权已收回', observationId: null } })
     const reset = page(directory, { projection: { ...first.projection, generation: 'generation-b' }, cursor: 'new:42' })
     const fetch = vi.fn().mockResolvedValueOnce(Response.json(first)).mockResolvedValueOnce(Response.json(delta))
       .mockResolvedValueOnce(Response.json(reset)); vi.stubGlobal('fetch', fetch)
@@ -98,7 +98,7 @@ describe('Ludens incremental activity source', () => {
 
   it('keeps runtime failures in blocks without treating a healthy log feed as a consumer error', async () => {
     const directory = workspace(), response = page(directory), onSnapshot = vi.fn()
-    response.current = { ...response.current, activity: 'manual', phase: '已交还控制权', error: 'Invalid channel/value: A=true' }
+    response.current = { ...response.current, activity: 'manual', phase: '控制权已收回', error: 'Invalid channel/value: A=true' }
     response.blocks = [{ ...response.blocks[0], status: 'error', text: response.current.error! }]
     vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new Error('connection refused'))
       .mockResolvedValueOnce(Response.json(response)))
@@ -106,7 +106,7 @@ describe('Ludens incremental activity source', () => {
     expect((await source.read()).current.error).toContain('connection refused')
     const recovered = await source.read()
     expect(recovered).toMatchObject({ activity: 'manual', blocks: response.blocks, current: { error: null } })
-    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ error: null, phase: '已交还控制权' }))
+    expect(onSnapshot).toHaveBeenLastCalledWith(expect.objectContaining({ error: null, phase: '控制权已收回' }))
     source.stop()
   })
 

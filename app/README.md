@@ -1,22 +1,22 @@
 # @ludens/app
 
-First-class **Ludens Desktop App** (Electron) and shared static SPA observability & control console for Ludens workspaces. Both the desktop app and browser development mode share the same React 19, Tailwind CSS 4, and shadcn/ui component primitives backed by `@ludens/core`'s unified `ludens app-server` — with zero Next.js server runtime in production.
+First-class **Ludens Desktop App** (Electron) and shared static SPA observability & control **Console** for Ludens workspaces. Both the desktop app and browser mode share the same React 19, Tailwind CSS 4, and shadcn/ui primitives backed by `@ludens/core`'s unified `ludens app-server` — with zero Next.js server runtime in production.
 
 ## Architecture & Host Modes
 
-- **Ludens Desktop App (`app/bin/ludens-app` / packaged installer)**: Spawns and supervises `ludens app-server --port 0 --parent-watchdog --static-dir <out>` automatically on launch, opens the main console window alongside the Tray and Companion Pet, hides to Tray + Companion when closing the window (`×`), and tears down `app-server` plus any UI-managed game AI processes cleanly on Quit (`⌘Q`, Tray Quit, or unexpected termination via `stdin` watchdog).
-- **Web Dev Mode (`npm run dev`)**: Runs `scripts/dev.mjs`, which spawns an ephemeral `ludens app-server` (`--port 0 --parent-watchdog --trusted-origin`) and proxies `/api/*` from `next dev` for instant HMR in any browser.
+- **Ludens Desktop App (`app/bin/ludens-app` / packaged installer)**: Automatically spawns and supervises `ludens app-server --port 0 --parent-watchdog --static-dir <out>` on launch, opens the main Console window alongside the tray icon (plus optional **Desktop Pet** widget), minimizes to tray on close (`×`), and tears down `app-server` plus any UI-managed workspace processes cleanly on Quit (`⌘Q`, tray Quit, or `stdin` watchdog exit).
+- **Web Dev Mode (`npm run dev`)**: Runs `scripts/dev.mjs`, spawning an ephemeral `ludens app-server` (`--port 0 --parent-watchdog --trusted-origin`) and proxying `/api/*` from `next dev` for instant HMR in any browser.
 - **Static Production Server (`npm run build && npm start`)**: Exports pure static SPA assets into `app/out/` (stamped at `app/out/.ludens-build.json`) and serves them directly from `ludens app-server`.
 
 ## Console Views
 
-- **Live (`?view=live`)**: Real-time **Shiori Loop Cockpit** (`auto on`, urgent mid-turn `steer`, `auto off`, `consolidate`), a duplex **Event Pool** composer mode (`ludens event`) with an outbound Help Request / Notice tray (Reply, Reply & Resume, Mark Handled), header pending badges, and stream cards/bubbles, plus a multi-machine observation stream switcher (`[machineId]`) and live activity trace.
+- **Live (`?view=live`)**: Real-time Auto Run controls (**Start Auto Run**, urgent mid-turn `steer`, **Reclaim Control**, `consolidate`), a duplex **Event Pool** composer (`ludens event`) with outbound Help Request / Notice triage (Reply, Reply & Resume, Mark Handled), header pending badges, multi-node viewport switching (`[machineId]`), and live activity trace.
 - **Replay (`?view=replay`)**: Bounded 30-second fMP4 frame window scrubber, millisecond timestamp jump, full-archive event search, and recorded model-input evidence inspector.
 - **Performance (`?view=perf`)**: Per-request latency breakdown, token/cache telemetry, and compaction timeline analysis.
 - **Capabilities (`?view=caps`)**: Visual **Capability – Eval – Env** triad topology, 3-way stale drift attribution, reward evolution charts, and 1-click **Run All Evals** / **Run Eval**.
-- **Config & Studio (`?view=perception`)**: Unified 5-tab workspace workbench (**Model & Budget**, **Connection & Multimodal Transport**, **Services & Session** with 1-click `up` / `reload` / `down` and inline `MEMORY.md` editor, **Perception Recording**, and **Loop Simulator**).
-- **Baseware (`?view=baseware`)**: Unified **Driver Library** (`~/.ludens/drivers.json` + automatic workspace discovery) and Master-Detail **Controlled Node Hub** (`~/.ludens/machines.json` + inline `workspace-default` endpoints) separating registration, workspace addition, and live mounting, with connectivity probes and Controller Interfaces inspection.
-- **Workspaces (`?view=workspaces`)**, **Docs (`?view=docs`)**, and **Settings (`?view=settings`)**.
+- **Config (`?view=perception`)**: Unified 6-tab workspace configuration panel (**Model & Budget**, **Target Device**, **Connection & Transport**, **Services & Session** with 1-click `up` / `reload` / `down` and inline `MEMORY.md` editor, **Perception Recording**, and **Loop Simulator**).
+- **Devices (`?view=baseware`)**: **Baseware** driver library (`~/.ludens/drivers.json` + workspace discovery) and Master-Detail **Controlled Nodes** hub (`~/.ludens/machines.json` + inline `workspace-default` endpoints) separating registration, workspace assignment, and live mounting with connectivity probes and Controller Interfaces inspection.
+- **Workspaces (`?view=workspaces`)**, **Docs (`?view=docs`)**, **Settings (`?view=settings`)**, and **Developer (`?view=dev`)**.
 
 ## Scripts
 
@@ -34,7 +34,7 @@ cd app && npm test               # Run console & desktop test suites
 
 ## Desktop CLI Flags & Chrome
 
-- **CLI Flags**: `--workspace <path>` (initial workspace), `--server <url>` / `--dashboard <url>` (attach to an external local dev server instead of spawning `app-server`), `--profile <path>` (override `~/.ludens/desktop/profile`), `--background` (launch hidden in Tray + Companion), `--show-window`, and `--help`.
+- **CLI Flags**: `--workspace <path>` (initial workspace), `--server <url>` / `--dashboard <url>` (attach to an external local dev server instead of spawning `app-server`), `--profile <path>` (override `~/.ludens/desktop/profile`), `--background` (launch hidden in tray), `--show-window`, and `--help`.
 - **Unified 38px Titlebar**: Frameless `#090a0d` desktop window across macOS (`titleBarStyle: "hiddenInset"`, centered traffic lights) and Windows 10/11 (`titleBarStyle: "hidden"` with native Window Controls Overlay and no legacy in-window menu bar).
 - **Window State & Shortcuts**: Persists bounds/maximized/fullscreen state in `window-state.json` with multi-display clamping; supports `Cmd/Ctrl+B` (toggle sidebar), `Cmd/Ctrl+K` (quick switcher), and `Cmd/Ctrl+[` / `]` (back/forward).
 - **Platform Launchers**: Use `app/bin/ludens-app` on macOS/Linux or `app/bin/ludens-app.cmd` on Windows.
@@ -42,6 +42,6 @@ cd app && npm test               # Run console & desktop test suites
 
 ## Documentation
 
-- [Dashboard UI and Interaction Contract](../docs/en/reference/dashboard-ui.md)
-- [Console Debugging and Verification](../docs/en/tutorials/debugging-and-verification.md)
-- [Install and Workspace Lifecycle](../docs/en/tutorials/quickstart.md)
+- [Console & Debugging Tutorial](../docs/en/tutorials/console-and-debugging.md)
+- [Quick Start and Workspace Lifecycle](../docs/en/tutorials/quickstart.md)
+- [Internal UI & Desktop Engineering Contract](DESIGN.md)

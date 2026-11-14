@@ -508,12 +508,12 @@ export class WorkspaceLauncher {
   async up(options?: UpOptions) {
     const wantDashboard = options?.includeDashboard ?? this.plan.config.dashboard;
     const wantPet = options?.includePet ?? this.plan.config.pet;
-    // Fail before launching the device when the permanent Dashboard would run stale code.
+    // Fail before launching the device when the permanent Console would run stale code.
     let dashboard = (wantDashboard || wantPet) ? await this.io.dashboardReady(this.plan.dashboardUrl) : false;
     if (wantDashboard && !dashboard) {
       const build = await this.run(this.plan.dashboardCheck);
-      if (build.code !== 0) throw new Error(build.stderr || build.stdout || "Build the Dashboard before starting it.");
-      if ((await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied by a Dashboard with a different Ludens home or an unready service. Stop that Dashboard before switching global homes.");
+      if (build.code !== 0) throw new Error(build.stderr || build.stdout || "Build the Console before starting it.");
+      if ((await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied by a Console with a different Ludens home or an unready service. Stop that Console before switching global homes.");
     }
     let baseware = await this.baseware();
     if (!baseware) {
@@ -584,20 +584,20 @@ export class WorkspaceLauncher {
       dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
     }
     if (wantDashboard && !dashboard) {
-      if (!(await this.job("dashboard")).pid && (await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied but the Ludens Dashboard API is not ready; inspect that service before retrying.");
+      if (!(await this.job("dashboard")).pid && (await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied but the Ludens Console API is not ready; inspect that service before retrying.");
       await this.ensure("dashboard");
-      dashboard = await this.waitFor("Dashboard API", async () => {
+      dashboard = await this.waitFor("Console API", async () => {
         if (await this.io.dashboardReady(this.plan.dashboardUrl)) return true;
         await this.alive("dashboard");
         return false;
       });
     }
     if (wantPet) {
-      if (!dashboard) throw new Error("Pet needs the Dashboard. Enable dashboard in ludens.json or start it separately.");
-      if (await this.io.petReady(this.plan.dashboardUrl)) this.io.note("Reusing Ludens Pet's connected desktop instance.");
+      if (!dashboard) throw new Error("Desktop Pet requires the Console. Enable dashboard in ludens.json or start it separately.");
+      if (await this.io.petReady(this.plan.dashboardUrl)) this.io.note("Reusing connected Desktop Pet instance.");
       else {
         await this.ensure("pet");
-        await this.waitFor(`Ludens Pet activity connection (${this.log("pet")})`, async () => {
+        await this.waitFor(`Desktop Pet activity connection (${this.log("pet")})`, async () => {
           if (await this.io.petReady(this.plan.dashboardUrl)) return true;
           const job = await this.job("pet");
           // Electron's single-instance lock can exit successfully while an existing app connects.
@@ -607,7 +607,7 @@ export class WorkspaceLauncher {
         });
       }
     }
-    this.io.note(host.mode === "auto" ? "Existing takeover is still running." : "Ready in manual mode. Run ludens auto on to start acting.");
+    this.io.note(host.mode === "auto" ? "Existing Auto Run is still active." : "Ready in manual standby. Run ludens auto on to start Auto Run.");
     return this.status();
   }
   async down(includeDashboard: boolean, keepEmulator = false, includePet = false) {

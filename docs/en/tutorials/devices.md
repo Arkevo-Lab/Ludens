@@ -1,64 +1,136 @@
-# Devices & driver setup
+# Devices & Baseware
 
-Each driver only exposes a device's native input and capture capabilities — no game strategy, cross-screen coordinate fusion, or automatic save/load logic. This page follows the [core installation](quickstart.md#install); once device and driver setup is done, continue with [Starting and stopping workspaces](quickstart.md#starting-and-stopping-workspaces) to create and launch a workspace.
+**Baseware** is Ludens's **cross-device integration layer**. It wraps heterogeneous desktop automation backends, camera or sensor feeds, robotics/embedded hardware bridges, simulators, and remote MCP endpoints behind a unified controller schema (`baseware.json`), while enforcing single-lease `epoch` control arbitration so hardware or UI inputs never misfire after **Reclaim Control**.
 
-Only the `cua` desktop adapter is built into the main repository. Emulator and custom hardware drivers are loaded on demand as external packages (`--driver-package`); the main repository does not bundle emulator binaries, native bridges, or build patches.
+For protocol-level contracts, read [Baseware Reference](../reference/baseware.md) and [Driver Bridge Protocol](../reference/driver-bridge-protocol.md).
 
-## Cua
+## 1. Built-in Desktop Target (`cua`)
 
-The desktop environment uses the stock upstream [Cua Driver](https://github.com/trycua/cua/tree/main/libs/cua-driver):
-
-1. Install Cua Driver, and in macOS **System Settings → Privacy & Security** grant `CuaDriver.app` **Accessibility** and **Screen Recording** permissions.
-2. Baseware attaches the driver through a persistent `cua-driver mcp` child process (stdio transport); no `game` or bridge port is needed. If `cua-driver` is not on `PATH`, specify the absolute path via `ludens init --cua-command` or the `ludens.json` `cuaCommand` field.
-3. All tools keep their upstream names and JSON parameter shapes (e.g. `ludens controller controller/get_desktop_state --args '{}'`); for contract boundaries see [Baseware design & capability contracts](../reference/baseware.md).
-
-**Desktop environment boundaries**: multiple Cua workspaces share the same host's real desktop; use a separate OS session or VM for an isolated desktop. Handing control back to a human immediately rejects new inputs and requests cancellation, but a single native call already inside the OS may still finish; `ludens down` does not close the shared `CuaDriver.app` or the user's desktop apps.
-
-## Discovering & connecting external driver packages
-
-Enter the exact address in the labeled **Driver package address** field. On narrow screens the verification button sits below the full-width input. Editing the address cancels an outstanding verification and clears its result; a late response cannot validate a different address.
-
-The Dashboard **Workspaces → New workspace → Community driver package** form validates a package only after you choose **Verify driver package**. A successful result means its registration declaration imported and passed validation; it does not connect to a device, build an emulator, or prove that a game runs. Creation is a separate explicit action and may download or import the package again. Set a name, review the directory and driver-specific options, then create; the completion card supplies a workspace-scoped `up` command to run in a terminal when ready.
-
-For an existing workspace, follow the configuration instructions below rather than initializing it again. On the **Capabilities (`?view=caps`)** page, the **Workspace sources** section distinguishes the saved `baseware.json` device snapshot from static Python declarations. A missing snapshot calls for service setup; it is not proof of an empty live device. **Host connection check** reads the selected workspace's Host status on load and on demand. The reported control connection is the Host's last-known state, including uncertainty after control errors; it does not verify physical hardware, game output, or individual capability execution.
-
-Non-built-in drivers must select an external package explicitly via `--driver-package`; only the `cua` desktop access is built in. Package addresses accept an npm spec, `github:org/repo#rev`, a GitHub HTTPS URL, `git@github.com:org/repo.git#rev`, or `file:path`. SSH addresses keep SSH transport, and the cache distinguishes transport, repository, and revision. Before initializing a workspace, validate the package's `DriverRegistration` declaration with `baseware driver discover` or the Dashboard Workspaces creation modal (`?view=workspaces&create=1`):
+Ludens ships with the built-in `cua` (`builtin:cua`) desktop automation driver and a default `local-desktop` machine entry over `stdio` MCP transport. It works out of the box with zero external driver package:
 
 ```sh
-baseware driver discover --package 'github:org/repo#rev'
-ludens init --name my-task --driver <id> --driver-package 'github:org/repo#rev'
+ludens init --name desktop-monitor --driver cua
+cd "$HOME/.ludens/workspaces/desktop-monitor"
+ludens up
 ```
 
-- **Path resolution**: relative `file:` paths in `ludens init` and `ludens up` resolve against the target workspace directory and are normalized; relative `file:` in `baseware driver discover` resolves against the current shell directory; external-driver validation in the Dashboard web UI requires absolute `file:` paths.
-- **Actual source**: the catalog's `drivers[].source`, Baseware `service_start.driverSource`, and Ludens `manifest.drivers[].source` record the source the loader actually resolved: GitHub `resolvedCommit`, npm `resolvedVersion`, or local entry `entrySha256`. The entry hash does not cover dependencies, and `provider.version` still denotes the device or protocol version; see [Package addresses & caching](../reference/baseware.md#1-package-addresses-and-caching) for the fields.
-- **Trust boundary**: discovery does not call the driver's `load()`, but it downloads and installs dependencies and imports the package entry code; only run discovery and init against trusted sources. For the driver package spec see [Driver packages & launch descriptions](../reference/baseware.md#driver-packages-and-launch-description) and [Driver Bridge protocol](../reference/driver-bridge-protocol.md).
+If you want `cua` to launch a custom server command, pass `--cua-command <path>` to `ludens init` or set `cuaCommand` in `ludens.json` (or `--cua-command <path>` when running `baseware serve --driver cua` directly).
 
-**Migrating an existing external-driver workspace**: run `ludens auto off`, then `ludens down --keep-emulator`; add or update the matching `driverPackage` in `ludens.json` (pinning the target revision or commit SHA), then run `ludens up --dry-run` / `ludens up`. Do not re-run `ludens init`; the original workspace files and saves are kept. Already-running services do not switch packages just because sources were updated. To attach to an already manually prepared emulator without auto-launching a game file, omit `game`.
+To test the built-in desktop target from a terminal while running:
 
-## Machine pool & multi-device mounting
+```sh
+ludens controller list
+ludens controller controller/screenshot --help
+```
 
-Rather than binding to a single static host, Ludens manages a persistent **controlled node pool** in `~/.ludens/machines.json` and allows a workspace to mount multiple devices simultaneously:
+## 2. Five Transports & Driver Packages
 
-1. **Inspect & manage nodes from the CLI** (when running inside a launched workspace shell):
-   ```bash
-   ludens machine list
-   ludens machine use gba-mgba
-   ludens machine connect gba-mgba-2
-   ludens machine disconnect gba-mgba-2
-   ```
-2. **Manage drivers & nodes in the Console (`?view=baseware`)**:
-   - Open the **Baseware** view and use the **Controlled Devices** tab (`data-baseware-section="machine-pool"`) to inspect both globally registered machines and workspace-inline endpoints (`workspace-default`, promotable via **Save to pool**) in a flat row list with compact badges (**In use**, **Workspace inline**, **Online** / **Standby**) plus 1-click **Use here**, co-mount, and probe actions.
-   - Switch to the **Driver Packages** tab (`data-baseware-section="driver-library"`) to inspect built-in drivers, globally registered entries in `~/.ludens/drivers.json`, and workspace/cache-discovered packages (**registration state** separated from **workspace usage state**), using **Add Driver** (`data-baseware-add-driver`) or row actions (**Save to library**, **New Device**) to verify manifests and prefill machine creation.
-   - Click **New Machine** (`data-baseware-add-machine`) to prefill from any driver template or configure custom transports, or click **Inspect** on any device to open the `<dialog>` detail drawer (`data-baseware-section="controllers-catalog"`) for controller interfaces and collapsible `<details>` diagnostics covering live Baseware daemon leases and CLI routing.
-3. **Target specific devices from Python (`ludens_tools`)**:
-   ```python
-   import ludens_tools
+Baseware separates driver manifests (`~/.ludens/drivers.json`) from controlled machine definitions (`~/.ludens/machines.json`), supporting five transport protocols across local and remote nodes:
 
-   # Inspect mounted machines
-   print(ludens_tools.machines())
+| Transport | Typical Target | Key Parameters / CLI Flags |
+| --- | --- | --- |
+| `stdio` | Local MCP desktop driver (`cua`) or local subprocess driver | `--driver cua [--cua-command <path>]` or `--transport stdio` |
+| `bridge` | Local or LAN TCP line-protocol device / simulator / hardware bridge | `--transport bridge --host <host> --port <n>` |
+| `ssh` | Remote host exposed over SSH stdio tunnel (`ssh -o BatchMode=yes`) | `--transport ssh --ssh-host <host> --ssh-user <user> --ssh-port <n> --ssh-identity <path> --ssh-command <cmd>` |
+| `http` | Streamable HTTP MCP device or service endpoint | `--transport http --url <url>` |
+| `sse` | Server-Sent Events MCP endpoint | `--transport sse --url <url>` |
 
-   # Call the primary machine (or pass machine="<machineId>" for any mounted node)
-   ludens_tools.call("controller/capture_frame", {}, machine="gba-mgba")
-   ludens_tools.call("controller/tap_button", {"button": "A"}, machine="gba-mgba-2")
-   ```
+### Installing & Discovering External Driver Packages
 
+External drivers are loaded via `--driver <id> --driver-package <spec>` (or stored in `~/.ludens/drivers.json` via Console **Devices**). `<spec>` supports three formats:
+
+1. **npm package**: e.g. `@scope/driver-pkg@1.2.0` (cached under `~/.local/state/ludens/baseware/drivers/` or `$XDG_STATE_HOME/ludens/baseware/drivers/`)
+2. **GitHub repository**: e.g. `github:org/repo#commit-sha`, HTTPS URL, or `git@github.com:org/repo.git#rev` (pin exact commit SHAs for reproducible runs)
+3. **Local directory or entry module**: e.g. `file:/abs/path/to/driver` or `file:./drivers/my-driver`
+
+Before wiring an external driver into a workspace, validate its exported `DriverRegistration` manifest without connecting to hardware:
+
+```sh
+baseware driver discover --package 'file:/path/to/my-driver'
+```
+
+`baseware driver discover` installs dependencies and imports the package entry to emit the validated `DriverManifest` JSON, without calling `load()`. Because package installation scripts and module top-level code still execute locally during discovery, only inspect and load driver packages from trusted sources.
+
+## 3. Managing Drivers & Nodes in Console (`Devices`, `?view=baseware`)
+
+Open **Devices** (`?view=baseware`, titled **Devices & Nodes · Baseware**) in the Console sidebar to configure drivers and machines visually without hand-editing JSON:
+
+- **Driver Packages tab**: Lists installed and workspace-local driver packages alongside their resolved sources. Click **Add Driver** to register an external npm, GitHub, or `file:` driver into `~/.ludens/drivers.json`.
+- **Controlled Devices tab**: Lists all nodes in `~/.ludens/machines.json` plus any synthesized `workspace-default` endpoint. Click **New Machine** to add a `stdio`, `bridge`, `ssh`, `http`, or `sse` node and save its host, port, URL, or SSH parameters.
+- **Node & Controllers drawer tab**: Select any node to test connectivity, activate the primary node or mount multiple nodes concurrently in the active workspace, inspect live controller schemas, and run quick test calls.
+- **Daemon & Lease drawer tab**: Inspect Baseware socket status, current `epoch` control lease state, reconnect history, or revoke active device control immediately.
+
+You can also pin the active target device for a workspace in Console **Config** (`?view=perception`) under **Target Device**.
+
+## 4. Multi-Machine Mounting & Tool Routing
+
+A workspace can authorize a pool of controlled machines (`machines.allowed`) and designate one primary machine (`machines.active`) in `ludens.json`. For example:
+
+```json
+{
+  "driver": "cua",
+  "machines": {
+    "active": "local-desktop",
+    "allowed": ["local-desktop", "lab-bench-ssh", "edge-sensor-http"]
+  }
+}
+```
+
+### Runtime Switching & Mounting via CLI
+
+Switch the primary machine or mount/unmount nodes live without restarting Baseware or your workspace:
+
+```sh
+ludens machine list
+ludens machine connect local-desktop lab-bench-ssh
+ludens machine use lab-bench-ssh
+ludens machine disconnect edge-sensor-http
+```
+
+Equivalent direct `baseware` commands are `baseware machine list`, `baseware machine use <id>`, `baseware machine connect <id> [<id2> ...]`, and `baseware machine disconnect <id>`.
+
+### Routing Controller Calls Across Machines
+
+When multiple machines are mounted concurrently:
+
+- **Primary route (unprefixed)**: `controller/<tool>` routes to the currently active primary machine.
+- **Explicit node route (prefixed)**: `controller/<machineId>/<tool>` targets a specific mounted node regardless of which node is primary.
+
+CLI examples:
+
+```sh
+ludens controller controller/screenshot
+ludens controller controller/lab-bench-ssh/gpio.read --args '{"pin":4}'
+ludens controller controller/gpio.read --machine lab-bench-ssh --args '{"pin":4}'
+```
+
+Python `ludens_tools` offers matching multi-machine helpers (`machines()`, `use_machine()`, `connect_machines()`, `disconnect_machines()`, and `call(..., machine=...)`):
+
+```python
+from ludens_tools import call, connect_machines, machines, use_machine
+
+connect_machines("local-desktop", "lab-bench-ssh")
+print(machines())
+
+# Route explicitly to a secondary node while keeping local-desktop primary
+telemetry = call("controller/gpio.read", {"pin": 4}, machine="lab-bench-ssh")
+use_machine("lab-bench-ssh")
+```
+
+## 5. Standalone Baseware CLI & Resilience
+
+When debugging a single hardware adapter outside a workspace, run `baseware` directly in the foreground:
+
+```sh
+baseware serve --driver cua --machine-id local-desktop --diagnostics full
+```
+
+Useful `baseware` diagnostic and recovery commands:
+
+- `baseware status` / `baseware list`: Inspect connected drivers, mounted nodes, and exported controller count
+- `baseware export [--output baseware.json]`: Export the live capability catalog snapshot
+- `baseware reconnect [--machine <id>]`: Force a driver reconnect on a dropped node
+- `baseware revoke`: Immediately revoke any active hardware control lease (`DISOWN` / `release()`)
+- `baseware mcp`: Expose Baseware's controller pool as a standard MCP stdio server
+
+During an active **Auto Run**, if the primary device drops cleanly or crashes, Baseware's background resync loop detects recovery and **Ludens** attempts automatic reconnection before pausing and returning to **Manual Standby** if all reconnect attempts fail. To inspect driver logs or troubleshoot socket disconnects, continue to [Console Operations & Debugging](console-and-debugging.md).

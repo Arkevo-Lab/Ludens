@@ -130,7 +130,7 @@ describe('pet log content', () => {
 
   it('labels manual control clearly while preserving its raw event fields', () => {
     render(target, notification('system', { title: 'control', data: { mode: 'manual', reason: 'budget', elapsedMs: 1800000 } }))
-    expect(target.querySelector('.log-event')?.textContent).toBe('已交还控制权')
+    expect(target.querySelector('.log-event')?.textContent).toBe('控制权已收回')
     const fields = Object.fromEntries([...target.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]))
     expect(fields).toEqual({ mode: 'manual', reason: 'budget', elapsedMs: '1800000' })
   })
@@ -142,12 +142,12 @@ describe('pet log content', () => {
     expect(target.querySelector('pre')?.getAttribute('aria-label')).toBe('Arguments')
     expect(target.querySelector('summary')?.textContent).toBe('Result')
     render(target, notification('system', { title: 'control', data: { mode: 'manual' } }), 'en')
-    expect(target.querySelector('.log-event')?.textContent).toBe('Control returned to you')
+    expect(target.querySelector('.log-event')?.textContent).toBe('Control Reclaimed')
   })
 
   it.each(['en', 'zh'] as const)('preserves redacted manual connection status in %s', locale => {
     const brief = briefNotification(notification('system', {
-      id: 'connected:manual', title: '本轮已结束，控制权已交还',
+      id: 'connected:manual', title: '本轮已结束，控制权已收回',
     }))
     render(target, brief, locale)
     expect(target.querySelector('.log-title')?.textContent).toBe(brief.title)

@@ -9,8 +9,8 @@ const companionI18n = {
     activity: {
       running: 'Running', error: 'Error', complete: 'Done', generating: 'Generating',
       content: '{title} content, scrollable', arguments: 'Arguments', result: 'Result',
-      aiControl: 'AI has control', manualControl: 'Control returned to you',
-      waiting: 'Connected, waiting for AI to take control', returned: 'Run finished; control returned to you',
+      aiControl: 'Auto Run', manualControl: 'Control Reclaimed',
+      waiting: 'Connected · Manual Standby', returned: 'Cycle ended · Control reclaimed',
     },
     menu: {
       open: 'Open Ludens Console', quit: 'Quit Ludens', play: 'Play · Catch the Stars',
@@ -36,19 +36,19 @@ const companionI18n = {
     },
   },
   zh: {
-    lang: 'zh-CN', name: '卢登斯', console: 'Ludens 控制台',
-    petLabel: '卢登斯：点击互动，拖动移动，右键设置和游戏',
+    lang: 'zh-CN', name: 'Ludens', console: 'Ludens 控制台',
+    petLabel: 'Ludens：点击互动，拖动移动，右键设置与小游戏',
     petTitle: '点击互动 · 拖动移动 · 右键游戏与设置',
     details: '详情', dismiss: '收起', dismissLabel: '收起这条日志',
-    lines: ['我在。', '先观察，再行动。', '嗯？叫卢登斯。', '别戳了，在想了。', '这次有把握。大概。', '蛛腿也要休息。', '再试一次。', '一起看看？'],
+    lines: ['我在。', '先观察，再行动。', '嗯？叫我 Ludens 就好。', '别戳了，在想了。', '这次有把握。大概。', '蛛腿也要休息。', '再试一次。', '一起看看？'],
     activity: {
       running: '运行中', error: '出错', complete: '完成', generating: '正在生成',
       content: '{title}内容，可滚动', arguments: '参数', result: '结果',
-      aiControl: 'AI 已接管', manualControl: '已交还控制权',
-      waiting: '已连接，等待 AI 接管', returned: '本轮已结束，控制权已交还',
+      aiControl: '自主运行中', manualControl: '控制权已收回',
+      waiting: '已连接 · 手动待命', returned: '本轮已结束，控制权已收回',
     },
     menu: {
-      open: '打开 Ludens 控制台', quit: '退出卢登斯', play: '玩一会儿 · 接星星',
+      open: '打开 Ludens 控制台', quit: '退出 Ludens', play: '玩一会儿 · 接星星',
       poses: '姿态', automatic: '自动（随活动与闲置切换）', effects: '特效', none: '无',
       hide: '隐藏桌宠', show: '显示桌宠', size: '大小', small: '小', medium: '中', large: '大',
       categories: { '日常': '日常', '工作': '工作', '互动': '互动', '方向': '方向', '特色': '特色', '特效': '特效' },

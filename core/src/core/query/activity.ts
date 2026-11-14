@@ -1134,7 +1134,7 @@ export async function getActivity(project: string, run?: string, epoch?: string,
   response.projection.durationMs = performance.now() - started;
   return { ...response, current: { workspace: selected.workspace ?? manifest.workspace ?? null, runId, epoch: result.scope.epoch, model: currentModel,
     activity, phase: activity === "running" ? livePhaseValue(state.phase)?.label ?? "等待下一步"
-      : activity === "manual" ? (result.scope.epoch ? "已交还控制权" : "已连接，等待 AI 接管")
+      : activity === "manual" ? (result.scope.epoch ? "控制权已收回" : "已连接 · 手动待命")
       : live?.runId === runId && live.mode === "auto" && live.epoch !== selectedState.effectiveEpoch ? "历史运行，仅供回放"
       : live?.runId === runId && !live.connected ? "设备连接已断开" : "Host 离线",
     intent: state.intent, observationId: state.observationId, updatedAt: state.updatedAt, error: state.error } };
