@@ -43,6 +43,7 @@ import {
 import { BasewareModalDialog } from "./baseware-modal-dialog";
 import { DriverRegisterDialog } from "./driver-register-dialog";
 import { MachineEditorDialog } from "./machine-editor-dialog";
+import { useAnimatedNativeDialog } from "@/components/use-motion-preferences";
 import {
   buildDisplayMachines,
   createEmptyMachineDraft,
@@ -216,6 +217,18 @@ export function BasewareView({
   });
   const drawerDialogRef = useRef<HTMLDialogElement | null>(null);
   const drawerPointerOutsideRef = useRef(false);
+  const drawerClosingProgrammaticallyRef = useRef(false);
+
+  const [renderedDeleteTarget, setRenderedDeleteTarget] = useState<DisplayMachineItem | null>(confirmDeleteTarget);
+  useEffect(() => {
+    if (confirmDeleteTarget) {
+      setRenderedDeleteTarget(confirmDeleteTarget);
+      return;
+    }
+    const timer = window.setTimeout(() => setRenderedDeleteTarget(null), 220);
+    return () => window.clearTimeout(timer);
+  }, [confirmDeleteTarget]);
+  const deleteDialogTarget = confirmDeleteTarget ?? renderedDeleteTarget;
 
   const displayMachines = useMemo(() => buildDisplayMachines(snapshot), [snapshot]);
   const normalizedDaemon = useMemo(() => normalizeDaemonForSnapshot(snapshot), [snapshot]);
@@ -262,18 +275,16 @@ export function BasewareView({
     }
   }, [drawerOpen, selectedMachine]);
 
-  // Sync native modal <dialog> for the right-side detail drawer
-  useEffect(() => {
-    const dialog = drawerDialogRef.current;
-    if (!dialog) return;
-    if (drawerOpen) {
-      if (!dialog.open) {
-        dialog.showModal();
-      }
-    } else if (dialog.open) {
-      dialog.close();
-    }
-  }, [drawerOpen]);
+  const renderedMachine = useAnimatedNativeDialog(
+    drawerDialogRef,
+    drawerOpen ? selectedMachine : null,
+    {
+      closeDurationMs: 220,
+      onBeforeProgrammaticClose: () => {
+        drawerClosingProgrammaticallyRef.current = true;
+      },
+    },
+  );
 
   // Light-dismiss fallback when browser lacks HTMLDialogElement.prototype.closedBy
   useEffect(() => {
@@ -312,8 +323,8 @@ export function BasewareView({
   );
 
   const selectedMachineControllers = useMemo(
-    () => resolveControllersForMachine(rawDeviceItems, selectedMachine, snapshot),
-    [rawDeviceItems, selectedMachine, snapshot],
+    () => resolveControllersForMachine(rawDeviceItems, renderedMachine, snapshot),
+    [rawDeviceItems, renderedMachine, snapshot],
   );
 
   const daemon = snapshot?.daemon;
@@ -333,6 +344,10 @@ export function BasewareView({
     const dialog = drawerDialogRef.current;
     if (dialog && dialog.returnValue) {
       dialog.returnValue = "";
+    }
+    if (drawerClosingProgrammaticallyRef.current) {
+      drawerClosingProgrammaticallyRef.current = false;
+      return;
     }
     setDrawerOpen(false);
   };
@@ -400,7 +415,7 @@ export function BasewareView({
     ? `${t("editMachineTitle")}: ${editingGlobalId}`
     : t("newMachineTitle");
 
-  const cliExample = selectedMachine ? formatCliControllerExample(selectedMachine) : "";
+  const cliExample = renderedMachine ? formatCliControllerExample(renderedMachine) : "";
 
   return (
     <div className="space-y-5 p-4 md:p-6" data-baseware-view>
@@ -452,7 +467,7 @@ export function BasewareView({
             onClick={() => void reloadAll()}
             disabled={loading || !ready}
           >
-            <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
+            <RefreshCw className={`size-3.5 ${loading ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
             {t("refresh")}
           </Button>
           <Button
@@ -629,7 +644,7 @@ export function BasewareView({
                                   aria-label={`${t("reconnectBtn")}: ${machine.name}`}
                                   onClick={() => void controlWorkspaceMachine("reconnect", machine.id)}
                                 >
-                                  <RefreshCw className="size-3" aria-hidden="true" />
+                                  <RefreshCw className={`size-3 ${isBusy ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
                                   {t("reconnectBtn")}
                                 </Button>
                               )}
@@ -698,7 +713,9 @@ export function BasewareView({
                             aria-label={`${t("probe")}: ${machine.name}`}
                             data-baseware-probe-btn={machine.id}
                           >
-                            <Play className="size-3" aria-hidden="true" />
+                            {probe === "probing"
+                              ? <RefreshCw className="size-3 motion-safe:animate-spin" aria-hidden="true" />
+                              : <Play className="size-3" aria-hidden="true" />}
                             {probe === "probing" ? t("probing") : t("probe")}
                           </Button>
 
@@ -909,9 +926,9 @@ export function BasewareView({
       >
         <div className="baseware-drawer-header">
           <div className="flex min-w-0 items-center gap-2.5">
-            {selectedMachine ? (
+            {renderedMachine ? (
               <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border bg-background">
-                <TransportIcon kind={selectedMachine.transport.kind} />
+                <TransportIcon kind={renderedMachine.transport.kind} />
               </div>
             ) : (
               <Server className="size-4 shrink-0 text-primary" aria-hidden="true" />
@@ -919,13 +936,13 @@ export function BasewareView({
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 id={drawerTitleId} className="truncate text-sm font-semibold text-foreground">
-                  {selectedMachine ? selectedMachine.name : t("drawerTitle")}
+                  {renderedMachine ? renderedMachine.name : t("drawerTitle")}
                 </h2>
-                {selectedMachine && (
+                {renderedMachine && (
                   <Badge
                     variant="outline"
                     className={
-                      selectedMachine.isMounted
+                      renderedMachine.isMounted
                         ? "border-emerald-500/45 bg-emerald-500/15 text-[10px] text-emerald-300"
                         : "text-[10px] text-muted-foreground"
                     }
@@ -933,10 +950,10 @@ export function BasewareView({
                     <span
                       aria-hidden="true"
                       className={`mr-1 inline-block size-1.5 rounded-full ${
-                        selectedMachine.isMounted ? "bg-emerald-400" : "bg-muted-foreground/40"
+                        renderedMachine.isMounted ? "bg-emerald-400" : "bg-muted-foreground/40"
                       }`}
                     />
-                    {t(selectedMachine.isMounted ? "nodeMountConnected" : "nodeMountStandby")}
+                    {t(renderedMachine.isMounted ? "nodeMountConnected" : "nodeMountStandby")}
                   </Badge>
                 )}
               </div>
@@ -957,7 +974,7 @@ export function BasewareView({
         </div>
 
         <div className="baseware-drawer-body space-y-5">
-          {selectedMachine && (
+          {renderedMachine && (
             <>
               {/* Quick actions strip */}
               <div className="flex flex-wrap items-center gap-1.5">
@@ -966,19 +983,21 @@ export function BasewareView({
                   variant="outline"
                   size="sm"
                   className="h-7 px-2.5 text-xs"
-                  onClick={() => void probeMachine(selectedMachine)}
-                  disabled={probeStates[selectedMachine.id] === "probing"}
+                  onClick={() => void probeMachine(renderedMachine)}
+                  disabled={probeStates[renderedMachine.id] === "probing"}
                 >
-                  <Play className="size-3" aria-hidden="true" />
-                  {probeStates[selectedMachine.id] === "probing" ? t("probing") : t("probe")}
+                  {probeStates[renderedMachine.id] === "probing"
+                    ? <RefreshCw className="size-3 motion-safe:animate-spin" aria-hidden="true" />
+                    : <Play className="size-3" aria-hidden="true" />}
+                  {probeStates[renderedMachine.id] === "probing" ? t("probing") : t("probe")}
                 </Button>
 
-                {selectedMachine.registrationStatus === "unregistered" ? (
+                {renderedMachine.registrationStatus === "unregistered" ? (
                   <Button
                     type="button"
                     size="sm"
                     className="h-7 px-2.5 text-xs"
-                    onClick={() => openEditorForPromote(selectedMachine)}
+                    onClick={() => openEditorForPromote(renderedMachine)}
                   >
                     <Sparkles className="size-3" aria-hidden="true" />
                     {t("deviceSaveGlobal")}
@@ -990,18 +1009,18 @@ export function BasewareView({
                       variant="outline"
                       size="sm"
                       className="h-7 px-2.5 text-xs"
-                      onClick={() => openEditorForMachine(selectedMachine)}
+                      onClick={() => openEditorForMachine(renderedMachine)}
                     >
                       <Edit3 className="size-3" aria-hidden="true" />
                       {t("edit")}
                     </Button>
-                    {selectedMachine.registrationStatus !== "builtin" && (
+                    {renderedMachine.registrationStatus !== "builtin" && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                        onClick={() => setConfirmDeleteTarget(selectedMachine)}
+                        onClick={() => setConfirmDeleteTarget(renderedMachine)}
                       >
                         <Trash2 className="size-3" aria-hidden="true" />
                         {t("delete")}
@@ -1010,41 +1029,41 @@ export function BasewareView({
                   </>
                 )}
 
-                {project && selectedMachine.registrationStatus !== "unregistered" && (
+                {project && renderedMachine.registrationStatus !== "unregistered" && (
                   <>
-                    {selectedMachine.workspaceAdditionStatus === "not-added" && (
+                    {renderedMachine.workspaceAdditionStatus === "not-added" && (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         className="h-7 px-2.5 text-xs"
-                        disabled={busyMachineId === selectedMachine.id}
-                        onClick={() => void controlWorkspaceMachine("toggleAllowed", selectedMachine.id)}
+                        disabled={busyMachineId === renderedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("toggleAllowed", renderedMachine.id)}
                       >
                         {t("addToWorkspaceBtn")}
                       </Button>
                     )}
-                    {selectedMachine.workspaceAdditionStatus !== "primary" && (
+                    {renderedMachine.workspaceAdditionStatus !== "primary" && (
                       <Button
                         type="button"
                         variant="secondary"
                         size="sm"
                         className="h-7 px-2.5 text-xs"
-                        disabled={busyMachineId === selectedMachine.id}
-                        onClick={() => void controlWorkspaceMachine("setPrimary", selectedMachine.id)}
+                        disabled={busyMachineId === renderedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("setPrimary", renderedMachine.id)}
                       >
                         <Star className="size-3" aria-hidden="true" />
                         {t("deviceSetActive")}
                       </Button>
                     )}
-                    {selectedMachine.isMounted ? (
+                    {renderedMachine.isMounted ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         className="h-7 px-2.5 text-xs"
-                        disabled={busyMachineId === selectedMachine.id}
-                        onClick={() => void controlWorkspaceMachine("unmount", selectedMachine.id)}
+                        disabled={busyMachineId === renderedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("unmount", renderedMachine.id)}
                       >
                         <Unplug className="size-3" aria-hidden="true" />
                         {t("unmountBtn")}
@@ -1056,22 +1075,22 @@ export function BasewareView({
                           variant="outline"
                           size="sm"
                           className="h-7 px-2.5 text-xs"
-                          disabled={busyMachineId === selectedMachine.id}
-                          onClick={() => void controlWorkspaceMachine("mount", selectedMachine.id)}
+                          disabled={busyMachineId === renderedMachine.id}
+                          onClick={() => void controlWorkspaceMachine("mount", renderedMachine.id)}
                         >
                           <PlugIcon className="size-3" aria-hidden="true" />
                           {t("coMountBtn")}
                         </Button>
                       )
                     )}
-                    {selectedMachine.workspaceAdditionStatus === "added" && (
+                    {renderedMachine.workspaceAdditionStatus === "added" && (
                       <Button
                         type="button"
                         variant="ghost"
                         size="sm"
                         className="h-7 px-2 text-xs text-muted-foreground"
-                        disabled={busyMachineId === selectedMachine.id}
-                        onClick={() => void controlWorkspaceMachine("toggleAllowed", selectedMachine.id)}
+                        disabled={busyMachineId === renderedMachine.id}
+                        onClick={() => void controlWorkspaceMachine("toggleAllowed", renderedMachine.id)}
                       >
                         {t("removeFromWorkspaceBtn")}
                       </Button>
@@ -1079,16 +1098,16 @@ export function BasewareView({
                   </>
                 )}
 
-                {project && selectedMachine.registrationStatus === "unregistered" && selectedMachine.isMounted && (
+                {project && renderedMachine.registrationStatus === "unregistered" && renderedMachine.isMounted && (
                   <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     className="h-7 px-2.5 text-xs"
-                    disabled={busyMachineId === selectedMachine.id}
-                    onClick={() => void controlWorkspaceMachine("reconnect", selectedMachine.id)}
+                    disabled={busyMachineId === renderedMachine.id}
+                    onClick={() => void controlWorkspaceMachine("reconnect", renderedMachine.id)}
                   >
-                    <RefreshCw className="size-3" aria-hidden="true" />
+                    <RefreshCw className={`size-3 ${busyMachineId === renderedMachine.id ? "motion-safe:animate-spin" : ""}`} aria-hidden="true" />
                     {t("reconnectBtn")}
                   </Button>
                 )}
@@ -1111,7 +1130,7 @@ export function BasewareView({
               </div>
 
               {(() => {
-                const probe = probeStates[selectedMachine.id];
+                const probe = probeStates[renderedMachine.id];
                 if (!probe || probe === "probing") return null;
                 return (
                   <div
@@ -1130,13 +1149,13 @@ export function BasewareView({
               <dl className="settings-rows text-xs">
                 <div className="flex items-center justify-between gap-4 py-2.5">
                   <dt className="shrink-0 text-muted-foreground">{t("driverLabel")}</dt>
-                  <dd className="min-w-0 font-mono text-foreground">{selectedMachine.driver}</dd>
+                  <dd className="min-w-0 font-mono text-foreground">{renderedMachine.driver}</dd>
                 </div>
                 <div className="flex items-center justify-between gap-4 py-2.5">
                   <dt className="shrink-0 text-muted-foreground">{t("endpointLabel")}</dt>
                   <dd className="min-w-0 font-mono text-foreground">
                     <SingleLineTruncate
-                      text={`${selectedMachine.transport.kind.toUpperCase()} · ${formatTransportSummary(selectedMachine.transport)}`}
+                      text={`${renderedMachine.transport.kind.toUpperCase()} · ${formatTransportSummary(renderedMachine.transport)}`}
                       mono
                     />
                   </dd>
@@ -1167,17 +1186,17 @@ export function BasewareView({
                 ) : capabilities.value.sources.device.status === "error" ? (
                   <p className="text-xs text-destructive">{ct("sourceFailure")}</p>
                 ) : selectedMachineControllers.length === 0 ? (
-                  normalizedDaemon.mountedById.size > 0 && !selectedMachine.isMounted ? (
+                  normalizedDaemon.mountedById.size > 0 && !renderedMachine.isMounted ? (
                     <div className="space-y-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                      <p>{fmt("unmountedPrompt", { id: selectedMachine.id })}</p>
-                      {project && !selectedMachine.isImplicit && (
+                      <p>{fmt("unmountedPrompt", { id: renderedMachine.id })}</p>
+                      {project && !renderedMachine.isImplicit && (
                         <Button
                           type="button"
                           variant="secondary"
                           size="sm"
                           className="h-7 text-xs"
-                          disabled={busyMachineId === selectedMachine.id}
-                          onClick={() => void controlWorkspaceMachine("mount", selectedMachine.id)}
+                          disabled={busyMachineId === renderedMachine.id}
+                          onClick={() => void controlWorkspaceMachine("mount", renderedMachine.id)}
                         >
                           <PlugIcon className="size-3" aria-hidden="true" />
                           {t("mountNowBtn")}
@@ -1201,21 +1220,21 @@ export function BasewareView({
                   <dl className="space-y-2">
                     <div className="flex items-center justify-between gap-3">
                       <dt className="shrink-0 text-muted-foreground">{t("fieldId")}</dt>
-                      <dd className="min-w-0 font-mono text-[11px] text-foreground">{selectedMachine.id}</dd>
+                      <dd className="min-w-0 font-mono text-[11px] text-foreground">{renderedMachine.id}</dd>
                     </div>
 
-                    {selectedMachine.driverPackage && (
+                    {renderedMachine.driverPackage && (
                       <div className="flex items-center justify-between gap-3">
                         <dt className="shrink-0 text-muted-foreground">{t("driverPathLabel")}</dt>
                         <dd className="flex min-w-0 items-center gap-1.5">
                           <SingleLineTruncate
-                            text={selectedMachine.driverPackage}
+                            text={renderedMachine.driverPackage}
                             mono
                             className="text-[11px] text-foreground"
                           />
                           <InlineCopyButton
-                            text={selectedMachine.driverPackage}
-                            ariaLabel={`${t("copySpec")}: ${selectedMachine.driverPackage}`}
+                            text={renderedMachine.driverPackage}
+                            ariaLabel={`${t("copySpec")}: ${renderedMachine.driverPackage}`}
                             copiedText={t("copiedNotice")}
                             failedText={t("copyFailedNotice")}
                           />
@@ -1324,12 +1343,12 @@ export function BasewareView({
         closedBy="closerequest"
         size="sm"
       >
-        {confirmDeleteTarget && (
+        {deleteDialogTarget && (
           <div className="space-y-4">
             <p className="text-xs leading-relaxed text-muted-foreground">
               {fmt("confirmDeleteBody", {
-                name: confirmDeleteTarget.name,
-                id: confirmDeleteTarget.id,
+                name: deleteDialogTarget.name,
+                id: deleteDialogTarget.id,
               })}
             </p>
             <div className="flex items-center justify-end gap-2 border-t border-border/60 pt-3">
@@ -1346,9 +1365,10 @@ export function BasewareView({
                 type="button"
                 variant="destructive"
                 size="sm"
-                disabled={busyMachineId === confirmDeleteTarget.id}
+                disabled={Boolean(confirmDeleteTarget) && busyMachineId === deleteDialogTarget.id}
                 onClick={() => {
                   const target = confirmDeleteTarget;
+                  if (!target) return;
                   setConfirmDeleteTarget(null);
                   void deleteMachine(target.id).catch(() => {});
                 }}

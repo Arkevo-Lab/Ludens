@@ -48,7 +48,7 @@ export function PerceptionField({ name, saved, draft, pending, inheritanceNoteId
               <NativeSelectOption value="inherit">{t("inheritEnvironment")}</NativeSelectOption>
             </NativeSelect>
             {mode === "override" ? (
-              <>
+              <div key="override" className="space-y-2.5 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
                 <div className="flex flex-wrap items-center gap-3">
                   <div className="flex items-center gap-2">
                     <Input
@@ -104,23 +104,23 @@ export function PerceptionField({ name, saved, draft, pending, inheritanceNoteId
                   {t("rangePrefix")} {limit.min}–{limit.max} {t("wholeSeconds")}
                 </p>
                 {invalid && (
-                  <p id={`${id}-error`} className="text-xs text-destructive" role="alert">
+                  <p id={`${id}-error`} className="text-xs text-destructive motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150" role="alert">
                     {t("invalidValue")}
                   </p>
                 )}
                 {custom && (
-                  <p id={`${id}-custom`} className="rounded-md border border-dashed p-2.5 text-xs leading-relaxed text-muted-foreground">
+                  <p id={`${id}-custom`} className="rounded-md border border-dashed p-2.5 text-xs leading-relaxed text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
                     {t("customPreserved")}
                   </p>
                 )}
-              </>
+              </div>
             ) : (
-              <p id={`${id}-default`} data-perception-default className="text-xs leading-relaxed text-muted-foreground">
+              <p key="inherit" id={`${id}-default`} data-perception-default className="text-xs leading-relaxed text-muted-foreground motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
                 {t("builtinDefaultLabel")} {limit.fallback} {t("seconds")}
               </p>
             )}
             {conflict && (
-              <p className="text-xs leading-relaxed text-warning" role="status">
+              <p className="text-xs leading-relaxed text-warning motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150" role="status">
                 {t("savedValueChanged")}
               </p>
             )}

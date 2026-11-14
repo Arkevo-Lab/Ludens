@@ -21,6 +21,7 @@ import { ReplayTimeJump } from "@/features/replay/replay-time-jump";
 import { ReplayEventSearch } from "@/features/replay/replay-event-search";
 import { ReplayEvidencePanel, type ReplayEvidenceSelection } from "@/features/replay/replay-evidence-panel";
 import { replayElapsedInput, replayEvidenceKey, replayEvidencePatch } from "@/features/replay/replay-navigation";
+import { useAnimatedPresence } from "@/components/use-motion-preferences";
 
 const DESKTOP_DOCK_QUERY = "(min-width: 1100px)";
 
@@ -144,7 +145,8 @@ function ReplayClockText({ clock, className }: { clock: ReplayClock; className: 
 
 function ReplayCursor({ clock, className, startAt, span }: { clock: ReplayClock; className: string; startAt: number; span: number }) {
   const at = useReplayClock(clock);
-  return <i className={className} style={{ left: Math.max(0, Math.min(100, (at - startAt) / span * 100)) + "%" }} />;
+  const pct = Math.max(0, Math.min(100, (at - startAt) / span * 100));
+  return <i className={className} style={{ transform: `translateX(${pct}cqi)` }} />;
 }
 
 /** Event lanes only re-render when items, the window, or the set of active items change. */
@@ -261,6 +263,7 @@ export function TimelinePlayer({
   const [dockOpen, setDockOpen] = useState(() =>
     typeof window === "undefined" ? true : window.matchMedia(DESKTOP_DOCK_QUERY).matches || Boolean(evidence),
   );
+  const { mounted: overlayBackdropMounted, state: overlayBackdropState } = useAnimatedPresence(!desktopDock && dockOpen, 180);
   const userDesktopPrefRef = useRef<boolean | null>(null);
   const prevDesktopDockRef = useRef<boolean | null>(null);
   const [inspectorTab, setInspectorTab] = useState("events");
@@ -692,7 +695,7 @@ export function TimelinePlayer({
               aria-label={refreshLabel}
               onClick={session.refresh}
             >
-              <RefreshCw className={"size-3.5" + (refreshing ? " animate-spin" : "")} aria-hidden="true" />
+              <RefreshCw className={"size-3.5" + (refreshing ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
               <span className="replay-topbar-btn-label">{refreshLabel}</span>
             </Button>
             <Button
@@ -943,9 +946,10 @@ export function TimelinePlayer({
         </div>
       </section>
 
-      {!desktopDock && dockOpen && (
+      {overlayBackdropMounted && (
         <div
           className="replay-inspector-backdrop"
+          data-state={overlayBackdropState}
           aria-hidden="true"
           onClick={() => setDockOpen(false)}
         />
@@ -953,9 +957,11 @@ export function TimelinePlayer({
 
       <aside
         className="replay-inspector"
-        hidden={!dockOpen}
         data-dock-open={dockOpen ? "true" : undefined}
+        data-dock-state={dockOpen ? "open" : "closed"}
         data-evidence-open={dockOpen && !!evidence && inspectorTab === "details"}
+        aria-hidden={!dockOpen || undefined}
+        inert={!dockOpen || undefined}
       >
         <Tabs value={inspectorTab} onValueChange={setInspectorTab} className="replay-inspector-tabs gap-0">
           <div className="replay-inspector-header">

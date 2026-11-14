@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Activity } from "lucide-react";
+import { Activity, RefreshCw } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,7 +65,9 @@ export function PerceptionRuntimeStatus({ project, workspace, settings, revision
               className="aria-disabled:opacity-50"
               onClick={() => void check()}
             >
-              <Activity className="size-3.5" aria-hidden="true" />
+              {loading
+                ? <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                : <Activity className="size-3.5" aria-hidden="true" />}
               {t(loading ? "checkingRuntime" : "checkRuntime")}
             </Button>
           </div>
@@ -97,7 +99,7 @@ export function PerceptionRuntimeStatus({ project, workspace, settings, revision
       </SettingsSection>
 
       {error && (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150">
           <AlertDescription>
             <p>{t("runtimeReadFailed")}</p>
           </AlertDescription>

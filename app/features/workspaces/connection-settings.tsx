@@ -295,7 +295,7 @@ export function ConnectionSettings({
               className="aria-disabled:opacity-50"
               onClick={() => { if (!loading && !saving) setReloadTick(value => value + 1); }}
             >
-              <RefreshCw className="size-3.5" aria-hidden="true" />
+              <RefreshCw className={"size-3.5" + (loading ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
               {t(loading ? "reading" : readError ? "retryRead" : "refresh")}
             </Button>
           </>

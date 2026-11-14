@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
-import { AlertCircle, CheckCircle2, Play, Sparkles, XCircle } from "lucide-react";
+import { AlertCircle, CheckCircle2, Play, RefreshCw, Sparkles, XCircle } from "lucide-react";
 import { MACHINE_TRANSPORT_KINDS, type BasewareMachineSpec, type MachineTransportKind } from "@ludens/protocol/machines";
 import type { BasewareDriverOverviewItem } from "@/lib/workspaces";
 import { useTranslations } from "@/lib/locale";
@@ -713,7 +713,9 @@ export function MachineEditorDialog({
             onClick={() => void handleProbe()}
             disabled={probeState === "probing"}
           >
-            <Play className="size-3.5" aria-hidden="true" />
+            {probeState === "probing"
+              ? <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+              : <Play className="size-3.5" aria-hidden="true" />}
             {probeState === "probing" ? t("probing") : t("probeConnection")}
           </Button>
           <div className="flex items-center gap-2">
