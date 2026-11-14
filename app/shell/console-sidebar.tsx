@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { MenuIcon, PanelLeftClose, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { PixelMark } from "@/components/ui/pixel-mark";
+import { PixelMark, type PixelMarkState } from "@/components/ui/pixel-mark";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
+import type { ActiveCoreItem } from "@/shell/use-active-cores";
 
 export const consoleViewIds = ["live", "replay", "perf", "caps", "perception", "baseware", "workspaces", "docs", "settings", "dev"] as const;
 export type ConsoleView = typeof consoleViewIds[number];
@@ -67,6 +68,45 @@ function NavIcon({ kind }: { kind: ConsoleView }) {
 
 let assembleUntil = 0;
 
+function corePixelState(core: ActiveCoreItem): PixelMarkState {
+  if (core.pendingOutbound > 0) return "reasoning";
+  if (core.consolidating) return "recording";
+  if (core.mode === "auto") return "reasoning";
+  return "waiting";
+}
+
+function coreModeKey(core: ActiveCoreItem): "activeCoresStatusConsolidating" | "activeCoresStatusAuto" | "activeCoresStatusManual" {
+  if (core.consolidating) return "activeCoresStatusConsolidating";
+  if (core.mode === "auto") return "activeCoresStatusAuto";
+  return "activeCoresStatusManual";
+}
+
+function coreModeToken(core: ActiveCoreItem): "consolidating" | "auto" | "manual" {
+  if (core.consolidating) return "consolidating";
+  if (core.mode === "auto") return "auto";
+  return "manual";
+}
+
+export interface ConsoleSidebarProps {
+  view: ConsoleView;
+  viewLink(view: ConsoleView): string;
+  onNavigate(url: string): void;
+  workspaceSlot?: ReactNode;
+  mobileOpen?: boolean;
+  onMobileOpenChange?(open: boolean): void;
+  mobileTriggerRef?: RefObject<HTMLButtonElement | null>;
+  collapsed?: boolean;
+  onToggleCollapse?(): void;
+  collapseShortcut?: string;
+  desktopChrome?: boolean;
+  activeCores?: ActiveCoreItem[];
+  activeProjectId?: string;
+  stoppingCoreId?: string | null;
+  onOpenCore?(projectId: string): void;
+  onStopCore?(projectId: string): void;
+  activeCoresStopError?: string | null;
+}
+
 export function ConsoleSidebar({
   view,
   viewLink,
@@ -79,19 +119,13 @@ export function ConsoleSidebar({
   onToggleCollapse,
   collapseShortcut,
   desktopChrome = false,
-}: {
-  view: ConsoleView;
-  viewLink(view: ConsoleView): string;
-  onNavigate(url: string): void;
-  workspaceSlot?: ReactNode;
-  mobileOpen?: boolean;
-  onMobileOpenChange?(open: boolean): void;
-  mobileTriggerRef?: RefObject<HTMLButtonElement | null>;
-  collapsed?: boolean;
-  onToggleCollapse?(): void;
-  collapseShortcut?: string;
-  desktopChrome?: boolean;
-}) {
+  activeCores = [],
+  activeProjectId,
+  stoppingCoreId = null,
+  onOpenCore,
+  onStopCore,
+  activeCoresStopError = null,
+}: ConsoleSidebarProps) {
   const { t } = useLocale();
   const dt = useTranslations("dashboard");
   const st = useTranslations("consoleSidebar");
@@ -288,6 +322,166 @@ export function ConsoleSidebar({
             <small>{t(section.label)}</small>{section.ids.map(renderLink)}
           </div>)}
         </nav>
+        {collapsed ? (
+          <section
+            className="sidebar-active-cores-rail"
+            aria-label={st("activeCoresTitle")}
+            data-active-cores-rail=""
+          >
+            {activeCores.length > 0 ? (
+              <ul role="list" className="sidebar-active-cores-rail-list">
+                {activeCores.map(core => {
+                  const isCurrent = core.projectId === activeProjectId;
+                  const openLabel = st("activeCoresOpenAria").replace("{name}", core.name);
+                  const modeToken = coreModeToken(core);
+                  const sosLabel = core.pendingOutbound > 0
+                    ? st("activeCoresOutboundBadge").replace("{count}", String(core.pendingOutbound))
+                    : "";
+                  return (
+                    <li key={core.projectId}>
+                      <button
+                        type="button"
+                        className="sidebar-active-cores-pill"
+                        data-active={isCurrent || undefined}
+                        data-mode={modeToken}
+                        data-sos={core.pendingOutbound > 0 || undefined}
+                        aria-label={sosLabel ? `${openLabel} · ${sosLabel}` : openLabel}
+                        aria-current={isCurrent ? "true" : undefined}
+                        title={sosLabel ? `${core.name} · ${sosLabel}` : core.name}
+                        onClick={() => {
+                          closeMenu();
+                          if (onOpenCore) onOpenCore(core.projectId);
+                          else onNavigate(`?view=live&project=${encodeURIComponent(core.projectId)}`);
+                        }}
+                      >
+                        <span className="sidebar-active-cores-pill-dot" aria-hidden="true" />
+                        <span className="sidebar-active-cores-pill-label">{core.name}</span>
+                        {core.pendingOutbound > 0 && (
+                          <span aria-hidden="true">🆘</span>
+                        )}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="sidebar-active-cores-empty">{st("activeCoresEmpty")}</p>
+            )}
+          </section>
+        ) : (
+          <section
+            className="sidebar-active-cores"
+            aria-labelledby={`${id}-active-cores-heading`}
+            data-active-cores=""
+          >
+            <div className="sidebar-active-cores-header">
+              <h2 id={`${id}-active-cores-heading`} className="sidebar-active-cores-heading">
+                {st("activeCoresTitle")}
+              </h2>
+              {activeCores.length > 0 && (
+                <span className="sidebar-active-cores-count">
+                  {st("activeCoresCount").replace("{count}", String(activeCores.length))}
+                </span>
+              )}
+            </div>
+            {activeCoresStopError && (
+              <p className="sidebar-active-cores-error" role="alert">
+                {activeCoresStopError}
+              </p>
+            )}
+            {activeCores.length > 0 ? (
+              <ul role="list" className="sidebar-active-cores-list">
+                {activeCores.map(core => {
+                  const isCurrent = core.projectId === activeProjectId;
+                  const isStopping = stoppingCoreId === core.projectId;
+                  const modeToken = coreModeToken(core);
+                  const modeLabel = st(coreModeKey(core));
+                  const originLabel = core.launchedBy === "cli"
+                    ? st("activeCoresOriginCli")
+                    : core.launchedBy === "app"
+                      ? st("activeCoresOriginApp")
+                      : null;
+                  const openLabel = st("activeCoresOpenAria").replace("{name}", core.name);
+                  const stopLabel = st("activeCoresStopAria").replace("{name}", core.name);
+                  const outboundTitle = core.pendingOutbound > 0
+                    ? st("activeCoresOutboundBadge").replace("{count}", String(core.pendingOutbound))
+                    : "";
+                  const buttonLabel = outboundTitle ? `${openLabel} · ${outboundTitle}` : openLabel;
+                  return (
+                    <li
+                      key={core.projectId}
+                      className="sidebar-active-core-item"
+                      data-active={isCurrent || undefined}
+                      data-sos={core.pendingOutbound > 0 || undefined}
+                      data-project-id={core.projectId}
+                    >
+                      <button
+                        type="button"
+                        className="sidebar-active-core-open"
+                        aria-label={buttonLabel}
+                        aria-current={isCurrent ? "true" : undefined}
+                        title={buttonLabel}
+                        onClick={() => {
+                          closeMenu();
+                          if (onOpenCore) onOpenCore(core.projectId);
+                          else onNavigate(`?view=live&project=${encodeURIComponent(core.projectId)}`);
+                        }}
+                      >
+                        <span className="sidebar-active-core-mark">
+                          <PixelMark
+                            size={14}
+                            state={corePixelState(core)}
+                            loading={core.mode === "auto" || core.consolidating}
+                            filled={modeToken === "manual"}
+                          />
+                        </span>
+                        <span className="sidebar-active-core-body">
+                          <span className="sidebar-active-core-top">
+                            <span className="sidebar-active-core-name">{core.name}</span>
+                          </span>
+                          <span className="sidebar-active-core-badges">
+                            <span className="sidebar-active-core-mode" data-mode={modeToken}>
+                              {modeLabel}
+                            </span>
+                            {originLabel && (
+                              <span
+                                className="sidebar-active-core-origin"
+                                data-origin={core.launchedBy}
+                              >
+                                {originLabel}
+                              </span>
+                            )}
+                            {core.pendingOutbound > 0 && (
+                              <span
+                                className="sidebar-active-core-sos"
+                                title={outboundTitle}
+                              >
+                                <span aria-hidden="true">🆘</span>
+                                <span>{core.pendingOutbound}</span>
+                              </span>
+                            )}
+                          </span>
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        className="sidebar-active-core-stop"
+                        disabled={isStopping || !onStopCore}
+                        aria-label={stopLabel}
+                        title={st(isStopping ? "activeCoresStopping" : "activeCoresStop")}
+                        onClick={() => onStopCore?.(core.projectId)}
+                      >
+                        <span aria-hidden="true">{isStopping ? "…" : "■"}</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="sidebar-active-cores-empty">{st("activeCoresEmpty")}</p>
+            )}
+          </section>
+        )}
       </div>
       <footer ref={footer} id={`${id}-footer`} className="sidebar-footer">
         {workspaceSlot && <div className="sidebar-workspace-slot">{workspaceSlot}</div>}

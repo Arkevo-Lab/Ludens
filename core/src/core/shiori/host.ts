@@ -6,6 +6,7 @@ import { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { EventLog, RecordEvent } from "../storage/events.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
 import type { ModelConnectionConfig } from "@ludens/protocol/ludens";
+import type { ServiceLaunchOrigin } from "../query/types.ts";
 
 /** The Host assembly used by daily play and evaluated agents. Transports remain owned by the caller. */
 export async function createHostRuntime(options: {
@@ -14,10 +15,11 @@ export async function createHostRuntime(options: {
   seconds: number; model?: string; maxRequests: number; resume?: string; compactionThreshold?: number;
   connection?: ModelConnectionConfig;
   budget?: SharedBudget;
+  launchedBy?: ServiceLaunchOrigin;
 }) {
   const { devices, workspace, runDir, state, log, ludensSocket, basewareSocket } = options;
   const record = options.record ?? log.record;
-  const runtime = new Runtime(devices, record, options.seconds, log.clock.id, log.diagnostics, options.budget);
+  const runtime = new Runtime(devices, record, options.seconds, log.clock.id, log.diagnostics, options.budget, undefined, undefined, options.launchedBy);
   const eventPool = new WorkspaceEventPool(state.dir);
   runtime.attach({ eventPool, eventPoolSummary: await eventPool.summary() });
   const binDir = resolve(import.meta.dir, "../../../bin");

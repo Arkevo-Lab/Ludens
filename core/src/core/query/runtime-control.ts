@@ -50,8 +50,8 @@ function wrapSocketError(cause: unknown): never {
   const code = (cause as { code?: string } | null)?.code;
   const message = cause instanceof Error ? cause.message : String(cause);
   if (code === "ENOENT" || code === "ECONNREFUSED" || message.includes("ENOENT") || message.includes("ECONNREFUSED")) {
-    throw Object.assign(new Error("当前工作区宿主未在线（未检测到运行中的 ludens run 进程）"), {
-      code: "HOST_OFFLINE",
+    throw Object.assign(new Error("当前工作区 Core 未在线（未检测到运行中的 Core 进程）"), {
+      code: "CORE_OFFLINE",
       status: 409,
     });
   }
@@ -123,7 +123,7 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
         );
         return result;
       } catch (error) {
-        if ((error as { code?: string } | null)?.code === "HOST_OFFLINE") {
+        if ((error as { code?: string } | null)?.code === "CORE_OFFLINE") {
           await updateWorkspaceShiori(
             project,
             {
@@ -138,7 +138,7 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
             epoch: null,
             mode: "manual",
             connected: false,
-            hostOffline: true,
+            coreOffline: true,
             model: nextModel,
             serviceTier: command.serviceTier ?? null,
             effort: command.effort ?? null,

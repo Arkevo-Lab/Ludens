@@ -8,7 +8,7 @@ import type { DesktopWindowCommand, DesktopWindowState } from '../lib/desktop.js
 import { AppServerHost } from './app-server-host.js'
 import { createCompanion } from './companion.js'
 import type { LudensPetSnapshot } from './ludens-source.js'
-import { PetSessionCoordinator } from './pet-session.js'
+import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
 import { dashboardSender, isDashboardUrl } from './dashboard-window.js'
 import { createLudensTrayIcon } from './tray-icon.js'
 import {
@@ -311,7 +311,10 @@ if (values.help) {
       })
 
       const rememberDashboard = (_event: Electron.Event, url: string) => {
-        if (isDashboardUrl(url, serverOrigin)) dashboardTarget = url
+        if (isDashboardUrl(url, serverOrigin)) {
+          dashboardTarget = url
+          source?.setFocusedProject(extractProjectFromUrl(url, serverOrigin))
+        }
       }
       owner.webContents.on('did-navigate', (event, url, status) => {
         rememberDashboard(event, url)
@@ -470,6 +473,7 @@ if (values.help) {
         },
       })
       if (companion) companion.configureActivity(source)
+      source.setFocusedProject(extractProjectFromUrl(dashboardTarget, serverOrigin))
       void source.start(workspace)
 
       tray = new Tray(createLudensTrayIcon(publicAssets, nativeTheme.shouldUseDarkColors))

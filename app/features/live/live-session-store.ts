@@ -26,15 +26,22 @@ import {
 import { asRecord, cleanErrorMessage } from "@/features/live/shiori-segments";
 import { readArchiveJson } from "@/lib/archive-client";
 import { ReadPoller } from "@/lib/read-poller";
-import type { Call, Observation, RunData, RunInfo } from "@/lib/types";
+import type { Call, DeviceContentionConflict, Observation, RunData, RunInfo } from "@/lib/types";
 
 export type RuntimeControlCommand =
   | { action: "status" }
-  | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
-  | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
-  | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
-  | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
-  | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
+  | {
+      action: "auto_on";
+      message?: string;
+      seconds?: number | null;
+      runId?: string;
+      expectedEpoch?: string | null;
+      preempt?: boolean;
+    }
+  | { action: "auto_off"; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
+  | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
+  | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
+  | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
   | {
       action: "set_model";
       model: string;
@@ -42,18 +49,28 @@ export type RuntimeControlCommand =
       effort?: ModelEffort | null;
       runId?: string;
       expectedEpoch?: string | null;
+      preempt?: boolean;
     }
-  | { action: "perception_inject"; enabled: boolean; runId?: string }
-  | { action: "perception_reload"; runId?: string };
+  | { action: "perception_inject"; enabled: boolean; runId?: string; preempt?: boolean }
+  | { action: "perception_reload"; runId?: string; preempt?: boolean };
 
 export type EventPoolCommand =
-  | { action: "send"; text: string; title?: string }
-  | { action: "reply"; replyTo: string; text: string; resumeAuto?: boolean; seconds?: number | null }
-  | { action: "ack"; ids: string[] };
+  | { action: "send"; text: string; title?: string; preempt?: boolean }
+  | {
+      action: "reply";
+      replyTo: string;
+      text: string;
+      resumeAuto?: boolean;
+      seconds?: number | null;
+      preempt?: boolean;
+    }
+  | { action: "ack"; ids: string[]; preempt?: boolean };
 
 export interface EventPoolReadPayload {
+  ok?: boolean;
   snapshot: EventPoolSnapshot;
   hostOnline: boolean;
+  coreOffline?: boolean;
   hostStatus?: Record<string, unknown>;
 }
 
@@ -61,6 +78,8 @@ export interface EventPoolMutatePayload extends EventPoolReadPayload {
   createdEvent?: PoolEvent;
   resolvedOutbound?: PoolEvent;
   updatedEvents?: PoolEvent[];
+  runId?: string;
+  spawned?: boolean;
 }
 
 export interface ActivityChangesClientOptions {
@@ -90,6 +109,76 @@ export interface LiveSessionTransport {
   ) => Promise<unknown>;
 }
 
+/** Structured error thrown by `/api/runtime/control` and `/api/event-pool` requests. */
+export class RuntimeControlError extends Error {
+  readonly status: number;
+  readonly code?: string;
+  readonly conflict?: DeviceContentionConflict;
+
+  constructor(
+    message: string,
+    options?: { status?: number; code?: string; conflict?: DeviceContentionConflict },
+  ) {
+    super(message);
+    this.name = "RuntimeControlError";
+    this.status = options?.status ?? 500;
+    this.code = options?.code;
+    this.conflict = options?.conflict;
+  }
+}
+
+function parseDeviceContentionConflict(raw: unknown): DeviceContentionConflict | undefined {
+  const rec = asRecord(raw);
+  if (!rec) return undefined;
+  if (typeof rec.holderProjectId !== "string" || typeof rec.deviceKey !== "string" || typeof rec.holderMode !== "string") {
+    return undefined;
+  }
+  const conflict: DeviceContentionConflict = {
+    holderProjectId: rec.holderProjectId,
+    deviceKey: rec.deviceKey,
+    holderMode: rec.holderMode,
+  };
+  if (typeof rec.holderWorkspaceName === "string") conflict.holderWorkspaceName = rec.holderWorkspaceName;
+  if (typeof rec.deviceLabel === "string") conflict.deviceLabel = rec.deviceLabel;
+  if (rec.holderOrigin === "app" || rec.holderOrigin === "cli") conflict.holderOrigin = rec.holderOrigin;
+  return conflict;
+}
+
+function parseApiError(status: number, payload: unknown, fallbackMessage: string): RuntimeControlError {
+  const rec = asRecord(payload);
+  const message = typeof rec?.error === "string" && rec.error.trim() ? rec.error : fallbackMessage;
+  const code = typeof rec?.code === "string" ? rec.code : undefined;
+  const conflict = parseDeviceContentionConflict(rec?.conflict);
+  return new RuntimeControlError(message, { status, code, conflict });
+}
+
+export function extractDeviceContention(cause: unknown): DeviceContentionConflict | null {
+  if (!cause || typeof cause !== "object") return null;
+  const rec = cause as { status?: unknown; code?: unknown; conflict?: unknown };
+  if (rec.status !== 409 || rec.code !== "DEVICE_BUSY") return null;
+  return parseDeviceContentionConflict(rec.conflict) ?? null;
+}
+
+export function isDeviceBusyError(cause: unknown): boolean {
+  if (!cause || typeof cause !== "object") return false;
+  const rec = cause as { status?: unknown; code?: unknown };
+  return rec.status === 409 && rec.code === "DEVICE_BUSY";
+}
+
+export function isCoreOfflineError(cause: unknown): boolean {
+  if (cause instanceof RuntimeControlError && cause.code === "CORE_OFFLINE") {
+    return true;
+  }
+  const msg = cause instanceof Error ? cause.message : String(cause);
+  return (
+    msg.includes("CORE_OFFLINE") ||
+    msg.includes("未在线") ||
+    msg.includes("HOST_OFFLINE") ||
+    msg.includes("ENOENT") ||
+    msg.includes("ECONNREFUSED")
+  );
+}
+
 async function defaultFetchEventPool(
   project: string,
   workspace: string,
@@ -99,9 +188,7 @@ async function defaultFetchEventPool(
   const response = await fetch(`/api/event-pool?${params}`, { signal, cache: "no-store" });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string" ? payload.error : `Event Pool read failed (${response.status})`,
-    );
+    throw parseApiError(response.status, payload, `Event Pool read failed (${response.status})`);
   }
   return payload as EventPoolReadPayload;
 }
@@ -118,9 +205,7 @@ async function defaultMutateEventPool(
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string" ? payload.error : `Event Pool request failed (${response.status})`,
-    );
+    throw parseApiError(response.status, payload, `Event Pool request failed (${response.status})`);
   }
   return payload as EventPoolMutatePayload;
 }
@@ -137,9 +222,7 @@ async function defaultSendRuntimeControl(
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string" ? payload.error : `Control request failed (${response.status})`,
-    );
+    throw parseApiError(response.status, payload, `Control request failed (${response.status})`);
   }
   return payload;
 }
@@ -179,16 +262,6 @@ export const defaultLiveSessionTransport: LiveSessionTransport = {
   sendRuntimeControl: defaultSendRuntimeControl,
   updateWorkspaceShioriModel: defaultUpdateWorkspaceShioriModel,
 };
-
-function isHostOfflineError(cause: unknown): boolean {
-  const msg = cause instanceof Error ? cause.message : String(cause);
-  return (
-    msg.includes("未在线") ||
-    msg.includes("HOST_OFFLINE") ||
-    msg.includes("ENOENT") ||
-    msg.includes("ECONNREFUSED")
-  );
-}
 
 export interface OlderRunSlice {
   runId: string;
@@ -239,6 +312,11 @@ export interface LiveSessionSnapshot {
   optimisticModel: OptimisticModelOverride | null;
   submitting: boolean;
   poolSubmitting: boolean;
+  spawningCore: boolean;
+  pendingContention: DeviceContentionConflict | null;
+  preemptError: string | null;
+  preemptSuccessSeq: number;
+  lastSpawnedRun: { runId: string; seq: number } | null;
 }
 
 export function samePoolSnapshot(left: EventPoolSnapshot | null, right: EventPoolSnapshot | null): boolean {
@@ -400,6 +478,11 @@ function emptySessionSnapshot(project: string, resetRevision = 0): LiveSessionSn
     optimisticModel: null,
     submitting: false,
     poolSubmitting: false,
+    spawningCore: false,
+    pendingContention: null,
+    preemptError: null,
+    preemptSuccessSeq: 0,
+    lastSpawnedRun: null,
   };
 }
 
@@ -415,6 +498,9 @@ export class LiveSessionEngine {
   private streamRefresh = false;
   private selectedBlockId: string | undefined;
   private scopeChangedMessage = "Activity scope changed";
+  private spawnInFlightCount = 0;
+  private spawnSeq = 0;
+  private pendingContentionRetry: (() => Promise<void>) | null = null;
 
   private changesPoller: ReadPoller | null = null;
   private bootstrapController: AbortController | null = null;
@@ -1182,6 +1268,90 @@ export class LiveSessionEngine {
     return asRecord(record?.status) ?? (typeof record?.mode === "string" ? record : null);
   }
 
+  private beginSpawn(): void {
+    this.spawnInFlightCount += 1;
+    if (this.spawnInFlightCount === 1) {
+      this.update(prev => (prev.spawningCore ? prev : { ...prev, spawningCore: true }));
+    }
+  }
+
+  private endSpawn(): void {
+    this.spawnInFlightCount = Math.max(0, this.spawnInFlightCount - 1);
+    if (this.spawnInFlightCount === 0) {
+      this.update(prev => (prev.spawningCore ? { ...prev, spawningCore: false } : prev));
+    }
+  }
+
+  private recordSpawnedRun(payload: unknown): string | null {
+    const rec = asRecord(payload);
+    const statusRec = asRecord(rec?.status);
+    const spawned = Boolean(rec?.spawned ?? statusRec?.spawned);
+    const rawRunId =
+      typeof rec?.runId === "string" && rec.runId.trim()
+        ? rec.runId.trim()
+        : typeof statusRec?.runId === "string" && statusRec.runId.trim()
+          ? statusRec.runId.trim()
+          : "";
+    if (!spawned || !rawRunId) {
+      return rawRunId || null;
+    }
+    this.spawnSeq += 1;
+    const seq = this.spawnSeq;
+    this.update(prev => ({
+      ...prev,
+      lastSpawnedRun: { runId: rawRunId, seq },
+    }));
+    return rawRunId;
+  }
+
+  private recordContention(cause: unknown, retry: () => Promise<void>): boolean {
+    const conflict = extractDeviceContention(cause);
+    if (!conflict) return false;
+    this.pendingContentionRetry = retry;
+    this.update(prev => ({
+      ...prev,
+      pendingContention: conflict,
+      preemptError: null,
+    }));
+    return true;
+  }
+
+  async confirmPreempt(): Promise<boolean> {
+    const retry = this.pendingContentionRetry;
+    if (!retry) return false;
+    this.beginSpawn();
+    this.update(prev => ({ ...prev, preemptError: null }));
+    try {
+      await retry();
+      this.pendingContentionRetry = null;
+      this.update(prev => ({
+        ...prev,
+        pendingContention: null,
+        preemptError: null,
+        preemptSuccessSeq: prev.preemptSuccessSeq + 1,
+      }));
+      return true;
+    } catch (cause) {
+      if (this.recordContention(cause, retry)) {
+        return false;
+      }
+      const msg = cause instanceof Error ? cause.message : String(cause);
+      this.update(prev => ({ ...prev, preemptError: msg }));
+      return false;
+    } finally {
+      this.endSpawn();
+    }
+  }
+
+  dismissContention(): void {
+    this.pendingContentionRetry = null;
+    this.update(prev => ({
+      ...prev,
+      pendingContention: null,
+      preemptError: null,
+    }));
+  }
+
   // ── Unified Mutations ──
 
   async runRuntimeCommand(options: {
@@ -1190,22 +1360,38 @@ export class LiveSessionEngine {
     baseUpdatedAt: string;
     baseServerModel?: string | null;
     command: RuntimeControlCommand;
+    mightSpawnCore?: boolean;
     onUpdated?: () => void;
   }): Promise<{ payload: unknown; status: Record<string, unknown> | null }> {
-    const { workspace, run, baseUpdatedAt, baseServerModel, command, onUpdated } = options;
+    const { workspace, run, baseUpdatedAt, baseServerModel, command, mightSpawnCore = false, onUpdated } = options;
+    const tracksSpawn = mightSpawnCore || Boolean("preempt" in command && command.preempt);
+    if (tracksSpawn) this.beginSpawn();
     this.update(prev => ({ ...prev, submitting: true }));
     try {
       const payload = await this.transport.sendRuntimeControl(this.project, workspace, command);
+      const spawnedRunId = this.recordSpawnedRun(payload);
       const status = this.recordOptimisticHost(
-        run,
+        spawnedRunId || run,
         baseUpdatedAt,
         this.extractReturnedStatus(payload),
         baseServerModel,
       );
       this.reconcileNow(onUpdated);
       return { payload, status };
+    } catch (cause) {
+      if (command.action !== "status") {
+        this.recordContention(cause, async () => {
+          await this.runRuntimeCommand({
+            ...options,
+            mightSpawnCore: true,
+            command: { ...command, preempt: true },
+          });
+        });
+      }
+      throw cause;
     } finally {
       this.update(prev => ({ ...prev, submitting: false }));
+      if (tracksSpawn) this.endSpawn();
     }
   }
 
@@ -1217,6 +1403,8 @@ export class LiveSessionEngine {
     expectedEpoch?: string | null;
     message: string;
     fallbackSeconds: number | null;
+    mightSpawnCore?: boolean;
+    preempt?: boolean;
     onUpdated?: () => void;
   }): Promise<{ fellBackToAutoOn: boolean; status: Record<string, unknown> | null }> {
     const {
@@ -1227,44 +1415,80 @@ export class LiveSessionEngine {
       expectedEpoch,
       message,
       fallbackSeconds,
+      mightSpawnCore = false,
+      preempt = false,
       onUpdated,
     } = options;
+    const tracksSpawn = mightSpawnCore || preempt;
+    if (tracksSpawn) this.beginSpawn();
     this.update(prev => ({ ...prev, submitting: true }));
+    let fellBackToAutoOn = false;
     try {
       let payload: unknown;
-      let fellBackToAutoOn = false;
       try {
         payload = await this.transport.sendRuntimeControl(this.project, workspace, {
           action: "steer",
           message,
-          runId: run,
+          ...(run ? { runId: run } : {}),
           expectedEpoch: expectedEpoch ?? undefined,
+          ...(preempt ? { preempt: true } : {}),
         });
       } catch (steerErr) {
         const msg = steerErr instanceof Error ? steerErr.message : String(steerErr);
-        if (msg.includes("Auto loop is not active")) {
+        if (msg.includes("Auto loop is not active") || isCoreOfflineError(steerErr)) {
           fellBackToAutoOn = true;
           payload = await this.transport.sendRuntimeControl(this.project, workspace, {
             action: "auto_on",
             ...(message ? { message } : {}),
             seconds: fallbackSeconds,
-            runId: run,
+            ...(run ? { runId: run } : {}),
             expectedEpoch: expectedEpoch ?? null,
+            ...(preempt ? { preempt: true } : {}),
           });
         } else {
           throw steerErr;
         }
       }
+      const spawnedRunId = this.recordSpawnedRun(payload);
       const status = this.recordOptimisticHost(
-        run,
+        spawnedRunId || run,
         baseUpdatedAt,
         this.extractReturnedStatus(payload),
         baseServerModel,
       );
       this.reconcileNow(onUpdated);
       return { fellBackToAutoOn, status };
+    } catch (cause) {
+      this.recordContention(cause, async () => {
+        if (fellBackToAutoOn) {
+          await this.runRuntimeCommand({
+            workspace,
+            run,
+            baseUpdatedAt,
+            baseServerModel,
+            mightSpawnCore: true,
+            onUpdated,
+            command: {
+              action: "auto_on",
+              ...(message ? { message } : {}),
+              seconds: fallbackSeconds,
+              ...(run ? { runId: run } : {}),
+              expectedEpoch: expectedEpoch ?? null,
+              preempt: true,
+            },
+          });
+        } else {
+          await this.steerOrStartAuto({
+            ...options,
+            mightSpawnCore: true,
+            preempt: true,
+          });
+        }
+      });
+      throw cause;
     } finally {
       this.update(prev => ({ ...prev, submitting: false }));
+      if (tracksSpawn) this.endSpawn();
     }
   }
 
@@ -1385,9 +1609,9 @@ export class LiveSessionEngine {
           if (status && "effort" in status) {
             appliedEffort = isModelEffort(status.effort) ? status.effort : null;
           }
-          persistedOffline = Boolean(status?.hostOffline) || !hostOnline;
+          persistedOffline = Boolean(status?.coreOffline ?? status?.hostOffline) || !hostOnline;
         } catch (cause) {
-          if (isHostOfflineError(cause)) {
+          if (isCoreOfflineError(cause)) {
             await this.transport.updateWorkspaceShioriModel(this.project, trimmed, serviceTier, effort);
             persistedOffline = true;
           } else {
@@ -1423,9 +1647,21 @@ export class LiveSessionEngine {
     baseServerModel?: string | null;
     command: EventPoolCommand;
     fromComposer?: boolean;
+    mightSpawnCore?: boolean;
     onUpdated?: () => void;
   }): Promise<EventPoolMutatePayload> {
-    const { workspace, run, baseUpdatedAt, baseServerModel, command, fromComposer = false, onUpdated } = options;
+    const {
+      workspace,
+      run,
+      baseUpdatedAt,
+      baseServerModel,
+      command,
+      fromComposer = false,
+      mightSpawnCore = false,
+      onUpdated,
+    } = options;
+    const tracksSpawn = mightSpawnCore || Boolean(command.preempt);
+    if (tracksSpawn) this.beginSpawn();
     const previousPool = this.state.poolSnapshot;
     const optimisticAckIso = command.action === "ack" ? new Date().toISOString() : "";
     const optimisticPriorById = new Map<string, PoolEvent>();
@@ -1464,12 +1700,13 @@ export class LiveSessionEngine {
 
     try {
       const res = await this.transport.mutateEventPool(this.project, workspace, command);
+      const spawnedRunId = this.recordSpawnedRun(res);
       this.update(prev => ({
         ...prev,
         poolSnapshot: res.snapshot,
       }));
       if (res.hostStatus) {
-        this.recordOptimisticHost(run, baseUpdatedAt, res.hostStatus, baseServerModel);
+        this.recordOptimisticHost(spawnedRunId || run, baseUpdatedAt, res.hostStatus, baseServerModel);
       }
       this.reconcileNow(onUpdated);
       return res;
@@ -1508,6 +1745,13 @@ export class LiveSessionEngine {
         });
         this.poolPoller?.nudge();
       }
+      this.recordContention(error, async () => {
+        await this.mutatePool({
+          ...options,
+          mightSpawnCore: true,
+          command: { ...command, preempt: true },
+        });
+      });
       throw error;
     } finally {
       this.update(prev => ({
@@ -1515,6 +1759,7 @@ export class LiveSessionEngine {
         poolSubmitting: false,
         ...(fromComposer ? { submitting: false } : {}),
       }));
+      if (tracksSpawn) this.endSpawn();
     }
   }
 

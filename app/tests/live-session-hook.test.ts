@@ -1289,3 +1289,56 @@ test("failed ACK rollback preserves concurrent Event Pool arrivals, and LiveMedi
   cache.invalidate("/api/media?img=1", l2.objectUrl);
   assert.equal(cache.size, 0);
 });
+
+test("switchModel persists offline when sendRuntimeControl rejects with CORE_OFFLINE and cold-start records lastSpawnedRun", async () => {
+  const { RuntimeControlError } = await import("../features/live/live-session-store");
+  let workspaceModelSaved: string | null = null;
+  const engine = new LiveSessionEngine({
+    project: "demo-core",
+    transport: {
+      sendRuntimeControl: async (_project, _workspace, command) => {
+        if (command.action === "set_model") {
+          throw new RuntimeControlError("Core offline", { status: 409, code: "CORE_OFFLINE" });
+        }
+        if (command.action === "auto_on") {
+          return {
+            spawned: true,
+            runId: "20261113T120000Z-spawned",
+            status: { mode: "auto", connected: true, agent: true, thinking: true },
+          };
+        }
+        return {};
+      },
+      updateWorkspaceShioriModel: async (_project, model) => {
+        workspaceModelSaved = model;
+        return { ok: true };
+      },
+    },
+  });
+
+  const switched = await engine.switchModel({
+    workspace: "/ws/demo-core",
+    run: "",
+    baseUpdatedAt: "1970-01-01T00:00:00.000Z",
+    baseServerModel: null,
+    hostOnline: true,
+    model: "openai-codex/gpt-6.1-sol",
+    serviceTier: null,
+    effort: "medium",
+  });
+  assert.equal(switched.persistedOffline, true);
+  assert.equal(workspaceModelSaved, "openai-codex/gpt-6.1-sol");
+
+  await engine.runRuntimeCommand({
+    workspace: "/ws/demo-core",
+    run: "",
+    baseUpdatedAt: "1970-01-01T00:00:00.000Z",
+    mightSpawnCore: true,
+    command: { action: "auto_on", message: "Start", seconds: null },
+  });
+  const snap = engine.getSnapshot();
+  assert.equal(snap.spawningCore, false);
+  assert.deepEqual(snap.lastSpawnedRun, { runId: "20261113T120000Z-spawned", seq: 1 });
+  assert.equal(snap.optimisticHost?.run, "20261113T120000Z-spawned");
+  engine.dispose();
+});

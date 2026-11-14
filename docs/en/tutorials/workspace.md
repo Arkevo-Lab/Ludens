@@ -17,14 +17,14 @@ Global state and workspaces form two layers. `LUDENS_HOME` defaults to `~/.luden
 ├── cache/drivers/          # External driver installation cache
 ├── logs/baseware/          # Standalone Baseware logs without --data-dir
 ├── pet/
-│   ├── target.json         # Stable workspace ID followed by the pet
+│   ├── target.json         # Optional pinned workspace ID or null stop (defaults to !auto multi-Core follow when unset)
 │   ├── consumer.json       # Pet consumer heartbeat
 │   ├── profile/            # Electron preferences and local cache
 │   └── background/         # Shared pet background logs
 └── workspaces/             # Initial workspaceRoot; configurable to any absolute path
 ```
 
-Each workspace owns its runtime state. Preserve the whole directory when moving or backing it up:
+Each workspace follows **1 Workspace = 1 Core** isolation and owns its runtime state and dedicated Core process (workspaces on distinct physical devices or ports run fully concurrently under App Daemon). Preserve the whole directory when moving or backing it up:
 
 ```text
 workspace/
@@ -44,15 +44,15 @@ workspace/
 │       ├── sessions/        # OMP session JSONL files and their same-named resource directories
 │       └── current-session.json # Default session-resume pointer
 └── logs/
-    ├── <run-id>/            # Event and stream records for a single Host run
+    ├── <run-id>/            # Event and stream records for a single Core run
     └── background/          # Detached background service logs and job state
 ```
 
 ### 2. Templates and Session Lifecycle
 
-- **Init templates**: `ludens init --name <name> --driver <id>` creates a workspace below the global default parent; pass `--workspace <path>` for an explicit directory. It creates missing [AGENTS.md](../../../core/templates/AGENTS.md) and [perception.py](../../../core/templates/perception.py) templates. Global `defaults` are copied into the new `ludens.json`; later global changes do not affect it. `AGENTS.md` may be freely edited or deleted and is never force-restored on later starts; restart the Host after editing it for changes to take effect.
+- **Init templates**: `ludens init --name <name> --driver <id>` creates a workspace below the global default parent; pass `--workspace <path>` for an explicit directory. It creates missing [AGENTS.md](../../../core/templates/AGENTS.md) and [perception.py](../../../core/templates/perception.py) templates. Global `defaults` are copied into the new `ludens.json`; later global changes do not affect it. `AGENTS.md` may be freely edited or deleted and is never force-restored on later starts; restart Core after editing it for changes to take effect.
 - **Workspace identity**: the ID in `.ludens/workspace.json` is persistent and is not derived from the directory name or path. After moving a workspace, run `ludens workspace open <new-path>` to update the global index. Use `open <copy-path> --new-id` for an independent copy, assigning a new identity and clearing the current session selection. Past sessions, skill versions, recordings, and logs remain in the workspace. Rebuild a lost registry with `open`; `forget <id>` removes only its index entry. Old directories need explicit [import](quickstart.md#registering-and-migrating-existing-workspaces).
-- **Session resume**: restarting the Host resumes the previous OMP session via `.ludens/shiori/current-session.json` by default; `ludens run --new-session` starts a new session while keeping all workspace code and files, and `--resume <session.jsonl>` resumes a specified historical session under the same workspace.
+- **Session resume**: restarting Core resumes the previous OMP session via `.ludens/shiori/current-session.json` by default; `ludens run --new-session` starts a new session while keeping all workspace code and files, and `--resume <session.jsonl>` resumes a specified historical session under the same workspace. After pausing (`auto off`), Core stays resident in **Warm Standby** (`manual` mode) with its session and Baseware connection ready for instant resumption.
 - **Skills and memory**: `skills/<name>/SKILL.md` uses YAML frontmatter with `name` and `description`. The agent reads and writes skills and memory on demand through the OMP-native `read` / `write` / `edit` tools; Ludens does not re-push a full file index on every model request.
 
 ## Discovering and Calling Capabilities
@@ -74,7 +74,7 @@ ludens controller controller/screen.top.capture --args '{}'
 ludens controller python/scripts/nav.py:move_to --file ./move-args.json
 ```
 
-- `controller/<name>`: provided by the currently connected Baseware Driver. The Host writes the latest catalog snapshot to the workspace `baseware.json` at startup (run `baseware export` at any time to refresh it).
+- `controller/<name>`: provided by the currently connected Baseware Driver. Core writes the latest catalog snapshot to the workspace `baseware.json` at startup (run `baseware export` at any time to refresh it).
 - `python/<relative-path.py>:<function or Class.method>`: provided by the `@capability` decorator in workspace Python code, discovered via static AST scanning — signatures and descriptions are queryable without starting any process.
 
 ### 2. Declaring Python Capabilities and the Four Call Styles
@@ -99,15 +99,15 @@ How the call entry points differ in execution location and data boundary:
 | Call style | Executing process | Arguments and return values | When to use |
 | --- | --- | --- | --- |
 | Plain Python `import` call | Current Python process | Native Python objects (PyTorch models, NumPy arrays, etc.) | High-performance composition inside the workspace, sharing in-process models and caches |
-| `Client().call("python/...", {...})` | Current Python process | Arguments validated against the capability schema, imported and called in the current process | Dispatching local Python capabilities dynamically by catalog ID without the Host spawning a new subprocess |
-| `ludens controller python/... --args '{...}'` | One-shot Python subprocess started by the Host | Cross-process JSON serialization; the subprocess exits after the call and keeps no in-memory state | Agent triggering a single Python capability from the command line via the native `bash` tool |
+| `Client().call("python/...", {...})` | Current Python process | Arguments validated against the capability schema, imported and called in the current process | Dispatching local Python capabilities dynamically by catalog ID without Core spawning a new subprocess |
+| `ludens controller python/... --args '{...}'` | One-shot Python subprocess started by Core | Cross-process JSON serialization; the subprocess exits after the call and keeps no in-memory state | Agent triggering a single Python capability from the command line via the native `bash` tool |
 | `Client().call("controller/...", {...})` or `ludens controller controller/...` | Forwarded to Baseware via Ludens | JSON argument object, returning an `ExecutionResult` with the native `result` and media bytes | Driving device inputs or collecting sensor/screen data |
 
 ### 3. Evaluating Capabilities with @eval_capability and ludens eval
 
 Use the **Fast Loop (`@capability`) + Offline Evaluation (`@eval_capability`)** pattern for latency-sensitive or repetitive interactions. Turn-by-turn LLM observation has multi-second latency: it cannot react to sub-second game windows such as fishing bites, timed combos, or moving targets, and it wastes turns on repetitive dialogue loops. Encapsulate those interactions as local Python `@capability` functions that poll and act at high frequency in-process, then evaluate their detection and control logic offline.
 
-When an atomic workspace capability can be evaluated offline, you can optionally pair it with a synchronous, zero-required-argument eval function in the same Python module. Evaluation strips inherited Host/device sockets and control epochs, so it cannot drive the live device. Choose the evaluation style that matches the capability:
+When an atomic workspace capability can be evaluated offline, you can optionally pair it with a synchronous, zero-required-argument eval function in the same Python module. Evaluation strips inherited Core/device sockets and control epochs, so it cannot drive the live device. Choose the evaluation style that matches the capability:
 
 1. **Replay labeled `.ludens/timeline/` records or 30 Hz trajectory slices** for perception, parsing, or sequence-detection functions. `Client().observe()` reads single pages from the persisted timeline, while `Client().replay(...)` (and `with record_window() as win:`) slices and automatically paginates multi-second 30 Hz trajectories by time window (`window=win` or `start=...`, `end=...`) or around an anchor record (`around=record_id, before_seconds=2.0, after_seconds=2.0`).
    Replay includes all capability streams unless `capability=...` is specified and returns at most `max_records=256`; increase this limit for longer trajectories.

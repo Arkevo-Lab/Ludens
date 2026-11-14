@@ -67,7 +67,7 @@ test("dashboard worker reads and mutates workspace Event Pool in standby mode wi
         workspace,
         { action: "reply", replyTo: outbound.event.id, text: "Code is 0451", resumeAuto: true },
       ]),
-      /宿主未在线/,
+      /Core 未在线/,
     );
 
     const replied = await worker.call("eventPoolMutate", [
@@ -454,4 +454,30 @@ test("human withdrawal marks the inbound bubble withdrawn without a receipt card
   const receipt = segments.find(seg => seg.kind === "pool_receipt");
   assert.equal(receipt?.kind === "pool_receipt" ? receipt.actor : null, "human");
   assert.deepEqual(receipt?.kind === "pool_receipt" ? receipt.ids : null, ["ev-21"]);
+});
+
+test("en and zh deviceContention locale keys stay in exact parity and RuntimeControlError classifies CORE_OFFLINE / DEVICE_BUSY", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const {
+    RuntimeControlError,
+    isCoreOfflineError,
+    isDeviceBusyError,
+  } = await import("../features/live/live-session-store");
+
+  const en = JSON.parse(readFileSync(join(import.meta.dirname, "../messages/en.json"), "utf8"));
+  const zh = JSON.parse(readFileSync(join(import.meta.dirname, "../messages/zh.json"), "utf8"));
+  assert.deepEqual(Object.keys(en.deviceContention).sort(), Object.keys(zh.deviceContention).sort());
+
+  const offlineErr = new RuntimeControlError("Core offline", { status: 409, code: "CORE_OFFLINE" });
+  assert.equal(isCoreOfflineError(offlineErr), true);
+  assert.equal(isDeviceBusyError(offlineErr), false);
+
+  const busyErr = new RuntimeControlError("Busy", {
+    status: 409,
+    code: "DEVICE_BUSY",
+    conflict: { holderProjectId: "other-ws", deviceKey: "adb:1", holderMode: "auto" },
+  });
+  assert.equal(isDeviceBusyError(busyErr), true);
+  assert.equal(isCoreOfflineError(busyErr), false);
 });

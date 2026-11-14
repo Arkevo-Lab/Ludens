@@ -17,14 +17,14 @@ Workspace 是交由 Agent 与开发者共同演进的普通 Coding 工作区：�
 ├── cache/drivers/          # External driver installation cache
 ├── logs/baseware/          # Standalone Baseware logs without --data-dir
 ├── pet/
-│   ├── target.json         # Stable workspace ID followed by the pet
+│   ├── target.json         # Optional pinned workspace ID or null stop (defaults to !auto multi-Core follow when unset)
 │   ├── consumer.json       # Pet consumer heartbeat
 │   ├── profile/            # Electron preferences and local cache
 │   └── background/         # Shared pet background logs
 └── workspaces/             # Initial workspaceRoot; configurable to any absolute path
 ```
 
-每个工作区独立保存运行所需的状态，移动或备份时应保留整个目录：
+每个工作区遵循 **1 Workspace = 1 Core** 隔离边界，独立保存运行所需的状态与所属 Core 进程（不同物理设备或端口的工作区可由 App Daemon 完全并发运行），移动或备份时应保留整个目录：
 
 ```text
 workspace/
@@ -44,15 +44,15 @@ workspace/
 │       ├── sessions/        # OMP session JSONL files and their same-named resource directories
 │       └── current-session.json # Default session-resume pointer
 └── logs/
-    ├── <run-id>/            # Event and stream records for a single Host run
+    ├── <run-id>/            # Event and stream records for a single Core run
     └── background/          # Detached background service logs and job state
 ```
 
 ### 2. 模板与会话生命周期
 
-- **初始化模板**：`ludens init --name <name> --driver <id>` 在全局默认父目录下创建工作区，也可传 `--workspace <path>` 指定目录。创建缺失的 [AGENTS.md](../../../core/templates/AGENTS.md)、[perception.py](../../../core/templates/perception.py) 模板；全局 `defaults` 复制到新建的 `ludens.json`，之后修改全局配置不影响它。`AGENTS.md` 可自由修改或删除，后续启动不会强行补回；修改后需重启 Host 生效。
+- **初始化模板**：`ludens init --name <name> --driver <id>` 在全局默认父目录下创建工作区，也可传 `--workspace <path>` 指定目录。创建缺失的 [AGENTS.md](../../../core/templates/AGENTS.md)、[perception.py](../../../core/templates/perception.py) 模板；全局 `defaults` 复制到新建的 `ludens.json`，之后修改全局配置不影响它。`AGENTS.md` 可自由修改或删除，后续启动不会强行补回；修改后需重启 Core 生效。
 - **工作区身份**：`.ludens/workspace.json` 的 ID 是唯一身份，不由目录名称或路径计算。移动后执行 `ludens workspace open <new-path>` 更新全局索引；独立副本用 `open <copy-path> --new-id` 分配新身份并清除当前会话选择。原始会话、技能版本、录制和日志仍在工作区内。registry 丢失后可重新 `open`，`forget <id>` 只注销索引。旧目录需显式 [导入](quickstart.md#已有工作区登记与迁移)。
-- **会话续接**：重启 Host 默认读取 `.ludens/shiori/current-session.json` 续接上一轮 OMP 会话；`ludens run --new-session` 开启新会话并保留工作区全部代码与文件，`--resume <session.jsonl>` 可指定恢复同一工作区下的历史会话。
+- **会话续接**：重启 Core 默认读取 `.ludens/shiori/current-session.json` 续接上一轮 OMP 会话；`ludens run --new-session` 开启新会话并保留工作区全部代码与文件，`--resume <session.jsonl>` 可指定恢复同一工作区下的历史会话。暂停（`auto off`）后 Core 保持 **Warm Standby**（`manual` 待命），会话与 Baseware 连接持续驻留以便秒级续跑。
 - **技能与记忆**：`skills/<name>/SKILL.md` 采用含 `name` 与 `description` 的 YAML frontmatter。Agent 通过 OMP 原生 `read` / `write` / `edit` 工具按需读写技能与记忆，Ludens 不会在每轮模型请求中重复推送全量文件索引。
 
 ## 发现与调用能力
@@ -74,7 +74,7 @@ ludens controller controller/screen.top.capture --args '{}'
 ludens controller python/scripts/nav.py:move_to --file ./move-args.json
 ```
 
-- `controller/<name>`：由当前连接的 Baseware Driver 提供，Host 启动时会将最新目录快照写入工作区 `baseware.json`（也可随时执行 `baseware export` 刷新）。
+- `controller/<name>`：由当前连接的 Baseware Driver 提供，Core 启动时会将最新目录快照写入工作区 `baseware.json`（也可随时执行 `baseware export` 刷新）。
 - `python/<相对路径.py>:<函数或Class.method>`：由工作区 Python 代码中的 `@capability` 装饰器提供，通过 AST 静态扫描发现，无需启动进程即可查询签名与说明。
 
 ### 2. Python 能力声明与四种调用方式
@@ -99,15 +99,15 @@ def capture_top(exposure: int = 1) -> dict:
 | 调用方式 | 执行进程 | 参数与返回值 | 适用场景 |
 | --- | --- | --- | --- |
 | 普通 Python `import` 调用 | 当前 Python 进程 | 原生 Python 对象（可传 PyTorch 模型、NumPy 数组等） | 工作区内部高性能组合、共享进程内模型与缓存 |
-| `Client().call("python/...", {...})` | 当前 Python 进程 | 按能力 schema 校验参数，在当前进程内导入并调用 | 按目录 ID 动态派发本地 Python 能力，不经 Host 重开子进程 |
-| `ludens controller python/... --args '{...}'` | Host 启动一次性 Python 子进程 | 跨进程 JSON 序列化；调用结束后子进程退出，不保留内存状态 | Agent 在原生 `bash` 工具中通过命令行触发单次 Python 能力 |
+| `Client().call("python/...", {...})` | 当前 Python 进程 | 按能力 schema 校验参数，在当前进程内导入并调用 | 按目录 ID 动态派发本地 Python 能力，不经 Core 重开子进程 |
+| `ludens controller python/... --args '{...}'` | Core 启动一次性 Python 子进程 | 跨进程 JSON 序列化；调用结束后子进程退出，不保留内存状态 | Agent 在原生 `bash` 工具中通过命令行触发单次 Python 能力 |
 | `Client().call("controller/...", {...})` 或 `ludens controller controller/...` | 经 Ludens 转发至 Baseware | JSON 参数对象，返回包含原生 `result` 与媒体字节的 `ExecutionResult` | 执行设备输入或采集传感器/屏幕数据 |
 
 ### 3. 使用 @eval_capability 与 ludens eval 评估能力
 
 对延迟敏感或重复性交互，使用**快速闭环（`@capability`）+ 离线评估（`@eval_capability`）**模式。逐轮 LLM 观测存在数秒延迟：既无法响应钓鱼咬钩、限时连击或移动目标等亚秒级游戏窗口，也会在重复对话循环上浪费轮次。将这些交互封装为本地 Python `@capability` 函数，在进程内高频轮询并执行动作，再离线评估其检测与控制逻辑。
 
-当单项工作区能力适合离线评估时，可在同一 Python 模块中按需为其配对一个同步、无必填参数的评估函数。评估会移除继承的 Host/设备 socket 与控制 epoch，因此无法驱动实机。应根据能力类型选择评估方式：
+当单项工作区能力适合离线评估时，可在同一 Python 模块中按需为其配对一个同步、无必填参数的评估函数。评估会移除继承的 Core/设备 socket 与控制 epoch，因此无法驱动实机。应根据能力类型选择评估方式：
 
 1. **重放已标注的 `.ludens/timeline/` 记录或 30 Hz 轨迹切片**，用于感知、解析或序列检测函数。`Client().observe()` 直接按页读取持久化时空轴；`Client().replay(...)`（配合 `with record_window() as win:`）则按时间窗口（`window=win` 或 `start=...`、`end=...`）或围绕锚点记录（`around=record_id, before_seconds=2.0, after_seconds=2.0`）自动分页拉取数秒长的 30 Hz 连续帧序列。
    回放默认包含所有能力流，可用 `capability=...` 筛选；默认最多返回 `max_records=256` 条记录，较长轨迹需增大此上限。

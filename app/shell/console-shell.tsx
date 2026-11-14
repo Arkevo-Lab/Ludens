@@ -26,8 +26,9 @@ import { replayEvidenceFromSearch, replayEvidencePatch } from "@/features/replay
 import { ArchiveBuild } from "@/shell/archive-build";
 import { WorkspacesView } from "@/features/workspaces/workspaces-view";
 import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clockTime } from "@/features/live/run-visuals";
-import { useTranslations } from "@/lib/locale";
-import { useDashboardController } from "@/shell/use-dashboard-controller";
+import { useLocale, useTranslations } from "@/lib/locale";
+import { useActiveCores } from "@/shell/use-active-cores";
+import { synthesizeEmptyRunData, useDashboardController } from "@/shell/use-dashboard-controller";
 
 type ShellHeaderSlots = {
   runPicker?: ReactNode;
@@ -47,8 +48,15 @@ const SlottedRunAnalysis = RunAnalysis as ComponentType<
 
 export default function ConsoleShell() {
   const {t, dt, lt, search, query, view, runControls, projects, catalogReady, catalogError, catalogLoading, project, latest, run, selection, entry, scopeKey, beforeCall, requestedCall, selectedImage, key, error, analysis, analysingRun, data, cycles, activity, call, pet, refresh, panel, setPanel, stopping, auto, status, staleStatus, phase, archiveRevision, archiveReady, preparing, pageRange, hasTelemetry, s, verifiedCreationDriver, navigateUrl, navigate, closeCreateIntent, returnToLatest, viewLink, pinned, selectCall, onReplayOverview, retryCatalog, retryingRun, retryRun, stop, runContent, catalogFocus, setSnapshotRevision, refreshRun, refreshCatalog, liveJumpTarget, activeLiveSegment, setActiveLiveSegment, jumpToLiveSegment, clearLiveJumpTarget} = useDashboardController();
+  const { locale } = useLocale();
   const st = useTranslations("consoleSidebar");
   const ct = useTranslations("desktopChrome");
+  const {
+    activeCores,
+    stoppingProjectId,
+    stopError: activeCoresStopError,
+    stopCore,
+  } = useActiveCores({ projects, onRefresh: refreshCatalog });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const desktop = useDesktopWindow({
@@ -218,10 +226,29 @@ export default function ConsoleShell() {
       {stopping ? dt("handingOver") : dt("handover")}
     </Button>
   ) : null;
+  const openCoreWorkspace = (targetProjectId: string) => {
+    const targetProject = projects.find(item => item.id === targetProjectId);
+    setMobileNavOpen(false);
+    navigate({
+      view: "live",
+      project: targetProjectId,
+      workspace: null,
+      run: targetProject?.runs?.length ? null : (targetProject?.core?.runId ?? null),
+      epoch: null,
+      beforeCall: null,
+      call: null,
+      block: null,
+      image: null,
+      at: null,
+      ...replayEvidencePatch(null),
+    });
+  };
+  const allowZeroRunLive = view === "live" && entry === "no-run" && Boolean(project);
+  const liveData = data ?? (allowZeroRunLive && project ? synthesizeEmptyRunData(project, locale) : null);
   const hasWorkbenchHeader =
     (view === "replay" && entry === "ready") ||
-    ((view === "live" || view === "perf") && entry === "ready" && Boolean(data));
-  const hasContextualBarPicker = Boolean(runControls && entry === "ready" && contextualRunPicker);
+    ((view === "live" || view === "perf") && Boolean(liveData) && (entry === "ready" || allowZeroRunLive));
+  const hasContextualBarPicker = Boolean(runControls && (entry === "ready" || allowZeroRunLive) && contextualRunPicker);
   const activeWorkspaceLabel = workspaceScopedView ? workspaceName(project) : "";
   return (
     <div
@@ -279,6 +306,12 @@ export default function ConsoleShell() {
           onToggleCollapse={desktop.toggleSidebar}
           collapseShortcut={formatDesktopShortcut(desktop.platform, "B")}
           desktopChrome={desktop.active}
+          activeCores={activeCores}
+          activeProjectId={selection.project}
+          stoppingCoreId={stoppingProjectId}
+          onOpenCore={openCoreWorkspace}
+          onStopCore={projectId => { void stopCore(projectId); }}
+          activeCoresStopError={activeCoresStopError}
         />
         <div className="console-main">
           {!hasWorkbenchHeader && (!desktop.active || hasContextualBarPicker) && (
@@ -397,7 +430,7 @@ export default function ConsoleShell() {
             <BasewareView project={selection.project} workspace={project?.workspace ?? null} projects={projects}
               ready={catalogReady} catalogError={catalogError} catalogLoading={catalogLoading}
               onRetryCatalog={refreshCatalog} onNavigate={navigateUrl} />
-          ) : runControls && entry !== "ready" ? (
+          ) : runControls && entry !== "ready" && !allowZeroRunLive ? (
             <WorkspaceRunEmpty state={entry} project={project?.id} workspaceName={workspaceName(project)}
               workspacePath={project?.workspace ?? undefined}
               error={catalogError} retrying={catalogLoading} onRetry={retryCatalog} onNavigate={navigateUrl} />
@@ -421,26 +454,10 @@ export default function ConsoleShell() {
                 );
               }}
               onEvidence={nextEvidence => navigate(replayEvidencePatch(nextEvidence))} />
-          ) : !data ? (
-            <section className="surface empty-state main-empty">
-              <span className="empty-symbol">◫</span>
-              <h2>
-                {error ? dt("empty.readFailed")
-                  : preparing?.key === key ? dt("empty.archiving") : dt("empty.loadingRun")}
-              </h2>
-              <p>
-                {error ? view === "live" ? lt("readFailureHint") : dt("emptyHint.checkService")
-                      : preparing?.key === key
-                        ? `${dt("archive.read")} ${bytes(preparing.progress.bytes)} / ${bytes(preparing.progress.totalBytes)}${preparing.progress.projection ? ` · ${dt("archive.organizedPrefix")}${preparing.progress.projection.position.toLocaleString()} / ${preparing.progress.projection.total.toLocaleString()}${dt("archive.organizedSuffix")}` : ""}${dt("archive.replayNote")}`
-                        : dt("emptyHint.loadingObs")}
-              </p>
-            </section>
-          ) : (
-            <>
-              {view === "live" ? (
-                <SlottedShioriWorkbench
+          ) : view === "live" && liveData ? (
+            <SlottedShioriWorkbench
                   project={selection.project}
-                  workspace={project?.workspace ?? data.manifest.workspace ?? null}
+                  workspace={project?.workspace ?? liveData.manifest.workspace ?? null}
                   workspaceTitle={workspaceName(project)}
                   runs={project?.runs ?? []}
                   runPicker={contextualRunPicker}
@@ -449,7 +466,7 @@ export default function ConsoleShell() {
                   jumpTarget={liveJumpTarget}
                   onClearJumpTarget={clearLiveJumpTarget}
                   onActiveSegmentChange={setActiveLiveSegment}
-                  data={data}
+                  data={liveData}
                   feed={activity}
                   refresh={refresh}
                   isLiveRun={true}
@@ -461,13 +478,18 @@ export default function ConsoleShell() {
                   onUpdated={() => {
                     refreshRun();
                   }}
+                  onRunSpawned={spawnedRunId => {
+                    navigate({ run: spawnedRunId || null }, { replace: true });
+                    refreshCatalog();
+                  }}
+                  onSwitchWorkspace={openCoreWorkspace}
                   onOpenPerf={() => navigate({ view: "perf" })}
                   onOpenCaps={() => navigate({ view: "caps" })}
                   onOpenReplay={() => navigate({ view: "replay" })}
                   onOpenReplayAt={openReplayAtFrame}
                   onReturnLatest={returnToLatest}
                   renderObservation={({ data: overrideData, call: overrideCall, selectedImage: overrideImage, onSelectImage }) => {
-                    const targetData = overrideData ?? data;
+                    const targetData = overrideData ?? liveData;
                     const obsById = new Map(targetData.observations.map(o => [o.id, o]));
                     const hasRecordedVisual = (candidate?: typeof call) =>
                       Boolean(
@@ -477,8 +499,8 @@ export default function ConsoleShell() {
                         }),
                       );
                     const latestRunCall = targetData.calls.at(-1);
-                    const defaultCall = targetData === data ? call : latestRunCall;
-                    const explicitSelection = Boolean(overrideCall || (targetData === data && requestedCall));
+                    const defaultCall = targetData === liveData ? call : latestRunCall;
+                    const explicitSelection = Boolean(overrideCall || (targetData === liveData && requestedCall));
                     const effectiveCall = explicitSelection
                       ? (overrideCall ?? defaultCall)
                       : hasRecordedVisual(defaultCall)
@@ -488,7 +510,7 @@ export default function ConsoleShell() {
                           defaultCall;
                     const effectiveImage =
                       overrideImage ??
-                      (targetData === data ? selectedImage : undefined) ??
+                      (targetData === liveData ? selectedImage : undefined) ??
                       (!effectiveCall?.inputObservations.length
                         ? [...targetData.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
                           targetData.observations.at(-1)?.id
@@ -508,9 +530,9 @@ export default function ConsoleShell() {
                   observationSlot={
                     <ObservationPanel
                       priority
-                      data={data}
+                      data={liveData}
                       call={(() => {
-                        const obsById = new Map(data.observations.map(o => [o.id, o]));
+                        const obsById = new Map(liveData.observations.map(o => [o.id, o]));
                         const hasRecordedVisual = (candidate?: typeof call) =>
                           Boolean(
                             candidate?.inputObservations.some(id => {
@@ -521,28 +543,42 @@ export default function ConsoleShell() {
                         if (requestedCall) return call;
                         if (hasRecordedVisual(call)) return call;
                         return (
-                          [...data.calls].reverse().find(hasRecordedVisual) ??
-                          [...data.calls].reverse().find(c => c.inputObservations.length > 0) ??
+                          [...liveData.calls].reverse().find(hasRecordedVisual) ??
+                          [...liveData.calls].reverse().find(c => c.inputObservations.length > 0) ??
                           call
                         );
                       })()}
-                      latestCall={!requestedCall ? data.calls.at(-1) : undefined}
+                      latestCall={!requestedCall ? liveData.calls.at(-1) : undefined}
                       selectedImage={
                         selectedImage ??
                         (!call?.inputObservations.length
-                          ? [...data.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
-                            data.observations.at(-1)?.id
+                          ? [...liveData.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
+                            liveData.observations.at(-1)?.id
                           : undefined)
                       }
                       onImage={(id) => navigate({ ...pinned, image: id })}
                       onOpenReplayAt={openReplayAtFrame}
                     />
                   }
-                />
-              ) : (
-                <>
-                  <SlottedRunAnalysis
-                    data={data}
+            />
+          ) : !data ? (
+            <section className="surface empty-state main-empty">
+              <span className="empty-symbol">◫</span>
+              <h2>
+                {error ? dt("empty.readFailed")
+                  : preparing?.key === key ? dt("empty.archiving") : dt("empty.loadingRun")}
+              </h2>
+              <p>
+                {error ? view === "live" ? lt("readFailureHint") : dt("emptyHint.checkService")
+                      : preparing?.key === key
+                        ? `${dt("archive.read")} ${bytes(preparing.progress.bytes)} / ${bytes(preparing.progress.totalBytes)}${preparing.progress.projection ? ` · ${dt("archive.organizedPrefix")}${preparing.progress.projection.position.toLocaleString()} / ${preparing.progress.projection.total.toLocaleString()}${dt("archive.organizedSuffix")}` : ""}${dt("archive.replayNote")}`
+                        : dt("emptyHint.loadingObs")}
+              </p>
+            </section>
+          ) : (
+            <>
+              <SlottedRunAnalysis
+                data={data}
                     detailData={analysis.detail}
                     call={call}
                     requestedCall={requestedCall}
@@ -811,9 +847,7 @@ export default function ConsoleShell() {
                         </details>
                       </>
                     }
-                  />
-                </>
-              )}
+              />
               {view !== "live" && (
                 <footer className="page-footer">
                   <span>ⓘ {dt("footer.perf")}</span>

@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useLocale, useTranslations } from "@/lib/locale";
 import type { LiveStatus, Project, RunData } from "@/lib/types";
+export { synthesizeEmptyRunData } from "@/features/live/empty-run-data";
 import type { ReplayOverviewResult } from "@/lib/replay-types";
 import { initialSelection, latestGameRun } from "@/lib/initial-selection";
 import { workspaceRunEntry } from "@/lib/workspace-run-entry";
@@ -140,13 +141,14 @@ export function useDashboardController() {
   } | null>(null);
   const [activeLiveSegment, setActiveLiveSegment] = useState("");
   const requested = initialSelection(search, projects);
-  const requestedLatest = latestGameRun(projects.find(p => p.id === requested.project));
+  const requestedProject = projects.find(p => p.id === requested.project);
+  const requestedLatest = latestGameRun(requestedProject);
   const followed = resolveLiveSelection({
     location: search,
     project: requested.project,
     requestedRun: view === "live" ? "" : requested.run,
     requestedEpoch: view === "live" ? "" : requested.epoch,
-    latestRun: requestedLatest?.id ?? "",
+    latestRun: requestedLatest?.id || requestedProject?.core?.runId || (view === "live" ? requested.run : "") || "",
     refresh,
     archiveRevision,
     paused: view === "live" ? null : pausedSelection,
@@ -186,8 +188,8 @@ export function useDashboardController() {
     ? replayCycles?.key === JSON.stringify([selection.project, run]) ? replayCycles.cycles : []
     : data?.cycles ?? [];
   const activity = useActivityFeed({ project: selection.project, run, epoch: effectiveEpoch || undefined,
-    enabled: view === "live", refresh: pollingEnabled, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined,
-    continuousStream: view === "live" });
+    enabled: view === "live" && Boolean(run), refresh: pollingEnabled, archiveRevision, resetRevision: snapshotRevision, selectedBlock: query.get("block") ?? undefined,
+    continuousStream: view === "live" && Boolean(run) });
   const call = analysingRun ? analysisRequest(analysis.detail, requestedCall)
     : data?.selectedCall ?? data?.calls.find((c) => c.id === requestedCall) ?? data?.calls.at(-1);
   const navigateUrl = useCallback((target: string, options?: { replace?: boolean }) => {
@@ -284,7 +286,7 @@ export function useDashboardController() {
           setCatalogReady(true);
           setCatalogLoading(false);
           if (typeof document === "undefined" || document.visibilityState !== "hidden") {
-            timer = setTimeout(load, 10000);
+            timer = setTimeout(load, 5000);
           }
         }
       }
@@ -345,8 +347,12 @@ export function useDashboardController() {
   useEffect(() => { runPoller.current?.reader.setEnabled(pollingEnabled); }, [pollingEnabled]);
   const retryingRun = runReading?.key === key && runReading.reader === runPoller.current?.reader;
   const refreshRun = useCallback(() => {
+    if (!run) {
+      refreshCatalog();
+      return;
+    }
     void runPoller.current?.reader.readOnce();
-  }, []);
+  }, [run, refreshCatalog]);
   const retryRun = (control: HTMLButtonElement) => {
     const pending = runPoller.current;
     if (!pending || pending.key !== key || retryingRun) return;

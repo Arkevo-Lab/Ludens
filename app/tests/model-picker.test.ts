@@ -523,7 +523,7 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
   assert.doesNotMatch(runningHtml, /感知注入/);
   assert.doesNotMatch(runningHtml, /Inject:\s*(ON|OFF)/i);
 
-  // Synthetic offline status from set_model keeps switching unlocked
+  // Synthetic offline status from set_model keeps switching unlocked and defaults composer to "start"
   const offlineOverrideHtml = renderToStaticMarkup(
     createElement(
       LocaleProvider,
@@ -535,7 +535,7 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
         hostStatusOverride: {
           mode: "manual",
           connected: false,
-          hostOffline: true,
+          coreOffline: true,
           model: "anthropic/claude-opus-4-6",
         },
         isLiveRun: true,
@@ -545,6 +545,7 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
   );
   assert.doesNotMatch(offlineOverrideHtml, /data-locked="true"/);
   assert.match(offlineOverrideHtml, /claude-opus-4-6/);
+  assert.match(offlineOverrideHtml, /data-shiori-composer="start"/);
 });
 
 test("ShioriWorkbench prefers live model in both Composer pill and Right Dock provenance and includes layout polish classes", () => {
