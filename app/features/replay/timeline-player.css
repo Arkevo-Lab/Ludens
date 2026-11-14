@@ -1457,10 +1457,12 @@
   .replay-frame-meta { font-size: 10px; gap: 6px; }
   .replay-preview-badge { max-width: 132px; }
   .replay-controls { padding: 6px 10px 7px; }
+  .replay-control-row { flex-wrap: wrap; row-gap: 6px; }
+  .replay-transport { flex-wrap: wrap; row-gap: 4px; }
   .replay-time-jump-popover { left: auto; right: 0; }
   .replay-loading { min-height: 120px; }
-  .replay-timeline-header { padding: 0 10px; }
-  .replay-window-label { display: none; }
+  .replay-timeline-header { padding: 4px 10px; height: auto; min-height: 30px; flex-wrap: wrap; row-gap: 4px; }
+  .replay-timeline-header .replay-window-label { display: none; }
   .replay-track-row { padding: 0 10px; grid-template-columns: 50px minmax(0, 1fr); gap: 6px; }
   .replay-time-axis { margin: 0 10px 2px 66px; font-size: 9.5px; }
   .replay-window-size { gap: 4px; }

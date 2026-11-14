@@ -6,6 +6,7 @@
   "type": "module",
   "exports": {
     "./activity": "./src/activity.ts",
+    "./app-rpc": "./src/app-rpc.ts",
     "./connection": "./src/connection.ts",
     "./drivers": "./src/drivers.ts",
     "./event-pool": "./src/event-pool.ts",

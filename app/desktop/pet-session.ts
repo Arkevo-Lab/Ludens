@@ -1,6 +1,18 @@
 import { randomUUID } from 'node:crypto'
+import { NodeUdsRpcClient } from '@ludens/core/cli/app-rpc-client'
+import { resolveAppServerSocketPath } from '@ludens/core/daemon/app-daemon'
 import type { Project } from '@ludens/core/core/query/types'
-import { consumerRecorder, ludensProjectId, LudensSource, type LudensActivitySnapshot, type LudensActivitySource, type LudensPetSnapshot } from './ludens-source.js'
+import type { AppRpcMethod, AppRpcParams, AppRpcResult, LudensServerEvent } from '@ludens/protocol/app-rpc'
+import { ludensHome } from '@ludens/protocol/ludens'
+import { originKey } from './dashboard-window.js'
+import {
+  consumerRecorder,
+  ludensProjectId,
+  LudensSource,
+  type LudensActivitySnapshot,
+  type LudensActivitySource,
+  type LudensPetSnapshot,
+} from './ludens-source.js'
 
 export interface PetTarget {
   project: string
@@ -8,14 +20,27 @@ export interface PetTarget {
   revision: string
   updatedAt: string
 }
+
+export interface PetRpcClient {
+  call<M extends AppRpcMethod>(
+    method: M,
+    params?: AppRpcParams<M>,
+    options?: { signal?: AbortSignal; timeoutMs?: number },
+  ): Promise<AppRpcResult<M>>
+  onEvent?(listener: (event: LudensServerEvent) => void): () => void
+  close?(): Promise<void>
+}
+
 type SourceFactory = (workspace: string, onSnapshot: (snapshot: LudensPetSnapshot) => void) => LudensActivitySource
 type ConsumerPhase = 'idle' | 'switching' | 'following' | 'error'
 
-/** Parse `?project=<id>` from a local dashboard URL matching `origin`. */
+/** Parse `?project=<id>` from a local dashboard URL matching `origin` (`ludens-app:` or `http:`). */
 export function extractProjectFromUrl(url: string, origin: string): string | null {
   try {
+    const expected = originKey(origin)
+    const actual = originKey(url)
+    if (!expected || !actual || actual !== expected) return null
     const parsed = new URL(url)
-    if (parsed.origin !== origin) return null
     const project = parsed.searchParams.get('project')?.trim()
     return project || null
   } catch {
@@ -65,7 +90,7 @@ export function selectAutoFollowTarget(
   return online[0]
 }
 
-/** One desktop instance follows the Dashboard's selected workspace (or auto-follows active Cores), independently of page navigation. */
+/** One desktop instance follows the Dashboard's selected workspace (or auto-follows active Cores) via UDS RPC. */
 export class PetSessionCoordinator implements LudensActivitySource {
   private target: PetTarget | null = null
   private source: LudensActivitySource | undefined
@@ -80,6 +105,10 @@ export class PetSessionCoordinator implements LudensActivitySource {
   private autoFollowing = false
   private heartbeatPending = false
   private heartbeatRequest?: Promise<void>
+  private eventSubscriptionActive = false
+  private unsubscribeEvents?: () => void
+  private ownedRpc: NodeUdsRpcClient | undefined
+  private readonly rpc: PetRpcClient
   private readonly abort = new AbortController()
   private readonly instanceId = randomUUID()
   private readonly origin: string
@@ -89,67 +118,120 @@ export class PetSessionCoordinator implements LudensActivitySource {
 
   constructor(private options: {
     dashboardUrl: string
+    rpc?: PetRpcClient
+    socketPath?: string
     onSnapshot(snapshot: LudensPetSnapshot): void
     onTargetChanged(): void
     createSource?: SourceFactory
   }) {
-    this.origin = new URL(options.dashboardUrl).origin
+    this.origin = originKey(options.dashboardUrl) ?? new URL(options.dashboardUrl).origin
+    this.rpc = options.rpc ?? {
+      call: (method, params, callOptions) =>
+        this.ensureOwnedRpc().call(method, params, callOptions),
+      onEvent: listener => this.ensureOwnedRpc().onEvent(listener),
+      close: () => this.ensureOwnedRpc().close(),
+    }
     this.current = this.empty('请选择要跟随的工作区')
     this.createSource = options.createSource ?? ((workspace, onSnapshot) => new LudensSource({
-      workspace, dashboardUrl: this.origin, record: consumerRecorder(workspace), onSnapshot,
+      workspace,
+      dashboardUrl: this.origin,
+      rpc: this.rpc,
+      record: consumerRecorder(workspace),
+      onSnapshot,
     }))
   }
 
+  private ensureOwnedRpc(): NodeUdsRpcClient {
+    this.ownedRpc ??= new NodeUdsRpcClient({
+      socketPath: this.options.socketPath ?? resolveAppServerSocketPath(ludensHome()),
+      connectTimeoutMs: 2_000,
+    })
+    return this.ownedRpc
+  }
+
   identity() { return `${this.origin}:pet:${this.generation}` }
+
   record: NonNullable<LudensActivitySource['record']> = (...args) => this.source?.record?.(...args)
+
   setFocusedProject(projectId: string | null) {
     const next = projectId?.trim() || null
     if (next === this.focusedProject) return
     this.focusedProject = next
     if (this.autoFollowing && !this.stopped) {
-      if (this.targetPollPromise) {
-        this.repollRequested = true
-      } else {
-        void this.pollTarget()
-      }
+      this.scheduleTargetPoll()
     }
   }
+
+  private scheduleTargetPoll() {
+    if (this.stopped) return
+    if (this.targetPollPromise) {
+      this.repollRequested = true
+    } else {
+      void this.pollTarget()
+    }
+  }
+
   private idlePhaseLabel(): string {
     return this.autoFollowing ? '等待活跃 Core' : '请选择要跟随的工作区'
   }
+
   private empty(phase: string): LudensPetSnapshot {
-    return { workspace: this.target?.workspace ?? null, runId: null, epoch: null, phase,
-      intent: null, observationUrl: null, updatedAt: null, error: null,
-      dashboardUrl: this.target ? `${this.origin}/?project=${encodeURIComponent(this.target.project)}&view=live` : `${this.origin}/` }
+    return {
+      workspace: this.target?.workspace ?? null,
+      runId: null,
+      epoch: null,
+      phase,
+      intent: null,
+      observationUrl: null,
+      updatedAt: null,
+      error: null,
+      dashboardUrl: this.target
+        ? `${this.origin}/?project=${encodeURIComponent(this.target.project)}&view=live`
+        : `${this.origin}/`,
+    }
   }
+
   private publish(snapshot: LudensPetSnapshot) {
     this.current = snapshot
     this.options.onSnapshot(snapshot)
   }
-  private async request(method: string, body?: unknown) {
-    const response = await fetch(`${this.origin}/api/pet`, {
-      method, cache: 'no-store', signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(2_000)]),
-      headers: { Origin: this.origin, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-    if (!response.ok) throw new Error(`桌宠日志服务 HTTP ${response.status}`)
-    return response.json()
+
+  private callRpc<M extends AppRpcMethod>(method: M, params: AppRpcParams<M>): Promise<AppRpcResult<M>> {
+    const signal = AbortSignal.any([this.abort.signal, AbortSignal.timeout(2_000)])
+    return this.rpc.call(method, params, { signal, timeoutMs: 2_000 })
   }
+
+  private async ensureEventSubscription(): Promise<void> {
+    if (this.stopped || this.eventSubscriptionActive) return
+    if (this.rpc.onEvent && !this.unsubscribeEvents) {
+      this.unsubscribeEvents = this.rpc.onEvent(event => {
+        if (this.stopped) return
+        if (event.topic === 'pet') {
+          const action = (event.payload as { action?: unknown } | undefined)?.action
+          if (action === 'recordConsumer') return
+        }
+        if (event.topic === 'pet' || event.topic === 'catalog' || event.topic === 'core') {
+          this.scheduleTargetPoll()
+        }
+      })
+    }
+    this.eventSubscriptionActive = true
+    try {
+      await this.callRpc('events/subscribe', { topics: ['pet', 'catalog', 'core'] })
+    } catch {
+      this.eventSubscriptionActive = false
+    }
+  }
+
   private async fetchCatalog(): Promise<Project[]> {
     try {
-      const response = await fetch(`${this.origin}/api/catalog?includeEmpty=1`, {
-        method: 'GET',
-        cache: 'no-store',
-        signal: AbortSignal.any([this.abort.signal, AbortSignal.timeout(2_000)]),
-        headers: { Origin: this.origin },
-      })
-      if (!response.ok) return []
-      const data = await response.json()
+      const data = await this.callRpc('catalog/get', { includeEmpty: true })
       return Array.isArray(data) ? (data as Project[]) : []
     } catch {
       return []
     }
   }
+
   async start(workspace?: string) {
     this.targetTimer = setInterval(() => { void this.pollTarget() }, 2_500)
     this.heartbeatTimer = setInterval(() => { void this.heartbeat() }, 2_500)
@@ -158,13 +240,16 @@ export class PetSessionCoordinator implements LudensActivitySource {
       try {
         const projectId = ludensProjectId(workspace)
         this.focusedProject ??= projectId
-        await this.request('PUT', { project: projectId, ifUnset: true })
+        await this.callRpc('pet/setTarget', { project: projectId, ifUnset: true })
+      } catch {
+        /* The shared target remains authoritative; the next pet/getState reports connection failures. */
       }
-      catch { /* The shared target remains authoritative; the next GET reports connection failures. */ }
     }
     await this.pollTarget()
+    await this.ensureEventSubscription()
     await this.heartbeat()
   }
+
   async pollTarget(): Promise<void> {
     if (this.stopped) return
     if (this.targetPollPromise) {
@@ -176,20 +261,29 @@ export class PetSessionCoordinator implements LudensActivitySource {
     })
     return this.targetPollPromise
   }
+
   private async runPollTarget(): Promise<void> {
     try {
       do {
         this.repollRequested = false
-        const state = await this.request('GET') as {
+        const state = await this.callRpc('pet/getState', undefined) as {
           target: PetTarget | null
           targetConfigured?: boolean
           targetUnavailable?: boolean
           autoFollowing?: boolean
         }
         if (this.stopped) return
+        if (!this.eventSubscriptionActive && this.targetTimer) {
+          void this.ensureEventSubscription()
+        }
+
         let next = state.target
-        if (next !== null && (!next || typeof next.project !== 'string' || typeof next.workspace !== 'string' || typeof next.revision !== 'string'))
+        if (
+          next !== null &&
+          (!next || typeof next.project !== 'string' || typeof next.workspace !== 'string' || typeof next.revision !== 'string')
+        ) {
           throw new Error('桌宠跟随目标无效')
+        }
         // Keep the saved selection on the server, but never consume an offline,
         // unregistered, or replaced directory as though it were that workspace.
         if (state.targetUnavailable === true) next = null
@@ -210,8 +304,13 @@ export class PetSessionCoordinator implements LudensActivitySource {
             : null
         }
 
-        if (next?.revision !== this.target?.revision || next?.workspace !== this.target?.workspace || next?.project !== this.target?.project
-          || (next && !this.source) || (!next && this.phase === 'error')) {
+        if (
+          next?.revision !== this.target?.revision ||
+          next?.workspace !== this.target?.workspace ||
+          next?.project !== this.target?.project ||
+          (next && !this.source) ||
+          (!next && this.phase === 'error')
+        ) {
           this.select(next)
         } else if (!next && this.phase === 'idle') {
           const idlePhase = this.idlePhaseLabel()
@@ -219,12 +318,14 @@ export class PetSessionCoordinator implements LudensActivitySource {
         }
       } while (this.repollRequested && !this.stopped)
     } catch (error) {
+      this.eventSubscriptionActive = false
       if (!this.stopped) {
         this.phase = 'error'
         this.publish({ ...this.current, phase: '日志服务离线', error: String(error) })
       }
     }
   }
+
   private select(target: PetTarget | null) {
     this.source?.stop?.()
     this.source = undefined
@@ -250,17 +351,28 @@ export class PetSessionCoordinator implements LudensActivitySource {
     this.options.onTargetChanged()
     void this.heartbeat()
   }
+
   async read(signal?: AbortSignal): Promise<LudensActivitySnapshot> {
     this.abort.signal.throwIfAborted()
     signal?.throwIfAborted()
-    const generation = this.generation, source = this.source
+    const generation = this.generation
+    const source = this.source
     if (source) {
       const snapshot = await source.read(signal)
       if (generation !== this.generation) throw new DOMException('Follow target changed', 'AbortError')
       return snapshot
     }
-    return { identity: this.identity(), activity: 'idle', current: this.current, blocks: [], mode: 'snapshot', revision: 0, hasMore: false }
+    return {
+      identity: this.identity(),
+      activity: 'idle',
+      current: this.current,
+      blocks: [],
+      mode: 'snapshot',
+      revision: 0,
+      hasMore: false,
+    }
   }
+
   heartbeat(): Promise<void> {
     if (this.stopped) return Promise.resolve()
     this.heartbeatPending = true
@@ -269,21 +381,36 @@ export class PetSessionCoordinator implements LudensActivitySource {
       do {
         this.heartbeatPending = false
         try {
-          await this.request('POST', {
-            instanceId: this.instanceId, pid: process.pid, revision: this.loadedRevision,
-            targetRevision: this.target?.revision ?? null, workspace: this.target?.workspace ?? null,
-            runId: this.current.runId, phase: this.phase, error: this.current.error,
+          await this.callRpc('pet/recordConsumer', {
+            instanceId: this.instanceId,
+            pid: process.pid,
+            revision: this.loadedRevision,
+            targetRevision: this.target?.revision ?? null,
+            workspace: this.target?.workspace ?? null,
+            runId: this.current.runId,
+            phase: this.phase,
+            error: this.current.error,
+            autoFollowing: this.autoFollowing,
           })
-        } catch { /* The next independent heartbeat retries; log consumption must keep running. */ }
+        } catch {
+          /* The next independent heartbeat retries; log consumption must keep running. */
+        }
       } while (this.heartbeatPending && !this.stopped)
-    })().finally(() => { this.heartbeatRequest = undefined })
+    })().finally(() => {
+      this.heartbeatRequest = undefined
+    })
     return this.heartbeatRequest
   }
+
   stop() {
     if (this.stopped) return
     this.stopped = true
-    clearInterval(this.targetTimer); clearInterval(this.heartbeatTimer)
+    clearInterval(this.targetTimer)
+    clearInterval(this.heartbeatTimer)
+    this.unsubscribeEvents?.()
+    this.unsubscribeEvents = undefined
     this.abort.abort()
     this.source?.stop?.()
+    void this.ownedRpc?.close().catch(() => {})
   }
 }

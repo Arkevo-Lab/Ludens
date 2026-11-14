@@ -1,19 +1,15 @@
-import { afterEach, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
+import type { AppRpcMethod, AppRpcResult } from "@ludens/protocol/app-rpc";
 import {
   extractProjectFromUrl,
   PetSessionCoordinator,
   selectAutoFollowTarget,
+  type PetRpcClient,
   type PetTarget,
 } from "../desktop/pet-session";
 import type { LudensActivitySnapshot, LudensPetSnapshot } from "../desktop/ludens-source";
 import type { Project } from "../lib/types";
-
-const originalFetch = globalThis.fetch;
-
-afterEach(() => {
-  globalThis.fetch = originalFetch;
-});
 
 function makeProject(
   id: string,
@@ -52,7 +48,7 @@ function makeSnapshot(workspace: string): LudensActivitySnapshot {
     observationUrl: null,
     updatedAt: null,
     error: null,
-    dashboardUrl: "http://localhost:3015",
+    dashboardUrl: "ludens-app://console",
   };
   return {
     identity: `${workspace}:run:epoch`,
@@ -66,6 +62,14 @@ function makeSnapshot(workspace: string): LudensActivitySnapshot {
 }
 
 test("extractProjectFromUrl parses ?project= only for matching origin", () => {
+  assert.equal(
+    extractProjectFromUrl("ludens-app://console/?view=live&project=ws-alpha", "ludens-app://console"),
+    "ws-alpha",
+  );
+  assert.equal(
+    extractProjectFromUrl("ludens-app://other/?view=live&project=ws-alpha", "ludens-app://console"),
+    null,
+  );
   assert.equal(
     extractProjectFromUrl("http://127.0.0.1:3015/?view=live&project=ws-alpha", "http://127.0.0.1:3015"),
     "ws-alpha",
@@ -138,21 +142,39 @@ test("PetSessionCoordinator supports !auto priority switching, setFocusedProject
   const createdWorkspaces: string[] = [];
   const stoppedWorkspaces: string[] = [];
   const snapshots: LudensPetSnapshot[] = [];
+  const recordedConsumers: unknown[] = [];
+  const subscribedTopics: unknown[] = [];
   let targetChangeCount = 0;
 
-  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url.includes("/api/catalog")) {
-      return Response.json(catalogProjects);
-    }
-    if (init?.method === "POST") {
-      return Response.json({ consumer: JSON.parse(String(init.body)) });
-    }
-    return Response.json(petPayload);
-  }) as typeof fetch;
+  const rpc: PetRpcClient = {
+    async call<M extends AppRpcMethod>(method: M, params?: unknown): Promise<AppRpcResult<M>> {
+      switch (method) {
+        case "catalog/get":
+          return catalogProjects as unknown as AppRpcResult<M>;
+        case "pet/getState":
+          return petPayload as unknown as AppRpcResult<M>;
+        case "pet/recordConsumer":
+          recordedConsumers.push(params);
+          return {
+            target: petPayload.target,
+            consumer: params,
+          } as unknown as AppRpcResult<M>;
+        case "events/subscribe":
+          subscribedTopics.push((params as { topics?: unknown } | undefined)?.topics ?? []);
+          return {
+            subscribedSeq: 0,
+            events: [],
+            replayTruncated: false,
+          } as unknown as AppRpcResult<M>;
+        default:
+          throw new Error(`Unexpected RPC method: ${method}`);
+      }
+    },
+  };
 
   const session = new PetSessionCoordinator({
-    dashboardUrl: "http://127.0.0.1:3015",
+    dashboardUrl: "ludens-app://console/",
+    rpc,
     onSnapshot: value => snapshots.push(value),
     onTargetChanged: () => {
       targetChangeCount += 1;
@@ -173,7 +195,9 @@ test("PetSessionCoordinator supports !auto priority switching, setFocusedProject
 
   try {
     // 1. !auto with 0 online Cores -> graceful idle without creating sources or erroring
-    await session.pollTarget();
+    await session.start();
+    assert.deepEqual(subscribedTopics, [["pet", "catalog", "core"]]);
+    assert.ok(recordedConsumers.length > 0);
     assert.equal(createdWorkspaces.length, 0);
     assert.equal(snapshots.at(-1)?.phase, "等待活跃 Core");
     assert.equal(snapshots.at(-1)?.error, null);

@@ -18,8 +18,8 @@ Ludens separates device plumbing, workspace code, agent scheduling, and human ob
 
 ```mermaid
 flowchart LR
-    U["Operator"] --> Con["Console (Web / Desktop App)"]
-    Con --> Srv["ludens app-server"]
+    U["Operator (Desktop / Web / Mobile / CLI --remote)"] --> Con["Console (Vite SPA app/out) & ludens CLI"]
+    Con -->|"UDS app-server.sock / WS /rpc"| Srv["ludens app-server (JSON-RPC 2.0 + EventHub + HMAC /media)"]
     Srv --> Sh["Shiori (Agent Thread Core)"]
     Sh --> Ws["Workspace & Resident Perception (30 Hz Timeline / Skills)"]
     Ws --> Cat["Unified Catalog (ludens controller)"]
@@ -57,7 +57,14 @@ A **Workspace** (`~/.ludens/workspaces/<name>` or any registered directory) is a
 
 ### 4. Console — Observability & Control Plane
 
-The **Console** (`@ludens/app`) is served by `ludens app-server` both in a browser (`http://127.0.0.1:3015` by default) and inside the native **Ludens Desktop App** (`ludens-app`). Archive indexing runs in isolated background query workers so the interface stays responsive even across long multi-hour recordings.
+The **Console** (`@ludens/app`) is a single React 19 + Vite static SPA (`app/out`, zero Next.js server runtime) speaking JSON-RPC 2.0 (`@ludens/protocol/app-rpc`), `events/subscribe` real-time push (with `sinceSeq` catch-up), and dual-plane `MediaResolver` against `ludens app-server` across four surfaces:
+
+- **Zero-port Desktop App (`ludens-app`)**: connects over Unix Domain Socket (`app-server.sock`, **0 listening TCP ports**) using `ludens-app://console/`, `ludens-media://local/media?...`, `window.ludens.rpc`, and `ActiveCoreQuitGuard`.
+- **Hosted Web / Remote microservice**: `ludens app-server` / `ludens daemon start` (`--listen ws://HOST:PORT --auth token`) serves `app/out`, WS `/rpc`, and HMAC-signed `/media` (`#token=` scrubbed via `history.replaceState`).
+- **Unified CLI (`ludens`)**: manages the singleton daemon (`ludens daemon`) and runs operator commands uniformly over local `app-server.sock` or `--remote ws(s)://...`.
+- **Mobile & Multi-Target browser SPA**: switches cleanly between `electron-local`, `same-origin`, and `remote` targets via `<ConnectionTargetDialog>`.
+
+Archive indexing runs in isolated background query workers inside `ludens app-server` so the interface stays responsive even across long multi-hour recordings.
 
 The Console organizes workspace operations across ten views:
 

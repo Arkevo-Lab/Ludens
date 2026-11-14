@@ -6,8 +6,8 @@ Ludens 是面向复杂端到端任务（如机器人操控、安防巡检、桌�
 
 | 层级 / 组件 | 进程形态与核心职责 |
 | --- | --- |
-| **Desktop UI**（`app/` 与 `app/desktop/`） | **一等桌面端与静态控制台构建产物（`ludens-app` / `@ludens/app`，`app/out`）**：纯静态 React/Next 导出包，生产态直接由 **App Daemon**（`ludens app-server`）承载（零 Next.js 服务端进程；开发态 `npm run dev` 将 `/api/*` 代理至后台 `ludens app-server` 以获得前端 HMR）。`ludens-app` 通过 `AppServerHost` 自动拉起并监管 `ludens app-server --port 0 --parent-watchdog --static-dir <app/out>`，主窗口承载完整控制台（含左侧栏「活跃 Core」列表、0-Run 零门槛运行页入口、收回控制权操作与设备冲突接管弹窗），同时驱动可选原生透明 **桌宠（Desktop Pet）** 小组件与系统托盘；点击窗口关闭按钮（`×`）仅隐藏至托盘与桌宠并保持活跃 Core 继续运行，显式退出（`⌘Q` / 托盘 **Quit** / 父进程 `stdin` EOF 监听）时干净终止 **App Daemon** 及其由当前 App 实例拉起的 Core（`launchedBy === "app"`），而保留 `CLI` 拉起的 headless Core（`launchedBy === "cli"`）。 |
-| **App Daemon**（`core/src/server/` 与 `core/src/daemon/`） | **统一多工作区守护与本地 HTTP 服务（`ludens app-server` / `ludens serve`）**：在同一进程内承载 `/api/*` 路由、静态控制台资源（`app/out`）、纯 TypeScript 跨平台 `WorkspaceSupervisor`、查询/回放投影 Worker、Event Pool API、物理设备冲突仲裁（`409 DEVICE_BUSY` + `preempt`）以及共享桌宠 `!auto` 多 Core 自动跟随解析，按 `1 Workspace = 1 Core` 并发编排多个工作区的 Core，并跟踪 `launchedBy: "app" \| "cli"` 启动来源。 |
+| **Desktop UI**（`app/` 与 `app/desktop/`） | **Electron 桌面应用与响应式 Vite 静态 SPA 控制台（`ludens-app` / `@ludens/app`，`app/out`）**：单一 React 19 + Vite 静态 SPA（零 Next.js 运行时；开发态 `npm run dev` 由 Vite 代理 `/rpc`、`/media` 与 `/health`）。本地桌面模式下，`ludens-app` 通过 `AppServerHost` / `ensureLocalAppDaemon` 按 `LUDENS_HOME` 拉起或复用单例 `ludens app-server` 并走 Unix Domain Socket（`app-server.sock`）通信（**0 个监听 TCP 端口**）；注册 `ludens-app://console/`（打包 SPA）与 `ludens-media://local/media?...`（经 UDS `media/resolve` 返回本地媒体并支持 HTTP `206` `Range`）；渲染进程与 `PetSessionCoordinator` 通过 `DesktopUdsRpcRelay`（`window.ludens.rpc`）走 UDS RPC。关闭主窗口（`×`）时隐藏至托盘与可选桌宠；退出（`⌘Q` / `before-quit` / 托盘 **Quit**）走 `ActiveCoreQuitGuard`（无活跃 Core 时直接退出并保留后台守护进程；存在活跃 Core 时弹出三选一确认：**后台继续运行 / 停止所有 Core 并退出 / 取消**）。同一套 SPA 也可通过 `<ConnectionTargetDialog>` 在 `same-origin`、`remote`（`ws://`/`wss://` + Token）及移动端浏览器中无缝切换。 |
+| **App Daemon**（`core/src/server/` 与 `core/src/daemon/`） | **统一多工作区守护与 JSON-RPC 2.0 服务端（`ludens app-server` / `ludens serve`，由 `ludens daemon` 监管）**：默认纯 UDS（`app-server.sock`，零 TCP 端口），也支持显式绑定 `--listen ws://HOST:PORT`（非回环地址强制 `--auth token`）。在同一进程内提供 UDS NDJSON 与 WebSocket `/rpc` JSON-RPC 2.0（`@ludens/protocol/app-rpc`）、`EventHub` 实时推送（`events/subscribe` + 基于 1024 条环形缓冲的 `sinceSeq` 增量补齐，并在确认媒体落盘后推送 `observation` 事件）、HMAC capability ticket 鉴权的 `/media`（`mt=`、`206 Range`）、`/health` 以及静态 `app/out`（`/api/*` 返回 `404`）；内部承载 `WorkspaceSupervisor`、查询/回放投影 Worker、事件池读写、物理设备冲突仲裁（`CONFLICT -32009 DEVICE_BUSY` + `preempt`）与桌宠状态协调（`1 Workspace = 1 Core`）。 |
 | **Core**（`core/`，`ludens run`） | **单工作区执行内核（`@ludens/core`）**：替代旧称「宿主（Host）」，每个工作区对应一个独立 Core 进程，内部承载 **Shiori**（**Agent 线程核心**，挂载 **OMP 18.18.8**，普通评测程序、Verifier 与 Metric 共用同一生命周期而不启动模型）、工作区常驻感知与动作状态机（`perception.py`）Python 子进程、能力发现与路由、工作区内生能力评估（`ludens eval`）以及运行日志归档。Core 支持在运行页发消息或点击 **启动自主运行** 时按需拉起，并在收回控制权后以 **Warm Standby**（手动待命，`manual`）形态常驻待命。 |
 | **Baseware**（`baseware/`） | **独立跨设备集成层服务**：加载内置或外部 Driver，提供统一 Controller 能力目录、控制权租约（`epoch`）仲裁、输入取消与设备事实日志，对外暴露 CLI、TS/Python API 与 MCP 接口。 |
 
@@ -31,7 +31,18 @@ flowchart LR
     Srv --> A[Optional Desktop Pet: !auto multi-Core auto-follow]
 ```
 
-各组件拥有独立的 `package.json` / `pyproject.toml` 与锁文件。Ludens Core 仅依赖 Baseware 的客户端与类型契约，不直接导入任何具体 Driver 实现；**App Daemon**（`ludens app-server`，响应前端按需拉起与工作区启停控制）与无头 `ludens up` 共用 `core/src/daemon/` 中的纯 TypeScript `WorkspaceSupervisor` 编排本机进程，不再依赖 Python 后台启动脚本。
+各组件拥有独立的 `package.json` / `pyproject.toml` 与锁文件。Ludens Core 仅依赖 Baseware 的客户端与类型契约，不直接导入任何具体 Driver 实现；**App Daemon**（`ludens app-server`，响应前端按需拉起与 `runtime/control`）与 `ludens up`（本地 UDS 或 `--remote`）共用 `core/src/daemon/` 中的纯 TypeScript `WorkspaceSupervisor` 编排进程。
+
+### 四工况拓扑与接入方式
+
+同一份 Vite 静态 SPA（`app/out`）与 `@ludens/protocol/app-rpc` JSON-RPC 2.0 服务（`ludens app-server`）统一覆盖四种运行工况：
+
+1. **本地 Electron 桌面端（`ludens-app`，零监听 TCP 端口）**：`AppServerHost` 按 `LUDENS_HOME` 执行纯 Node `ensureLocalAppDaemon`，复用或拉起单例 `<home>/run/app-server.sock`（路径接近 96 字节 `APP_SERVER_SUN_PATH_LIMIT` 时自动回退至 `/tmp/ludens-app-<uid>-<sha256_12>.sock`）。通过自定义协议 `ludens-app://console/` 加载打包静态资源、`ludens-media://local/media?...` 走 UDS `media/resolve` 返回本地媒体并支持 `206` `Range`；渲染层 Preload IPC（`window.ludens.rpc`）与 `PetSessionCoordinator` 共用该 UDS 链路；退出流程由 `ActiveCoreQuitGuard` 保护。
+2. **托管 Web / 远端微型服务（`ludens app-server` / `ludens daemon start`）**：使用 `--listen ws://HOST:PORT --auth token [--token ... | --token-env ...] --static-dir app/out` 同时对外提供同源 Vite SPA、WebSocket JSON-RPC `/rpc`、HMAC capability ticket 鉴权的 `/media`（`mt=`、`DEFAULT_MEDIA_TICKET_TTL_MS = 4h`、`206 Range`）与 `/health`。非回环地址缺少 `--auth token` 时拒绝启动；浏览器打开 `#token=...` 后会立即通过 `history.replaceState` 擦除 URL 中的凭据。
+3. **统一 CLI（`ludens`）**：通过 `ludens daemon status|start|stop|restart` 管理后台 App-Server 守护进程（`stop` 默认同时停止 Core，除非传入 `--keep-cores`）。操作者命令（`config`、`workspace list|open|forget`、`init`、`up`、`services`、`down`、`status`、`auto`、`steer`、`consolidate`、`stop`、`model`）既可直连本地 `app-server.sock`，也可通过 `--remote ws(s)://... [--token ...]` 统一接入远端 App-Server；Shiori 运行时内部调用（`LUDENS_SOCKET` -> `core.sock`）继续直连对应 Core。
+4. **移动端与多目标切换**：任意手机或桌面浏览器加载响应式 SPA 后，可在 `<ConnectionTargetDialog>` 中切换 `electron-local`、`same-origin` 与 `remote`（`ws://` / `wss://` + Token）目标，底层契约保持干净以兼容未来的 Outbound Relay 扩展。
+
+所有界面均以事件驱动推送（`events/subscribe` + 基于 `1024` 环形缓冲的 `sinceSeq` 增量补齐）与双平面媒体解析（`MediaResolver`，且 `observation` 事件保证在媒体落盘验证后再推送）保持同步。
 
 ## 源码目录与分层
 
@@ -39,14 +50,14 @@ flowchart LR
 
 | 包 / 目录 | 分层与职责 |
 | --- | --- |
-| `protocol/`（`@ludens/protocol`） | **共享契约层**：RPC Schema、运行事件类型、Timeline / Archive 格式与控制台活动投影；其余包只通过 workspace 导入消费。 |
+| `protocol/`（`@ludens/protocol`） | **共享契约层**：JSON-RPC 2.0 协议契约（`app-rpc`）、连接/驱动/机器/事件池 Schema、运行事件类型、Timeline / Archive 格式与控制台活动投影；其余包只通过 workspace 导入消费。 |
 | `core/src/core/shiori/` | **Agent 线程核心控制内核**：`epoch` 控制租约、时间/请求预算、程序执行与取消；不依赖 OMP、CLI 或 Socket。 |
 | `core/src/core/storage/` | **工作区与事实存储**：`.ludens/` 身份与状态、`logs/<run-id>/` 事件流与归档。 |
 | `core/src/core/subsystems/` | **工作区常驻与设备子系统**：Python 感知/动作 Worker、`@capability` 发现、Baseware 设备会话。 |
 | `core/src/core/agent-omp/` | **OMP AgentRunner 实现**：OMP 会话组装、Ludens 扩展与模型 Trace 记录，通过窄接口 `ExtensionHost` 暴露 Core 运行时能力。 |
-| `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、原生 TypeScript Worker 与冷构建子进程、多 Core 摘要（`ProjectCoreSummary`）、设备冲突类型（`DeviceContentionConflict`）及活动/回放/遥测/桌宠（`PET_AUTO_TARGET`）投影，供 **App Daemon** 与可选 **桌宠** 消费。 |
-| `core/src/server/`、`core/src/daemon/`、`core/src/perf/`、`core/src/cli/` | **App Daemon 与外壳层**：统一 `ludens app-server`（`/api/*` 路由、静态 `app/out` 承载、`--parent-watchdog`）、Unix Socket RPC 守护进程与纯 TS `WorkspaceSupervisor`（管理多 Core 并发、启动来源与设备仲裁）、子系统性能基线（`perf`）、无头 CLI 前端。 |
-| `app/shell/` + `app/features/` + `app/lib/` + `app/perf/` | **Desktop UI 视图、交互 Hook 与性能基线**（循环工作台位于 `shell/`，统一生命周期封装 `useWorkspaceService` 位于 `lib/`，`index-memory` 基线位于 `perf/`）：外壳（`console-shell`、侧边栏「活跃 Core」、选择上下文）叠加按业务域切分的 `live`、`replay`、`capabilities`、`workspaces`、`pet`、`docs` 垂直切片，基础原子组件位于 `app/components/ui/`。 |
+| `core/src/core/query/` | **查询与投影引擎**：日志/运行/操作索引、原生 TypeScript Worker 与冷构建子进程、多 Core 摘要（`ProjectCoreSummary`）、设备冲突类型（`DeviceContentionConflict`）及活动/回放/遥测/桌宠（`PET_AUTO_TARGET`）投影，供 **App Daemon** 与 `PetSessionCoordinator` 消费。 |
+| `core/src/server/`、`core/src/daemon/`、`core/src/perf/`、`core/src/cli/` | **App Daemon 与多端接入层**：统一 `ludens app-server`（`rpc-router.ts`、`event-hub.ts`、HMAC `media-ticket.ts`、`http-routes.ts` 承载 `/health`、`/media` 与静态 `app/out`，`/api/*` 返回 `404`）、`app-daemon.ts`（`ensureLocalAppDaemon`）与 `app-server-paths.ts`（`app-server.sock`）、纯 TS `WorkspaceSupervisor`、`ludens daemon` 与 `--remote` 操作者 RPC 客户端（`operator-rpc.ts`、`app-rpc-client.ts`）、子系统性能基线（`perf`）与 CLI 前端。 |
+| `app/shell/`、`app/features/`、`app/lib/`、`app/desktop/`、`app/perf/` | **控制台 Vite SPA 与 Electron 桌面壳**：RPC 客户端与 Hooks（`lib/ludens-rpc.tsx`、`lib/connection-target.ts`、`lib/media-resolver.ts`、`components/connection-target-dialog.tsx`）、外壳（`console-shell`、侧边栏「活跃 Core」）、垂直业务切片（`live`、`replay`、`capabilities`、`workspaces`、`pet`、`docs`）、Electron 零端口桌面宿主（`desktop/main.ts`、`custom-protocols.ts`、`rpc-bridge.ts`、`quit-guard.ts`、`pet-session.ts`）与 `index-memory` 性能基线。 |
 
 
 ## 设备与统一能力
@@ -61,12 +72,12 @@ flowchart LR
 
 Ludens 遵循 **1 Workspace = 1 Core** 隔离原则，由 **App Daemon** 统一监管多个工作区的 Core 进程（`Project.core` / `ProjectCoreSummary`），彻底替代旧有的单全局宿主模式：
 
-- **按需拉起（On-Demand Spawn）与 0-Run 零门槛**：选择任意工作区（即使尚未产生历史运行记录）即可直接进入运行页（Live），基于 `Project.defaults` 展示预设模型与预算；在运行页发送目标消息或点击 **启动自主运行**（`▶`）时，App Daemon 会自动按需拉起对应工作区的 Core 与 Baseware（`spawned: true`），无需预先在终端执行 `ludens up`。
+- **按需拉起（On-Demand Spawn）与 0-Run 零门槛**：选择任意工作区（即使尚未产生历史运行记录）即可直接进入运行页（Live），基于 `Project.defaults` 展示预设模型与预算；在运行页发送目标消息或点击 **启动自主运行**（`▶`）时，App Daemon 会通过 JSON-RPC（`runtime/control` / `eventPool/mutate`）自动按需拉起对应工作区的 Core 与 Baseware（`spawned: true`），无需预先在终端执行 `ludens up`。
 - **Warm Standby 热备驻留**：当主动**收回控制权**（`auto off`）或控制预算耗尽时，Core 退出自主运行循环并保持 **Warm Standby**（手动待命，`manual` 态）：Baseware 设备连接与 Shiori OMP 会话持续驻留就绪，仅停止高频采样与录制，支持随时发送新消息秒级续接或切换模型。
-- **启动来源与退出回收边界（`launchedBy: "app" | "cli"`）**：每个活跃 Core 都会记录启动来源 `ServiceLaunchOrigin`（`"app"` 或 `"cli"`）及所属 `appInstanceId`，并在控制台侧边栏「活跃 Core」列表直观标注来源与单点停止按钮（`■`）。关闭桌面主窗口（`×`）仅隐藏至系统托盘与可选桌宠；显式退出桌面 App（`⌘Q` / 托盘 **Quit**）时，App Daemon **仅回收由该 App 实例拉起的 Core（`launchedBy === "app"`）**，由终端无头命令启动的 Core（`launchedBy === "cli"`）保持不受影响、继续在后台运行。
-- **物理设备冲突仲裁（`409 DEVICE_BUSY` + `preempt`）**：绑定不同物理设备或不同端口的工作区 Core 完全并发运行、互不干扰。当多个工作区尝试占用同一物理设备或端口时：
+- **启动来源与 `ActiveCoreQuitGuard` 退出守卫**：每个活跃 Core 都会记录启动来源 `ServiceLaunchOrigin`（`"app"` 或 `"cli"`）及所属 `appInstanceId`，并在控制台侧边栏「活跃 Core」列表直观标注来源与单点停止按钮（`■`）。关闭桌面主窗口（`×`）仅隐藏至系统托盘与可选桌宠；显式退出桌面 App（`⌘Q` / `before-quit` / 托盘 **Quit**）时，由 `ActiveCoreQuitGuard` 查询 `daemon/status`：若当前无活跃 Core，应用直接退出并保留后台单例守护进程；若存在活跃 Core，则弹出三选一确认框（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。
+- **物理设备冲突仲裁（`CONFLICT -32009 DEVICE_BUSY` + `preempt`）**：绑定不同物理设备或不同端口的工作区 Core 完全并发运行、互不干扰。当多个工作区尝试占用同一物理设备或端口时：
   - 若当前持有设备的 Core 处于 **Warm Standby（手动待命，`manual`）**，系统自动让位释放其设备租约并由新工作区接管；
-  - 若持有设备的 Core 正在执行活跃**自主运行**循环，App Daemon 返回 HTTP `409`（`code: "DEVICE_BUSY"` 与 `DeviceContentionConflict` 载荷），Desktop UI 弹出设备冲突提示框，供用户选择取消、切换到持有工作区或执行**抢占接管（`preempt`）**——干净停止原 Core、释放设备租约后立即启动当前工作区。
+  - 若持有设备的 Core 正在执行活跃**自主运行**循环，App Daemon 返回 JSON-RPC 错误 `-32009`（`APP_RPC_ERROR_CODES.CONFLICT`，`data.code: "DEVICE_BUSY"` 与 `DeviceContentionConflict` 载荷），控制台弹出设备冲突提示框，供用户选择取消、切换到持有工作区或执行**抢占接管（`preempt`）**——干净停止原 Core、释放设备租约后立即启动当前工作区。
 
 ### 2. 控制租约（`epoch`）与权限校验
 
@@ -124,7 +135,7 @@ Core 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens/shiori
 - **CLI**：`ludens event list [--direction inbound|outbound] [--status pending|handled] [--limit <n>]`、`ludens event send [--title <text>] [--message <text> | <text>]`、`ludens event reply <event-id> [...]`、`ludens event ack <event-id>...`。Core 在线时命令经 Core Socket 路由，否则直接写入 `.ludens/event-pool.json`，因此在 `manual` 待机或 Core 已停止时留下的消息会在下一个周期被拾取。变更类命令仅限人类：在智能体周期内（存在 `BASEWARE_EPOCH`）会被拒绝，并引导智能体改用 `event_pool` 工具。
 - **Shiori 工具**：`event_pool({ action: "read" | "ack" | "emit" })`。`read` 返回待处理的入站消息/回复（全部或指定 `ids`；`includeHandled` 可读历史），默认将其标记已读，`ack: false` 则在忙碌时暂缓；`ack` 显式将入站事件标记为已处理；`emit` 发布出站 `help_request`（默认）或 `notice`。`pause` 默认为 `false`，保持自主循环异步进行；只有 `pause: true`——仅用于彻底受阻的智能体——会以 `awaiting human` 停止自主运行并撤销设备控制权、回到手动待命，直到人类恢复。
 - **轮首摘要**：`before_agent_start` 仅在 `pendingInbound > 0` 时追加紧凑的入站摘要：每条包含 `id`、`seq`、`kind`、可选 `title` 与 72 字符单行预览。事件池空闲时不追加任何字节，从而保留 provider 前缀 KV 缓存；完整正文通过 `event_pool({ action: "read" })` 按需拉取。
-- **界面**：Desktop UI 通过 **App Daemon** 的 `GET/POST /api/event-pool` 读写同一存储，驱动出站托盘、会话流卡片、标题栏待处理徽章与回复输入框；多工作区的待处理出站数量（`pendingOutbound`）同步汇总至侧栏「活跃 Core」列表并驱动可选桌宠 `!auto` 的 `🆘` 优先跳转。CLI 与控制台是对同一加锁文件的对等写入方。
+- **界面**：控制台前端通过 **App Daemon** 的 `eventPool/read` 与 `eventPool/mutate` JSON-RPC 方法读写同一存储，并通过 `events/subscribe` 订阅 `eventPool` 实时推送，驱动出站托盘、会话流卡片、标题栏待处理徽章与回复输入框；多工作区的待处理出站数量（`pendingOutbound`）同步汇总至侧栏「活跃 Core」列表并驱动可选桌宠 `!auto` 的 `🆘` 优先跳转。CLI（本地 UDS 或 `--remote`）与控制台是对同一加锁文件的对等写入方。
 - **双时序投影与全览**：每个生命周期投影为两条流消息。消息 1（人工消息或 `outbound_event` 卡片）严格锚定在 `createdAt`（`T_send` / `T_emit`），绝不追加到流尾。消息 2（`pool_receipt`）由 `pool_event` 的 `action: "handled"` 投影而来，锚定在 `handledAt`（`T_read`）。人工可通过 `ack` 与 `actor: "human"` 撤回未读的待处理入站消息，显示为已撤回而非已读取。Live 工作台右侧检查器坞在 `Stage & Telemetry` 与 `Event Pool` 分段头之间切换；专用的事件池全览列出留存事件，线程头快捷入口可打开它，每条事件的定位到会话流操作会跳转到其流内位置。
 
 紧急的轮内打断仍然使用 `ludens steer <message>`，它直接排队进入正在运行的智能体，而不进入事件池。
@@ -132,13 +143,13 @@ Core 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens/shiori
 ## 可核查的运行事实
 
 - **多源事实解耦**：Baseware 独立持久化设备控制与执行事实（`logs/baseware/`），Core 记录模型调用、工具执行、能力调用与感知交付（`logs/<run-id>/`），Shiori 挂载局部 OpenTelemetry provider 记录 `agentLoop` 遥测。
-- **控制台隔离读取**：**App Daemon**（`ludens app-server`）将归档解析与索引维护放在独立的 Worker 线程（`core/src/core/query/`）中，冷历史目录由限流为全局单实例的临时 Builder 子进程构建并原子发布至 `.dashboard-index/`；`core/src/server/` 中的 `/api/*` 路由与可选桌宠仅通过有界 RPC 读取投影结果，生产态不运行任何 Next.js 服务端进程。详见 [日志与调用链](logging.md#消费与指标解释)。
+- **控制台隔离读取**：**App Daemon**（`ludens app-server`）将归档解析与索引维护放在独立的 Worker 线程（`core/src/core/query/`）中，冷历史目录由限流为全局单实例的临时 Builder 子进程构建并原子发布至 `.dashboard-index/`；`core/src/server/rpc-router.ts` 中的 JSON-RPC 处理器与 `PetSessionCoordinator`（`activity/get`、`events/subscribe`）仅通过有界 RPC 读取投影结果，完全移除 `/api/*` REST 路由且不运行任何 Next.js 服务端进程。详见 [日志与调用链](logging.md#消费与指标解释)。
 
 ## TypeScript 与 Python
 
 Ludens 由 TypeScript **Core / App Daemon**（`core/src/`）与 Python 工具包（`core/python/ludens_tools/`）共同组成：
 
-- **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、统一 **App Daemon**（`ludens app-server`：`/api/*` + 静态前端承载）、纯 TS 跨平台 `WorkspaceSupervisor`（管理多 Core 并发、`launchedBy` 清理边界与 `--parent-watchdog` 回收）、跨进程 RPC 与 CLI 编排。
+- **TypeScript 侧**：负责 Shiori 运行时、控制权租约、OMP 会话扩展、统一 **App Daemon**（`ludens app-server` 提供 UDS/WS JSON-RPC `/rpc`、`EventHub` 推送、HMAC `/media` 与 Vite 静态 SPA `app/out`）、`ensureLocalAppDaemon`（`app-server.sock`）、纯 TS 跨平台 `WorkspaceSupervisor`、统一 CLI（`ludens daemon` 与 `--remote`）及 Electron 桌面端集成。
 - **Python 侧**：负责 `@capability` 静态发现与动态执行、统一常驻 `Perception` 状态机、PyAV 视频段编码与冷帧按需解码。常驻感知通过媒体流引用（`_StreamMediaRef`）直接从磁盘摄取 Baseware 缓冲的原始字节，省去跨进程内联 Base64 往返，自动将设备观测 `sources` 时空溯源绑定至时间线记录，并通过 `ifNoneMatchSequence` 对未发生帧变化的最新帧 `Client().observe()` 轮询执行零编码短路。视频编解码直接在常驻感知进程内完成，不额外引入独立的流媒体服务。
 
 ## 能力持久化边界
@@ -147,7 +158,7 @@ Ludens 由 TypeScript **Core / App Daemon**（`core/src/`）与 Python 工具包
 
 登记创建、移动、移除与桌宠目标选择共用按工作区划分的锁。同时需要两把锁时，先获取登记锁，再获取桌宠目标锁。移除先读取当前登记，仅清除与之匹配的原始桌宠目标，再删除登记文件；目标不可读或不可写时，在删除前阻止移除。重新登记不会恢复已清除的目标。其他目标、消费者心跳文件、工作区内容及运行中的 Core 均不受影响。普通桌宠状态轮询保持只读，只有已存目标发生目录移动时才加锁重新读取并更新。控制台操作结果直接报告已提交配置或实际移除的登记，不依赖后续目录或消费者状态读取。
 
-默认情况下，可选**桌宠**采用 **`!auto`（`PET_AUTO_TARGET`）多 Core 自动追踪模式**（`targetConfigured === false` 且 `autoFollowing: true`）：只要存在活跃 Core，桌面端按优先级自动跟随——优先任意存在待处理 `🆘` 出站协助请求（`pendingOutbound > 0`）的在线 Core → 其次当前聚焦工作区的在线 Core → 其次后台处于**自主运行**态（或唯一活跃）的 Core；全部 Core 停机时优雅进入空闲待命（`autoWaiting`）。用户仍可手动固定单个工作区或显式选择**停止跟随**（`null`）。桌宠目标 PUT 与心跳 POST 分别独立返回已提交的 `{ target }` 和 `{ consumer }`。状态 GET 在心跳记录不可读时仍保留已保存目标（`connected: null` 并附 `consumerError`），不会声称桌面端未连接。登记目录离线、缺失或身份不符时，仍保留已保存目标并标注 `targetUnavailable: true`；桌面端暂时停止消费该来源，不清除选择。心跳的 `targetRevision` 表示正在尝试的目标，`revision` 表示已加载的来源。只有尝试目标匹配时才归属应用错误，正在跟随则必须有匹配的已加载 revision。状态读取会等待该 worker 已接收的目标写入结束，避免恢复读取先报告旧选择，排队中的写入随后才完成。`targetConfigured` 区分尚未设置目标文件（默认进入 `!auto` 自动追踪）与显式保存停止（`null`）；只有后者会阻止启动时的自动选择。
+默认情况下，可选**桌宠**采用 **`!auto`（`PET_AUTO_TARGET`）多 Core 自动追踪模式**（`targetConfigured === false` 且 `autoFollowing: true`）：只要存在活跃 Core，桌面端按优先级自动跟随——优先任意存在待处理 `🆘` 出站协助请求（`pendingOutbound > 0`）的在线 Core → 其次当前聚焦工作区的在线 Core → 其次后台处于**自主运行**态（或唯一活跃）的 Core；全部 Core 停机时优雅进入空闲待命（`autoWaiting`）。用户仍可手动固定单个工作区或显式选择**停止跟随**（`null`）。桌宠通过 UDS RPC 调用 `pet/setTarget` 与 `pet/recordConsumer` 分别返回已提交的 `{ target }` 和 `{ consumer }`，观测图像通过 `ludens-media://local/media?...` 加载。`pet/getState` 在心跳记录不可读时仍保留已保存目标（`connected: null` 并附 `consumerError`），不会声称桌面端未连接。登记目录离线、缺失或身份不符时，仍保留已保存目标并标注 `targetUnavailable: true`；桌面端暂时停止消费该来源，不清除选择。心跳的 `targetRevision` 表示正在尝试的目标，`revision` 表示已加载的来源。只有尝试目标匹配时才归属应用错误，正在跟随则必须有匹配的已加载 revision。`pet/getState` 读取会等待该 worker 已接收的目标写入结束，避免恢复读取先报告旧选择，排队中的写入随后才完成。`targetConfigured` 区分尚未设置目标文件（默认进入 `!auto` 自动追踪）与显式保存停止（`null`）；只有后者会阻止启动时的自动选择。
 
 工作区内的状态存储各司其职，互不冗余复制：
 

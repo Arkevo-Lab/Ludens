@@ -101,7 +101,7 @@
 
 ### 1. 控制台 Worker 与三层可重建索引（`.dashboard-index/`）
 
-控制台将日志解析与索引构建完全隔离在 Next.js 请求上下文之外的独立 Node Worker 中。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.ludens/archive/` 或 `.ludens/timeline/`），包含三部分：
+控制台在 `ludens app-server` 中将日志解析与索引构建完全隔离于独立 Node Worker，不依赖 Next.js 请求上下文（已全面移除 Next.js 运行时）。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.ludens/archive/` 或 `.ludens/timeline/`），包含三部分：
 
 1. **源事件位置与关系目录**：每条事件仅保存文件字节偏移、时间戳（取 `origin.at ?? at`）、类型与调用身份；模型、Span、动作与观测的关联表均指向源事件字节偏移。
 2. **Activity 按需展示配方**：仅保存每个展示块（Thinking / Text / Tool / System / Diagnostic）对应的源事件偏移或 `streams/` 截止字节数；前端或桌宠请求时才按配方从原件组装文本，不在索引中冗余存储完整正文。
@@ -110,18 +110,18 @@
 ### 2. 分页缓存与冷历史构建子进程
 
 - **页缓存与租约淘汰**：索引按每页最多 1024 条或 256 KiB 分页落盘。查询 Worker 维护默认 **256 MiB** 的共享页缓存（可通过 `LUDENS_APP_INDEX_CACHE_BYTES` 调整），最多保留 **3 个**闲置 run（`LUDENS_APP_INDEX_MAX_RUNS`），闲置 **5 分钟**（`LUDENS_APP_INDEX_IDLE_MS`）且无在途读取租约时自动释放内存。
-- **单实例冷构建 Builder**：首次打开尚未建立索引的历史大型 run 时，查询 Worker 启动全局唯一的临时 Builder 子进程（目标工作集默认 **2 GiB**，由 `LUDENS_APP_BUILD_BYTES` 控制），单遍扫描固定截止点的事件流并批量生成 `generations/<id>/`，完成后通过原子替换 `.dashboard-index/active.json` 发布并退出子进程以归还 OS 内存。构建期间接口返回 HTTP `202 ARCHIVE_PREPARING` 及实时进度；关闭浏览器标签页仅取消当前 HTTP 查询，不会中断后台有限构建任务。
+- **单实例冷构建 Builder**：首次打开尚未建立索引的历史大型 run 时，查询 Worker 启动全局唯一的临时 Builder 子进程（目标工作集默认 **2 GiB**，由 `LUDENS_APP_BUILD_BYTES` 控制），单遍扫描固定截止点的事件流并批量生成 `generations/<id>/`，完成后通过原子替换 `.dashboard-index/active.json` 发布并退出子进程以归还 OS 内存。构建期间 JSON-RPC 查询返回错误 `CONFLICT`（`-32009`，`data.code: "ARCHIVE_PREPARING"`）及实时进度载荷；关闭客户端仅取消当次请求，不会中断后台有限构建任务。
 
-### 3. 控制台 HTTP 接口与可选桌宠增量跟随
+### 3. 控制台 JSON-RPC 接口、`EventHub` 推送与可选桌宠增量跟随
 
-- **`/api/activity`**：提供 `changes`（基于不透明游标的增量块更新，供网页与桌宠共用）、`history`（按类别与全文关键词分页检索）与 `block`（单块详情展开）。桌宠仅消费所跟随工作区最新运行的实时 `changes` 增量，并在 `workspace/logs/consumers/` 下记录自身消费水位。
-- **`/api/diagnostics`**：专供 `full` 模式诊断事件按 `epoch`、时间窗、`traceId / spanId / actionId` 分页查询（单页上限 500 条），不混入普通 Activity 流或桌宠气泡。
+- **`activity/get` 与 `events/subscribe`**：提供 `changes`（基于游标的增量块更新，供 Vite SPA 控制台与桌宠 `PetSessionCoordinator` 共用）、`history`（按类别与全文关键词分页检索）与 `block`（单块详情展开）。实时更新通过 `EventHub`（1024 条环形缓冲 + `sinceSeq` 断点续传）订阅推送，且 `observation` 事件确保在媒体落盘核验后才发布；桌宠经 UDS RPC 消费最新运行的 `changes` 增量，并通过 `pet/recordConsumer` 在 `workspace/logs/consumers/` 下记录自身消费水位。
+- **`diagnostics/events`**：专供 `full` 模式诊断事件按 `epoch`、时间窗、`traceId / spanId / actionId` 通过 JSON-RPC 分页查询（单页上限 500 条），不混入普通 Activity 流或桌宠气泡。
 
 ## 经历回放
 
 ### 1. 时空轴播放器与帧预读缓冲
 
-控制台回放视图（`/api/replay`）将 `.ludens/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
+控制台回放视图（`replay/get` JSON-RPC 配合双平面 `MediaResolver`：桌面端经 UDS `media/resolve` 解析 `ludens-media://local/media?...`，托管 Web / 远端经 HMAC 签名的 `/media?...&mt=<ticket>` 加载并支持 `206 Partial Content` `Range` 断点续传）将 `.ludens/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
 
 - **时间窗与双帧预读**：事件按最多 60 秒窗口、每页 500 条游标分页；画面使用解码缓冲 Hook——待目标时刻的所有屏幕画面加载完毕后原子切换，同时向后预读最多 2 帧（上限 8 张图 / 32 MiB 预读缓存），切换工作区或离开页面时立即释放图像内存。
 - **时钟与解码器状态**：显式时间轴跳转增加时钟版本并精确对齐解码器；已提交的 URL 位置会被确认，避免属性回写造成第二次 seek。连续播放容忍瞬时偏差和普通解码等待。任何真实 `waiting` 事件都会同时冻结共享时钟与解码器，直到恢复，即使 `readyState` 仍报告数据充足。仅当播放且全局就绪时，超过 1 秒的偏差持续存在 1 秒才触发重同步；稀疏尾部的精确恢复只作用于最后 100ms 的采样区域。

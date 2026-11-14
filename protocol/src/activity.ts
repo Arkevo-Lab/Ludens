@@ -68,48 +68,89 @@ export function acceptsScope(scope: ActivityScope, project: string, run?: string
     && (epoch === undefined || (epoch === "all" ? scope.epoch === null : scope.epoch === epoch));
 }
 
-/** HTTP reads wait for a finite archive build; abort only stops this reader. */
-async function readArchiveJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  for (;;) {
-    signal?.throwIfAborted();
-    const response = await fetch(url, { cache: "no-store", signal });
-    const body = await response.json();
-    signal?.throwIfAborted();
-    if (response.status === 202 && body.code === "ARCHIVE_PREPARING") {
-      await new Promise<void>((resolve, reject) => {
-        const aborted = () => { clearTimeout(timer); reject(signal?.reason); };
-        const timer = setTimeout(() => { signal?.removeEventListener("abort", aborted); resolve(); }, 250);
-        signal?.addEventListener("abort", aborted, { once: true });
-        if (signal?.aborted) aborted();
-      });
-      continue;
-    }
-    if (!response.ok) throw Object.assign(new Error(body.error ?? `读取失败 · HTTP ${response.status}`),
-      { code: body.code, progress: body.progress });
-    return body;
-  }
+export interface ActivityChangesRequest {
+  project: string;
+  run?: string;
+  epoch?: string;
+  mode: "changes";
+  limit?: number;
+  cursor?: string;
 }
 
-export async function requestActivity(params: URLSearchParams, signal: AbortSignal, baseUrl?: string): Promise<ActivityResponse> {
-  const path = "/api/activity?" + params;
-  return readArchiveJson<ActivityResponse>(baseUrl ? new URL(path, baseUrl).href : path, signal);
+export type ActivityChangesReader = (
+  request: ActivityChangesRequest,
+  signal: AbortSignal,
+) => Promise<ActivityResponse>;
+
+export interface ActivityChangesClientOptions {
+  project: string;
+  run?: string;
+  epoch?: string;
+  limit?: number;
+  /** Injected transport reader backed by RPC (`activity/get`) or custom fetcher. */
+  reader?: ActivityChangesReader;
+  /** Alias for `reader` to support fetcher naming cleanly. */
+  fetcher?: ActivityChangesReader;
+}
+
+/** Retries `ARCHIVE_PREPARING` responses cleanly while respecting caller abort signals. */
+export async function retryArchivePreparing<T>(
+  read: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  for (;;) {
+    signal.throwIfAborted();
+    try {
+      const result = await read(signal);
+      signal.throwIfAborted();
+      return result;
+    } catch (error) {
+      signal.throwIfAborted();
+      const err = error as { code?: unknown; data?: { code?: unknown } } | null;
+      const code = err?.code ?? err?.data?.code;
+      if (code === "ARCHIVE_PREPARING") {
+        await new Promise<void>((resolve, reject) => {
+          const aborted = () => { clearTimeout(timer); reject(signal.reason); };
+          const timer = setTimeout(() => {
+            signal.removeEventListener("abort", aborted);
+            resolve();
+          }, 250);
+          signal.addEventListener("abort", aborted, { once: true });
+          if (signal.aborted) aborted();
+        });
+        continue;
+      }
+      throw error;
+    }
+  }
 }
 
 /** Holds only an opaque cursor. The server owns projection, ordering and reset snapshots. */
 export class ActivityChangesClient {
   private cursor: string | null = null;
-  constructor(private options: { project: string; run?: string; epoch?: string; limit?: number; baseUrl?: string }) {}
+  private readonly reader: ActivityChangesReader;
+
+  constructor(private options: ActivityChangesClientOptions) {
+    const reader = options.reader ?? options.fetcher;
+    if (typeof reader !== "function") {
+      throw new Error("ActivityChangesClient requires an injected reader function");
+    }
+    this.reader = reader;
+  }
 
   async read(signal: AbortSignal): Promise<ActivityChangesPage> {
     signal.throwIfAborted();
-    const { project, run, epoch, limit, baseUrl } = this.options;
+    const { project, run, epoch, limit } = this.options;
     const previousCursor = this.cursor;
-    const params = new URLSearchParams({ project, mode: "changes" });
-    if (run !== undefined) params.set("run", run);
-    if (epoch !== undefined) params.set("epoch", epoch);
-    if (limit !== undefined) params.set("limit", String(limit));
-    if (previousCursor) params.set("cursor", previousCursor);
-    const result = await requestActivity(params, signal, baseUrl);
+    const request: ActivityChangesRequest = {
+      project,
+      mode: "changes",
+      ...(run !== undefined ? { run } : {}),
+      ...(epoch !== undefined ? { epoch } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+      ...(previousCursor ? { cursor: previousCursor } : {}),
+    };
+    const result = await retryArchivePreparing(sig => this.reader(request, sig), signal);
     if (!acceptsScope(result.scope, project, run, epoch)) throw new Error("日志返回了其他运行范围");
     if (result.mode !== "snapshot" && result.mode !== "delta") throw new Error("日志返回了非增量页面");
     const cursor = result.cursor ?? null;

@@ -2,6 +2,8 @@
 
 This note explains why Ludens patches the OpenAI Codex WebSocket transport layer and maintains an offline fault matrix for connection recovery.
 
+> **Scope**: This post covers the **LLM model-inference WebSocket delta channel** inside Shiori / OMP. For Console and `--remote` CLI **App-Server WebSocket JSON-RPC (`/rpc`)** recovery (`events/subscribe` + `sinceSeq` replay over `EventHub`), see [Architecture and Boundaries](../reference/architecture.md) and [Logging and Call Chains](../reference/logging.md).
+
 The reason is straightforward: **multimodal payloads are large. Without delta transport, request bodies grow rapidly with session history and degrade long-horizon runs.**
 
 ## Why multimodal loops rely on WebSocket delta transport

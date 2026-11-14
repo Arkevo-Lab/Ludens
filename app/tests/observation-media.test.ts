@@ -14,13 +14,13 @@ test("a failed text read releases the response; an explicit retry reads the iden
       : new Response("  unchanged\n\ttext\n");
   };
   try {
-    await assert.rejects(readObservationText("/api/media?id=same", new AbortController().signal), { httpStatus: 409 });
+    await assert.rejects(readObservationText("/media?kind=asset&id=same", new AbortController().signal), { httpStatus: 409 });
     assert.equal(cancelled, 1); assert.equal(calls.length, 1);
-    const text = await readObservationText("/api/media?id=same", new AbortController().signal);
+    const text = await readObservationText("/media?kind=asset&id=same", new AbortController().signal);
     assert.equal(text, "  unchanged\n\ttext\n");
     assert.deepEqual(calls, [
-      { url: "/api/media?id=same", cache: "no-store", method: undefined },
-      { url: "/api/media?id=same", cache: "no-store", method: undefined },
+      { url: "/media?kind=asset&id=same", cache: "no-store", method: undefined },
+      { url: "/media?kind=asset&id=same", cache: "no-store", method: undefined },
     ]);
   } finally { globalThis.fetch = savedFetch; }
 });
@@ -36,7 +36,7 @@ test("late text from a superseded scope is rejected even if the fetch ignores ca
   };
   const controller = new AbortController();
   try {
-    const pending = readObservationText("/api/media?id=old", controller.signal);
+    const pending = readObservationText("/media?kind=asset&id=old", controller.signal);
     controller.abort(); assert.equal(requestSignal?.aborted, true);
     resolve(new Response(new ReadableStream({ cancel() { cancelled++; } })));
     await assert.rejects(pending, { name: "AbortError" });
@@ -53,8 +53,8 @@ test("audio/status probes cancel their response body and never read or play medi
     return new Response(new ReadableStream({ cancel() { cancelled++; } }), { status: calls.length === 1 ? 410 : 200 });
   };
   try {
-    assert.equal(await observationMediaStatus("/api/media?id=audio", new AbortController().signal), 410);
-    assert.equal(await observationMediaStatus("/api/media?id=audio", new AbortController().signal), 200);
+    assert.equal(await observationMediaStatus("/media?kind=asset&id=audio", new AbortController().signal), 410);
+    assert.equal(await observationMediaStatus("/media?kind=asset&id=audio", new AbortController().signal), 200);
     assert.equal(cancelled, 2);
     assert(calls.every(call => call.cache === "no-store" && call.method === undefined && call.body === undefined));
   } finally { globalThis.fetch = savedFetch; }
@@ -67,7 +67,7 @@ test("a cancelled status probe releases a late response without reporting it as 
   globalThis.fetch = async () => new Promise<Response>(accept => { resolve = accept; });
   const controller = new AbortController();
   try {
-    const pending = observationMediaStatus("/api/media?id=old-audio", controller.signal);
+    const pending = observationMediaStatus("/media?kind=asset&id=old-audio", controller.signal);
     controller.abort();
     resolve(new Response(new ReadableStream({ cancel() { cancelled++; } }), { status: 200 }));
     await assert.rejects(pending, { name: "AbortError" }); assert.equal(cancelled, 1);

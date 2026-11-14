@@ -15,6 +15,7 @@ import { replayUpcomingVideos, replayVideoReady, type VideoSource } from "@/feat
 import { REPLAY_COARSE_TICK_MS, useReplayClock, useReplaySession, type ReplayClock } from "@/features/replay/use-replay-session";
 import "@/features/replay/timeline-player.css";
 import { useTranslations } from "@/lib/locale";
+import { useMediaResolver } from "@/lib/ludens-rpc";
 import { ChevronLeft, ChevronRight, PanelRight, RefreshCw, RotateCcw, RotateCw, Search, Share2, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReplayTimeJump } from "@/features/replay/replay-time-jump";
@@ -66,42 +67,44 @@ type VideoPlayback = { at: number; liveAt?: () => number; playing: boolean; cloc
 function ReplayMedia({ media, label, sampledAt, image, playback, slot, upcoming }: { media: ReplayFrame["media"][number]; label: string; image?: BufferedImage;
   sampledAt: number; playback: VideoPlayback; slot: string; upcoming?: VideoSource }) {
   const t = useTranslations("timelinePlayer");
+  const resolveMedia = useMediaResolver();
+  const resolvedUrl = useMemo(() => resolveMedia.resolve(media.url) ?? media.url, [resolveMedia, media.url]);
   const [failure, setFailure] = useState<{ url: string; message: string } | null>(null);
-  const error = failure?.url === media.url ? failure.message : "";
-  const setError = (message: string) => setFailure({ url: media.url, message });
+  const error = failure && failure.url === resolvedUrl ? failure.message : "";
+  const setError = (message: string) => setFailure({ url: resolvedUrl, message });
   const [text, setText] = useState("");
   const isText = media.mediaType.startsWith("text/") || media.mediaType === "application/json";
   useEffect(() => {
     setError(""); setText("");
-    if (!isText) return;
+    if (!isText || !resolvedUrl) return;
     const controller = new AbortController();
-    fetch(media.url, { signal: controller.signal }).then(async response => {
+    fetch(resolvedUrl, { signal: controller.signal }).then(async response => {
       if (!response.ok) throw new Error(response.status === 410 ? t("recordExpired") : t("recordUnreadable"));
       const value = await response.text();
       if (!controller.signal.aborted) setText(value);
     }).catch(error => { if (!controller.signal.aborted) setError(error.message); });
     return () => controller.abort();
-  }, [media.url, isText]);
+  }, [resolvedUrl, isText]);
   if (media.video) return <ReplayVideo source={media.video} sampledAt={sampledAt} {...playback} slot={slot} label={label} upcoming={upcoming} />;
   if (image?.error || error) return <div className="replay-media-missing" role="status">{image?.error || error}<small>{t("mediaKeepPosition")}</small></div>;
   if (media.mediaType.startsWith("image/")) return <img src={image?.src} width={image?.width} height={image?.height} alt={label} draggable={false}
     onError={() => setError(t("imageUnavailable"))} />;
-  if (media.mediaType.startsWith("audio/")) return <audio controls preload="none" src={media.url}
+  if (media.mediaType.startsWith("audio/")) return <audio controls preload="none" src={resolvedUrl}
     aria-label={label} onError={() => setError(t("audioUnavailable"))} />;
-  if (media.mediaType.startsWith("video/")) return <video controls preload="metadata" src={media.url}
+  if (media.mediaType.startsWith("video/")) return <video controls preload="metadata" src={resolvedUrl}
     aria-label={label} onError={() => setError(t("videoUnavailable"))} />;
   if (isText) return <pre>{text || t("readingText")}</pre>;
-  return <a href={media.url} target="_blank" rel="noreferrer">{t("view")} {media.mediaType} {t("record")} ↗</a>;
+  return <a href={resolvedUrl} target="_blank" rel="noreferrer">{t("view")} {media.mediaType} {t("record")} ↗</a>;
 }
 
-const FrameMedia = memo(function FrameMedia({ frame, images, playback, upcoming, onInspect }: {
-  frame: ReplayFrame; images: Map<string, BufferedImage>; playback: VideoPlayback; upcoming: ReadonlyMap<string, VideoSource>;
+const FrameMedia = memo(function FrameMedia({ frame, images, resolveMediaUrl, playback, upcoming, onInspect }: {
+  frame: ReplayFrame; images: Map<string, BufferedImage>; resolveMediaUrl: (url: string) => string; playback: VideoPlayback; upcoming: ReadonlyMap<string, VideoSource>;
   onInspect?: (trigger: HTMLElement) => void;
 }) {
   const t = useTranslations("timelinePlayer");
   return <><div className="replay-media-grid">
     {frame.media.map(media => <div className={"replay-media" + (media.mediaType.startsWith("image/") ? " replay-image" : "")} key={media.index}>
-      <ReplayMedia media={media} sampledAt={frame.at} image={images.get(media.url)} playback={playback} slot={frame.capability + ":" + media.index}
+      <ReplayMedia media={media} sampledAt={frame.at} image={images.get(resolveMediaUrl(media.url))} playback={playback} slot={frame.capability + ":" + media.index}
         upcoming={upcoming.get(frame.capability + ":" + media.index)}
         label={frame.capability + " · " + wallTime(frame.at) + " · " + (media.index + 1)} />
     </div>)}
@@ -333,6 +336,8 @@ export function TimelinePlayer({
   }, [evidenceKey]);
 
   const requestedScope = new URLSearchParams({ project, run, ...(epoch ? { epoch } : {}) }).toString();
+  const resolveMedia = useMediaResolver();
+  const resolveMediaUrl = useCallback((raw: string) => resolveMedia.resolve(raw) ?? raw, [resolveMedia]);
   const [capability, setCapability] = useState("");
   const [windowMs, setWindowMs] = useState(REPLAY_WINDOW_MS);
   const [shareState, setShareState] = useState("");
@@ -416,11 +421,11 @@ export function TimelinePlayer({
   // Records are immutable. Keep frame identity stable while the playhead moves within one sample.
   const frameKey = useMemo(() => JSON.stringify(visibleFrames.map(frame => [frame.id, frame.media])), [visibleFrames]);
   const target = useMemo(() => activeWindow ? { key: frameKey, value: visibleFrames,
-    urls: visibleFrames.flatMap(frame => frame.media.filter(media => media.mediaType.startsWith("image/") && !media.video).map(media => media.url)) } : null,
+    urls: visibleFrames.flatMap(frame => frame.media.filter(media => media.mediaType.startsWith("image/") && !media.video).map(media => resolveMediaUrl(media.url))) } : null,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  [frameKey, !!activeWindow]);
+  [frameKey, !!activeWindow, resolveMediaUrl]);
   const future = useMemo(() => indexedFramesAfter(index, at, capability, 6)
-    .flatMap(frame => frame.media.filter(media => media.mediaType.startsWith("image/") && !media.video).map(media => media.url)), [index, at, capability]);
+    .flatMap(frame => frame.media.filter(media => media.mediaType.startsWith("image/") && !media.video).map(media => resolveMediaUrl(media.url))), [index, at, capability, resolveMediaUrl]);
   const { displayed, pending } = useBufferedMedia(scope + ":" + capability + ":" + session.refreshRevision + ":" + session.retryRevision, target, future, !activeWindow || stepping);
   // Video frames share a decoder for the entire segment; advancing record metadata must not pause playback.
   const frameTail = activeWindow?.frames.at(-1)?.at;
@@ -766,6 +771,7 @@ export function TimelinePlayer({
                         key={session.refreshRevision + ":" + session.retryRevision}
                         frame={frame}
                         images={displayed?.images ?? EMPTY_IMAGES}
+                        resolveMediaUrl={resolveMediaUrl}
                         playback={isPreview ? playbackPreview : playbackLive}
                         upcoming={upcomingVideos}
                         onInspect={trigger => selectFrame(frame, trigger)}

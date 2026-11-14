@@ -23,6 +23,7 @@ import {
   type StreamSegment,
 } from "@/features/live/shiori-segments";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
+import { useLudensEvent, useOptionalLudensRpc, type LudensRpcCaller } from "@/lib/ludens-rpc";
 import type { DeviceContentionConflict, RunData, RunInfo, ServiceLaunchOrigin } from "@/lib/types";
 
 export function canSwitchShioriModel(state: {
@@ -149,9 +150,9 @@ export interface UseLiveSessionResult {
 
 /**
  * Unified Live Session Hook (`useLiveSession`):
- * -Stabilizes `/api/run` snapshots against volatile `updatedAt` ticks
- * -Connects to per-project `LiveSessionEngine` for warm monotonic olderRuns + EventPool polling + optimistic mutations
- * -Memoizes `buildCodexSegments` per historical run and reconciles `StreamSegment` object references across 2.5s live polls
+ * - Stabilizes `run/get` snapshots against volatile `updatedAt` ticks
+ * - Connects to per-project `LiveSessionEngine` for warm monotonic olderRuns + EventPool updates + optimistic mutations
+ * - Memoizes `buildCodexSegments` per historical run and reconciles `StreamSegment` object references across updates
  */
 export function useLiveSession(options: {
   project: string;
@@ -183,8 +184,36 @@ export function useLiveSession(options: {
   const data = stabilizeRunData(stabilizedDataRef.current, rawData);
   stabilizedDataRef.current = data;
 
-  const engine = useMemo(() => getLiveSessionEngine(project), [project]);
+  const rpcCtx = useOptionalLudensRpc();
+  const rpcCall = rpcCtx?.call;
+  const rpcCaller = useMemo<LudensRpcCaller | null>(
+    () => (rpcCall ? { call: rpcCall } : null),
+    [rpcCall],
+  );
+  const engine = useMemo(() => getLiveSessionEngine(project, rpcCaller), [project, rpcCaller]);
   const snap = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
+
+  useEffect(() => {
+    engine.setRpc(rpcCaller);
+  }, [engine, rpcCaller]);
+
+  useLudensEvent(
+    ["eventPool", "core", "run"],
+    () => {
+      engine.nudgeEventPool();
+    },
+    {
+      enabled: Boolean(workspace && isLiveRun && refresh),
+      workspaceId: project,
+    },
+  );
+
+  const reconnectGen = rpcCtx?.snapshot.reconnectGeneration ?? 0;
+  useEffect(() => {
+    if (reconnectGen > 0 && workspace && isLiveRun) {
+      engine.nudgeEventPool();
+    }
+  }, [engine, isLiveRun, reconnectGen, workspace]);
 
   // 2. Unified optimistic + server runtime / model state
   const rawUpdatedAtMs = Date.parse(rawData.updatedAt);

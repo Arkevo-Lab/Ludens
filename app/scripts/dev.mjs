@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveBunBinary, withBunNodePath } from "./production.mjs";
+import { resolveBunBinary, resolveViteBin, withBunNodePath } from "./production.mjs";
 
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOOPBACK_DEV_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -59,8 +59,8 @@ export function parseDevArgs(argv) {
       `Refusing non-loopback dev hostname "${hostname}". Use 127.0.0.1, localhost, or ::1.`,
     );
   }
-  const nextHost = normalizedHost === "[::1]" ? "::1" : normalizedHost;
-  return { port: String(numericPort), hostname: nextHost, rest };
+  const normalizedHostname = normalizedHost === "[::1]" ? "::1" : normalizedHost;
+  return { port: String(numericPort), hostname: normalizedHostname, rest };
 }
 
 function forceKillProcessTree(child) {
@@ -214,7 +214,7 @@ async function main() {
   const devOrigin = `http://${formatOriginHost(hostname)}:${port}`;
 
   let serverChild = null;
-  let nextChild = null;
+  let viteChild = null;
   let appServerUrl = process.env.LUDENS_APP_SERVER_URL?.trim().replace(/\/+$/, "");
   let shuttingDown = false;
   let cleanupPromise = null;
@@ -222,13 +222,13 @@ async function main() {
   const cleanup = () => {
     shuttingDown = true;
     cleanupPromise ??= (async () => {
-      if (nextChild && nextChild.exitCode === null && nextChild.signalCode === null) {
+      if (viteChild && viteChild.exitCode === null && viteChild.signalCode === null) {
         try {
-          nextChild.kill("SIGTERM");
+          viteChild.kill("SIGTERM");
         } catch {}
       }
       await Promise.all([
-        waitForExit(nextChild, 4_000),
+        waitForExit(viteChild, 4_000),
         terminateAppServerChild(serverChild, 6_500),
       ]);
     })();
@@ -248,10 +248,10 @@ async function main() {
       const started = await spawnManagedAppServer(trustedOrigins);
       serverChild = started.child;
       appServerUrl = started.url;
-      console.log(`[ludens-dev] app-server=${appServerUrl} -> next dev ${devOrigin}`);
+      console.log(`[ludens-dev] app-server=${appServerUrl} -> vite ${devOrigin}`);
       serverChild.once("exit", (code, signal) => {
         if (!shuttingDown) {
-          console.error(`[ludens-dev] app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}); stopping next dev`);
+          console.error(`[ludens-dev] app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}); stopping vite`);
           void cleanup().finally(() => {
             process.exit(code ?? 1);
           });
@@ -261,19 +261,18 @@ async function main() {
 
     const env = {
       ...withBunNodePath(process.env, directory),
-      LUDENS_NEXT_DEV: "1",
       LUDENS_APP_SERVER_URL: appServerUrl,
     };
 
-    nextChild = spawn(
+    viteChild = spawn(
       process.execPath,
       [
-        join(directory, "node_modules/next/dist/bin/next"),
-        "dev",
-        "--hostname",
+        resolveViteBin(directory),
+        "--host",
         hostname,
         "--port",
         port,
+        "--strictPort",
         ...rest,
       ],
       {
@@ -284,8 +283,8 @@ async function main() {
     );
 
     const exitCode = await new Promise((resolvePromise, rejectPromise) => {
-      nextChild.once("error", rejectPromise);
-      nextChild.once("exit", (code, signal) => resolvePromise(code ?? (signal ? 1 : 0)));
+      viteChild.once("error", rejectPromise);
+      viteChild.once("exit", (code, signal) => resolvePromise(code ?? (signal ? 1 : 0)));
     });
     await cleanup();
     process.exitCode = exitCode;

@@ -27,6 +27,8 @@ import { ArchiveBuild } from "@/shell/archive-build";
 import { WorkspacesView } from "@/features/workspaces/workspaces-view";
 import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clockTime } from "@/features/live/run-visuals";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { ConnectionTargetDialog } from "@/components/connection-target-dialog";
 import { useActiveCores } from "@/shell/use-active-cores";
 import { synthesizeEmptyRunData, useDashboardController } from "@/shell/use-dashboard-controller";
 
@@ -51,6 +53,9 @@ export default function ConsoleShell() {
   const { locale } = useLocale();
   const st = useTranslations("consoleSidebar");
   const ct = useTranslations("desktopChrome");
+  const connT = useTranslations("connectionTarget");
+  const rpcCtx = useOptionalLudensRpc();
+  const [connectionDialogOpen, setConnectionDialogOpen] = useState(false);
   const {
     activeCores,
     stoppingProjectId,
@@ -312,6 +317,7 @@ export default function ConsoleShell() {
           onOpenCore={openCoreWorkspace}
           onStopCore={projectId => { void stopCore(projectId); }}
           activeCoresStopError={activeCoresStopError}
+          onOpenConnectionDialog={() => setConnectionDialogOpen(true)}
         />
         <div className="console-main">
           {!hasWorkbenchHeader && (!desktop.active || hasContextualBarPicker) && (
@@ -378,6 +384,34 @@ export default function ConsoleShell() {
         <main ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
           tabIndex={runControls ? -1 : undefined} aria-label={runControls ? t(`views.${view}.title`) : undefined}
           className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : view === "replay" && entry === "ready" ? " replay-page" : view === "perf" ? " perf-page" : "")}>
+          {rpcCtx && !rpcCtx.snapshot.isReady && rpcCtx.snapshot.status !== "connecting" && (
+            <Alert
+              variant={rpcCtx.snapshot.needsAuth || rpcCtx.snapshot.status === "disconnected" ? "destructive" : "default"}
+              className="mb-4"
+            >
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                <span className="min-w-0 break-words">
+                  {rpcCtx.snapshot.needsAuth
+                    ? connT("bannerAuthRequired")
+                    : rpcCtx.snapshot.status === "unconfigured"
+                      ? connT("bannerUnconfigured")
+                      : rpcCtx.snapshot.error
+                        ? connT("bannerDisconnected").replace("{reason}", rpcCtx.snapshot.error)
+                        : connT("bannerDisconnectedNoReason")}
+                </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {!rpcCtx.snapshot.needsAuth && rpcCtx.snapshot.status !== "unconfigured" && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => rpcCtx.reconnect()}>
+                      {connT("bannerRetryBtn")}
+                    </Button>
+                  )}
+                  <Button type="button" size="sm" variant="default" onClick={() => setConnectionDialogOpen(true)}>
+                    {connT("bannerConfigureBtn")}
+                  </Button>
+                </div>
+              </AlertDescription>
+            </Alert>
+          )}
           {view === "dev" && <div className="page-heading">
             <div>
               <h1>{t(`views.${view}.title`)}</h1>
@@ -898,6 +932,12 @@ export default function ConsoleShell() {
         companionVisible={desktop.companionVisible}
         onToggleCompanion={() => void desktop.toggleCompanion()}
       />
+      {rpcCtx && (
+        <ConnectionTargetDialog
+          open={connectionDialogOpen}
+          onOpenChange={setConnectionDialogOpen}
+        />
+      )}
     </div>
   );
 

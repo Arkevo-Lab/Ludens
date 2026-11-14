@@ -13,7 +13,9 @@ import { WorkspaceCreateForm } from "@/features/workspaces/workspace-create-form
 import type { WorkspaceCreationIntent } from "@/features/workspaces/workspace-create-model";
 import type { CreateWorkspaceInput, WorkspaceRootResult, WorkspaceRemovalResult, WorkspaceSettings } from "@/lib/workspaces";
 import type { WorkspaceRegistration } from "@ludens/protocol/ludens";
+import type { CreateWorkspaceInputDto } from "@ludens/protocol/app-rpc";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { useRetryFocus } from "@/components/use-retry-focus";
 
@@ -95,16 +97,6 @@ function WorkspaceInlineServiceError({
 type DialogKind = "create" | "register" | "root";
 type Completion = { kind: "created" | "registered"; entry: WorkspaceRegistration };
 
-async function request<T>(fallback: string, method = "GET", body?: unknown, signal?: AbortSignal): Promise<T> {
-  const response = await fetch("/api/workspaces", {
-    method, signal,
-    ...(body === undefined ? {} : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
-  });
-  const value = await response.json();
-  if (!response.ok) throw Object.assign(new Error(value.error ?? fallback), { code: value.code });
-  return value;
-}
-
 export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, catalogLoading, onRetryCatalog, createIntent, onCloseCreateIntent }: {
   onChanged(): void; onOpen(id: string): void; onConfigure?(id: string): void;
   catalogError?: string; catalogLoading?: boolean; onRetryCatalog?(): void;
@@ -113,6 +105,9 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
 }) {
   const t = useTranslations("workspaceLibrary");
   const { locale } = useLocale();
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [loadRevision, setLoadRevision] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -153,11 +148,19 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
   }, []);
   useEffect(() => {
     if (busy.current) return;
+    const caller = rpcRef.current;
+    if (!caller) {
+      setLoading(false);
+      setLoadError(t("operationFailed"));
+      return;
+    }
     const controller = new AbortController();
     readController.current = controller;
     const version = ++readVersion.current;
     setLoading(true);
-    void request<WorkspaceSettings>(t("operationFailed"), "GET", undefined, controller.signal)
+    void caller
+      .call("workspaces/getSettings", undefined, { signal: controller.signal })
+      .then(value => value as WorkspaceSettings)
       .then(value => {
         if (version === readVersion.current && !controller.signal.aborted) { setSettings(value); setLoadError(""); }
       })
@@ -168,7 +171,10 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
         if (!controller.signal.aborted && version === readVersion.current) setLoading(false);
       });
     return () => controller.abort();
-  }, [loadRevision, t]);
+  }, [loadRevision, t, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
+  useLudensEvent(["workspace", "catalog"], () => {
+    if (!busy.current) setLoadRevision(value => value + 1);
+  });
   useEffect(() => {
     if (copied === "idle") return;
     const timer = setTimeout(() => setCopied("idle"), 2500);
@@ -254,9 +260,18 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
     focusCompletion.current = true;
     closeDialog();
   };
+  const callWorkspaceMutate = <T,>(params: Parameters<NonNullable<typeof rpc>["call"]>[1] & { action: string }): Promise<T> => {
+    const caller = rpcRef.current;
+    if (!caller) return Promise.reject(new Error("RPC client is unavailable"));
+    return caller.call("workspaces/mutate", params as never) as Promise<T>;
+  };
+
   const createWorkspace = (input: CreateWorkspaceInput) => {
-    void mutate("create", () => request<WorkspaceRegistration>(t("operationFailed"), "POST", { action: "create", workspace: input }),
-      entry => acceptEntry(entry, "created"));
+    void mutate(
+      "create",
+      () => callWorkspaceMutate<WorkspaceRegistration>({ action: "create", input: input as unknown as CreateWorkspaceInputDto }),
+      entry => acceptEntry(entry, "created"),
+    );
   };
   const command = completion ? `ludens --workspace '${completion.entry.workspace.replace(/'/g, "'\\''")}' up` : "";
   const copyCommand = async () => {
@@ -343,7 +358,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
         </Card>}
         {removed && <Alert ref={removedNotice} tabIndex={-1} role="status"><AlertDescription className="flex w-full flex-wrap items-center justify-between gap-3">
           <span><strong className="font-medium text-foreground">{removed.name}</strong> · {t("removedHint")}</span>
-          <Button ref={undoButton} type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => void mutate("undo", () => request<WorkspaceRegistration>(t("operationFailed"), "POST", { action: "register", workspace: removed.workspace }), entry => {
+          <Button ref={undoButton} type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => void mutate("undo", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: removed.workspace }), entry => {
             acceptEntry(entry, "registered");
             requestAnimationFrame(() => { resultCard.current?.focus(); resultCard.current?.scrollIntoView({ block: "nearest" }); focusCompletion.current = false; });
           })}>{pending === "undo" ? t("restoring") : t("undo")}</Button>
@@ -408,7 +423,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                             <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => onConfigure(entry.id)}>{t("configure")}</Button>
                           )}
                           {!entry.available && <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget, entry.workspace)}>{t("reconnect")}</Button>}
-                          <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" disabled={!!pending} onClick={() => void mutate(entry.id, () => request<WorkspaceRemovalResult>(t("operationFailed"), "DELETE", { id: entry.id }), value => {
+                          <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" disabled={!!pending} onClick={() => void mutate(entry.id, () => callWorkspaceMutate<WorkspaceRemovalResult>({ action: "remove", id: entry.id }), value => {
                             setSettings(previous => previous && ({ ...previous, workspaces: previous.workspaces.filter(item => item.id !== entry.id) }));
                             setRemoved(value.removed); setAlreadyRemoved(!value.removed); setCompletion(null); setSavedRoot(null);
                             requestAnimationFrame(() => (undoButton.current ?? removedNotice.current)?.focus());
@@ -452,7 +467,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
         {activeDialog === "create" && settings && <WorkspaceCreateForm key={initialIntent?.driverPackage ?? "default"} defaultRoot={settings.config.workspaceRoot} initialIntent={initialIntent} pending={pending === "create"} error={actionError} onSubmit={createWorkspace} onCancel={closeDialog} />}
         {activeDialog === "register" && <form className="grid gap-5" onSubmit={event => {
           event.preventDefault();
-          void mutate("register", () => request<WorkspaceRegistration>(t("operationFailed"), "POST", { action: "register", workspace: existingPath.trim() }), entry => acceptEntry(entry, "registered"));
+          void mutate("register", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: existingPath.trim() }), entry => acceptEntry(entry, "registered"));
         }}>
           <div className="space-y-2"><Label htmlFor="workspace-existing">{t("pathLabel")}</Label><Input id="workspace-existing" required value={existingPath} disabled={!!pending} onChange={event => setExistingPath(event.target.value)} aria-describedby="workspace-register-hint" placeholder="/Users/you/Ludens/my-workspace" autoComplete="off" spellCheck={false} /><p id="workspace-register-hint" className="text-xs leading-relaxed text-muted-foreground">{t("addHint")}</p></div>
           {actionError && <Alert variant="destructive"><AlertDescription>{actionError}</AlertDescription></Alert>}
@@ -460,7 +475,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
         </form>}
         {activeDialog === "root" && <form className="grid gap-5" onSubmit={event => {
           event.preventDefault();
-          void mutate("root", () => request<WorkspaceRootResult>(t("operationFailed"), "PUT", { workspaceRoot: workspaceRoot.trim() }), value => {
+          void mutate("root", () => callWorkspaceMutate<WorkspaceRootResult>({ action: "updateRoot", workspaceRoot: workspaceRoot.trim() }), value => {
             setSettings(previous => previous && ({ ...previous, config: value.config })); setSavedRoot(value.config.workspaceRoot); setDialog(null);
           });
         }}>

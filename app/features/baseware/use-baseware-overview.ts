@@ -5,6 +5,7 @@ import type { BasewareMachineSpec } from "@ludens/protocol/machines";
 import type { RegisteredDriverSpec } from "@ludens/protocol/drivers";
 import type { WorkspaceBasewareSnapshot } from "@/lib/workspaces";
 import type { CapabilitiesResult } from "@/lib/capabilities";
+import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { useReadResource } from "@/components/use-read-resource";
 import type { MachineBindMode } from "./baseware-model";
 
@@ -59,13 +60,21 @@ export function useBasewareOverview({
 
   const overviewRequestRef = useRef<AbortController | null>(null);
   const mutationControllersRef = useRef(new Set<AbortController>());
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
   const projectRef = useRef(project);
   projectRef.current = project;
 
-  const capUrl = ready && project && workspace
-    ? `/api/capabilities?project=${encodeURIComponent(project)}&workspace=${encodeURIComponent(workspace)}`
-    : null;
-  const capabilities = useReadResource<CapabilitiesResult>(capUrl, capabilitiesFailedMessage);
+  const canReadCaps = ready && Boolean(rpc) && Boolean(project) && Boolean(workspace);
+  const capabilities = useReadResource<CapabilitiesResult>(
+    canReadCaps ? `capabilities:${project}:${workspace}` : null,
+    canReadCaps
+      ? signal => rpcRef.current!.call("capabilities/get", { project, workspace: workspace! }, { signal }) as unknown as Promise<CapabilitiesResult>
+      : null,
+    capabilitiesFailedMessage,
+    { refreshOnEvents: ["baseware", "workspace", "core"], workspaceId: project },
+  );
   const retryCapabilities = capabilities.retry;
 
   useEffect(() => {
@@ -81,23 +90,24 @@ export function useBasewareOverview({
 
   const loadOverview = useCallback(async () => {
     if (!ready) return;
+    const caller = rpcRef.current;
+    if (!caller) {
+      setLoadError(loadFailedMessage);
+      return;
+    }
     overviewRequestRef.current?.abort();
     const controller = new AbortController();
     overviewRequestRef.current = controller;
     setLoading(true);
     setLoadError("");
     try {
-      const qs = project ? `?workspaceId=${encodeURIComponent(project)}` : "";
-      const response = await fetch(`/api/baseware${qs}`, {
-        cache: "no-store",
-        signal: controller.signal,
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(typeof data?.error === "string" ? data.error : loadFailedMessage);
-      }
+      const data = await caller.call(
+        "baseware/overview",
+        project ? { workspaceId: project } : undefined,
+        { signal: controller.signal },
+      );
       if (!controller.signal.aborted && overviewRequestRef.current === controller) {
-        setSnapshot(data as WorkspaceBasewareSnapshot);
+        setSnapshot(data as unknown as WorkspaceBasewareSnapshot);
       }
     } catch (error) {
       if ((error as { name?: string })?.name === "AbortError") return;
@@ -110,11 +120,19 @@ export function useBasewareOverview({
         setLoading(false);
       }
     }
-  }, [project, ready, loadFailedMessage]);
+  }, [project, ready, loadFailedMessage, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
 
   useEffect(() => {
     void loadOverview();
   }, [loadOverview]);
+
+  useLudensEvent(
+    ["baseware", "workspace", "core"],
+    () => {
+      void loadOverview();
+    },
+    { enabled: ready, workspaceId: project || undefined },
+  );
 
   const reloadAll = useCallback(async () => {
     await loadOverview();
@@ -139,17 +157,10 @@ export function useBasewareOverview({
   const discoverDriverSpec = useCallback(
     (spec: string) =>
       runMutation<DiscoveredDriverSummary>(async signal => {
-        const response = await fetch("/api/drivers/discover", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ spec: spec.trim() }),
-          signal,
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(typeof data?.error === "string" ? data.error : "Driver discovery failed");
-        }
-        return data as DiscoveredDriverSummary;
+        const caller = rpcRef.current;
+        if (!caller) throw new Error("RPC client is unavailable");
+        const data = await caller.call("drivers/discover", { spec: spec.trim() }, { signal });
+        return data as unknown as DiscoveredDriverSummary;
       }),
     [runMutation],
   );
@@ -162,23 +173,20 @@ export function useBasewareOverview({
       if (keyForBusy) setBusyDriverKey(keyForBusy);
       try {
         return await runMutation(async signal => {
-          const response = await fetch("/api/baseware", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const caller = rpcRef.current;
+          if (!caller) throw new Error("RPC client is unavailable");
+          const data = (await caller.call(
+            "baseware/mutate",
+            {
               action: "registerDriver",
               spec: spec.trim(),
               ...(requestWorkspace ? { workspaceId: requestWorkspace } : {}),
-            }),
-            signal,
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(typeof data?.error === "string" ? data.error : "Failed to register driver");
-          }
+            },
+            { signal },
+          )) as { snapshot?: WorkspaceBasewareSnapshot; driver?: RegisteredDriverSpec };
           if (requestWorkspace === projectRef.current) {
             if (data?.snapshot) {
-              setSnapshot(data.snapshot as WorkspaceBasewareSnapshot);
+              setSnapshot(data.snapshot);
             } else {
               await loadOverview();
             }
@@ -207,24 +215,21 @@ export function useBasewareOverview({
       setBusyDriverKey(busyKey);
       try {
         await runMutation(async signal => {
-          const response = await fetch("/api/baseware", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const caller = rpcRef.current;
+          if (!caller) throw new Error("RPC client is unavailable");
+          const data = (await caller.call(
+            "baseware/mutate",
+            {
               action: "unregisterDriver",
               id: input.id,
               ...(input.spec ? { spec: input.spec } : {}),
               ...(requestWorkspace ? { workspaceId: requestWorkspace } : {}),
-            }),
-            signal,
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(typeof data?.error === "string" ? data.error : "Failed to unregister driver");
-          }
+            },
+            { signal },
+          )) as { snapshot?: WorkspaceBasewareSnapshot };
           if (requestWorkspace === projectRef.current) {
             if (data?.snapshot) {
-              setSnapshot(data.snapshot as WorkspaceBasewareSnapshot);
+              setSnapshot(data.snapshot);
             } else {
               await loadOverview();
             }
@@ -248,16 +253,9 @@ export function useBasewareOverview({
       setProbeStates(prev => ({ ...prev, [machine.id]: "probing" }));
       try {
         const result = await runMutation<ProbeOutcome>(async signal => {
-          const response = await fetch("/api/baseware", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action: "probeMachine", machine }),
-            signal,
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(typeof data?.error === "string" ? data.error : "Probe failed");
-          }
+          const caller = rpcRef.current;
+          if (!caller) throw new Error("RPC client is unavailable");
+          const data = await caller.call("baseware/mutate", { action: "probeMachine", machine }, { signal });
           return data as ProbeOutcome;
         });
         setProbeStates(prev => ({ ...prev, [machine.id]: result }));
@@ -278,16 +276,9 @@ export function useBasewareOverview({
   const probeDraftMachine = useCallback(
     (machine: BasewareMachineSpec) =>
       runMutation<ProbeOutcome>(async signal => {
-        const response = await fetch("/api/baseware", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "probeMachine", machine }),
-          signal,
-        });
-        const data = await response.json();
-        if (!response.ok) {
-          throw new Error(typeof data?.error === "string" ? data.error : "Probe failed");
-        }
+        const caller = rpcRef.current;
+        if (!caller) throw new Error("RPC client is unavailable");
+        const data = await caller.call("baseware/mutate", { action: "probeMachine", machine }, { signal });
         return data as ProbeOutcome;
       }),
     [runMutation],
@@ -302,21 +293,18 @@ export function useBasewareOverview({
       setActionNotice("");
       try {
         const next = await runMutation<WorkspaceBasewareSnapshot>(async signal => {
-          const response = await fetch("/api/baseware", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const caller = rpcRef.current;
+          if (!caller) throw new Error("RPC client is unavailable");
+          const data = await caller.call(
+            "baseware/mutate",
+            {
               action: "controlWorkspaceMachine",
               workspaceId: requestWorkspace,
               operation,
               machineId,
-            }),
-            signal,
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(typeof data?.error === "string" ? data.error : "Operation failed");
-          }
+            },
+            { signal },
+          );
           return data as WorkspaceBasewareSnapshot;
         });
         if (requestWorkspace === projectRef.current) {
@@ -348,25 +336,22 @@ export function useBasewareOverview({
       setBusyMachineId(machine.id);
       try {
         return await runMutation(async signal => {
-          const response = await fetch("/api/baseware", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
+          const caller = rpcRef.current;
+          if (!caller) throw new Error("RPC client is unavailable");
+          const data = (await caller.call(
+            "baseware/mutate",
+            {
               action: "upsertMachine",
               machine,
               ...(requestWorkspace && bindMode !== "none"
                 ? { workspaceId: requestWorkspace, bindMode }
                 : {}),
-            }),
-            signal,
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(typeof data?.error === "string" ? data.error : "Failed to save machine");
-          }
+            },
+            { signal },
+          )) as { snapshot?: WorkspaceBasewareSnapshot; machine?: BasewareMachineSpec };
           if (requestWorkspace === projectRef.current) {
             if (data?.snapshot) {
-              setSnapshot(data.snapshot as WorkspaceBasewareSnapshot);
+              setSnapshot(data.snapshot);
             } else {
               await loadOverview();
             }
@@ -394,16 +379,9 @@ export function useBasewareOverview({
       setBusyMachineId(id);
       try {
         await runMutation(async signal => {
-          const response = await fetch("/api/baseware", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ id }),
-            signal,
-          });
-          const data = await response.json();
-          if (!response.ok) {
-            throw new Error(typeof data?.error === "string" ? data.error : "Failed to remove machine");
-          }
+          const caller = rpcRef.current;
+          if (!caller) throw new Error("RPC client is unavailable");
+          await caller.call("baseware/mutate", { action: "removeMachine", id }, { signal });
           await reloadAll();
         });
       } catch (error) {

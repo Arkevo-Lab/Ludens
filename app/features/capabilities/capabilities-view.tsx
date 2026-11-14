@@ -32,6 +32,7 @@ import type {
 } from "@/lib/capabilities";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { useReadResource } from "@/components/use-read-resource";
 import { useRetryFocus } from "@/components/use-retry-focus";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -1026,16 +1027,22 @@ function SurrogateEnvsCatalog({ envs }: { envs: CapabilityEnvEntry[] }) {
 
 function ConnectionCheck({ project, workspace }: { project: string; workspace: string }) {
   const t = useTranslations("capabilitiesView");
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
   const [value, setValue] = useState<CapabilityRuntime | null>(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(false), request = useRef<AbortController | null>(null);
   const check = async () => {
     if (request.current) return;
+    const caller = rpcRef.current;
+    if (!caller) { setError(t("runtimeReadFailed")); return; }
     const controller = new AbortController(); request.current = controller; setLoading(true);
     try {
-      const response = await fetch("/api/capabilities/runtime?" + new URLSearchParams({ project, workspace }),
-        { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error ?? t("runtimeReadFailed"));
+      const result = (await caller.call(
+        "capabilities/runtime",
+        { project, workspace },
+        { signal: controller.signal, timeoutMs: 10_000 },
+      )) as unknown as CapabilityRuntime;
       if (request.current === controller && !controller.signal.aborted) { setValue(result); setError(""); }
     } catch (cause) {
       if (request.current === controller && !controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause));
@@ -1044,7 +1051,7 @@ function ConnectionCheck({ project, workspace }: { project: string; workspace: s
   useEffect(() => {
     void check();
     return () => { const controller = request.current; request.current = null; controller?.abort(); };
-  }, [project, workspace]);
+  }, [project, workspace, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
   const status = loading ? "runtimeChecking" : error ? value ? "runtimeStale" : "runtimeReadFailed" : !value ? "runtimeUnchecked" : value.host === "unavailable" ? "runtimeUnavailable"
     : value.controlConnected === null ? "runtimeUnknown" : value.controlConnected ? "runtimeConnected" : "runtimeDisconnected";
   return <Card className="min-w-0" data-capability-runtime><CardContent className="min-w-0 space-y-4">
@@ -1061,7 +1068,15 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
   const t = useTranslations("capabilitiesView"), guide = useGuideHref(project);
   const { locale } = useLocale();
   const isZh = locale === "zh";
-  const capsLoad = useReadResource<CapabilitiesResult>(project && workspace ? "/api/capabilities?" + new URLSearchParams({ project, workspace }) : null, t("readFailed"));
+  const rpc = useOptionalLudensRpc();
+  const capsLoad = useReadResource<CapabilitiesResult>(
+    rpc && project && workspace ? `capabilities:${project}:${workspace}` : null,
+    rpc && project && workspace
+      ? signal => rpc.call("capabilities/get", { project, workspace }, { signal }) as unknown as Promise<CapabilitiesResult>
+      : null,
+    t("readFailed"),
+    { refreshOnEvents: ["baseware", "workspace", "core"], workspaceId: project },
+  );
   const caps = capsLoad.value;
   const [statusFilter, setStatusFilter] = useState<CapabilityEvalStatus | "all">("all");
   const [analyticsOpen, setAnalyticsOpen] = useState(true);
@@ -1086,21 +1101,15 @@ function WorkspaceCapabilities({ project, workspace, ready, catalogError, catalo
   const evalSummary = caps?.evalSummary ?? { missing: 0, unverified: 0, stale: 0, adapting: 0, failed: 0, verified: 0 };
 
   const handleRunEval = async (capabilityId?: string) => {
-    if (!project || !workspace || runningEvalTarget) return;
+    if (!project || !workspace || runningEvalTarget || !rpc) return;
     setRunningEvalTarget(capabilityId ?? "__all__");
     setEvalRunNotice(null);
     try {
-      const response = await fetch("/api/capabilities", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project,
-          workspace,
-          ...(capabilityId ? { capabilityId } : { all: true }),
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result?.error ?? (isZh ? "运行评测失败" : "Failed to run eval"));
+      const result = (await rpc.call("capabilities/eval", {
+        project,
+        workspace,
+        options: capabilityId ? { capabilityId } : { all: true },
+      })) as { run?: { outcome?: string; results?: unknown[] } };
       const runOutcome = result?.run?.outcome === "passed";
       const count = Array.isArray(result?.run?.results) ? result.run.results.length : 1;
       setEvalRunNotice({

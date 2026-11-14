@@ -34,6 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 
 export type ModelServiceTier = "priority" | "ultrafast";
 
@@ -316,6 +317,7 @@ export function ModelPickerDialog({
   inline = false,
 }: ModelPickerDialogProps) {
   const t = useTranslations("modelPicker");
+  const rpcCtx = useOptionalLudensRpc();
   const listboxId = useId();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const cardRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -357,29 +359,28 @@ export function ModelPickerDialog({
     setSelectError(null);
   }, [open]);
 
+  const rpcCall = rpcCtx?.call;
   useEffect(() => {
     if (!open || catalogOverride !== undefined) return;
+    if (!rpcCall) {
+      setLoadError(t("loadFailed"));
+      setLoading(false);
+      return;
+    }
     const controller = new AbortController();
     const version = ++requestVersionRef.current;
     setLoading(true);
     setLoadError(null);
-    const params = new URLSearchParams();
-    if (projectId?.trim()) params.set("project", projectId.trim());
-    const url = params.size > 0 ? `/api/models?${params}` : "/api/models";
+    const trimmedProject = projectId?.trim();
 
-    void fetch(url, { signal: controller.signal, cache: "no-store" })
-      .then(async response => {
-        const payload = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          throw new Error(
-            typeof payload?.error === "string" ? payload.error : t("loadFailed"),
-          );
-        }
-        return payload as AvailableModelsCatalog;
-      })
-      .then(result => {
+    void rpcCall(
+      "models/list",
+      trimmedProject ? { workspaceId: trimmedProject } : undefined,
+      { signal: controller.signal },
+    )
+      .then(payload => {
         if (controller.signal.aborted || version !== requestVersionRef.current) return;
-        setFetchedCatalog(result);
+        setFetchedCatalog(payload as unknown as AvailableModelsCatalog);
       })
       .catch(error => {
         if (controller.signal.aborted || version !== requestVersionRef.current) return;
@@ -392,7 +393,7 @@ export function ModelPickerDialog({
       });
 
     return () => controller.abort();
-  }, [open, projectId, reloadTick, catalogOverride, t]);
+  }, [open, projectId, reloadTick, catalogOverride, rpcCall, t]);
 
   const catalog = catalogOverride !== undefined ? catalogOverride : fetchedCatalog;
   const allModels = catalog?.models ?? [];

@@ -18,7 +18,7 @@ Ludens is a multimodal, cross-device Agent Harness designed for complex end-to-e
 | **Baseware** | The cross-device integration layer that standardizes drivers, multi-node transports (`stdio`, `bridge`, `ssh`, `http`, `sse`), and `epoch` control leases. |
 | **Workspace** | The persistent coding directory (`perception.py`, `@capability` modules, `skills/`, `memory/`, `.ludens/timeline/`) shared by the agent and operator. |
 | **Shiori** | Ludens's **Agent Thread Core**, orchestrating Control Cycles, time/request budgets, context delivery, and safe device release. |
-| **Console** | The unified observability and control plane (Web Console and Ludens Desktop App) covering Live, Replay, Performance, Capabilities, Config, Devices, Workspaces, Docs, Settings, and Developer views. |
+| **Console** | The unified React 19 + Vite static SPA observability and control plane (zero-port Desktop App over `app-server.sock`, hosted Web / remote `wss://` over `/rpc`, and mobile multi-target switching) covering Live, Replay, Performance, Capabilities, Config, Devices, Workspaces, Docs, Settings, and Developer views. |
 
 ## Where to Go Next
 
