@@ -2,6 +2,8 @@
 
 为什么我们要在一个实时交互 Agent 项目里，花精力给 OpenAI Codex 的 WebSocket 传输层打补丁、写故障矩阵？
 
+> **范围说明**：本文讨论的是 Shiori / OMP 与上游 LLM 之间的**模型推理 WebSocket 增量（delta）通道**。关于控制台与 `--remote` CLI 接入 **App-Server WebSocket JSON-RPC（`/rpc`）** 的断线恢复（`events/subscribe` + `EventHub` `sinceSeq` 增量补齐），请参见 [架构与边界](../reference/architecture.md) 与 [日志与调用链](../reference/logging.md)。
+
 原因只有一句话：**多模态载荷实在太大了。如果不走增量传输，每一轮请求体都会随历史滚雪球式膨胀，严重拖慢长周期运行。**
 
 ## 为什么多模态循环离不开 WebSocket 增量传输？

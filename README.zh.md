@@ -23,7 +23,7 @@ Ludens 不把智能体限制在静态提示词或固定动作Schema里，而是�
 - **任意屏幕，任意设备（`Baseware`）** — 统一接入本机桌面（`cua`）、采集卡与 HID 硬件桥（如通过 SSH 或 TCP 桥接控制的机器设备与嵌入式主机）、仿真器或 MCP 端点；单个工作区支持并发挂载多个受控节点并按需路由。
 - **代码即感知（`perception.py`）** — 常驻 Python 进程将实时画面录制为可检索的 30 Hz fMP4 时间轴，同时在内存中运行并热重载智能体自己编写的视觉检测器与闭环状态机。
 - **可自验证的能力演化（`@capability` 与 `ludens eval`）** — 将反复试错的动作流程沉淀为带类型的 Python 能力函数，搭配离线代理环境（`@eval_env`）与评测断言（`@eval_capability`），在秒级内离线完成回归验证后再下发真机执行。
-- **统一控制台、自主循环与逐帧回放** — 通过原生 **Ludens 桌面应用** 或浏览器**控制台**（`ludens app-server`）一键启停工作区、开启**自主运行**、经由双向**事件池**异步协作（`ludens event`）、在推理中途紧急插话纠偏（`steer`）、随时一键**收回控制权**（`ludens auto off`），并对照模型完整轨迹拖拽 30 Hz 录像回放。*（可选附带系统托盘**桌宠**小组件。）*
+- **统一控制台、自主循环与逐帧回放** — 一套 Vite 静态 SPA 与 JSON-RPC 2.0（`ludens app-server`）覆盖零端口 **Ludens 桌面应用**、托管 Web **控制台**、远程 `wss://` 与移动端四种工况：一键启停工作区、开启**自主运行**、经由双向**事件池**异步协作（`ludens event`）、在推理中途紧急插话纠偏（`steer`）、随时一键**收回控制权**（`ludens auto off`），并对照模型完整轨迹拖拽 30 Hz 录像回放。*（可选附带系统托盘**桌宠**小组件。）*
 
 ## 30 秒看懂工作流
 
@@ -88,11 +88,11 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 
 ### 2. 三种启动方式
 
-Ludens 基于统一的 `@ludens/core` `app-server`（生产态零 Next.js 服务端进程、纯 TypeScript 跨平台进程监管）提供三种运行方式：
+Ludens 基于统一的 React 19 + Vite 静态 SPA（`app/out`）与 `@ludens/core` `app-server` JSON-RPC 2.0（零 Next.js 运行时、纯 TypeScript 跨平台进程监管）提供四种运行工况：
 
-- **桌面端应用**：执行一次 `(cd app && npm run desktop:build)` 后运行 `ludens-app --show-window`（或执行 `npm --prefix app run desktop:dist` 打包原生 macOS `.dmg` / Windows `.exe` 安装包）。应用自动监管后台 `ludens app-server`，无需终端即可一键**启动 / 重载 / 停止**工作区；关闭窗口（`×`）时最小化至系统托盘（可选显示桌宠），完全退出（`⌘Q` / 托盘 **Quit**）时干净清理全部受管进程。
-- **本地浏览器控制台（`ludens app-server` / `npm run dev`）**：运行 `ludens app-server`（别名 `ludens serve`）在 [`http://127.0.0.1:3015`](http://127.0.0.1:3015) 同时承载 `/api/*` 与静态前端控制台（`app/out`）；前端热更新开发运行 `(cd app && npm run dev)`。
-- **无头 CLI 模式**：直接在终端初始化并管理工作区（接入外部驱动包 `--driver-package` 或远程 SSH / 桥接节点详见[设备与驱动准备](docs/zh/tutorials/devices.md)）：
+- **桌面端应用（零 TCP 端口本地模式）**：执行一次 `(cd app && npm run desktop:build)` 后运行 `ludens-app --show-window`（或执行 `npm --prefix app run desktop:dist` 打包原生 macOS `.dmg` / Windows `.exe` 安装包）。应用按 `LUDENS_HOME` 通过 Unix Domain Socket（`app-server.sock`）拉起并复用单例 `ludens app-server`（**0 个监听 TCP 端口**），通过 `ludens-app://console/` 加载静态资源、`ludens-media://local/media?...` 走 UDS `media/resolve` 返回本地媒体、通过 `window.ludens.rpc` 与托盘桌宠走 UDS RPC。关闭主窗口（`×`）时最小化至托盘；退出（`⌘Q` / 托盘 **Quit**）时，若无活跃 Core 则直接退出并保留后台守护进程，若有活跃 Core 则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。
+- **托管 Web / 远端 App-Server（`ludens app-server` / `ludens daemon start`）**：单进程同时提供静态 SPA 控制台、WebSocket JSON-RPC `/rpc` 与 HMAC capability ticket 鉴权的 `/media` 端点：执行 `ludens daemon start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN`（非回环地址必须启用 `--auth token`；页面加载 `http(s)://host:port/#token=...` 后会立即通过 `history.replaceState` 擦除 URL 中的 token）。前端 HMR 开发可执行 `(cd app && npm run dev)`（Vite 默认 `127.0.0.1:3015` 代理 `/rpc`、`/media` 与 `/health`）。
+- **统一 CLI（`ludens` —— 本地 UDS 与 `--remote`）**：支持 `ludens daemon status|start|stop|restart` 监管后台服务；所有操作者命令（`up`、`down`、`services`、`workspace`、`config`、`status`、`auto`、`steer`、`consolidate`、`stop`、`model`）既可直连本地 `app-server.sock`，也可传入 `--remote ws(s)://... [--token ...]` 统一接入远端 App-Server（接入外部驱动包 `--driver-package` 或远程 SSH / 桥接节点详见[设备与驱动准备](docs/zh/tutorials/devices.md)）：
 
 ```sh
 ludens init --name my-agent --driver cua
@@ -100,9 +100,11 @@ cd "$HOME/.ludens/workspaces/my-agent"
 ludens up
 ```
 
+- **移动端与多目标切换**：在手机、平板或桌面浏览器打开同一套响应式 Vite SPA，可通过连接切换弹窗在 `electron-local`（桌面端 IPC UDS）、`same-origin`（托管同源 WS `/rpc`）与 `remote`（`ws://` / `wss://` + Token）之间无缝切换。
+
 ### 3. 开启自主运行、收回控制权与异步协作
 
-在桌面应用或 [`http://127.0.0.1:3015`](http://127.0.0.1:3015) 的**运行（`?view=live`）**页点击**启动自主运行**，或通过终端命令行操控：
+在桌面应用或已连接的 Web 控制台**运行（`?view=live`）**页点击**启动自主运行**，或通过终端命令行操控：
 
 ```sh
 ludens auto on --message "探索目标环境并沉淀经验证的 Python 能力函数"
@@ -115,10 +117,10 @@ ludens auto off
 
 | 子包 | 职责 |
 | --- | --- |
-| [`@ludens/protocol`](protocol/README.md) | 零依赖契约层：RPC Schema、事件信封与内容寻址归档格式。 |
+| [`@ludens/protocol`](protocol/README.md) | 零依赖契约层：JSON-RPC 2.0 协议类型（`@ludens/protocol/app-rpc`）、事件信封、连接传输策略与内容寻址归档格式。 |
 | [`@ludens/baseware`](baseware/README.md) | 跨设备集成层：驱动加载器、多机受控节点池（`stdio`/`bridge`/`ssh`/`http`/`sse`）与 `epoch` 控制租约仲裁。 |
-| [`@ludens/core`](core/README.md) | Harness 运行时与统一 `app-server`：**Shiori**（Agent 线程核心）、常驻 Python `perception.py` 进程、`/api/*` 与控制台后端、纯 TS 进程监管与 `ludens eval`。 |
-| [`@ludens/app`](app/README.md) | 静态 Web **控制台**（`app/out`，涵盖运行、回放、性能、能力、配置、设备、工作区、文档、设置与开发者视图）、Electron 桌面端与可选桌宠小组件。 |
+| [`@ludens/core`](core/README.md) | Harness 运行时与统一 `app-server`：**Shiori**（Agent 线程核心）、常驻 Python `perception.py` 进程、UDS/WS JSON-RPC 2.0 + `EventHub` + HMAC `/media`、`ludens daemon`、纯 TS 进程监管与 `ludens eval`。 |
+| [`@ludens/app`](app/README.md) | 响应式 React 19 + Vite 静态 SPA **控制台**（`app/out`，涵盖运行、回放、性能、能力、配置、设备、工作区、文档、设置与开发者视图）、零端口 Electron 桌面端（`ludens-app://` / `ludens-media://`）、多目标连接弹窗与可选桌宠小组件。 |
 
 ## 文档导航
 
