@@ -20,6 +20,7 @@ import {
   Sparkles,
   XIcon,
 } from "lucide-react";
+import { useAnimatedPresence } from "@/components/use-motion-preferences";
 import { workspaceName } from "@/features/workspaces/workspace-picker";
 import type { DesktopPlatform } from "@/lib/desktop";
 import { useLocale, useTranslations } from "@/lib/locale";
@@ -109,7 +110,7 @@ function ItemIcon({ kind }: { kind: QuickSwitcherItem["icon"] }) {
     case "forward":
       return <ArrowRight className={cls} aria-hidden="true" />;
     case "reload":
-      return <RotateCw className={cls} aria-hidden="true" />;
+      return <RotateCw className={`${cls} desktop-qs-item-icon-reload`} aria-hidden="true" />;
     case "pet":
       return <Sparkles className={cls} aria-hidden="true" />;
     default:
@@ -147,6 +148,7 @@ export function DesktopQuickSwitcher({
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
+  const { mounted, state: motionState } = useAnimatedPresence(open, 150);
 
   const close = useCallback(() => {
     onOpenChange(false);
@@ -319,7 +321,7 @@ export function DesktopQuickSwitcher({
     node?.scrollIntoView({ block: "nearest" });
   }, [open, clampedIndex]);
 
-  if (!open) return null;
+  if (!mounted) return null;
 
   const groups: Array<{
     key: QuickSwitcherItem["group"];
@@ -413,6 +415,7 @@ export function DesktopQuickSwitcher({
     <div
       className="desktop-qs-backdrop"
       data-quick-switcher=""
+      data-motion-state={motionState}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) close();
       }}
@@ -423,6 +426,7 @@ export function DesktopQuickSwitcher({
         aria-modal="true"
         aria-label={t("switcherTitle")}
         className="desktop-qs-dialog"
+        data-motion-state={motionState}
         onKeyDown={handleKeyDown}
       >
         <div className="desktop-qs-input-row">

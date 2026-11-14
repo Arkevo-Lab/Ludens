@@ -2,7 +2,7 @@
 
 import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { createPortal } from "react-dom";
-import { BookOpen, Check, Copy, List, RefreshCw, Search, X } from "lucide-react";
+import { BookOpen, Check, ChevronRight, Copy, List, RefreshCw, Search, X } from "lucide-react";
 import type { DocCodeBlock, DocDetail, DocGroupInfo } from "@/lib/docs";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useReadResource } from "@/components/use-read-resource";
@@ -25,20 +25,53 @@ function CopyCode({ block }: { block: DocCodeBlock }) {
   const t = useTranslations("docsView");
   const [result, setResult] = useState<"" | "copied" | "failed">("");
   const mounted = useRef(true);
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      if (resetTimer.current) clearTimeout(resetTimer.current);
+    };
+  }, []);
+  const scheduleReset = () => {
+    if (resetTimer.current) clearTimeout(resetTimer.current);
+    resetTimer.current = setTimeout(() => {
+      if (mounted.current) setResult("");
+    }, 2000);
+  };
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(block.code);
-      if (mounted.current) setResult("copied");
-    } catch { if (mounted.current) setResult("failed"); }
+      if (mounted.current) {
+        setResult("copied");
+        scheduleReset();
+      }
+    } catch {
+      if (mounted.current) {
+        setResult("failed");
+        scheduleReset();
+      }
+    }
   };
+  const isCopied = result === "copied";
   return <>
     <span className="text-xs text-muted-foreground">{block.language || t("code")}</span>
-    <Button type="button" variant="ghost" size="xs" onClick={() => void copy()} aria-label={t(result === "copied" ? "copied" : "copyCode")}>
-      {result === "copied" ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}{t(result === "copied" ? "copied" : "copy")}
+    <Button type="button" variant="ghost" size="xs" onClick={() => void copy()} aria-label={t(isCopied ? "copied" : "copyCode")}>
+      <span className="relative inline-flex size-3.5 items-center justify-center">
+        <Copy className={`size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${isCopied ? "scale-75 opacity-0" : "scale-100 opacity-100"}`} aria-hidden="true" />
+        <Check className={`text-success absolute inset-0 size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${isCopied ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} aria-hidden="true" />
+      </span>
+      <span className="inline-grid items-center justify-items-center">
+        <span className={`col-start-1 row-start-1 transition-opacity duration-150 motion-reduce:transition-none ${isCopied ? "opacity-0" : "opacity-100"}`} aria-hidden={isCopied}>
+          {t("copy")}
+        </span>
+        <span className={`col-start-1 row-start-1 transition-opacity duration-150 motion-reduce:transition-none ${isCopied ? "opacity-100" : "opacity-0"}`} aria-hidden={!isCopied}>
+          {t("copied")}
+        </span>
+      </span>
     </Button>
     <span role="status" className={result === "failed" ? "basis-full text-xs text-destructive" : "sr-only"}>
-      {result === "failed" ? t("copyFailed") : result === "copied" ? t("copied") : ""}
+      {result === "failed" ? t("copyFailed") : isCopied ? t("copied") : ""}
     </span>
   </>;
 }
@@ -73,10 +106,11 @@ function ReadNotice({ title, error, cached, loading, retry }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0"><p className="font-medium">{title}</p>{cached && <p>{t("showingCached")}</p>}</div>
         <Button type="button" variant="outline" size="sm" aria-disabled={loading} onClick={event => { if (!loading) retry(event.currentTarget); }}>
+          <RefreshCw className={loading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" />
           {t(loading ? "retrying" : "retry")}
         </Button>
       </div>
-      <details className="mt-2 text-xs"><summary className="cursor-pointer">{t("errorDetails")}</summary><p className="mt-2 break-words">{error}</p></details>
+      <details className="settings-disclosure border-y-0 mt-2 text-xs"><summary className="settings-disclosure-summary min-h-0 py-1 font-normal text-inherit"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("errorDetails")}</summary><p className="mt-2 break-words">{error}</p></details>
     </AlertDescription>
   </Alert>;
 }
@@ -243,7 +277,7 @@ export function DocsView({ search, navigate }: {
     <div className="flex items-center gap-1.5">
       {languageSelect(selectId)}
       <Button type="button" variant="ghost" size="icon-sm" className="shrink-0 text-muted-foreground" aria-label={t("refreshIndex")} title={t("refreshIndex")} aria-disabled={groupsLoad.loading}
-        onClick={() => { if (!groupsLoad.loading) groupsLoad.retry(); }}><RefreshCw className={groupsLoad.loading ? "animate-spin" : ""} aria-hidden="true" /></Button>
+        onClick={() => { if (!groupsLoad.loading) groupsLoad.retry(); }}><RefreshCw className={groupsLoad.loading ? "motion-safe:animate-spin" : ""} aria-hidden="true" /></Button>
     </div>
     {groupsLoad.error && <ReadNotice title={t("indexFailed")} error={groupsLoad.error} cached={!!groups} loading={groupsLoad.loading} retry={control => retryRead("index", control)} />}
     {!groups && !groupsLoad.error && <p role="status" className="text-sm text-muted-foreground">{t("loadingTitle")}</p>}
@@ -338,7 +372,7 @@ export function DocsView({ search, navigate }: {
             <div className="flex items-center gap-1.5">
               {headings.length > 0 && dialogMenu("headings")}
               <Button type="button" variant="ghost" size="icon-sm" aria-label={t("refreshArticle")} title={t("refreshArticle")} aria-disabled={docLoad.loading}
-                onClick={() => { if (!docLoad.loading) docLoad.retry(); }}><RefreshCw className={docLoad.loading ? "animate-spin" : ""} aria-hidden="true" /></Button>
+                onClick={() => { if (!docLoad.loading) docLoad.retry(); }}><RefreshCw className={docLoad.loading ? "motion-safe:animate-spin" : ""} aria-hidden="true" /></Button>
             </div>
           </div>
           <h1 lang={doc.lang}>{doc.title}</h1>

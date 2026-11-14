@@ -331,7 +331,7 @@ export function WorkspaceStudioView({
                 data-studio-header-service="up"
               >
                 {service.pendingOperation === "up" ? (
-                  <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                  <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
                 ) : (
                   <Play className="size-3.5 fill-current" aria-hidden="true" />
                 )}
@@ -348,7 +348,7 @@ export function WorkspaceStudioView({
                   data-studio-header-service="reload"
                 >
                   {service.pendingOperation === "reload" ? (
-                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                    <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
                   ) : (
                     <RotateCcw className="size-3.5" aria-hidden="true" />
                   )}
@@ -363,7 +363,7 @@ export function WorkspaceStudioView({
                   data-studio-header-service="down"
                 >
                   {service.pendingOperation === "down" ? (
-                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                    <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
                   ) : (
                     <Square className="size-3 fill-current" aria-hidden="true" />
                   )}
@@ -379,7 +379,7 @@ export function WorkspaceStudioView({
             disabled={loading || !target}
             onClick={refreshStudio}
           >
-            <RefreshCw className={"size-3.5" + (loading ? " animate-spin" : "")} aria-hidden="true" />
+            <RefreshCw className={"size-3.5" + (loading ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
             {t(loading ? "refreshing" : "refresh")}
           </Button>
         </div>
@@ -504,6 +504,7 @@ export function WorkspaceStudioView({
             <ServicesAndShioriPanel
               studio={studio}
               isZh={isZh}
+              refreshing={loading}
               onRefresh={refreshStudio}
               onOpenBaseware={() => navigate({ view: "baseware", project: target?.id ?? null })}
               onStudioUpdated={next => setStudio(next)}
@@ -572,7 +573,7 @@ function WorkspaceTargetDevicePanel({
         actions={
           <>
             <Button type="button" variant="outline" size="sm" disabled={loading} onClick={onRefresh}>
-              <RefreshCw className={"size-3.5" + (loading ? " animate-spin" : "")} aria-hidden="true" />
+              <RefreshCw className={"size-3.5" + (loading ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
               {t(loading ? "refreshing" : "refresh")}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={onManageInBaseware}>
@@ -652,7 +653,11 @@ function WorkspaceTargetDevicePanel({
                       disabled={probing}
                       onClick={() => onProbe(machine)}
                     >
-                      <Activity className="size-3.5" aria-hidden="true" />
+                      {probing ? (
+                        <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+                      ) : (
+                        <Activity className="size-3.5" aria-hidden="true" />
+                      )}
                       {t(probing ? "deviceSection.probingBtn" : "deviceSection.probeBtn")}
                     </Button>
                   </div>
@@ -1240,7 +1245,7 @@ export function ModelAndBudgetPanel({
               onClick={() => void service.reloadWorkspace()}
             >
               {service.pendingOperation === "reload" ? (
-                <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
               ) : (
                 <RotateCcw className="size-3.5" aria-hidden="true" />
               )}
@@ -1278,6 +1283,7 @@ const SERVICE_ROWS: Array<{ name: "host" | "baseware" | "emulator"; label: strin
 export function ServicesAndShioriPanel({
   studio,
   isZh,
+  refreshing = false,
   onRefresh,
   onOpenBaseware,
   onStudioUpdated,
@@ -1285,6 +1291,7 @@ export function ServicesAndShioriPanel({
 }: {
   studio: WorkspaceStudioSnapshot;
   isZh: boolean;
+  refreshing?: boolean;
   onRefresh(): void;
   onOpenBaseware(): void;
   onStudioUpdated(next: WorkspaceStudioSnapshot): void;
@@ -1390,7 +1397,7 @@ export function ServicesAndShioriPanel({
                   data-studio-service-action={item.key}
                 >
                   {isRunningOp ? (
-                    <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                    <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
                   ) : (
                     <Icon className="size-3.5" aria-hidden="true" />
                   )}
@@ -1402,9 +1409,9 @@ export function ServicesAndShioriPanel({
               <HardDrive className="size-3.5" aria-hidden="true" />
               {t("servicesSection.manageBaseware")}
             </Button>
-            <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
-              <RefreshCw className="size-3.5" aria-hidden="true" />
-              {t("refresh")}
+            <Button type="button" variant="outline" size="sm" disabled={refreshing} onClick={onRefresh}>
+              <RefreshCw className={"size-3.5" + (refreshing ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
+              {t(refreshing ? "refreshing" : "refresh")}
             </Button>
           </>
         }
@@ -1465,7 +1472,7 @@ export function ServicesAndShioriPanel({
             <button
               type="button"
               onClick={() => service.clearResult()}
-              className="text-muted-foreground hover:text-foreground"
+              className="text-muted-foreground transition-colors duration-150 hover:text-foreground"
             >
               ×
             </button>

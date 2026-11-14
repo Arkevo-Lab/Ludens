@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CornerDownRight, Search, X } from "lucide-react";
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
+import { prefersSmoothScrollBehavior } from "@/components/use-motion-preferences";
 import { useTranslations } from "@/lib/locale";
 
 export interface EventPoolOverviewPanelProps {
@@ -163,7 +164,7 @@ export function EventPoolOverviewPanel({
     }
     revealedFocusRef.current = focusedEventId;
     const card = listRef.current?.querySelector<HTMLElement>(`[data-pool-overview-id="${CSS.escape(focusedEventId)}"]`);
-    card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    card?.scrollIntoView({ block: "nearest", behavior: prefersSmoothScrollBehavior() });
   }, [focusedEventId, byId, visible]);
 
   const runMutation = useCallback(async (eventId: string, action: (id: string) => Promise<void> | void) => {
@@ -441,7 +442,11 @@ function PoolEventCard({
 
       {event.title && <h4 className="pool-card-title">{event.title}</h4>}
       {event.text && (
-        <p className="pool-card-body" data-clamped={longBody && !expanded ? "true" : undefined}>
+        <p
+          className="pool-card-body"
+          data-clamped={longBody && !expanded ? "true" : undefined}
+          data-expanded={longBody && expanded ? "true" : undefined}
+        >
           {event.text}
         </p>
       )}

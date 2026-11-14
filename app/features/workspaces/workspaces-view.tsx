@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, CheckCircle2, Copy, Folder, FolderOpen, Play, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowRight, Check, CheckCircle2, ChevronRight, Copy, Folder, FolderOpen, Play, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,7 +50,7 @@ function WorkspaceInlineStartButton({
       data-workspace-start={workspaceId}
     >
       {starting ? (
-        <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+        <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
       ) : (
         <Play className="size-3.5 fill-current" aria-hidden="true" />
       )}
@@ -78,7 +78,7 @@ function WorkspaceInlineServiceError({
           type="button"
           aria-label={dismissLabel}
           onClick={service.clearError}
-          className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+          className="rounded p-0.5 text-muted-foreground transition-colors duration-150 hover:text-foreground"
         >
           <X className="size-3.5" aria-hidden="true" />
         </button>
@@ -278,7 +278,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
             <Button type="button" variant="ghost" aria-label={t(loading ? "refreshing" : "refreshList")} title={t("refreshList")} aria-disabled={loading || !!pending} className="aria-disabled:opacity-50" onClick={() => {
               if (loading || busy.current) return;
               setLoadRevision(value => value + 1); onRetryCatalog?.();
-            }}><RefreshCw /><span className="hidden sm:inline">{t(loading ? "refreshing" : "refreshList")}</span></Button>
+            }}><RefreshCw className={loading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" /><span className="hidden sm:inline">{t(loading ? "refreshing" : "refreshList")}</span></Button>
             <Button type="button" variant="outline" disabled={!settings || !!pending} onClick={event => openDialog("register", event.currentTarget)}><FolderOpen />{t("addExisting")}</Button>
             <Button ref={createTrigger} type="button" disabled={!settings || !!pending} onClick={event => openDialog("create", event.currentTarget)}><Plus />{t("newWorkspace")}</Button>
           </div>
@@ -289,23 +289,23 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
         </AlertDescription></Alert>}
         {loadError && <Alert variant={committed ? "default" : "destructive"} className={committed ? "border-primary/35 bg-primary/5" : undefined}><AlertTitle className="line-clamp-none">{t(committed ? "refreshFailed" : "loadFailed")}</AlertTitle><AlertDescription>
           {committed && <p>{t("committedReadFailed")}</p>}
-          <details className="text-xs"><summary>{t("technicalDetails")}</summary><p className="mt-2 break-all">{loadError}</p></details>
+          <details className="settings-disclosure border-y-0 text-xs"><summary className="settings-disclosure-summary min-h-0 py-1 font-normal text-inherit"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("technicalDetails")}</summary><p className="mt-2 break-all">{loadError}</p></details>
           <Button type="button" size="sm" variant="outline" aria-disabled={loading || !!pending} className="aria-disabled:opacity-50" onClick={event => {
             if (loading || busy.current) return;
             readFocus.remember(event.currentTarget); setLoadRevision(value => value + 1);
-          }}>{t(loading ? "refreshing" : "retry")}</Button>
+          }}><RefreshCw className={loading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" />{t(loading ? "refreshing" : "retry")}</Button>
         </AlertDescription></Alert>}
         {catalogError && <Alert className="border-primary/35 bg-primary/5"><AlertTitle className="line-clamp-none">{t("catalogRefreshFailed")}</AlertTitle><AlertDescription>
           <p>{t(committed ? "committedReadFailed" : "catalogRetryHint")}</p>
-          <details className="text-xs"><summary>{t("technicalDetails")}</summary><p className="mt-2 break-all">{catalogError}</p></details>
+          <details className="settings-disclosure border-y-0 text-xs"><summary className="settings-disclosure-summary min-h-0 py-1 font-normal text-inherit"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("technicalDetails")}</summary><p className="mt-2 break-all">{catalogError}</p></details>
           <Button type="button" variant="outline" size="sm" aria-disabled={catalogLoading || !!pending} className="aria-disabled:opacity-50" onClick={event => {
             if (catalogLoading || busy.current) return;
             catalogFocus.remember(event.currentTarget); onRetryCatalog?.();
-          }}>{t(catalogLoading ? "refreshing" : "retryCatalog")}</Button>
+          }}><RefreshCw className={catalogLoading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" />{t(catalogLoading ? "refreshing" : "retryCatalog")}</Button>
         </AlertDescription></Alert>}
         {pageError && <Alert variant="destructive"><AlertTitle className="line-clamp-none">{t(removalBlocked ? "removeNotCompleted" : "operationFailed")}</AlertTitle><AlertDescription>
           <p>{removalBlocked ? t("removeBlockedHint") : pageError}</p>
-          {removalBlocked && <details className="text-xs"><summary>{t("technicalDetails")}</summary><p className="mt-2 break-all">{pageError}</p></details>}
+          {removalBlocked && <details className="settings-disclosure border-y-0 text-xs"><summary className="settings-disclosure-summary min-h-0 py-1 font-normal text-inherit"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("technicalDetails")}</summary><p className="mt-2 break-all">{pageError}</p></details>}
         </AlertDescription></Alert>}
         {completion && <Card ref={resultCard} role="region" tabIndex={-1} className="gap-3 border-success/35 bg-success/5 outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t(completion.kind)}>
           <CardHeader className="flex flex-row items-start justify-between gap-3">
@@ -329,7 +329,20 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                 }}
               />
               <Button type="button" size="sm" variant="outline" onClick={() => onOpen(completion.entry.id)}>{t("openWorkspace")}<ArrowRight /></Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copyCommand()}>{copied === "done" ? <Check /> : <Copy />}{copied === "done" ? t("copied") : t("copyStart")}</Button>
+              <Button type="button" size="sm" variant="outline" onClick={() => void copyCommand()}>
+                <span className="relative inline-flex size-3.5 items-center justify-center">
+                  <Copy className={`size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-75 opacity-0" : "scale-100 opacity-100"}`} aria-hidden="true" />
+                  <Check className={`text-success absolute inset-0 size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} aria-hidden="true" />
+                </span>
+                <span className="inline-grid items-center justify-items-center">
+                  <span className={`col-start-1 row-start-1 transition-opacity duration-150 motion-reduce:transition-none ${copied === "done" ? "opacity-0" : "opacity-100"}`} aria-hidden={copied === "done"}>
+                    {t("copyStart")}
+                  </span>
+                  <span className={`col-start-1 row-start-1 transition-opacity duration-150 motion-reduce:transition-none ${copied === "done" ? "opacity-100" : "opacity-0"}`} aria-hidden={copied !== "done"}>
+                    {t("copied")}
+                  </span>
+                </span>
+              </Button>
               <Button asChild size="sm" variant="ghost"><a href={`?view=docs&doc=tutorials%2Fquickstart&docLang=${locale}`}>{t("setupGuide")}</a></Button>
             </div>
             <WorkspaceInlineServiceError
@@ -338,7 +351,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
               dismissLabel={t("dismiss")}
             />
             {copied === "error" && <p role="alert" className="text-xs text-destructive">{t("copyFailed")}</p>}
-            <details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t("viewCommand")}</summary><code className="mt-2 block select-all break-all rounded-md bg-background p-3">{command}</code></details>
+            <details className="settings-disclosure border-y-0 text-xs text-muted-foreground"><summary className="settings-disclosure-summary min-h-0 py-1 text-xs"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("viewCommand")}</summary><code className="mt-2 block select-all break-all rounded-md bg-background p-3">{command}</code></details>
           </CardContent>
         </Card>}
         {removed && <Alert ref={removedNotice} tabIndex={-1} role="status"><AlertDescription className="flex w-full flex-wrap items-center justify-between gap-3">
