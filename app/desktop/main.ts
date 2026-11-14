@@ -1,15 +1,37 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, nativeTheme, screen, systemPreferences, Tray } from 'electron'
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  protocol,
+  screen,
+  session,
+  systemPreferences,
+  Tray,
+} from 'electron'
 import { existsSync, mkdirSync, realpathSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
+import { NodeUdsRpcClient } from '@ludens/core/cli/app-rpc-client'
 import { ludensHome, registerWorkspace } from '@ludens/protocol/ludens'
 import type { DesktopWindowCommand, DesktopWindowState } from '../lib/desktop.js'
-import { AppServerHost } from './app-server-host.js'
+import { AppServerHost, resolveStaticDir } from './app-server-host.js'
 import { createCompanion } from './companion.js'
+import {
+  LUDENS_APP_ENTRY_URL,
+  LUDENS_APP_ORIGIN,
+  registerLudensPrivilegedSchemes,
+  registerLudensProtocols,
+} from './custom-protocols.js'
+import { dashboardSender, isDashboardUrl, originKey } from './dashboard-window.js'
 import type { LudensPetSnapshot } from './ludens-source.js'
 import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
-import { dashboardSender, isDashboardUrl } from './dashboard-window.js'
+import { ActiveCoreQuitGuard, mapDialogButtonToQuitAction } from './quit-guard.js'
+import { DesktopUdsRpcRelay } from './rpc-bridge.js'
 import { createLudensTrayIcon } from './tray-icon.js'
 import {
   buildOfflineWaitingHtml,
@@ -47,34 +69,47 @@ if (values.help) {
       'Ludens — Desktop console & Shiori game AI host',
       '',
       '--workspace PATH   Initial workspace to register/select on launch',
-      '--server URL       Connect to an external local Ludens server (e.g. next dev)',
+      '--server URL       Load an explicit local dev server URL instead of ludens-app://console/',
       '--dashboard URL    Alias for --server',
       '--profile PATH     Custom desktop profile directory (default: ~/.ludens/desktop/profile)',
       '--background       Start hidden in the system tray + Companion without opening the main window',
       '--show-window      Open the main window on launch (default unless --background is passed)',
       '--help             Show this help message',
       '',
-      'By default, Ludens launches and supervises its own local `ludens app-server` instance.',
-      'Closing the window hides to Tray + Companion; quitting stops managed game AI services.',
+      'By default, Ludens ensures a zero-port UDS `ludens app-server` daemon and serves `app/out` via `ludens-app://console/`.',
+      'Closing the window hides to Tray + Companion; Cmd+Q checks for active Cores before quitting.',
     ].join('\n'),
   )
   app.exit(0)
 } else {
   const initialWorkspace = values.workspace ?? process.env.LUDENS_WORKSPACE
   const workspace = initialWorkspace ? realpathSync(resolve(initialWorkspace)) : undefined
-  const externalServerArg = values.server ?? values.dashboard
-  let externalServer: URL | undefined
-  if (externalServerArg) {
-    externalServer = new URL(externalServerArg)
+  const explicitDevArg =
+    values.server ??
+    values.dashboard ??
+    process.env.LUDENS_APP_DEV_URL?.trim() ??
+    process.env.LUDENS_DEV_URL?.trim()
+
+  let externalDevServer: URL | undefined
+  if (explicitDevArg) {
+    externalDevServer = new URL(explicitDevArg)
     if (
-      externalServer.protocol !== 'http:' ||
-      !['127.0.0.1', 'localhost', '[::1]'].includes(externalServer.hostname) ||
-      externalServer.username ||
-      externalServer.password
+      (externalDevServer.protocol !== 'http:' && externalDevServer.protocol !== 'https:') ||
+      !['127.0.0.1', 'localhost', '[::1]'].includes(externalDevServer.hostname) ||
+      externalDevServer.username ||
+      externalDevServer.password
     ) {
-      throw new Error('--server must be a local HTTP URL')
+      throw new Error('--server / LUDENS_APP_DEV_URL must be a local HTTP(S) URL')
     }
   }
+
+  const serverOrigin = externalDevServer
+    ? (originKey(externalDevServer.href) ?? externalDevServer.origin)
+    : LUDENS_APP_ORIGIN
+  const serverHref = externalDevServer ? externalDevServer.href : LUDENS_APP_ENTRY_URL
+
+  // Custom schemes MUST be registered synchronously before `app.whenReady()`.
+  registerLudensPrivilegedSchemes(protocol)
 
   const here = dirname(fileURLToPath(import.meta.url))
   nativeTheme.themeSource = 'dark'
@@ -86,25 +121,22 @@ if (values.help) {
   if (!app.requestSingleInstanceLock()) {
     app.exit(0)
   } else {
-    const appServerHost = externalServer
-      ? undefined
-      : new AppServerHost({
-          here,
-          resourcesPath: process.resourcesPath,
-          env: process.env,
-        })
-    const serverReadyPromise = externalServer
-      ? Promise.resolve({ origin: externalServer.origin, href: externalServer.href })
-      : appServerHost!.start()
-    // Prevent unhandled rejection noise before app.whenReady() awaits serverReadyPromise.
-    void serverReadyPromise.catch(() => {})
+    const appServerHost = new AppServerHost({
+      here,
+      resourcesPath: process.resourcesPath,
+      env: process.env,
+    })
+    const daemonReadyPromise = appServerHost.start()
+    // Prevent unhandled rejection noise before app.whenReady() handles daemon readiness.
+    void daemonReadyPromise.catch(() => {})
 
     let quitting = false
-    let serverStopped = !appServerHost
-    let shutdownPromise: Promise<void> | undefined
     let owner: BrowserWindow | undefined
     let tray: Tray | undefined
     let source: PetSessionCoordinator | undefined
+    let rpcRelay: DesktopUdsRpcRelay | undefined
+    let mainMediaClient: NodeUdsRpcClient | undefined
+    let mainMediaSocketPath: string | undefined
     let retryDashboard: (() => void) | undefined
     let dashboardTimer: ReturnType<typeof setInterval> | undefined
     let saveStateTimer: ReturnType<typeof setTimeout> | undefined
@@ -128,36 +160,111 @@ if (values.help) {
       retryDashboard?.()
     }
 
+    const ensureMainMediaClient = async (): Promise<NodeUdsRpcClient> => {
+      if (!appServerHost.current()) {
+        await daemonReadyPromise.catch(() => {})
+        if (!appServerHost.current()) {
+          await appServerHost.ensureOnline()
+        }
+      }
+      const socketPath = appServerHost.socketPath()
+      if (!mainMediaClient || mainMediaSocketPath !== socketPath) {
+        await mainMediaClient?.close().catch(() => {})
+        mainMediaSocketPath = socketPath
+        mainMediaClient = new NodeUdsRpcClient({ socketPath, connectTimeoutMs: 5_000 })
+      }
+      return mainMediaClient
+    }
+
+    const quitGuard = new ActiveCoreQuitGuard({
+      getLocale: () => app.getLocale(),
+      queryStatus: timeoutMs => appServerHost.probeStatus(timeoutMs),
+      stopAllCores: async () => {
+        const status = await appServerHost.probeStatus(1_200)
+        const socketPath = status?.socketPath ?? appServerHost.socketPath()
+        const client = new NodeUdsRpcClient({ socketPath, connectTimeoutMs: 1_500 })
+        try {
+          return await client.call('cores/stopAll', undefined, { timeoutMs: 8_000 })
+        } finally {
+          await client.close().catch(() => {})
+        }
+      },
+      promptUser: async labels => {
+        const parent = owner && !owner.isDestroyed() && owner.isVisible() ? owner : undefined
+        const dialogOptions: Electron.MessageBoxOptions = {
+          type: 'question',
+          buttons: [labels.keepBackground, labels.stopAllAndQuit, labels.cancel],
+          defaultId: 0,
+          cancelId: 2,
+          noLink: true,
+          title: labels.title,
+          message: labels.message,
+          detail: labels.detail,
+        }
+        const result = parent
+          ? await dialog.showMessageBox(parent, dialogOptions)
+          : await dialog.showMessageBox(dialogOptions)
+        return mapDialogButtonToQuitAction(result.response)
+      },
+      onConfirmQuit: async () => {
+        quitting = true
+        clearInterval(dashboardTimer)
+        clearTimeout(saveStateTimer)
+        if (syncTrayTheme) nativeTheme.off('updated', syncTrayTheme)
+        const nextState = captureWindowState?.()
+        if (nextState) {
+          try {
+            saveWindowStateSync(windowStatePath, nextState)
+          } catch {}
+        }
+        source?.stop()
+        rpcRelay?.dispose()
+        await mainMediaClient?.close().catch(() => {})
+        mainMediaClient = undefined
+        await appServerHost.stop().catch(() => {})
+      },
+      triggerQuit: () => {
+        app.quit()
+      },
+    })
+
     app.on('second-instance', showOwner)
     app.on('activate', showOwner)
     app.on('before-quit', event => {
-      quitting = true
-      clearInterval(dashboardTimer)
-      clearTimeout(saveStateTimer)
-      if (syncTrayTheme) nativeTheme.off('updated', syncTrayTheme)
-      const nextState = captureWindowState?.()
-      if (nextState) {
-        try {
-          saveWindowStateSync(windowStatePath, nextState)
-        } catch {}
-      }
-      source?.stop()
-      if (appServerHost && !serverStopped) {
-        event.preventDefault()
-        shutdownPromise ??= appServerHost
-          .stop()
-          .catch(error => {
-            console.error('[ludens] failed to stop app-server:', error)
-          })
-          .finally(() => {
-            serverStopped = true
-            app.exit(0)
-          })
-      }
+      quitGuard.handleBeforeQuit(event)
     })
     app.on('window-all-closed', () => app.quit())
 
     void app.whenReady().then(async () => {
+      const staticDir = resolveStaticDir({
+        here,
+        resourcesPath: process.resourcesPath,
+        env: process.env,
+      })
+
+      registerLudensProtocols(session.defaultSession, {
+        staticDir,
+        resolveMedia: async (params, signal) => {
+          const client = await ensureMainMediaClient()
+          try {
+            return await client.call('media/resolve', params, { signal, timeoutMs: 15_000 })
+          } catch (error) {
+            const err = error as NodeJS.ErrnoException
+            if (
+              !signal.aborted &&
+              (err?.code === 'ENOENT' ||
+                err?.code === 'ECONNREFUSED' ||
+                err?.message?.includes('UDS'))
+            ) {
+              await appServerHost.ensureOnline()
+              const recovered = await ensureMainMediaClient()
+              return recovered.call('media/resolve', params, { signal, timeoutMs: 15_000 })
+            }
+            throw error
+          }
+        },
+      })
+
       const primaryWorkArea = screen.getPrimaryDisplay().workArea
       const workAreas = [
         primaryWorkArea,
@@ -180,10 +287,6 @@ if (values.help) {
           : resolve(here, '../../public')
       const appIcon = nativeImage.createFromPath(resolve(publicAssets, 'brand/ludens-app-icon.png'))
       if (!appIcon.isEmpty()) app.dock?.setIcon(appIcon)
-
-      const serverTarget = await serverReadyPromise
-      const serverOrigin = serverTarget.origin
-      const serverHref = serverTarget.href
 
       let initialProjectId: string | undefined
       if (workspace) {
@@ -223,7 +326,23 @@ if (values.help) {
       owner.webContents.on('will-navigate', navigation)
       owner.webContents.on('will-redirect', navigation)
 
-      const initial = new URL(serverOrigin)
+      const trusted = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) =>
+        !!owner && dashboardSender(owner, serverOrigin, event)
+
+      rpcRelay = new DesktopUdsRpcRelay({
+        ipcMain,
+        resolveSocketPath: async () => (await appServerHost.ensureOnline()).socketPath,
+        isTrustedSender: trusted,
+        getTargetWebContents: () => (owner && !owner.isDestroyed() ? owner.webContents : undefined),
+        isTrustedWebContents: contents =>
+          !!owner &&
+          !owner.isDestroyed() &&
+          contents === owner.webContents &&
+          Boolean(contents.mainFrame && isDashboardUrl(contents.mainFrame.url, serverOrigin)),
+      })
+      rpcRelay.install()
+
+      const initial = new URL(serverHref)
       if (initialProjectId) initial.searchParams.set('project', initialProjectId)
       initial.searchParams.set('view', 'live')
       let dashboardTarget = initial.href
@@ -360,8 +479,6 @@ if (values.help) {
         }
       })
 
-      const trusted = (event: Electron.IpcMainInvokeEvent) =>
-        !!owner && dashboardSender(owner, serverOrigin, event)
       const openDetails = (url: string) => {
         if (!owner || owner.isDestroyed() || !isDashboardUrl(url, serverOrigin)) return
         void owner.loadURL(url).catch(error => console.error('[ludens] console navigation failed:', error))
@@ -460,21 +577,8 @@ if (values.help) {
       owner.webContents.on('did-finish-load', () => {
         owner?.webContents.send('ludens-pet:snapshot', snapshot)
         publishWindowState()
+        rpcRelay?.syncStatus()
       })
-
-      source = new PetSessionCoordinator({
-        dashboardUrl: serverHref,
-        onTargetChanged: () => {
-          if (source && companion) companion.configureActivity(source)
-        },
-        onSnapshot: value => {
-          snapshot = value
-          if (owner && !owner.isDestroyed()) owner.webContents.send('ludens-pet:snapshot', value)
-        },
-      })
-      if (companion) companion.configureActivity(source)
-      source.setFocusedProject(extractProjectFromUrl(dashboardTarget, serverOrigin))
-      void source.start(workspace)
 
       tray = new Tray(createLudensTrayIcon(publicAssets, nativeTheme.shouldUseDarkColors))
       tray.setToolTip('Ludens')
@@ -584,15 +688,41 @@ if (values.help) {
         void loadDashboard()
       }
       dashboardTimer = setInterval(retryDashboard, 5_000)
-      await loadDashboard()
 
+      // Start loading the static SPA immediately while finishing UDS daemon startup.
+      const loadPromise = loadDashboard()
       const shouldShowWindow = values['show-window'] ? true : !values.background
       if (shouldShowWindow) showOwner()
-      console.log(`[ludens] server=${serverOrigin} profile=${app.getPath('userData')}`)
+
+      const daemonInfo = await daemonReadyPromise
+      void rpcRelay.start().catch(error => {
+        console.error('[ludens] UDS RPC relay initial connection failed (will retry):', error)
+      })
+
+      source = new PetSessionCoordinator({
+        dashboardUrl: serverHref,
+        socketPath: daemonInfo.socketPath,
+        onTargetChanged: () => {
+          if (source && companion) companion.configureActivity(source)
+        },
+        onSnapshot: value => {
+          snapshot = value
+          if (owner && !owner.isDestroyed()) owner.webContents.send('ludens-pet:snapshot', value)
+        },
+      })
+      if (companion) companion.configureActivity(source)
+      source.setFocusedProject(extractProjectFromUrl(dashboardTarget, serverOrigin))
+      void source.start(workspace)
+
+      await loadPromise
+      console.log(
+        `[ludens] ui=${serverOrigin} uds=${daemonInfo.socketPath} pid=${daemonInfo.pid} profile=${app.getPath('userData')}`,
+      )
     }).catch(async error => {
       console.error(error)
-      await appServerHost?.stop().catch(() => {})
-      serverStopped = true
+      rpcRelay?.dispose()
+      await mainMediaClient?.close().catch(() => {})
+      await appServerHost.stop().catch(() => {})
       app.exit(1)
     })
   }
