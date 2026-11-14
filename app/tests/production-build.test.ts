@@ -33,6 +33,16 @@ test("static export stamp refuses missing, stale, and replaced production builds
     await stampBuild(root);
     await checkBuild(root);
 
+    await writeFile(join(root, "index.html"), "<!doctype html><html><body>Updated</body></html>");
+    await assert.rejects(checkBuild(root), /missing or stale/);
+    await stampBuild(root);
+    await checkBuild(root);
+
+    await writeFile(join(root, "vite.config.ts"), "export default {};\n");
+    await assert.rejects(checkBuild(root), /missing or stale/);
+    await stampBuild(root);
+    await checkBuild(root);
+
     await rm(join(root, "out/index.html"));
     await assert.rejects(checkBuild(root), /missing or stale/);
   } finally {
