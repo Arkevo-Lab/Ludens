@@ -23,7 +23,7 @@ import {
   type StreamSegment,
 } from "@/features/live/shiori-segments";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
-import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { useLudensEvent, useOptionalLudensRpc, type LudensRpcCaller } from "@/lib/ludens-rpc";
 import type { DeviceContentionConflict, RunData, RunInfo, ServiceLaunchOrigin } from "@/lib/types";
 
 export function canSwitchShioriModel(state: {
@@ -185,12 +185,17 @@ export function useLiveSession(options: {
   stabilizedDataRef.current = data;
 
   const rpcCtx = useOptionalLudensRpc();
-  const engine = useMemo(() => getLiveSessionEngine(project, rpcCtx), [project, rpcCtx]);
+  const rpcCall = rpcCtx?.call;
+  const rpcCaller = useMemo<LudensRpcCaller | null>(
+    () => (rpcCall ? { call: rpcCall } : null),
+    [rpcCall],
+  );
+  const engine = useMemo(() => getLiveSessionEngine(project, rpcCaller), [project, rpcCaller]);
   const snap = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
 
   useEffect(() => {
-    engine.setRpc(rpcCtx);
-  }, [engine, rpcCtx]);
+    engine.setRpc(rpcCaller);
+  }, [engine, rpcCaller]);
 
   useLudensEvent(
     ["eventPool", "core", "run"],

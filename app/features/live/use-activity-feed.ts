@@ -19,7 +19,7 @@ import {
   getLiveSessionEngine,
 } from "@/features/live/live-session-store";
 import { ActivityChangesClient } from "@ludens/protocol/activity";
-import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { useLudensEvent, useOptionalLudensRpc, type LudensRpcCaller } from "@/lib/ludens-rpc";
 import { useTranslations } from "@/lib/locale";
 
 interface FeedState {
@@ -131,14 +131,19 @@ export function useActivityFeed(options: {
 
   // ── 1. Primary Unfiltered Continuous Live Session Store (Monotonic + Warm across View Switches) ──
   const rpcCtx = useOptionalLudensRpc();
+  const rpcCall = rpcCtx?.call;
+  const rpcCaller = useMemo<LudensRpcCaller | null>(
+    () => (rpcCall ? { call: rpcCall } : null),
+    [rpcCall],
+  );
   const isFilteredMode = filter !== "all" || search !== "";
   const useSessionEngine = continuousStream && !isFilteredMode;
-  const engine = useMemo(() => getLiveSessionEngine(project, rpcCtx), [project, rpcCtx]);
+  const engine = useMemo(() => getLiveSessionEngine(project, rpcCaller), [project, rpcCaller]);
   engine.setScopeChangedMessage(scopeChangedError.current);
 
   useEffect(() => {
-    engine.setRpc(rpcCtx);
-  }, [engine, rpcCtx]);
+    engine.setRpc(rpcCaller);
+  }, [engine, rpcCaller]);
 
   useLudensEvent(
     ["run", "observation", "core", "eventPool"],
@@ -228,7 +233,7 @@ export function useActivityFeed(options: {
       return;
     }
     update(() => emptyState(resetRevision));
-    if (!rpcCtx) {
+    if (!rpcCaller) {
       update(value => ({ ...value, loading: false, error: "RPC client is unavailable" }));
       return;
     }
@@ -239,7 +244,7 @@ export function useActivityFeed(options: {
       epoch,
       limit: ACTIVITY_PAGE_SIZE,
       reader: (req, signal) =>
-        rpcCtx.call(
+        rpcCaller.call(
           "activity/get",
           {
             project: req.project,
@@ -337,7 +342,7 @@ export function useActivityFeed(options: {
       selectionRequest.current?.abort();
       historyLoading.current = false;
     };
-  }, [project, run, epoch, boundedEnabled, activeArchiveRevision, resetRevision, rpcCtx, update]);
+  }, [project, run, epoch, boundedEnabled, activeArchiveRevision, resetRevision, rpcCaller, update]);
 
   useLudensEvent(
     ["run", "observation", "core"],

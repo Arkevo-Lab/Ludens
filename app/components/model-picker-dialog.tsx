@@ -359,9 +359,10 @@ export function ModelPickerDialog({
     setSelectError(null);
   }, [open]);
 
+  const rpcCall = rpcCtx?.call;
   useEffect(() => {
     if (!open || catalogOverride !== undefined) return;
-    if (!rpcCtx) {
+    if (!rpcCall) {
       setLoadError(t("loadFailed"));
       setLoading(false);
       return;
@@ -372,12 +373,11 @@ export function ModelPickerDialog({
     setLoadError(null);
     const trimmedProject = projectId?.trim();
 
-    void rpcCtx
-      .call(
-        "models/list",
-        trimmedProject ? { workspaceId: trimmedProject } : undefined,
-        { signal: controller.signal },
-      )
+    void rpcCall(
+      "models/list",
+      trimmedProject ? { workspaceId: trimmedProject } : undefined,
+      { signal: controller.signal },
+    )
       .then(payload => {
         if (controller.signal.aborted || version !== requestVersionRef.current) return;
         setFetchedCatalog(payload as unknown as AvailableModelsCatalog);
@@ -393,7 +393,7 @@ export function ModelPickerDialog({
       });
 
     return () => controller.abort();
-  }, [open, projectId, reloadTick, catalogOverride, rpcCtx, t]);
+  }, [open, projectId, reloadTick, catalogOverride, rpcCall, t]);
 
   const catalog = catalogOverride !== undefined ? catalogOverride : fetchedCatalog;
   const allModels = catalog?.models ?? [];

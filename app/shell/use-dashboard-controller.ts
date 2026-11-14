@@ -300,7 +300,7 @@ export function useDashboardController() {
     return () => {
       controller.abort();
     };
-  }, [catalogRevision, rpc, rpc.reconnectGeneration]);
+  }, [catalogRevision, rpc.call, rpc.reconnectGeneration]);
 
   const catalogEventQueued = useRef(false);
   useLudensEvent(
@@ -392,7 +392,7 @@ export function useDashboardController() {
     followed.archiveRevision,
     snapshotRevision,
     runRefreshTick,
-    rpc,
+    rpc.call,
     rpc.reconnectGeneration,
   ]);
 

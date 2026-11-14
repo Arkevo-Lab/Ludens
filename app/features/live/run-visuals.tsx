@@ -207,26 +207,26 @@ function TimelineRecordData({ query }: { query: TimelineRecordQuery }) {
   const t = useTranslations("runVisuals");
   const { t: rootT } = useLocale();
   const rpcCtx = useOptionalLudensRpc();
+  const rpcCall = rpcCtx?.call;
   const [record, setRecord] = useState<TimelineRecordDetail | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
-    if (!rpcCtx) {
+    if (!rpcCall) {
       setError(mediaFailureMessage(0, rootT));
       return;
     }
     const controller = new AbortController();
-    void rpcCtx
-      .call(
-        "run/timelineRecord",
-        {
-          project: query.project,
-          run: query.run,
-          record: query.record,
-          sequence: query.sequence,
-          source: query.source,
-        },
-        { signal: controller.signal },
-      )
+    void rpcCall(
+      "run/timelineRecord",
+      {
+        project: query.project,
+        run: query.run,
+        record: query.record,
+        sequence: query.sequence,
+        source: query.source,
+      },
+      { signal: controller.signal },
+    )
       .then(result => {
         if (!controller.signal.aborted) {
           setRecord(result as unknown as TimelineRecordDetail);
@@ -238,7 +238,7 @@ function TimelineRecordData({ query }: { query: TimelineRecordQuery }) {
         }
       });
     return () => controller.abort();
-  }, [query.project, query.run, query.record, query.sequence, query.source.call, query.source.observation, rpcCtx, rootT]);
+  }, [query.project, query.run, query.record, query.sequence, query.source.call, query.source.observation, rpcCall, rootT]);
   if (error) return <p role="status">{error}</p>;
   if (!record) return <p role="status">{t("record.loading")}</p>;
   if (record.data === undefined && record.space === undefined) return <p>{t("record.empty")}</p>;

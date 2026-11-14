@@ -44,14 +44,15 @@ export function ArchiveBuild({ project, run, onReady }: { project: string; run: 
     current.current = null;
   }, [project, run]);
 
+  const rpcCall = rpcCtx?.call;
   useEffect(() => {
-    if (!project || !run || !rpcCtx) return;
+    if (!project || !run || !rpcCall) return;
     const abort = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const load = async () => {
       try {
-        const next = (await rpcCtx.call(
+        const next = (await rpcCall(
           "archive/build",
           { project, run },
           { signal: abort.signal },
@@ -82,7 +83,7 @@ export function ArchiveBuild({ project, run, onReady }: { project: string; run: 
       mutation.current?.abort();
       if (timer !== undefined) clearTimeout(timer);
     };
-  }, [project, run, rpcCtx, refreshTick, reconnectGen]);
+  }, [project, run, rpcCall, refreshTick, reconnectGen]);
 
   const triggerRefresh = useCallback(() => {
     setRefreshTick(v => v + 1);

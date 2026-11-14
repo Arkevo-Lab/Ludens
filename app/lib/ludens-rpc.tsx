@@ -1127,20 +1127,23 @@ export function useLudensRpc(): {
     [ctx.client],
   );
 
-  return {
-    client: ctx.client,
-    call: ctx.call,
-    status: ctx.snapshot.status,
-    error: ctx.snapshot.error,
-    needsAuth: ctx.snapshot.needsAuth,
-    isReady: ctx.snapshot.isReady,
-    serverInfo: ctx.snapshot.serverInfo,
-    serverSeq: ctx.snapshot.serverSeq,
-    mediaTicket: ctx.snapshot.mediaTicket,
-    reconnectGeneration: ctx.snapshot.reconnectGeneration,
-    reconnect: ctx.reconnect,
-    subscribeEvent,
-  };
+  return useMemo(
+    () => ({
+      client: ctx.client,
+      call: ctx.call,
+      status: ctx.snapshot.status,
+      error: ctx.snapshot.error,
+      needsAuth: ctx.snapshot.needsAuth,
+      isReady: ctx.snapshot.isReady,
+      serverInfo: ctx.snapshot.serverInfo,
+      serverSeq: ctx.snapshot.serverSeq,
+      mediaTicket: ctx.snapshot.mediaTicket,
+      reconnectGeneration: ctx.snapshot.reconnectGeneration,
+      reconnect: ctx.reconnect,
+      subscribeEvent,
+    }),
+    [ctx.client, ctx.call, ctx.snapshot, ctx.reconnect, subscribeEvent],
+  );
 }
 
 export function useConnectionTarget(): ConnectionTargetController {

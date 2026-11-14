@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
+import { act, createElement, useEffect } from "react";
+import { createRoot } from "react-dom/client";
 import {
   APP_RPC_ERROR_CODES,
   APP_RPC_EVENT_NOTIFICATION,
@@ -8,7 +11,13 @@ import {
   type LudensServerEvent,
 } from "@ludens/protocol/app-rpc";
 import type { DesktopRpcBridge, DesktopRpcStatus } from "../lib/desktop";
-import { LudensRpcClient, LudensRpcError, type RpcWebSocketLike } from "../lib/ludens-rpc";
+import {
+  LudensRpcClient,
+  LudensRpcError,
+  LudensRpcProvider,
+  useLudensRpc,
+  type RpcWebSocketLike,
+} from "../lib/ludens-rpc";
 
 class FakeWebSocket implements RpcWebSocketLike {
   readonly sent: Array<{ jsonrpc: string; id: number; method: string; params?: Record<string, unknown> }> = [];
@@ -365,5 +374,149 @@ test("LudensRpcClient communicates over DesktopRpcBridge IPC in electron-local m
     );
   } finally {
     client.dispose();
+  }
+});
+
+test("useLudensRpc preserves object identity across unchanged renders and keeps rpc.call stable across snapshot updates", async () => {
+  const nodeRequire = createRequire(import.meta.url);
+  const { JSDOM } = nodeRequire("jsdom") as {
+    JSDOM: new (html: string, options?: { url?: string }) => {
+      window: { document: Document; close(): void };
+    };
+  };
+  const dom = new JSDOM("<!doctype html><html><body><div id='root'></div></body></html>", {
+    url: "https://remote.example:8443/",
+  });
+  const globalAny = globalThis as {
+    window?: unknown;
+    document?: unknown;
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  };
+  const prevWindow = globalAny.window;
+  const prevDocument = globalAny.document;
+  const prevActEnv = globalAny.IS_REACT_ACT_ENVIRONMENT;
+
+  globalAny.window = dom.window;
+  globalAny.document = dom.window.document;
+  globalAny.IS_REACT_ACT_ENVIRONMENT = true;
+
+  const sockets: FakeWebSocket[] = [];
+  const baseNow = 1_700_000_000_000;
+  const client = new LudensRpcClient({
+    target: { kind: "remote", url: "https://remote.example:8443", token: "tok-stable" },
+    now: () => baseNow,
+    createWebSocket: url => {
+      const sock = new FakeWebSocket(url);
+      sockets.push(sock);
+      return sock;
+    },
+  });
+
+  const observed: Array<ReturnType<typeof useLudensRpc>> = [];
+  let callEffectRuns = 0;
+
+  function Probe({ tick }: { tick: number }) {
+    const rpc = useLudensRpc();
+    observed.push(rpc);
+    useEffect(() => {
+      callEffectRuns += 1;
+    }, [rpc.call]);
+    return createElement("div", { "data-tick": tick, "data-status": rpc.status });
+  }
+
+  const container = dom.window.document.getElementById("root")!;
+  const root = createRoot(container);
+
+  try {
+    await act(async () => {
+      root.render(
+        createElement(LudensRpcProvider, {
+          client,
+          children: createElement(Probe, { tick: 1 }),
+        }),
+      );
+    });
+
+    const countAfterMount = observed.length;
+
+    // Unchanged snapshot re-renders must return the exact same object reference (`Object.is`).
+    await act(async () => {
+      root.render(
+        createElement(LudensRpcProvider, {
+          client,
+          children: createElement(Probe, { tick: 2 }),
+        }),
+      );
+    });
+
+    assert.equal(observed.length, countAfterMount + 1);
+    assert.equal(Object.is(observed[countAfterMount - 1], observed[countAfterMount]), true);
+    assert.equal(callEffectRuns, 1);
+
+    // Trigger snapshot changes (connecting -> connected + mediaTicket -> mediaTicket renewal).
+    await act(async () => {
+      sockets[0].triggerOpen();
+      sockets[0].emitResult(sockets[0].sent[0].id, {
+        serverVersion: "0.2.0",
+        protocolVersion: APP_RPC_PROTOCOL_VERSION,
+        transport: "ws",
+        authenticated: true,
+        serverSeq: 10,
+        media: { ticket: "ticket-1", ticketExpiresAt: baseNow + 500 },
+        activeCoreCount: 0,
+        managedWorkspaces: [],
+      });
+      await flushAsync();
+      sockets[0].emitResult(sockets[0].sent[1].id, {
+        subscribedSeq: 10,
+        events: [],
+        replayTruncated: false,
+      });
+      await flushAsync();
+    });
+
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 1_100));
+      const refreshReq = sockets[0].sent.find(frame => frame.method === "media/refreshTicket");
+      assert.ok(refreshReq, "expected media/refreshTicket request");
+      sockets[0].emitResult(refreshReq.id, {
+        ticket: "ticket-2",
+        expiresAt: baseNow + 600_000,
+      });
+      await flushAsync();
+    });
+
+    const latest = observed.at(-1)!;
+    assert.equal(latest.status, "connected");
+    assert.equal(latest.mediaTicket, "ticket-2");
+    assert.equal(latest.serverSeq, 10);
+    assert.equal(Object.is(observed[0], latest), false);
+
+    for (const snap of observed) {
+      assert.equal(Object.is(snap.call, observed[0].call), true);
+    }
+    assert.equal(callEffectRuns, 1);
+
+    // Re-rendering again while snapshot stays at seq 11 keeps the new object identity stable.
+    const countBefore = observed.length;
+    await act(async () => {
+      root.render(
+        createElement(LudensRpcProvider, {
+          client,
+          children: createElement(Probe, { tick: 3 }),
+        }),
+      );
+    });
+    assert.equal(observed.length, countBefore + 1);
+    assert.equal(Object.is(observed[countBefore - 1], observed[countBefore]), true);
+  } finally {
+    await act(async () => {
+      root.unmount();
+    });
+    client.dispose();
+    dom.window.close();
+    globalAny.window = prevWindow;
+    globalAny.document = prevDocument;
+    globalAny.IS_REACT_ACT_ENVIRONMENT = prevActEnv;
   }
 });
