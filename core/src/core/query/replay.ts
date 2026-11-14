@@ -25,7 +25,7 @@ const scoped = (event: Event, epoch: string | null) => epoch === null || event.t
 const url = (scope: Pick<Scope, "project" | "run" | "epoch">, values: Record<string, string | number>) => {
   const q = new URLSearchParams({ project: scope.project, run: scope.run, ...(scope.epoch === null ? {} : { epoch: scope.epoch }),
     ...Object.fromEntries(Object.entries(values).map(([key, value]) => [key, String(value)])) });
-  return `/api/replay?${q}`;
+  return `/media?kind=replay&${q}`;
 };
 
 /** A short source-index batch makes progress visible without waiting for unrelated projections. */

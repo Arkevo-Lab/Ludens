@@ -100,12 +100,34 @@ export class WorkspaceSupervisor {
     return ids;
   }
 
+  activeCoreWorkspaceIds(): string[] {
+    const ids: string[] = [];
+    for (const record of this.owned.values()) {
+      if (record.ownedServices.has("host")) ids.push(record.workspaceId);
+    }
+    return ids;
+  }
+
   managedWorkspacePaths(): string[] {
     const paths: string[] = [];
     for (const record of this.owned.values()) {
       if (record.ownedServices.size > 0) paths.push(record.workspace);
     }
     return paths;
+  }
+
+  async stopAllManaged(): Promise<string[]> {
+    const targets = [...this.owned.values()]
+      .filter(record => record.ownedServices.size > 0)
+      .map(record => ({ workspaceId: record.workspaceId, workspace: record.workspace }));
+    const stopped: string[] = [];
+    await Promise.allSettled(
+      targets.map(async target => {
+        await this.down(target.workspace, { keepEmulator: false });
+        stopped.push(target.workspaceId);
+      }),
+    );
+    return stopped;
   }
 
   ownedServicesFor(workspacePath: string): ReadonlySet<ManagedServiceName> {
