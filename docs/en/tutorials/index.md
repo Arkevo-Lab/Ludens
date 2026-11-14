@@ -1,21 +1,21 @@
 # Tutorials
 
-This directory splits the hands-on journey into five standalone topics, covering the full flow from first install, preparing emulator/desktop drivers, starting and stopping workspaces, to writing adaptive code and debugging.
+Ludens is a multimodal, cross-device Harness for complex end-to-end tasks—including robotics control, security and surveillance, desktop and software workflows, and real-time games. These five hands-on guides take you from installation and first launch to multi-machine device integration, capability verification, resident perception loops, and Console debugging.
 
-## Five-step path
+If you want to understand the core design—including **Shiori** (Ludens's Agent Thread Core), **Baseware** (the cross-device integration layer), and the perception-action loop—before running commands, read [Concepts Overview](../concepts/overview.md) first.
 
-For a first run, complete the [core installation](quickstart.md#install) in **1. Install & lifecycle**, prepare the target emulator or desktop driver in **2. Device preparation**, then return to [Starting and stopping workspaces](quickstart.md#starting-and-stopping-workspaces) to launch the workspace:
+## Recommended Reading Order
 
-| Stage | Topic | What it solves | Key commands / entry points |
-| --- | --- | --- | --- |
-| **1. Install & lifecycle** | [**Install & workspace lifecycle**](quickstart.md) | Install components, configure the global default directory, then create/register/import workspaces and manage their lifecycle once devices are ready | `ludens config` · `ludens init --name` · `ludens workspace` · `ludens up` · `ludens model` · `ludens auto on` · `ludens down` |
-| **2. Device preparation** | [**Devices & driver setup**](devices.md) | Set up the built-in Cua desktop driver or discover and connect external emulator driver packages | `--driver-package` · `baseware driver discover` · `cua-driver` |
-| **3. Capabilities & recording** | [**Workspaces & capability programming**](workspace.md) | Understand the workspace file layout, declare `@capability` and `@record`, call device and local Python capabilities | `ludens controller` · `ludens_tools.Client` · `.ludens/timeline/` |
-| **4. Perception & action** | [**Resident perception-and-action state machine**](perception-and-action.md) | Write a 30Hz resident `perception.py` state machine, query the historical timeline, and manage auto-injection and recording parameters | `ludens perception reload` · `ludens observe` |
-| **5. Debugging & verification** | [**Console debugging & verification**](debugging-and-verification.md) | Debug a single component in the foreground, use the Dashboard and the Ludens Pet companion, follow script naming conventions, run offline and on-device tests | `baseware serve` · `ludens run` · `http://127.0.0.1:3015` |
+| Step | Guide | What You Will Accomplish |
+| --- | --- | --- |
+| 1 | [Quickstart](quickstart.md) | Install dependencies, launch Ludens via Desktop App, local Console, or Headless CLI, start **Auto Run**, steer via the Event Pool, and **Reclaim Control** |
+| 2 | [Devices & Baseware](devices.md) | Configure built-in CUA desktop automation and external driver packages across `stdio`, `bridge`, `ssh`, `http`, and `sse`, and route tools across multiple machines |
+| 3 | [Workspace, Capabilities & Self-Verification](workspace.md) | Organize `ludens.json`, `MEMORY.md`, `skills/`, and `perception.py`; build `@capability`, `@eval_env`, and `@eval_capability` loops; run `ludens eval` and inspect results in **Capabilities** |
+| 4 | [Perception, Action & Performance Tuning](perception-and-action.md) | Write and hot-reload resident `perception.py` state machines, query 30 Hz fMP4 archives with `Client.observe()`, configure multimodal transport and image URL offloading, and tune latency |
+| 5 | [Console Operations & Debugging](console-and-debugging.md) | Operate every **Console** view, inspect timeline evidence in **Replay**, diagnose stalled control cycles and capability failures, check daemon/socket health, and run verification suites |
 
-## Related reference
+## Related Documentation
 
-- For the five-component boundaries, the Shiori control cycle, and OMP session assembly, see [Architecture & boundaries](../reference/architecture.md).
-- For device tool schemas, control leases, and the driver package protocol, see [Baseware design & capability contracts](../reference/baseware.md) and [Driver Bridge protocol](../reference/driver-bridge-protocol.md).
-- For diagnosing runtime events, model-input receipts, or the Dashboard indexing mechanism, see [Logging & call chains](../reference/logging.md).
+- **Concepts**: [Overview](../concepts/overview.md), [Loop and Control](../concepts/loop-and-control.md), and [Self-Verification](../concepts/self-verification.md)
+- **Reference**: [CLI Reference](../reference/cli.md), [Architecture](../reference/architecture.md), [Baseware](../reference/baseware.md), [Driver Bridge Protocol](../reference/driver-bridge-protocol.md), and [Logging](../reference/logging.md)
+- **Insights**: [Technical Insights](../insights/index.md)

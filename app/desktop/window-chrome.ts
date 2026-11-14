@@ -242,8 +242,8 @@ export function buildOfflineWaitingHtml(input: OfflineWaitingHtmlInput): string 
         <span class="pulse-block" aria-hidden="true"></span>
         <h1>等待本地日志服务 · Waiting for Local Service</h1>
       </div>
-      <p>卢登斯正在自动重连本地控制台。服务恢复后，此窗口将自动打开。</p>
-      <p>Ludens is reconnecting to the local dashboard. This window will open automatically once the service is ready.</p>
+      <p>Ludens 正在自动重连本地控制台。服务恢复后，此窗口将自动打开。</p>
+      <p>Ludens is reconnecting to the local Console. This window will open automatically once the service is ready.</p>
       <div class="origin">${safeOrigin}</div>
       <div class="actions">
         <a class="retry-btn" href="${safeRetryUrl}">立即重试 / Retry now</a>

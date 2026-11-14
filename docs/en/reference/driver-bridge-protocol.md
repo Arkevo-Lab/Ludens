@@ -17,9 +17,9 @@ This spec defines the Baseware `bridge` transport layer (TCP socket) communicati
 | Instruction (`op`) | Request Params | Response Format | Semantics |
 | --- | --- | --- | --- |
 | `HELLO` | none | `OK\t<version...>` | Connection handshake and version check (for example, returning clock parameters `<frequency>\t<cycles>` to compute frame rate, or a protocol version token). The Provider closes the connection immediately on version mismatch. |
-| `OWN` | `<epoch>` | `OK` or `ERROR OWNED` | Requests device control. Rejected if a holder already exists, including a repeat with the same epoch (`OWNED` or `ALREADY_OWNED`); the Provider handles same-epoch idempotency one layer up. Gamepad input state is zeroed immediately after a successful takeover. |
+| `OWN` | `<epoch>` | `OK` or `ERROR OWNED` | Requests device control. Rejected if a holder already exists, including a repeat with the same epoch (`OWNED` or `ALREADY_OWNED`); the Provider handles same-epoch idempotency one layer up. Gamepad input state is zeroed immediately after a successful control acquisition. |
 | `DISOWN` | `<epoch>` | `OK` or `ERROR STALE_EPOCH` | Releases device control. In-flight gamepad actions settle as `interrupted`, keys are zeroed, and any active touchscreen contacts are released. |
-| `STATE` | `<epoch>` | see below | Reads the control state currently held by the Bridge injection layer (reflects controller state only; never reads game memory). |
+| `STATE` | `<epoch>` | see below | Reads the control state currently held by the Bridge injection layer (reflects controller state only; never reads target/simulator internal memory). |
 
 `STATE` response field formats by controller model:
 
@@ -51,7 +51,7 @@ For devices that expose touchscreen hardware:
 | `TOUCH_INFO` | none | `OK\t<minX>\t<minY>\t<maxX>\t<maxY>` | Queries native touchscreen coordinate bounds. The Provider generates JSON Schema from this and rejects out-of-bounds coordinates. |
 | `TOUCH_DOWN` | `<epoch>\t<x>\t<y>` | Deferred response: `OK\tcompleted` or `OK\tinterrupted` | Presses at the given coordinates; returns `completed` once the device completes one input sample, with contact held after the return. Returns `ALREADY_DOWN` / `TOUCH_ALREADY_DOWN` if already pressed. |
 | `TOUCH_MOVE` | `<epoch>\t<x>\t<y>` | Deferred response: `OK\tcompleted` or `OK\tinterrupted` | Moves the current touch point; returns `completed` after sampling. Returns `NOT_DOWN` / `TOUCH_NOT_DOWN` if not currently pressed. |
-| `TOUCH_UP` | `<epoch>` | Deferred response: `OK\tcompleted` or `OK\tinterrupted` | Lifts the touch point and waits for one input sample; returns `interrupted` if cancelled or control is handed over while waiting. Returns `completed` idempotently when not pressed with no touch request in flight. |
+| `TOUCH_UP` | `<epoch>` | Deferred response: `OK\tcompleted` or `OK\tinterrupted` | Lifts the touch point and waits for one input sample; returns `interrupted` if cancelled or control is reclaimed while waiting. Returns `completed` idempotently when not pressed with no touch request in flight. |
 
 At most one touch request may be in flight at a time; concurrent requests return `BUSY` / `TOUCH_BUSY`. When the caller cancels a request (`AbortSignal` fires `STOP <epoch> <touchId>`), calls `pad.release`, or executes `DISOWN`, the Bridge immediately lifts the touch contact.
 

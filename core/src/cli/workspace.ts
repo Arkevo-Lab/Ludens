@@ -30,8 +30,22 @@ ludens services [--remote <url> --token <secret>]
 ludens down [--keep-emulator] [--services <emulator,baseware,core>] [--dashboard] [--pet] [--remote <url> --token <secret>]
 
 These commands use <workspace>/ludens.json locally or route through the shared app-server daemon.
+init uses the configured workspaceRoot unless --workspace selects a directory.
+An explicit directory does not require --name. Global defaults are copied at creation only.
+New hosts start in manual standby; run ludens auto on to start Auto Run.
+Desktop Pet is off by default. init --pet enables it in ludens.json.
+up --pet or --no-pet overrides that setting for this launch without changing ludens.json.
+--no-pet leaves any already running shared Desktop Pet open.
+Repeated up reuses running services; down then up applies configuration changes.
+down stops this workspace's managed host, Baseware and target emulator/process (persist unsaved target state first).
+Use down --keep-emulator before changing host settings to keep the current target process running.
+The shared Console stays up unless --dashboard is given by its owning workspace.
+Desktop Pet is shared across workspaces; down --pet stops its managed background job.
+A Desktop Pet opened separately is reused and stays open after down.
+Choose which workspace Desktop Pet follows in the Console; up preserves that selection.
 up / down / services connect over app-server.sock so CLI and Desktop share one WorkspaceSupervisor.
---remote <url> (or LUDENS_REMOTE_URL) and --token <secret> (or LUDENS_REMOTE_TOKEN) operate on a remote app-server.`;
+--remote <url> (or LUDENS_REMOTE_URL) and --token <secret> (or LUDENS_REMOTE_TOKEN) operate on a remote app-server.
+The driver manifest decides the bridge port, backend startup and preparation hints; see baseware driver list.`;
 
 function parseServicesOption(raw: string | undefined): ManagedServiceTarget[] | undefined {
   if (!raw) return undefined;

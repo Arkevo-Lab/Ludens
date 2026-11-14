@@ -172,7 +172,7 @@ describe('Ludens block speech', () => {
     const historical = state([block('old-action'), block('old-error', 'tool', 'error')], { activity: 'manual' })
     await s.poll(historical); await s.poll(historical)
     expect(s.shows()).toHaveLength(1)
-    expect(s.shows()[0].event.input.title).toBe('本轮已结束，控制权已交还')
+    expect(s.shows()[0].event.input.title).toBe('本轮已结束，控制权已收回')
     await vi.advanceTimersByTimeAsync(4_000); await s.poll(historical)
     expect(s.shows()).toHaveLength(1)
     s.controller.stop()
@@ -183,7 +183,7 @@ describe('Ludens block speech', () => {
     fresh.current.epoch = null
     await s.poll(fresh); await s.poll(fresh)
     expect(s.shows()).toHaveLength(1)
-    expect(s.shows()[0].event.input.title).toBe('已连接，等待 AI 接管')
+    expect(s.shows()[0].event.input.title).toBe('已连接 · 手动待命')
     expect(JSON.stringify(s.shows())).not.toContain('结束')
     s.controller.stop()
   })

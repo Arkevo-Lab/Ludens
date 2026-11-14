@@ -17,9 +17,9 @@
 | 指令 (`op`) | 请求参数 | 响应格式 | 语义说明 |
 | --- | --- | --- | --- |
 | `HELLO` | 无 | `OK\t<version...>` | 连接握手与版本核验（例如返回 `<frequency>\t<cycles>` 时钟参数以计算帧率，或返回协议版本标识）。版本不匹配时 Provider 立即关闭连接。 |
-| `OWN` | `<epoch>` | `OK` 或 `ERROR OWNED` | 申请设备控制权。若当前已有持有者则拒绝，包括重复传入相同 epoch（返回 `OWNED` 或 `ALREADY_OWNED`）；Provider 在上层处理同 epoch 的幂等。接管成功后立即清零手柄输入状态。 |
+| `OWN` | `<epoch>` | `OK` 或 `ERROR OWNED` | 申请设备控制权。若当前已有持有者则拒绝，包括重复传入相同 epoch（返回 `OWNED` 或 `ALREADY_OWNED`）；Provider 在上层处理同 epoch 的幂等。获取控制权成功后立即清零手柄输入状态。 |
 | `DISOWN` | `<epoch>` | `OK` 或 `ERROR STALE_EPOCH` | 释放设备控制权。在途手柄动作按 `interrupted` 结算、归零按键，并同时释放所有触屏接触点。 |
-| `STATE` | `<epoch>` | 见下方说明 | 读取当前 Bridge 注入层持有的控制状态（仅反映控制器状态，绝不读取游戏内存）。 |
+| `STATE` | `<epoch>` | 见下方说明 | 读取当前 Bridge 注入层持有的控制状态（仅反映控制器状态，绝不读取目标/模拟器内部内存）。 |
 
 不同控制器模型的 `STATE` 响应字段格式：
 
@@ -51,7 +51,7 @@ Provider 侧先通过 [timeline.ts](../../../baseware/src/drivers/timeline.ts) �
 | `TOUCH_INFO` | 无 | `OK\t<minX>\t<minY>\t<maxX>\t<maxY>` | 查询触屏原生坐标边界。Provider 据此生成 JSON Schema 并拦截越界坐标。 |
 | `TOUCH_DOWN` | `<epoch>\t<x>\t<y>` | 延迟响应：`OK\tcompleted` 或 `OK\tinterrupted` | 按下指定坐标，待设备完成一次输入采样后返回 `completed`，接触状态在返回后继续保持。若已处于按下状态则返回 `ALREADY_DOWN` / `TOUCH_ALREADY_DOWN`。 |
 | `TOUCH_MOVE` | `<epoch>\t<x>\t<y>` | 延迟响应：`OK\tcompleted` 或 `OK\tinterrupted` | 移动当前触点，待采样后返回 `completed`。若未处于按下状态则返回 `NOT_DOWN` / `TOUCH_NOT_DOWN`。 |
-| `TOUCH_UP` | `<epoch>` | 延迟响应：`OK\tcompleted` 或 `OK\tinterrupted` | 抬起触点并等待一次输入采样；等待期间被取消或交还控制权时返回 `interrupted`。未按下且无在途 Touch 请求时直接幂等返回 `completed`。 |
+| `TOUCH_UP` | `<epoch>` | 延迟响应：`OK\tcompleted` 或 `OK\tinterrupted` | 抬起触点并等待一次输入采样；等待期间被取消或收回或释放控制权时返回 `interrupted`。未按下且无在途 Touch 请求时直接幂等返回 `completed`。 |
 
 同一时刻最多允许一个在途 Touch 请求，并发请求返回 `BUSY` / `TOUCH_BUSY`。当调用方取消请求（`AbortSignal` 触发 `STOP <epoch> <touchId>`）、调用 `pad.release` 或执行 `DISOWN` 时，Bridge 会立即抬起触点。
 

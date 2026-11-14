@@ -66,18 +66,18 @@ const { values } = parseArgs({
 if (values.help) {
   console.log(
     [
-      'Ludens — Desktop console & Shiori game AI host',
+      'Ludens — Desktop Console & Multimodal Harness Host',
       '',
       '--workspace PATH   Initial workspace to register/select on launch',
       '--server URL       Load an explicit local dev server URL instead of ludens-app://console/',
       '--dashboard URL    Alias for --server',
       '--profile PATH     Custom desktop profile directory (default: ~/.ludens/desktop/profile)',
-      '--background       Start hidden in the system tray + Companion without opening the main window',
+      '--background       Start hidden in the system tray + Desktop Pet without opening the main window',
       '--show-window      Open the main window on launch (default unless --background is passed)',
       '--help             Show this help message',
       '',
-      'By default, Ludens ensures a zero-port UDS `ludens app-server` daemon and serves `app/out` via `ludens-app://console/`.',
-      'Closing the window hides to Tray + Companion; Cmd+Q checks for active Cores before quitting.',
+      'By default, Ludens ensures a zero-port UDS `ludens app-server` daemon for the active LUDENS_HOME and serves `app/out` via `ludens-app://console/`.',
+      'Pass --server URL only to override with an explicit external dev server. Closing the window hides to Tray + Desktop Pet; Cmd+Q checks active Cores before quitting managed workspace services.',
     ].join('\n'),
   )
   app.exit(0)

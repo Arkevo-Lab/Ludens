@@ -282,7 +282,7 @@ export class PetSessionCoordinator implements LudensActivitySource {
           next !== null &&
           (!next || typeof next.project !== 'string' || typeof next.workspace !== 'string' || typeof next.revision !== 'string')
         ) {
-          throw new Error('Ludens Pet 跟随目标无效')
+          throw new Error('桌宠跟随目标无效')
         }
         // Keep the saved selection on the server, but never consume an offline,
         // unregistered, or replaced directory as though it were that workspace.

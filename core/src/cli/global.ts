@@ -38,7 +38,7 @@ open registers an existing workspace; forget clears its matching pet follow targ
 forget keeps workspace files and services; if target cleanup fails, registration is retained.
 --new-id makes a copied directory independent and starts a new session, retaining archived history.
 import explicitly brings old workspace sessions and skill versions into the workspace.
-Stop the workspace's host and Baseware before import or --new-id; the emulator can remain open.`;
+The emulator or external target process can remain open during import or --new-id; stop the workspace's host and Baseware first.`;
 
 function directory(value: string) {
   if (!value.trim()) throw new Error("Directory must not be empty");

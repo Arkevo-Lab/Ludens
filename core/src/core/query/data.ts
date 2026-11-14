@@ -385,7 +385,7 @@ export async function stopRun(
   readRun: (project: string, run: string, epoch: string) => Promise<Pick<RunData,
     "manifest" | "live" | "selectedEpoch" | "controlAllowed">> = controlState,
 ) {
-  if (!expectedEpoch) throw new Error("必须明确选择接管周期");
+  if (!expectedEpoch) throw new Error("必须明确选择控制周期");
   const data = await readRun(project, run, expectedEpoch);
   if (
     !data.controlAllowed ||
@@ -394,7 +394,7 @@ export async function stopRun(
     data.live.epoch !== expectedEpoch
   )
     throw new Error("控制状态已变化，请刷新后重试");
-  if (data.live.mode !== "auto") throw new Error("当前运行没有开启 AI 接管");
+  if (data.live.mode !== "auto") throw new Error("当前运行未处于自主运行模式");
   return hostRequest(data.manifest.socket, {
     kind: "auto",
     argv: ["off"],

@@ -96,8 +96,8 @@ ludens controller python/<path.py>:<function> [--args '<JSON object>' | --file <
 
 Device controllers (including sensors) and decorated Python functions share this workspace catalog.
 List and help discover capabilities without executing workspace code.
-Calls requiring control use BASEWARE_EPOCH from an existing takeover; they never acquire control.
-Sensor controllers return observations alongside the execution result and can run without takeover.
+Calls requiring control use BASEWARE_EPOCH from an active Auto Run cycle; they never acquire control.
+Sensor controllers return observations alongside the execution result and can run during manual standby.
 Python: from ludens_tools import Client; Client().list(), .help(id), .call(id, arguments).
 All arguments are objects; --file reads the same complete argument object as --args.`;
 

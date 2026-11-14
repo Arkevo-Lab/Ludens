@@ -1,6 +1,6 @@
 # Logging and Call Chains
 
-Offline analyzers, the Dashboard web console, and the Ludens Pet desktop companion all consume the same persisted run facts. The recording rule is: **continuous high-frequency capabilities archive data on demand and report periodic aggregate statistics; active decisions and device changes record full events; internal nested call chains are traced at the diagnostics level**.
+Offline analyzers, the web **Console**, and the optional **Desktop Pet** all consume the same persisted run facts. The recording rule is: **continuous high-frequency capabilities archive data on demand and report periodic aggregate statistics; active decisions and device changes record full events; internal nested call chains are traced at the diagnostics level**.
 
 ## Recording modes
 
@@ -17,7 +17,7 @@ Set the log mode in `ludens.json`'s `logging.diagnostics` (or CLI `--diagnostics
 
 To keep 30Hz resident loops from flooding the event stream, continuous sampling and action loops use **fixed 5-second window statistics + fault-span merging**:
 
-- **5-second window statistics**: resident perception writes `perception_stats` every 5 seconds while a control lease (`auto` epoch) is active (per capability ID and `codeSHA`: call counts, error counts, latency `total/min/max`, sampling attempts/completions/recordings/`sleepStarved` ticks, window `realizedHz` and `utilization`, `history` hot-buffer watermarks `hotRecords/hotBytes/hotLimitBytes`, generation `lifetime` cumulative totals, plus video-encoder cumulative counts and current queue snapshot); Baseware independently writes `device_sampling_stats`. A trailing statistics segment is automatically appended on clean process shutdown, and lease revocation at handback flushes the final window (`reason: "stopped"`) before the cycle's `control(manual)` event — `manual` standby emits no sampling statistics.
+- **5-second window statistics**: resident perception writes `perception_stats` every 5 seconds while a control lease (`auto` epoch) is active (per capability ID and `codeSHA`: call counts, error counts, latency `total/min/max`, sampling attempts/completions/recordings/`sleepStarved` ticks, window `realizedHz` and `utilization`, `history` hot-buffer watermarks `hotRecords/hotBytes/hotLimitBytes`, generation `lifetime` cumulative totals, plus video-encoder cumulative counts and current queue snapshot); Baseware independently writes `device_sampling_stats`. A trailing statistics segment is automatically appended on clean process shutdown, and lease revocation on Reclaim Control flushes the final window (`reason: "stopped"`) before the cycle's `control(manual)` event — Manual Standby (`manual`) emits no sampling statistics.
 - **Fault-span merging**: the first continuous-perception error immediately writes `perception_fault` / `device_sampling_error`; subsequent retried errors of the same kind only accumulate the span's `fault.count` — the fault event is not reopened per frame even when successes and failures interleave. The fault span closes once a successful recovery is observed followed by at least one full 5-second window with no errors of the same kind (or the process stops normally).
 
 ## Files and event identity
@@ -66,11 +66,11 @@ Quick reference of core event contracts:
 | `python_call_start / python_call_end` | Actual execution Span of a workspace `@capability`-decorated function; records PID, source hash, terminal state, latency, and scoped `rpc: {calls, errors, durationMs, controllerCalls, observeCalls}` aggregated across nested `Client` IPC calls (native Python input/return objects are not force-serialized). Resident parents omitted under `normal` are flagged `parentOmitted: true` on child events. |
 | `command / execution / execution_error` | Baseware device-operation request and terminal state; the media summary produced by the same call is embedded in `execution.observations`. |
 | `action_start / action_end` | Independent hardware-execution lifecycle of a submitted async gamepad action (`pad.play`), carrying `actionId` and reusing the submission's `trace / epoch` — never hung under a later `pad.wait / status` request. |
-| `perception_status / perception_fault / perception_fault_end / perception_stats` | Resident `perception.py` process lifecycle (including `startupDurationMs` when transitioning from `loading` to `ready / error / unimplemented`), fault spans, and 5-second statistics; lifecycle and fault events feed Activity and the desktop pet; statistics stay diagnostic. |
-| `control / runtime_stats` | Takeover control transitions (`auto` start and `manual` handback with `elapsedMs` takeover duration) and optional periodic host runtime snapshots (`activeCalls`, queue watermarks, and process memory `rss / heapUsed / heapTotal`). |
+| `perception_status / perception_fault / perception_fault_end / perception_stats` | Resident `perception.py` process lifecycle (including `startupDurationMs` when transitioning from `loading` to `ready / error / unimplemented`), fault spans, and 5-second statistics; lifecycle and fault events feed Activity and the Desktop Pet; statistics stay diagnostic. |
+| `control / runtime_stats` | Control cycle transitions (`auto` Auto Run start and `manual` transition with `elapsedMs` cycle duration) and optional periodic host runtime snapshots (`activeCalls`, queue watermarks, and process memory `rss / heapUsed / heapTotal`). |
 | `background_start / background_result` | Start and completion notifications of OMP native async `bash` tasks (`async`) or named services (`service`), paired by `jobId` or `service name + PID`, keeping the `trace / epoch` from launch. |
 
-**Python exception-chain merging rule**: `python_call_end.outcome = "error"` only means that layer's function raised (an outer caller may have caught it with `try/except`). The analyzer and Dashboard merge adjacent uncaught exceptions along explicit Python parentage into one exception chain (`localPythonExceptionGroups`); once an ancestor call returns successfully the chain is cut — an internally caught exception never overwrites the outer tool's success status.
+**Python exception-chain merging rule**: `python_call_end.outcome = "error"` only means that layer's function raised (an outer caller may have caught it with `try/except`). The analyzer and Console merge adjacent uncaught exceptions along explicit Python parentage into one exception chain (`localPythonExceptionGroups`); once an ancestor call returns successfully the chain is cut — an internally caught exception never overwrites the outer tool's success status.
 
 ## Perception and true model input
 
@@ -90,14 +90,14 @@ Quick reference of core event contracts:
 1. **Shiori OTel telemetry**: [shiori.ts](../../../core/src/core/agent-omp/shiori.ts) mounts a scoped OpenTelemetry provider (with `captureMessageContent = "none"` to avoid duplicating bodies) and writes a `shiori_run_end` summary at the end of each `agentLoop`.
 2. **HTTP and WebSocket transport tracing**: [trace.ts](../../../core/src/core/agent-omp/trace.ts) records full request payloads, transport protocol (WS full / WS delta / HTTP SSE), and phase latencies:
    - **HTTP header wait**: from request dispatch to receipt of the HTTP response headers (streaming completion is marked by the content-stream end after `http_end`).
-   - **WS first-event wait**: in WebSocket mode the outbound `response.create` only marks send completion; the Dashboard measures outbound-completion to first inbound server event as the first-response metric.
+   - **WS first-event wait**: in WebSocket mode the outbound `response.create` only marks send completion; the Console measures outbound-completion to first inbound server event as the first-response metric.
 3. **Background speculation-compaction tracing**: each background compaction candidate gets a unique `operationId` via `diagnostics_channel("omp.compaction.speculation")`, tracing `started → armed / failed / cancelled` end to end plus threshold-phase `waiting / applied / invalidated`; its internal HTTP requests and retries are mounted under that `operationId` and the original control `epoch`.
 
 ## Consumption and metric interpretation
 
-### 1. Dashboard Worker and three-layer rebuildable index (`.dashboard-index/`)
+### 1. Console Worker and three-layer rebuildable index (`.dashboard-index/`)
 
-The Dashboard isolates log parsing and index building in a dedicated Node Worker fully outside the Next.js request context. Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.ludens/archive/`, or `.ludens/timeline/`), with three parts:
+The Console isolates log parsing and index building in a dedicated Node Worker fully outside the Next.js request context. Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.ludens/archive/`, or `.ludens/timeline/`), with three parts:
 
 1. **Source-event location and relation catalog**: each event keeps only its file byte offset, timestamp (taken as `origin.at ?? at`), type, and call identity; model, Span, action, and observation relation tables all point at source-event byte offsets.
 2. **Activity on-demand display recipes**: each display block (Thinking / Text / Tool / System / Diagnostic) keeps only the source-event offsets or `streams/` cutoff byte counts; text is assembled from originals on recipe only when the frontend or pet requests it, never redundantly stored in the index.
@@ -108,16 +108,16 @@ The Dashboard isolates log parsing and index building in a dedicated Node Worker
 - **Page cache and lease eviction**: the index pages to disk at most 1024 entries or 256 KiB per page. The query Worker keeps a shared page cache of **256 MiB** by default (tunable via `LUDENS_APP_INDEX_CACHE_BYTES`), retains at most **3** idle runs (`LUDENS_APP_INDEX_MAX_RUNS`), and releases memory after **5 minutes** idle (`LUDENS_APP_INDEX_IDLE_MS`) with no in-flight read leases.
 - **Single-instance cold builder**: on first opening a historical large run with no index yet, the query Worker spawns a globally unique temporary Builder subprocess (target working set **2 GiB** by default, controlled by `LUDENS_APP_BUILD_BYTES`), which single-pass scans the event stream at a fixed cutoff and batch-generates `generations/<id>/`, then publishes via atomic replacement of `.dashboard-index/active.json` and exits to return memory to the OS. During the build, endpoints return HTTP `202 ARCHIVE_PREPARING` with live progress; closing the browser tab only cancels the current HTTP query and never interrupts the bounded background build.
 
-### 3. Console HTTP API and Ludens Pet incremental follow
+### 3. Console HTTP API and Desktop Pet incremental follow
 
-- **`/api/activity`**: `changes` (opaque-cursor incremental block updates, shared by web and Ludens Pet), `history` (paged search by category and full-text keywords), and `block` (single-block detail expansion). Ludens Pet only consumes live `changes` deltas of the followed workspace's latest run, recording its own consumption watermark under `workspace/logs/consumers/`.
+- **`/api/activity`**: `changes` (opaque-cursor incremental block updates, shared by web and the Desktop Pet), `history` (paged search by category and full-text keywords), and `block` (single-block detail expansion). The Desktop Pet only consumes live `changes` deltas of the followed workspace's latest run, recording its own consumption watermark under `workspace/logs/consumers/`.
 - **`/api/diagnostics`**: dedicated paged query of `full`-mode diagnostic events by `epoch`, time window, `traceId / spanId / actionId` (max 500 entries per page), never mixed into the regular Activity stream or pet bubbles.
 
 ## Experience replay
 
 ### 1. Spacetime player and frame read-ahead buffer
 
-The Dashboard replay view (`/api/replay`) aligns `.ludens/timeline/` continuous-sample frames, device-action spans (`action_start / action_end`), model reasoning, and tool calls on one workspace wall-clock timeline:
+The Console replay view (`/api/replay`) aligns `.ludens/timeline/` continuous-sample frames, device-action spans (`action_start / action_end`), model reasoning, and tool calls on one workspace wall-clock timeline:
 
 - **Time windows and dual-frame read-ahead**: events page by at most 60-second windows with 500-entry cursors; frames use a decode-buffer Hook — atomically switching only once all screen frames for the target moment are loaded, while reading ahead at most 2 frames (max 8 images / 32 MiB read-ahead cache), releasing image memory immediately on workspace switch or page leave.
 - **Clock and decoder state**: explicit timeline moves increment a clock revision and align the decoder exactly; committed URL positions are acknowledged so their echo cannot create a second seek. Continuous playback tolerates transient drift and ordinary decoder waits. Any actual `waiting` event freezes both the shared clock and decoder until recovery, even if `readyState` still reports enough data. Only drift greater than 1 second that persists for 1 second while playing and globally ready triggers a resync; precise sparse-tail recovery is restricted to the final 100 ms sample region.
@@ -125,7 +125,7 @@ The Dashboard replay view (`/api/replay`) aligns `.ludens/timeline/` continuous-
 
 ### 2. Offline log reading and run-analysis tools
 
-From the repo root, archives can be read and statistics reports generated without starting the Host or Dashboard:
+From the repo root, archives can be read and statistics reports generated without starting the Host or Console:
 
 ```sh
 # Emit the full JSON statistics report for a given run and control cycle

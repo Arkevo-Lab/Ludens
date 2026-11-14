@@ -1,4 +1,4 @@
-/** Shared read-only activity protocol for the Dashboard hook and Ludens Pet. */
+/** Shared read-only activity protocol for the Console hook and Desktop Pet. */
 export interface EventSource { component: string; implementation?: string; implementationVersion?: string }
 export interface LogBlock {
   id: string;

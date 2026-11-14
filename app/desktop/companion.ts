@@ -72,7 +72,7 @@ export function createCompanion(owner: BrowserWindow, access: OwnerAccess = {}, 
   const bounds = settleCompanion(initial, screen.getDisplayMatching(initial).workArea, false)
   const pet = new BrowserWindow({
     x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
-    title: '卢登斯', transparent: true, frame: false, hasShadow: false,
+    title: 'Ludens', transparent: true, frame: false, hasShadow: false,
     // Frameless transparent Windows windows reserve a native border outside
     // the requested bounds unless their dimensions are content dimensions.
     // Keep macOS on its existing input-coordinate path.

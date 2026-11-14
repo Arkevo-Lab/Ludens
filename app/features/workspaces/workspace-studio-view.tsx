@@ -95,8 +95,8 @@ const COMPACTION_PRESETS: Array<{ tokens: number | null; labelEn: string; labelZ
     tokens: null,
     labelEn: "Model Default (Unset)",
     labelZh: "跟随模型默认（不设覆盖）",
-    hintEn: "Uses OMP's native contextWindow - reserve",
-    hintZh: "使用 OMP 原生 contextWindow - reserve（适合有状态 WS）",
+    hintEn: "Uses the model's native contextWindow - reserve",
+    hintZh: "使用模型原生 contextWindow - reserve（适合有状态 WS）",
   },
   {
     tokens: 24000,

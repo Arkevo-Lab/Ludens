@@ -7,7 +7,7 @@ const docsRoot = join(repoRoot, "docs");
 
 export type DocLanguage = "en" | "zh";
 export interface DocEntry { id: string; title: string; group: DocGroup; path: string; lang: DocLanguage }
-export type DocGroup = "tutorials" | "reference" | "insights";
+export type DocGroup = "concepts" | "tutorials" | "reference" | "insights";
 export interface DocHeading { id: string; text: string; level: number }
 export interface DocCodeBlock { id: string; language: string; code: string }
 export interface DocSummary { id: string; title: string; lang: DocLanguage; fallback: boolean; availableLanguages: DocLanguage[] }
@@ -17,30 +17,35 @@ export interface DocDetail {
   html: string; headings: DocHeading[]; codeBlocks: DocCodeBlock[];
 }
 const groups: { id: DocGroup; labels: Record<DocLanguage, { title: string; blurb: string }> }[] = [
+  { id: "concepts", labels: {
+    en: { title: "Concepts", blurb: "What Ludens is, how it works, and how the loop closes." },
+    zh: { title: "核心概念", blurb: "Ludens 的定位、运行机制与端到端闭环。" },
+  } },
   { id: "tutorials", labels: {
-    en: { title: "Tutorials", blurb: "Install, prepare devices, and run a workspace." },
-    zh: { title: "教程", blurb: "安装、准备设备并运行工作区。" },
+    en: { title: "Tutorials", blurb: "Install, connect devices, configure workspaces, and operate the Console." },
+    zh: { title: "教程", blurb: "安装、连接设备、配置工作区并使用控制台。" },
   } },
   { id: "reference", labels: {
-    en: { title: "Reference", blurb: "Component boundaries, protocols, and logging/eval specs." },
-    zh: { title: "参考", blurb: "组件边界、协议，以及日志与评测规范。" },
+    en: { title: "Reference", blurb: "Architecture boundaries, CLI, Baseware protocols, and logging/eval specs." },
+    zh: { title: "参考", blurb: "架构边界、CLI、Baseware 协议与日志/评测规范。" },
   } },
   { id: "insights", labels: {
     en: { title: "Insights", blurb: "Postmortems from long runs and architecture rationale." },
-    zh: { title: "分析", blurb: "长时间运行复盘与架构设计说明。" },
+    zh: { title: "洞察", blurb: "长程运行复盘与关键架构设计取舍。" },
   } },
 ];
 
 const order = [
+  "concepts/index", "concepts/overview", "concepts/loop-and-control", "concepts/self-verification",
   "tutorials/index", "tutorials/quickstart", "tutorials/devices", "tutorials/workspace",
-  "tutorials/perception-and-action", "tutorials/debugging-and-verification",
-  "reference/index", "reference/architecture", "reference/baseware",
-  "reference/driver-bridge-protocol", "reference/logging", "reference/dashboard-ui",
+  "tutorials/perception-and-action", "tutorials/console-and-debugging",
+  "reference/index", "reference/architecture", "reference/cli", "reference/baseware",
+  "reference/driver-bridge-protocol", "reference/logging",
   "insights/index", "insights/omp-compaction", "insights/ws-recovery", "insights/omp-injection", "insights/perception-parameters",
 ];
 const rank = (key: string) => { const idx = order.indexOf(key); return idx < 0 ? 999 : idx; };
 
-const docIdPattern = /^(tutorials|reference|insights)\/[a-z0-9-]+$/;
+const docIdPattern = /^(concepts|tutorials|reference|insights)\/[a-z0-9-]+$/;
 
 async function fileTitle(path: string, fallback: string): Promise<string> {
   try {

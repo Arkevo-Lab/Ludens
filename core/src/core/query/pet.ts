@@ -66,7 +66,7 @@ export function petStatus(state: PetState | null, t?: (key: string) => string): 
   const key = petStatusKey(state), full = `status.${key}`;
   const translated = t?.(full);
   if (translated && translated !== full) return translated;
-  return ({ connecting: "正在读取状态…", unknown: "桌宠状态未知", disconnected: "Ludens Pet 未连接",
+  return ({ connecting: "正在读取状态…", unknown: "桌宠状态未知", disconnected: "桌宠未连接",
     unavailable: "保存的工作区不可用", stopped: "已停止跟随", stopping: "正在停止…", switching: "等待应用选择",
     followError: "跟随遇到问题", following: "正在跟随", waitingRun: "等待工作区运行",
     autoWaiting: "等待活跃 Core" } as Record<string, string>)[key];
