@@ -64,6 +64,10 @@ function TextObservation({ url }: { url: string }) {
   const pending = result?.revision !== revision;
   const error = !pending && result?.failed ? mediaFailureMessage(result.httpStatus ?? 0, rootT) : undefined;
   useEffect(() => {
+    if (!url) {
+      setResult({ revision, failed: true, httpStatus: 0 });
+      return;
+    }
     const controller = new AbortController();
     void readObservationText(url, controller.signal).then(text => {
       if (!controller.signal.aborted) setResult({ revision, text });
@@ -82,6 +86,7 @@ function MediaFailure({ url }: { url: string }) {
   const { t } = useLocale();
   const [status, setStatus] = useState<number | undefined>();
   useEffect(() => {
+    if (!url) return;
     const controller = new AbortController();
     void observationMediaStatus(url, controller.signal).then(value => {
       if (!controller.signal.aborted) setStatus(value);

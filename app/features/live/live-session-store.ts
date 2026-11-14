@@ -3,10 +3,15 @@
 import type { EventPoolSnapshot, PoolEvent } from "@ludens/protocol/event-pool";
 import {
   ActivityChangesClient,
-  requestActivity as defaultRequestActivity,
   type ActivityChangesPage,
   type ActivityResponse,
 } from "@ludens/protocol/activity";
+import type {
+  ActivityRpcQuery,
+  AppRpcParams,
+  EventPoolMutateCommandDto,
+  RuntimeControlCommandDto,
+} from "@ludens/protocol/app-rpc";
 import {
   isModelEffort,
   type ModelEffort,
@@ -25,7 +30,7 @@ import {
 } from "@/features/live/activity-feed-model";
 import { asRecord, cleanErrorMessage } from "@/features/live/shiori-segments";
 import { readArchiveJson } from "@/lib/archive-client";
-import { ReadPoller } from "@/lib/read-poller";
+import type { LudensRpcCaller } from "@/lib/ludens-rpc";
 import type { Call, DeviceContentionConflict, Observation, RunData, RunInfo } from "@/lib/types";
 
 export type RuntimeControlCommand =
@@ -87,7 +92,6 @@ export interface ActivityChangesClientOptions {
   run?: string;
   epoch?: string;
   limit?: number;
-  baseUrl?: string;
 }
 
 export interface ChangesReaderLike {
@@ -97,9 +101,14 @@ export interface ChangesReaderLike {
 export interface LiveSessionTransport {
   createChangesClient: (options: ActivityChangesClientOptions) => ChangesReaderLike;
   requestActivity: (params: URLSearchParams, signal: AbortSignal) => Promise<ActivityResponse>;
-  readRun: (url: string, signal?: AbortSignal) => Promise<RunData>;
+  readRun: (params: AppRpcParams<"run/get">, signal?: AbortSignal) => Promise<RunData>;
   fetchEventPool: (project: string, workspace: string, signal?: AbortSignal) => Promise<EventPoolReadPayload>;
-  mutateEventPool: (project: string, workspace: string, command: EventPoolCommand) => Promise<EventPoolMutatePayload>;
+  mutateEventPool: (
+    project: string,
+    workspace: string,
+    command: EventPoolCommand,
+    options?: { spawnIfOffline?: boolean },
+  ) => Promise<EventPoolMutatePayload>;
   sendRuntimeControl: (project: string, workspace: string, command: RuntimeControlCommand) => Promise<unknown>;
   updateWorkspaceShioriModel: (
     project: string,
@@ -109,7 +118,7 @@ export interface LiveSessionTransport {
   ) => Promise<unknown>;
 }
 
-/** Structured error thrown by `/api/runtime/control` and `/api/event-pool` requests. */
+/** Structured error thrown by `runtime/control` and `eventPool/mutate` RPC calls. */
 export class RuntimeControlError extends Error {
   readonly status: number;
   readonly code?: string;
@@ -144,14 +153,6 @@ function parseDeviceContentionConflict(raw: unknown): DeviceContentionConflict |
   return conflict;
 }
 
-function parseApiError(status: number, payload: unknown, fallbackMessage: string): RuntimeControlError {
-  const rec = asRecord(payload);
-  const message = typeof rec?.error === "string" && rec.error.trim() ? rec.error : fallbackMessage;
-  const code = typeof rec?.code === "string" ? rec.code : undefined;
-  const conflict = parseDeviceContentionConflict(rec?.conflict);
-  return new RuntimeControlError(message, { status, code, conflict });
-}
-
 export function extractDeviceContention(cause: unknown): DeviceContentionConflict | null {
   if (!cause || typeof cause !== "object") return null;
   const rec = cause as { status?: unknown; code?: unknown; conflict?: unknown };
@@ -166,7 +167,8 @@ export function isDeviceBusyError(cause: unknown): boolean {
 }
 
 export function isCoreOfflineError(cause: unknown): boolean {
-  if (cause instanceof RuntimeControlError && cause.code === "CORE_OFFLINE") {
+  if ((cause instanceof RuntimeControlError || (cause && typeof cause === "object")) &&
+    (cause as { code?: unknown }).code === "CORE_OFFLINE") {
     return true;
   }
   const msg = cause instanceof Error ? cause.message : String(cause);
@@ -179,89 +181,107 @@ export function isCoreOfflineError(cause: unknown): boolean {
   );
 }
 
-async function defaultFetchEventPool(
-  project: string,
-  workspace: string,
-  signal?: AbortSignal,
-): Promise<EventPoolReadPayload> {
-  const params = new URLSearchParams({ project, workspace });
-  const response = await fetch(`/api/event-pool?${params}`, { signal, cache: "no-store" });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw parseApiError(response.status, payload, `Event Pool read failed (${response.status})`);
+export function activityRpcParamsFromSearchParams(
+  params: URLSearchParams,
+): AppRpcParams<"activity/get"> {
+  const project = params.get("project") ?? "";
+  const run = params.get("run") || undefined;
+  const epoch = params.get("epoch") || undefined;
+  const query: ActivityRpcQuery = {};
+  const mode = params.get("mode");
+  if (mode === "changes" || mode === "history" || mode === "block") {
+    query.mode = mode;
   }
-  return payload as EventPoolReadPayload;
+  const cursor = params.get("cursor");
+  if (cursor) query.cursor = cursor;
+  const before = params.get("before");
+  if (before) query.before = before;
+  const kind = params.get("kind");
+  if (kind) query.kind = kind;
+  const q = params.get("q");
+  if (q !== null && q !== "") query.q = q;
+  const limitRaw = params.get("limit");
+  if (limitRaw !== null && limitRaw !== "") {
+    const limit = Number(limitRaw);
+    if (Number.isFinite(limit)) query.limit = limit;
+  }
+  const id = params.get("id");
+  if (id) query.id = id;
+  return {
+    project,
+    ...(run ? { run } : {}),
+    ...(epoch ? { epoch } : {}),
+    ...(Object.keys(query).length > 0 ? { query } : {}),
+  };
 }
 
-async function defaultMutateEventPool(
-  project: string,
-  workspace: string,
-  command: EventPoolCommand,
-): Promise<EventPoolMutatePayload> {
-  const response = await fetch("/api/event-pool", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ project, workspace, command }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw parseApiError(response.status, payload, `Event Pool request failed (${response.status})`);
-  }
-  return payload as EventPoolMutatePayload;
-}
+function createRpcLiveSessionTransport(getRpc: () => LudensRpcCaller | null): LiveSessionTransport {
+  const requireRpc = (): LudensRpcCaller => {
+    const rpc = getRpc();
+    if (!rpc) {
+      throw new RuntimeControlError("RPC client is unavailable", { status: 503 });
+    }
+    return rpc;
+  };
 
-async function defaultSendRuntimeControl(
-  project: string,
-  workspace: string,
-  command: RuntimeControlCommand,
-): Promise<unknown> {
-  const response = await fetch("/api/runtime/control", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ project, workspace, command }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw parseApiError(response.status, payload, `Control request failed (${response.status})`);
-  }
-  return payload;
+  return {
+    createChangesClient: options =>
+      new ActivityChangesClient({
+        project: options.project,
+        run: options.run,
+        epoch: options.epoch,
+        limit: options.limit,
+        reader: (request, signal) =>
+          requireRpc().call(
+            "activity/get",
+            {
+              project: request.project,
+              ...(request.run ? { run: request.run } : {}),
+              ...(request.epoch ? { epoch: request.epoch } : {}),
+              query: {
+                mode: "changes",
+                ...(request.limit !== undefined ? { limit: request.limit } : {}),
+                ...(request.cursor !== undefined ? { cursor: request.cursor } : {}),
+              },
+            },
+            { signal },
+          ),
+      }),
+    requestActivity: (params, signal) =>
+      requireRpc().call("activity/get", activityRpcParamsFromSearchParams(params), { signal }),
+    readRun: (params, signal) =>
+      readArchiveJson<RunData>(
+        s => requireRpc().call("run/get", params, { signal: s }) as unknown as Promise<RunData>,
+        signal,
+      ),
+    fetchEventPool: (project, workspace, signal) =>
+      requireRpc().call("eventPool/read", { project, workspace }, { signal }) as unknown as Promise<EventPoolReadPayload>,
+    mutateEventPool: (project, workspace, command, options) =>
+      requireRpc().call(
+        "eventPool/mutate",
+        {
+          project,
+          workspace,
+          command: command as EventPoolMutateCommandDto,
+          ...(options?.spawnIfOffline ? { spawnIfOffline: true } : {}),
+          ...(command.preempt ? { preempt: true } : {}),
+        },
+      ) as unknown as Promise<EventPoolMutatePayload>,
+    sendRuntimeControl: (project, workspace, command) =>
+      requireRpc().call("runtime/control", {
+        project,
+        workspace,
+        command: command as RuntimeControlCommandDto,
+        ...("preempt" in command && command.preempt ? { preempt: true } : {}),
+      }),
+    updateWorkspaceShioriModel: (project, model, serviceTier, effort) =>
+      requireRpc().call("workspaces/mutate", {
+        action: "updateShiori",
+        workspaceId: project,
+        input: { model, serviceTier, effort },
+      }),
+  };
 }
-
-async function defaultUpdateWorkspaceShioriModel(
-  project: string,
-  model: string,
-  serviceTier: ModelServiceTier | null,
-  effort: ModelEffort | null,
-): Promise<unknown> {
-  const response = await fetch("/api/workspaces", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      action: "workspaceShiori",
-      id: project,
-      shiori: { model, serviceTier, effort },
-    }),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    throw new Error(
-      typeof payload?.error === "string"
-        ? payload.error
-        : `Workspace model update failed (${response.status})`,
-    );
-  }
-  return payload;
-}
-
-export const defaultLiveSessionTransport: LiveSessionTransport = {
-  createChangesClient: options => new ActivityChangesClient(options),
-  requestActivity: (params, signal) => defaultRequestActivity(params, signal),
-  readRun: (url, signal) => readArchiveJson<RunData>(url, signal),
-  fetchEventPool: defaultFetchEventPool,
-  mutateEventPool: defaultMutateEventPool,
-  sendRuntimeControl: defaultSendRuntimeControl,
-  updateWorkspaceShioriModel: defaultUpdateWorkspaceShioriModel,
-};
 
 export interface OlderRunSlice {
   runId: string;
@@ -403,7 +423,7 @@ function sameCyclesArray(left: RunData["cycles"], right: RunData["cycles"]): boo
 }
 
 /**
- * Stabilizes `/api/run` polling snapshots against volatile `updatedAt` timestamps:
+ * Stabilizes `run/get` snapshots against volatile `updatedAt` timestamps:
  * - Preserves `calls`, `observations`, and `cycles` array references when unchanged
  * - Returns `previous` verbatim when no meaningful field changed
  */
@@ -489,6 +509,7 @@ function emptySessionSnapshot(project: string, resetRevision = 0): LiveSessionSn
 export class LiveSessionEngine {
   readonly project: string;
   private readonly transport: LiveSessionTransport;
+  private rpc: LudensRpcCaller | null = null;
   private state: LiveSessionSnapshot;
   private readonly listeners = new Set<() => void>();
 
@@ -502,7 +523,10 @@ export class LiveSessionEngine {
   private spawnSeq = 0;
   private pendingContentionRetry: (() => Promise<void>) | null = null;
 
-  private changesPoller: ReadPoller | null = null;
+  private changesController: AbortController | null = null;
+  private changesInFlight = false;
+  private changesPending = false;
+  private changesRunFn: ((signal: AbortSignal) => Promise<boolean>) | null = null;
   private bootstrapController: AbortController | null = null;
   private earlierController: AbortController | null = null;
   private selectionController: AbortController | null = null;
@@ -514,15 +538,39 @@ export class LiveSessionEngine {
   private inFlightOlderCursorKey: string | null = null;
 
   private workspacePath: string | null = null;
-  private poolPoller: ReadPoller | null = null;
+  private poolController: AbortController | null = null;
+  private poolInFlight = false;
+  private poolPending = false;
+  private poolFetchFn: ((signal: AbortSignal) => Promise<void>) | null = null;
   private poolKey = "";
   private poolEnabled = false;
   private disposed = false;
 
-  constructor(options: { project: string; transport?: Partial<LiveSessionTransport> }) {
+  constructor(options: {
+    project: string;
+    rpc?: LudensRpcCaller | null;
+    transport?: Partial<LiveSessionTransport>;
+  }) {
     this.project = options.project;
-    this.transport = { ...defaultLiveSessionTransport, ...options.transport };
+    this.rpc = options.rpc ?? null;
+    const rpcTransport = createRpcLiveSessionTransport(() => this.rpc);
+    this.transport = { ...rpcTransport, ...options.transport };
     this.state = emptySessionSnapshot(options.project);
+  }
+
+  setRpc(rpc: LudensRpcCaller | null | undefined): void {
+    const next = rpc ?? null;
+    if (this.rpc === next) return;
+    const hadRpc = this.rpc !== null;
+    this.rpc = next;
+    if (!hadRpc && next) {
+      if (this.streamEnabled && this.changesRunFn) {
+        this.triggerChangesCycle();
+      }
+      if (this.poolEnabled && this.poolFetchFn) {
+        this.triggerPoolCycle();
+      }
+    }
   }
 
   subscribe = (listener: () => void): (() => void) => {
@@ -601,15 +649,14 @@ export class LiveSessionEngine {
 
     if (!targetChanged) {
       if (!enabled) {
-        this.changesPoller?.setEnabled(false);
+        this.changesController?.abort();
+        this.changesController = null;
+        this.changesPending = false;
       } else {
-        if (!this.changesPoller) {
+        if (!this.changesRunFn) {
           this.startStreamForCurrentTarget(run, epoch, refresh, resetRevision);
-        } else {
-          this.changesPoller.setEnabled(refresh);
-          if (!wasEnabled && refresh) {
-            this.changesPoller.nudge();
-          }
+        } else if (!wasEnabled && refresh) {
+          this.triggerChangesCycle();
         }
       }
       this.syncSelectedBlock(options.selectedBlock);
@@ -736,11 +783,11 @@ export class LiveSessionEngine {
         });
     };
 
-    const poller = new ReadPoller(async signal => {
+    this.changesRunFn = async signal => {
       let more = false;
       try {
         const result = await reader.read(signal);
-        if (signal.aborted || token !== this.streamToken) return 2500;
+        if (signal.aborted || token !== this.streamToken) return false;
         more = result.hasMore;
 
         const prev = this.state;
@@ -810,14 +857,78 @@ export class LiveSessionEngine {
             error: String(error),
           }));
         }
+        return false;
       }
-      return more ? 0 : 2500;
-    }, refresh);
+      return more;
+    };
 
-    this.changesPoller = poller;
     // Parallel bootstrap: launch live changes stream AND initial history page concurrently at t=0.
     runBootstrapHistory();
-    void poller.readOnce();
+    this.triggerChangesCycle();
+  }
+
+  private triggerChangesCycle(): void {
+    if (this.disposed || !this.streamEnabled || !this.changesRunFn) return;
+    if (this.changesInFlight) {
+      this.changesPending = true;
+      return;
+    }
+
+    const activeToken = this.streamToken;
+    this.changesInFlight = true;
+    void (async () => {
+      try {
+        while (!this.disposed && this.streamEnabled && activeToken === this.streamToken && this.changesRunFn) {
+          this.changesPending = false;
+          const controller = new AbortController();
+          this.changesController = controller;
+          const hasMore = await this.changesRunFn(controller.signal);
+          if (controller.signal.aborted || activeToken !== this.streamToken) break;
+          if (!hasMore && !this.changesPending) break;
+        }
+      } finally {
+        this.changesInFlight = false;
+        this.changesController = null;
+      }
+    })();
+  }
+
+  private triggerPoolCycle(): void {
+    if (this.disposed || !this.poolEnabled || !this.poolFetchFn) return;
+    if (this.poolInFlight) {
+      this.poolPending = true;
+      return;
+    }
+
+    const activePoolKey = this.poolKey;
+    this.poolInFlight = true;
+    void (async () => {
+      try {
+        while (!this.disposed && this.poolEnabled && activePoolKey === this.poolKey && this.poolFetchFn) {
+          this.poolPending = false;
+          const controller = new AbortController();
+          this.poolController = controller;
+          await this.poolFetchFn(controller.signal);
+          if (controller.signal.aborted || activePoolKey !== this.poolKey) break;
+          if (!this.poolPending) break;
+        }
+      } finally {
+        this.poolInFlight = false;
+        this.poolController = null;
+      }
+    })();
+  }
+
+  nudgeChanges(): void {
+    if (this.streamRefresh && this.streamEnabled) {
+      this.triggerChangesCycle();
+    }
+  }
+
+  nudgeEventPool(): void {
+    if (this.poolEnabled) {
+      this.triggerPoolCycle();
+    }
   }
 
   private syncSelectedBlock(selectedBlock: string | undefined): void {
@@ -1092,11 +1203,13 @@ export class LiveSessionEngine {
     try {
       const fetched = await Promise.all(
         toFetch.map(async targetRunId => {
-          const runParams = new URLSearchParams({ project: this.project, run: targetRunId, epoch: "all" });
-          if (evidence && evidence.targetRunId === targetRunId) {
-            if (evidence.call) runParams.set("call", evidence.call);
-            if (evidence.image) runParams.set("image", evidence.image);
-          }
+          const page =
+            evidence && evidence.targetRunId === targetRunId
+              ? {
+                  ...(evidence.call ? { call: evidence.call } : {}),
+                  ...(evidence.image ? { image: evidence.image } : {}),
+                }
+              : undefined;
           const actParams = new URLSearchParams({
             project: this.project,
             run: targetRunId,
@@ -1106,7 +1219,15 @@ export class LiveSessionEngine {
             limit: "300",
           });
           const [runPayload, actPayload] = await Promise.all([
-            this.transport.readRun(`/api/run?${runParams}`, controller.signal),
+            this.transport.readRun(
+              {
+                project: this.project,
+                run: targetRunId,
+                epoch: "all",
+                ...(page && Object.keys(page).length > 0 ? { page } : {}),
+              },
+              controller.signal,
+            ),
             this.transport.requestActivity(actParams, controller.signal),
           ]);
           const rawBlocks = Array.isArray(actPayload.blocks) ? actPayload.blocks : [];
@@ -1161,8 +1282,8 @@ export class LiveSessionEngine {
   };
 
   /**
-   * Coordinates `/api/event-pool` background polling via `ReadPoller` (3.5s, visibility-throttled),
-   * completely decoupled from volatile `data.updatedAt`, with structural snapshot deduplication.
+   * Coordinates Event Pool updates driven by RPC push notifications and explicit nudges,
+   * decoupled from volatile `data.updatedAt`, with structural snapshot deduplication.
    */
   syncEventPool(options: {
     workspace: string | null;
@@ -1172,7 +1293,7 @@ export class LiveSessionEngine {
     liveLatestSeq?: number;
   }): void {
     if (this.disposed) return;
-    const { workspace, isLiveRun, enabled, refresh, liveLatestSeq } = options;
+    const { workspace, isLiveRun, enabled, liveLatestSeq } = options;
     this.workspacePath = workspace;
 
     const active = Boolean(isLiveRun && enabled && this.project && workspace);
@@ -1180,20 +1301,23 @@ export class LiveSessionEngine {
 
     if (!active || !workspace) {
       this.poolEnabled = false;
-      this.poolPoller?.setEnabled(false);
+      this.poolController?.abort();
+      this.poolController = null;
+      this.poolPending = false;
       return;
     }
 
-    const shouldPoll = active && refresh;
     const keyChanged = nextPoolKey !== this.poolKey;
     const becameActive = !this.poolEnabled;
     this.poolEnabled = true;
 
-    if (keyChanged || !this.poolPoller) {
-      this.poolPoller?.dispose();
+    if (keyChanged || !this.poolFetchFn) {
+      this.poolController?.abort();
+      this.poolController = null;
+      this.poolPending = false;
       this.poolKey = nextPoolKey;
       const targetWorkspace = workspace;
-      const poller = new ReadPoller(async signal => {
+      this.poolFetchFn = async signal => {
         try {
           const payload = await this.transport.fetchEventPool(this.project, targetWorkspace, signal);
           if (!signal.aborted && this.poolKey === nextPoolKey) {
@@ -1206,16 +1330,13 @@ export class LiveSessionEngine {
         } catch {
           // Non-fatal background refresh
         }
-        return 3500;
-      }, shouldPoll);
-      this.poolPoller = poller;
-      void poller.readOnce();
+      };
+      this.triggerPoolCycle();
       return;
     }
 
-    this.poolPoller.setEnabled(shouldPoll);
     if (becameActive) {
-      this.poolPoller.nudge();
+      this.triggerPoolCycle();
       return;
     }
 
@@ -1223,13 +1344,13 @@ export class LiveSessionEngine {
       typeof liveLatestSeq === "number" &&
       liveLatestSeq > (this.state.poolSnapshot?.summary.latestSeq ?? -1)
     ) {
-      this.poolPoller.nudge();
+      this.triggerPoolCycle();
     }
   }
 
   /** Nudges immediate local reconciliation of activity deltas & event pool without resetting state. */
   reconcileNow(onUpdated?: () => void): void {
-    this.changesPoller?.nudge();
+    this.triggerChangesCycle();
     onUpdated?.();
   }
 
@@ -1699,7 +1820,13 @@ export class LiveSessionEngine {
     }
 
     try {
-      const res = await this.transport.mutateEventPool(this.project, workspace, command);
+      const spawnIfOffline =
+        mightSpawnCore &&
+        (command.action === "send" ||
+          (command.action === "reply" && Boolean(command.resumeAuto)));
+      const res = await this.transport.mutateEventPool(this.project, workspace, command, {
+        spawnIfOffline,
+      });
       const spawnedRunId = this.recordSpawnedRun(res);
       this.update(prev => ({
         ...prev,
@@ -1743,7 +1870,7 @@ export class LiveSessionEngine {
             },
           };
         });
-        this.poolPoller?.nudge();
+        this.triggerPoolCycle();
       }
       this.recordContention(error, async () => {
         await this.mutatePool({
@@ -1764,8 +1891,10 @@ export class LiveSessionEngine {
   }
 
   private teardownStreamRequests(): void {
-    this.changesPoller?.dispose();
-    this.changesPoller = null;
+    this.changesController?.abort();
+    this.changesController = null;
+    this.changesRunFn = null;
+    this.changesPending = false;
     this.bootstrapController?.abort();
     this.bootstrapController = null;
     this.earlierController?.abort();
@@ -1779,8 +1908,10 @@ export class LiveSessionEngine {
   dispose(): void {
     this.disposed = true;
     this.teardownStreamRequests();
-    this.poolPoller?.dispose();
-    this.poolPoller = null;
+    this.poolController?.abort();
+    this.poolController = null;
+    this.poolFetchFn = null;
+    this.poolPending = false;
     this.listeners.clear();
   }
 }
@@ -1788,15 +1919,21 @@ export class LiveSessionEngine {
 const MAX_CACHED_PROJECT_SESSIONS = 6;
 const projectEngines = new Map<string, LiveSessionEngine>();
 
-export function getLiveSessionEngine(project: string): LiveSessionEngine {
+export function getLiveSessionEngine(
+  project: string,
+  rpc?: LudensRpcCaller | null,
+): LiveSessionEngine {
   const key = project || "__empty__";
   let engine = projectEngines.get(key);
   if (engine) {
+    if (rpc !== undefined) {
+      engine.setRpc(rpc);
+    }
     projectEngines.delete(key);
     projectEngines.set(key, engine);
     return engine;
   }
-  engine = new LiveSessionEngine({ project });
+  engine = new LiveSessionEngine({ project, rpc });
   projectEngines.set(key, engine);
   while (projectEngines.size > MAX_CACHED_PROJECT_SESSIONS) {
     const oldestKey = projectEngines.keys().next().value!;

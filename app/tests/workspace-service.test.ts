@@ -4,8 +4,9 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { LudensRpcCaller } from "../lib/ludens-rpc";
 import {
-  buildWorkspaceServiceRequestBody,
+  buildWorkspaceServiceParams,
   createWorkspaceServiceStore,
   formatWorkspaceServiceFailure,
   requestWorkspaceServiceControl,
@@ -62,11 +63,10 @@ function collectLeafKeys(obj: unknown, prefix = ""): string[] {
   return out.sort();
 }
 
-test("buildWorkspaceServiceRequestBody trims workspaceId and formats workspaceServiceControl payload", () => {
-  assert.deepEqual(buildWorkspaceServiceRequestBody("  ws-alpha  ", "up"), {
-    action: "workspaceServiceControl",
-    id: "ws-alpha",
-    service: { operation: "up" },
+test("buildWorkspaceServiceParams trims workspaceId and formats workspaces/serviceControl payload", () => {
+  assert.deepEqual(buildWorkspaceServiceParams("  ws-alpha  ", "up"), {
+    workspaceId: "ws-alpha",
+    action: "up",
   });
 });
 
@@ -116,30 +116,25 @@ test("formatWorkspaceServiceFailure prefers stderr, falls back to stdout, and re
   );
 });
 
-test("store runOperation sends PUT /api/workspaces, updates state, and triggers onSuccess on exit 0", async () => {
-  const calls: Array<{ url: string; method?: string; body: unknown }> = [];
+test("store runOperation sends workspaces/serviceControl RPC, updates state, and triggers onSuccess on exit 0", async () => {
+  const calls: Array<{ method: string; params: unknown }> = [];
   const studio = makeStudioSnapshot("ws-1");
 
-  const mockFetch: typeof fetch = async (input, init) => {
-    calls.push({
-      url: String(input),
-      method: init?.method,
-      body: init?.body ? JSON.parse(String(init.body)) : null,
-    });
-    return new Response(
-      JSON.stringify({
+  const mockRpc: LudensRpcCaller = {
+    call: (async (method: string, params: unknown) => {
+      calls.push({ method, params });
+      return {
         ok: true,
         operation: "up",
         exitCode: 0,
         stdout: "Host ready (PID 4242)",
         stderr: "",
         studio,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
+      };
+    }) as LudensRpcCaller["call"],
   };
 
-  const store = createWorkspaceServiceStore(mockFetch);
+  const store = createWorkspaceServiceStore(mockRpc);
   let successCount = 0;
   let studioCount = 0;
 
@@ -156,12 +151,10 @@ test("store runOperation sends PUT /api/workspaces, updates state, and triggers 
   });
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "/api/workspaces");
-  assert.equal(calls[0].method, "PUT");
-  assert.deepEqual(calls[0].body, {
-    action: "workspaceServiceControl",
-    id: "ws-1",
-    service: { operation: "up" },
+  assert.equal(calls[0].method, "workspaces/serviceControl");
+  assert.deepEqual(calls[0].params, {
+    workspaceId: "ws-1",
+    action: "up",
   });
 
   assert.ok(result);
@@ -179,35 +172,31 @@ test("store runOperation sends PUT /api/workspaces, updates state, and triggers 
 test("store surfaces non-zero exitCode errors without firing onSuccess and supports clearError + retry reset", async () => {
   let attempt = 0;
   const studio = makeStudioSnapshot("ws-err");
-  const mockFetch: typeof fetch = async () => {
-    attempt += 1;
-    if (attempt === 1) {
-      return new Response(
-        JSON.stringify({
+  const mockRpc: LudensRpcCaller = {
+    call: (async () => {
+      attempt += 1;
+      if (attempt === 1) {
+        return {
           ok: false,
           operation: "up",
           exitCode: 1,
           stdout: "checking driver...",
           stderr: "Error: TCP bridge 127.0.0.1:47111 unreachable",
           studio,
-        }),
-        { status: 200, headers: { "Content-Type": "application/json" } },
-      );
-    }
-    return new Response(
-      JSON.stringify({
+        };
+      }
+      return {
         ok: true,
         operation: "up",
         exitCode: 0,
         stdout: "started cleanly",
         stderr: "",
         studio,
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
+      };
+    }) as LudensRpcCaller["call"],
   };
 
-  const store = createWorkspaceServiceStore(mockFetch);
+  const store = createWorkspaceServiceStore(mockRpc);
   let successCalled = 0;
   let studioCalled = 0;
 
@@ -235,17 +224,16 @@ test("store surfaces non-zero exitCode errors without firing onSuccess and suppo
   assert.equal(store.getSnapshot("ws-err").error, null);
   assert.equal(store.getSnapshot("ws-err").lastResult?.exitCode, 1);
 
-  // HTTP 500 error also populates error cleanly
-  const failHttpStore = createWorkspaceServiceStore(async () =>
-    new Response(JSON.stringify({ error: "App-server supervisor unavailable" }), {
-      status: 503,
-      headers: { "Content-Type": "application/json" },
-    }),
-  );
-  const httpRes = await failHttpStore.runOperation("ws-http", "reload");
-  assert.equal(httpRes, null);
+  // RPC error also populates error cleanly
+  const failRpcStore = createWorkspaceServiceStore({
+    call: (async () => {
+      throw new Error("App-server supervisor unavailable");
+    }) as LudensRpcCaller["call"],
+  });
+  const rpcRes = await failRpcStore.runOperation("ws-http", "reload");
+  assert.equal(rpcRes, null);
   assert.equal(
-    failHttpStore.getSnapshot("ws-http").error,
+    failRpcStore.getSnapshot("ws-http").error,
     "App-server supervisor unavailable",
   );
 
@@ -264,35 +252,34 @@ test("concurrency guard blocks duplicate in-flight operations per workspace whil
   const resolvers = new Map<string, () => void>();
   const startedOps: Array<{ id: string; op: WorkspaceServiceOperation }> = [];
 
-  const mockFetch: typeof fetch = async (_input, init) => {
-    const parsed = JSON.parse(String(init?.body)) as {
-      id: string;
-      service: { operation: WorkspaceServiceOperation };
-    };
-    startedOps.push({ id: parsed.id, op: parsed.service.operation });
-    await new Promise<void>(resolve => {
-      resolvers.set(parsed.id, resolve);
-    });
-    return new Response(
-      JSON.stringify({
+  const mockRpc: LudensRpcCaller = {
+    call: (async (_method: string, rawParams: unknown) => {
+      const parsed = rawParams as {
+        workspaceId: string;
+        action: WorkspaceServiceOperation;
+      };
+      startedOps.push({ id: parsed.workspaceId, op: parsed.action });
+      await new Promise<void>(resolve => {
+        resolvers.set(parsed.workspaceId, resolve);
+      });
+      return {
         ok: true,
-        operation: parsed.service.operation,
+        operation: parsed.action,
         exitCode: 0,
         stdout: "ok",
         stderr: "",
-        studio: makeStudioSnapshot(parsed.id),
-      }),
-      { status: 200, headers: { "Content-Type": "application/json" } },
-    );
+        studio: makeStudioSnapshot(parsed.workspaceId),
+      };
+    }) as LudensRpcCaller["call"],
   };
 
-  const store = createWorkspaceServiceStore(mockFetch);
+  const store = createWorkspaceServiceStore(mockRpc);
 
   const p1 = store.runOperation("ws-a", "up");
   assert.equal(store.getSnapshot("ws-a").busy, true);
   assert.equal(store.getSnapshot("ws-a").pendingOperation, "up");
 
-  // Duplicate concurrent mutation on ws-a is rejected immediately without calling fetch
+  // Duplicate concurrent mutation on ws-a is rejected immediately without calling rpc.call
   const duplicate = await store.runOperation("ws-a", "down");
   assert.equal(duplicate, null);
   assert.equal(startedOps.length, 1);
@@ -312,12 +299,18 @@ test("concurrency guard blocks duplicate in-flight operations per workspace whil
   assert.equal(store.getSnapshot("ws-b").busy, false);
 });
 
-test("requestWorkspaceServiceControl handles non-JSON HTTP errors gracefully", async () => {
+test("requestWorkspaceServiceControl propagates RPC errors cleanly", async () => {
   await assert.rejects(
     () =>
-      requestWorkspaceServiceControl("ws-plain", "up", {
-        fetchImpl: async () => new Response("Bad Gateway", { status: 502 }),
-      }),
+      requestWorkspaceServiceControl(
+        {
+          call: (async () => {
+            throw new Error("Bad Gateway");
+          }) as LudensRpcCaller["call"],
+        },
+        "ws-plain",
+        "up",
+      ),
     /Bad Gateway/,
   );
 });

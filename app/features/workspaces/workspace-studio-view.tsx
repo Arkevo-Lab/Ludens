@@ -48,6 +48,7 @@ import {
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
@@ -172,6 +173,9 @@ export function WorkspaceStudioView({
   }, [initialTab]);
 
   const target = projects.find(item => item.id === project);
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
   const [studio, setStudio] = useState<WorkspaceStudioSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [readError, setReadError] = useState<string | null>(null);
@@ -199,19 +203,19 @@ export function WorkspaceStudioView({
       setStudio(null);
       return;
     }
+    const caller = rpcRef.current;
+    if (!caller) {
+      setLoading(false);
+      setReadError(t("loadFailed"));
+      return;
+    }
     const controller = new AbortController();
     const version = ++requestVersion.current;
     setLoading(true);
     setReadError(null);
-    void fetch(`/api/workspaces?studio=${encodeURIComponent(target.id)}`, {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then(async response => {
-        const value = await response.json();
-        if (!response.ok) throw new Error(value?.error ?? t("loadFailed"));
-        return value as WorkspaceStudioSnapshot;
-      })
+    void caller
+      .call("workspaces/getStudio", { workspaceId: target.id }, { signal: controller.signal })
+      .then(value => value as unknown as WorkspaceStudioSnapshot)
       .then(snapshot => {
         if (controller.signal.aborted || version !== requestVersion.current) return;
         setStudio(snapshot);
@@ -224,7 +228,13 @@ export function WorkspaceStudioView({
         if (!controller.signal.aborted && version === requestVersion.current) setLoading(false);
       });
     return () => controller.abort();
-  }, [target?.id, reloadTick, t]);
+  }, [target?.id, reloadTick, t, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
+
+  useLudensEvent(
+    ["workspace", "core"],
+    () => setReloadTick(value => value + 1),
+    { enabled: Boolean(target?.id), workspaceId: target?.id },
+  );
 
   const onTabChange = (next: string) => {
     const valid = (STUDIO_TABS as readonly string[]).includes(next) ? (next as StudioTab) : "device";
@@ -715,6 +725,7 @@ export function ModelAndBudgetPanel({
   onOpenConnection(): void;
 }) {
   const t = useTranslations("workspaceStudio");
+  const rpc = useOptionalLudensRpc();
   const service = useWorkspaceService({
     workspaceId: studio.id,
     fallbackError: t("operationFailed"),
@@ -811,32 +822,30 @@ export function ModelAndBudgetPanel({
 
   const saveConfig = async () => {
     if (saving || !dirty) return;
+    if (!rpc) {
+      setSaveError("RPC client is unavailable");
+      return;
+    }
     setSaving(true);
     setSaveError(null);
     setSavedNotice(false);
     try {
-      const response = await fetch("/api/workspaces", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "workspaceStudioConfig",
-          id: studio.id,
-          patch: {
-            model: model.trim(),
-            serviceTier,
-            effort,
-            seconds: parsedSeconds,
-            requests: parsedRequests,
-            compactionThreshold: parsedCompaction,
-            diagnostics,
-            pet,
-            dashboard,
-            ...(initial.driver !== "cua" ? { port: parsedPort, game: game.trim() || null } : {}),
-          },
-        }),
+      const value = await rpc.call("workspaces/mutate", {
+        action: "updateStudioConfig",
+        workspaceId: studio.id,
+        patch: {
+          model: model.trim(),
+          serviceTier,
+          effort,
+          seconds: parsedSeconds,
+          requests: parsedRequests,
+          compactionThreshold: parsedCompaction,
+          diagnostics,
+          pet,
+          dashboard,
+          ...(initial.driver !== "cua" ? { port: parsedPort, game: game.trim() || null } : {}),
+        },
       });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value?.error ?? t("saveFailed"));
       onSaved(value as WorkspaceStudioSnapshot);
       setSavedNotice(true);
     } catch (error) {
@@ -1291,6 +1300,7 @@ export function ServicesAndShioriPanel({
   onShioriUpdated(shiori: WorkspaceShioriSnapshot): void;
 }) {
   const t = useTranslations("workspaceStudio");
+  const rpc = useOptionalLudensRpc();
   const [memoryDraft, setMemoryDraft] = useState(studio.shiori.memory.content);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1327,21 +1337,19 @@ export function ServicesAndShioriPanel({
 
   const runShioriMutation = async (payload: Record<string, unknown>, successMsg: string) => {
     if (busyAction) return;
+    if (!rpc) {
+      setActionError("RPC client is unavailable");
+      return;
+    }
     setBusyAction(String(payload.kind));
     setActionError(null);
     setActionSuccess(null);
     try {
-      const response = await fetch("/api/workspaces", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          action: "workspaceShiori",
-          id: studio.id,
-          shiori: payload,
-        }),
+      const value = await rpc.call("workspaces/mutate", {
+        action: "updateShiori",
+        workspaceId: studio.id,
+        input: payload,
       });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value?.error ?? t("operationFailed"));
       onShioriUpdated(value as WorkspaceShioriSnapshot);
       setActionSuccess(successMsg);
     } catch (error) {

@@ -49,7 +49,7 @@ export function createPetFollowResource({ read, write, onChange, intervalMs = 25
   const schedule = () => {
     clearTimeout(timer);
     // An uncertain write stays visible until the user explicitly reads the saved choice.
-    if (active && !state.pending && !state.writeError) timer = setTimeout(() => { void refresh(); }, intervalMs);
+    if (active && intervalMs > 0 && !state.pending && !state.writeError) timer = setTimeout(() => { void refresh(); }, intervalMs);
   };
   const refresh = async () => {
     if (!active || readController || state.pending) return;
