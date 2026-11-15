@@ -1,5 +1,5 @@
 import { readFile, stat } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { listEventSourceFiles, type EventChannel, type EventSourceFile, type SourceDependency } from "@ludens/protocol/event-sources";
 import { readWorkspaceIdentity } from "@ludens/protocol/ludens";
 import type { SourceSnapshot } from "./cold-build-protocol";
@@ -23,7 +23,7 @@ export async function eventFiles(root: string, channel: EventChannel = "events",
         const path = relative(manifest.workspace, dependency.root);
         // Only paths recorded inside this workspace move with it. External
         // sources retain their explicit address and fail if unavailable.
-        return path && !isAbsolute(path) && path !== ".." && !path.startsWith("../")
+        return path && !isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`)
           ? { ...dependency, root: resolve(workspace, path) } : dependency;
       });
     }

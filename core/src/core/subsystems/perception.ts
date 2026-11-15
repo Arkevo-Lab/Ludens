@@ -552,7 +552,12 @@ export class PerceptionRuntime {
 
   private async closeWorker() {
     const worker = this.worker;
-    if (worker) await worker.stop();
+    if (!worker) return;
+    try { await worker.stop(); }
+    catch (error) {
+      this.setStatus({ ...this.current, state: "error", error: String(error) });
+      throw error;
+    }
   }
 
   private isCurrent(worker: PythonWorker) {

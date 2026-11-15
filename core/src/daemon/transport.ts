@@ -1,5 +1,5 @@
 import { createServer, connect } from "node:net";
-import { lstat, unlink } from "node:fs/promises";
+import { clearStaleLocalSocket } from "@ludens/protocol/local-socket";
 import type { Runtime } from "../core/shiori/runtime.ts";
 import { childTrace, type EventTrace, type EventMetadata } from "../core/storage/events.ts";
 import { observationMetadata, type ObservationQuery, type TimelineAppend, type TimelineDerive } from "../core/subsystems/perception.ts";
@@ -18,18 +18,7 @@ export interface Request {
 type Response = { ok: true; value: unknown } | { ok: false; error: string };
 
 export async function listen(path: string, runtime: Runtime | (() => Runtime)) {
-  // A killed host can leave a Unix socket behind. Never remove a live host's socket.
-  try {
-    if (!(await lstat(path)).isSocket()) throw new Error(`Not a Unix socket: ${path}`);
-    await new Promise<void>((resolve, reject) => {
-      const probe = connect(path);
-      probe.once("connect", () => { probe.destroy(); reject(new Error(`Host already running: ${path}`)); });
-      probe.once("error", (error: NodeJS.ErrnoException) => {
-        if (error.code === "ECONNREFUSED") resolve(); else reject(error);
-      });
-    });
-    await unlink(path);
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  await clearStaleLocalSocket(path, () => new Error(`Host already running: ${path}`));
   const server = createServer((socket) => {
     let buffer = "";
     let dispatched = false;

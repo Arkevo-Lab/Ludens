@@ -1,6 +1,6 @@
 import { mkdirSync, openSync, closeSync, writeSync, existsSync, renameSync, rmSync, readFileSync, realpathSync } from "node:fs";
 import { open, realpath, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join, sep } from "node:path";
 import { randomUUID, createHash } from "node:crypto";
 import type { Event } from "./types";
 import { eventFiles, type EventFile } from "./event-files";
@@ -199,7 +199,7 @@ export class LogIndex {
     const source = this.eventFiles.get(relative), file = source?.path ?? join(this.path, relative);
     let info;
     try {
-      if (await realpath(file) !== file || (!source?.sourceId && !file.startsWith(this.path + "/"))) throw new Error("日志文件必须位于运行目录内");
+      if (await realpath(file) !== file || (!source?.sourceId && !file.startsWith(this.path + sep))) throw new Error("日志文件必须位于运行目录内");
       info = await stat(file);
     } catch (error) {
       if (!source?.sourceId && (error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -485,7 +485,7 @@ function reapRetired() {
   }
 }
 export function indexStorageRoot(path: string) {
-  return process.env.LUDENS_APP_INDEX_ROOT ? join(process.env.LUDENS_APP_INDEX_ROOT, path.split("/").at(-1)!) : join(path, ".dashboard-index");
+  return process.env.LUDENS_APP_INDEX_ROOT ? join(process.env.LUDENS_APP_INDEX_ROOT, basename(path)) : join(path, ".dashboard-index");
 }
 function activeDirectory(path: string) {
   const root = indexStorageRoot(path), pointer = join(root, "active.json");
@@ -496,7 +496,7 @@ function activeDirectory(path: string) {
     generation = active.generation;
   } else {
     const current = registry.get(path);
-    if (current && !current.invalid && /^empty(?:-|$)/.test(current.directory.split("/").at(-1)!)) return current.directory;
+    if (current && !current.invalid && /^empty(?:-|$)/.test(basename(current.directory))) return current.directory;
     const empty = join(root, "generations", "empty");
     // A leased placeholder can outlive a publication and a subsequent invalidation.
     // Never let its eventual cleanup remove a new placeholder at the same path.

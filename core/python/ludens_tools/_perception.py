@@ -16,7 +16,7 @@ from ludens_tools._sampling import env_sample_hz
 from ludens_tools._resident import StateMachine, load_instance, run_continuously
 
 def main():
-    protocol = os.fdopen(os.dup(sys.stdout.fileno()), "w", buffering=1)
+    protocol = os.fdopen(os.dup(sys.stdout.fileno()), "w", buffering=1, encoding="utf-8")
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
     sys.stdout = sys.stderr
     messages = queue.Queue()
@@ -50,12 +50,12 @@ def main():
         return observation_result(record)
 
     def read_requests():
-        for line in sys.stdin:
+        for line in sys.stdin.buffer:
             try:
-                messages.put(json.loads(line))
-            except json.JSONDecodeError as error:
+                messages.put(json.loads(line.decode("utf-8")))
+            except (UnicodeDecodeError, json.JSONDecodeError) as error:
                 print(f"Invalid perception request: {error}", file=sys.stderr)
-        os.kill(os.getpid(), signal.SIGTERM)
+        messages.put(None)
 
     def terminate(_signum, _frame):
         raise SystemExit(0)
@@ -104,6 +104,8 @@ def main():
                 if history is not None:
                     history.prune()
                 continue
+            if message is None:  # EOF lets the main thread flush and close the timeline.
+                break
             reply = {"id": message["id"]}
             try:
                 action = message["action"]

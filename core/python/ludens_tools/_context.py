@@ -16,13 +16,55 @@ class LudensError(RuntimeError):
     """The Ludens host rejected a request."""
 
 
+def _connect_local(socket_path, timeout):
+    if os.name != "nt":
+        connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            connection.settimeout(timeout)
+            connection.connect(socket_path)
+            return connection
+        except BaseException:
+            connection.close()
+            raise
+
+    # Winsock supports AF_UNIX, but Windows CPython does not marshal sockaddr_un.
+    import ctypes
+    import select
+
+    class UnixAddress(ctypes.Structure):
+        _fields_ = [("family", ctypes.c_ushort), ("path", ctypes.c_char * 108)]
+
+    path = os.fsencode(socket_path)
+    if len(path) >= 108:
+        raise ValueError("Ludens socket path is too long for Winsock")
+    family = 1  # AF_UNIX in Winsock
+    address = UnixAddress(family, path)
+    winsock = ctypes.WinDLL("Ws2_32.dll")
+    winsock.connect.argtypes = [ctypes.c_size_t, ctypes.POINTER(UnixAddress), ctypes.c_int]
+    connection = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        connection.settimeout(timeout)
+        if winsock.connect(connection.fileno(), ctypes.byref(address), ctypes.sizeof(address)) != 0:
+            error = winsock.WSAGetLastError()
+            if not timeout or error != 10035:  # WSAEWOULDBLOCK
+                raise ctypes.WinError(error)
+            _, writable, exceptional = select.select([], [connection], [connection], timeout)
+            if not writable and not exceptional:
+                raise TimeoutError("Ludens connection timed out")
+            error = connection.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+            if error:
+                raise ctypes.WinError(error)
+        return connection
+    except BaseException:
+        connection.close()
+        raise
+
+
 def request(socket_path, message, timeout=None):
     if not socket_path:
         raise ValueError("LUDENS_SOCKET or socket_path is required")
     wire = json.dumps(message, allow_nan=False).encode("utf-8") + b"\n"
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-        connection.settimeout(timeout)
-        connection.connect(socket_path)
+    with _connect_local(socket_path, timeout) as connection:
         connection.sendall(wire)
         with connection.makefile("rb") as incoming:
             line = incoming.readline()

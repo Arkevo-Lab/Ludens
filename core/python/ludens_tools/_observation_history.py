@@ -4,8 +4,8 @@ from collections import Counter, OrderedDict
 from datetime import datetime, timezone
 import base64
 import binascii
+import errno
 from fractions import Fraction
-import fcntl
 import hashlib
 import json
 import math
@@ -20,6 +20,23 @@ import uuid
 
 from ._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
 from ._capabilities import discover
+
+if os.name == "nt":
+    import msvcrt
+else:
+    import fcntl
+
+
+def _replace_file(temporary, destination):
+    # Windows can briefly deny a rename while a console reader has the old file open.
+    for delay in (0.01, 0.02, 0.04, 0.08, None):
+        try:
+            temporary.replace(destination)
+            return
+        except PermissionError as error:
+            if os.name != "nt" or error.winerror not in (5, 32) or delay is None:
+                raise
+            time.sleep(delay)
 
 
 def timestamp(value, name):
@@ -218,10 +235,16 @@ class ObservationHistory:
         self.directory.mkdir(parents=True, exist_ok=True)
         self._writer = (self.directory / "writer.lock").open("a+b")
         try:
-            fcntl.flock(self._writer.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
+            if os.name == "nt":
+                self._writer.seek(0)
+                msvcrt.locking(self._writer.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                fcntl.flock(self._writer.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as error:
             self._writer.close()
-            raise RuntimeError("This workspace timeline already has a writer") from None
+            if isinstance(error, BlockingIOError) or (os.name == "nt" and error.errno == errno.EACCES):
+                raise RuntimeError("This workspace timeline already has a writer") from None
+            raise
         try:
             self._initialize()
         except BaseException:
@@ -231,7 +254,7 @@ class ObservationHistory:
     def _unlock(self):
         writer = getattr(self, "_writer", None)
         if writer is not None and not writer.closed:
-            fcntl.flock(writer.fileno(), fcntl.LOCK_UN)
+            # Closing the only handle releases flock or the Windows byte-range lock.
             writer.close()
 
     def __del__(self):
@@ -308,7 +331,7 @@ class ObservationHistory:
                     state.update(status="error", error="Recording interrupted before segment finalization")
                     temporary = path.with_suffix(".tmp")
                     temporary.write_text(json.dumps(state) + "\n")
-                    temporary.replace(path)
+                    _replace_file(temporary, path)
 
     def policy(self):
         return {"persistent": self.persistent, "hotSeconds": self.hot_seconds,
@@ -327,7 +350,7 @@ class ObservationHistory:
         path = Path(segment["path"] + ".meta.json")
         temporary = path.with_suffix(".tmp")
         temporary.write_text(json.dumps({key: value for key, value in segment.items() if key != "path"}))
-        temporary.replace(path)
+        _replace_file(temporary, path)
 
     def _recover(self, segment):
         path = Path(segment["path"])
@@ -467,7 +490,7 @@ class ObservationHistory:
             self.sequence = record["sequence"]
             temporary = self.directory / "sequence.tmp"
             temporary.write_text(str(self.sequence))
-            temporary.replace(self.directory / "sequence.json")
+            _replace_file(temporary, self.directory / "sequence.json")
             paths = tuple(item.get("path") or str(self.directory / item["timeline"]["asset"]) for item in archived)
             cost = len(encoded) + media_bytes
             channel = _key(record["capability"])
@@ -519,7 +542,7 @@ class ObservationHistory:
             added = 0
             if not destination.exists():
                 added = temporary.stat().st_size
-                temporary.replace(destination)
+                _replace_file(temporary, destination)
             return destination, added
         finally:
             temporary.unlink(missing_ok=True)

@@ -21,7 +21,7 @@ import type { ServiceLaunchOrigin } from "../core/query/types.ts";
 import { NodeUdsRpcClient, WsAppRpcClient } from "../cli/app-rpc-client.ts";
 import { probeAppDaemon, readAppDaemonRuntime } from "./app-daemon.ts";
 import { resolveAppServerSocketPath } from "./app-server-paths.ts";
-import { jobStateFilePath, jobTargetLabel } from "./background-jobs.ts";
+import { cliCommand, jobStateFilePath, jobTargetLabel } from "./background-jobs.ts";
 import {
   probeBackgroundJob,
   startBackgroundJob,
@@ -216,18 +216,18 @@ export async function launchPlan(
     launcher: join(repo, "core/src/daemon/process-manager.ts"), ludens, baseware, basewareSocket,
     commands: {
       ...(emulatorCmd ? { emulator: emulatorCmd } : {}),
-      baseware: [baseware, "serve", "--driver", effectiveDriver,
+      baseware: [...cliCommand(baseware), "serve", "--driver", effectiveDriver,
         ...(activeMachine ? ["--machine-id", activeMachine.id] : []),
         ...(resolvedPackage ? ["--driver-package", resolvedPackage] : []),
         ...transportArgs, "--socket", basewareSocket,
         "--data-dir", join(workspace, "logs/baseware"), "--diagnostics", config.logging.diagnostics],
-      host: [ludens, "run", "--baseware-socket", basewareSocket, "--model", config.model,
+      host: [...cliCommand(ludens), "run", "--baseware-socket", basewareSocket, "--model", config.model,
         "--seconds", String(config.seconds), "--requests", String(config.requests),
         ...(config.compactionThreshold !== undefined
           ? ["--compaction-threshold", String(config.compactionThreshold)] : []),
         "--diagnostics", config.logging.diagnostics,
       ],
-      ...(config.dashboard ? { dashboard: [ludens, "app-server", "--static-dir", join(repo, "app/out")] } : {}),
+      ...(config.dashboard ? { dashboard: [...cliCommand(ludens), "app-server", "--static-dir", join(repo, "app/out")] } : {}),
       ...(config.pet ? { pet: petLaunchCommand(repo, workspace) } : {}),
     },
   };
@@ -372,12 +372,17 @@ function parseSsPids(stdout: string, port: number, state: "LISTEN" | "ESTAB"): n
 }
 
 function parseNetstatPids(stdout: string, port: number, state: "LISTENING" | "ESTABLISHED"): number[] {
+  const rows = stdout.split(/\r?\n/).map(line => line.trim().split(/\s+/))
+    .filter(cols => cols.length >= 5 && cols[0]?.toUpperCase() === "TCP" && cols[3]?.toUpperCase() === state);
+  const suffix = `:${port}`;
+  // netstat lists both endpoints of a local connection. Match the reversed
+  // endpoint pair so an outbound connection to the same port elsewhere is ignored.
+  const bridgePeers = state === "ESTABLISHED"
+    ? new Set(rows.filter(cols => cols[1]!.endsWith(suffix)).map(cols => `${cols[2]} ${cols[1]}`))
+    : undefined;
   const pids = new Set<number>();
-  for (const line of stdout.split(/\r?\n/)) {
-    const cols = line.trim().split(/\s+/);
-    if (cols.length < 5 || cols[0]?.toUpperCase() !== "TCP") continue;
-    if (cols[3]?.toUpperCase() !== state) continue;
-    if (!(cols[1] ?? "").endsWith(`:${port}`)) continue;
+  for (const cols of rows) {
+    if (bridgePeers ? !bridgePeers.has(`${cols[1]} ${cols[2]}`) : !cols[1]!.endsWith(suffix)) continue;
     const pid = Number(cols[4]);
     if (Number.isInteger(pid) && pid > 0) pids.add(pid);
   }
@@ -420,11 +425,11 @@ export class WorkspaceLauncher {
     };
   }
   async host(): Promise<HostStatus | null> {
-    const result = await this.run([this.plan.ludens, "status"]);
+    const result = await this.run([...cliCommand(this.plan.ludens), "status"]);
     return result.code === 0 ? JSON.parse(result.stdout) : null;
   }
   async baseware(): Promise<BasewareStatus | null> {
-    const result = await this.run(["env", `BASEWARE_SOCKET=${this.plan.basewareSocket}`, this.plan.baseware, "status"]);
+    const result = await this.run(["env", `BASEWARE_SOCKET=${this.plan.basewareSocket}`, ...cliCommand(this.plan.baseware), "status"]);
     return result.code === 0 ? JSON.parse(result.stdout) : null;
   }
   async status() {
@@ -506,11 +511,12 @@ export class WorkspaceLauncher {
     return result.stdout.trim().split(/\s+/).filter(Boolean).map(Number);
   }
   private async bridgeClients(port: number) {
-    const listeners = await this.listeningPids(port);
     if (process.platform === "win32") {
       const netstat = await this.run(["netstat", "-ano", "-p", "tcp"]);
+      const listeners = parseNetstatPids(netstat.stdout, port, "LISTENING");
       return parseNetstatPids(netstat.stdout, port, "ESTABLISHED").filter(pid => !listeners.includes(pid));
     }
+    const listeners = await this.listeningPids(port);
     const result = await this.run(["lsof", "-nP", `-iTCP:${port}`, "-sTCP:ESTABLISHED", "-t"]);
     if (result.code === 127 && process.platform === "linux") {
       const ss = await this.run(["ss", "-Htanp"]);
@@ -685,7 +691,7 @@ export class WorkspaceLauncher {
     const managedHost = await this.job("host");
     if (managedHost.pid) {
       const host = await this.host();
-      if (host?.mode === "auto") await this.checked([this.plan.ludens, "auto", "off"]);
+      if (host?.mode === "auto") await this.checked([...cliCommand(this.plan.ludens), "auto", "off"]);
       if (host) await this.waitFor("model cleanup", async () => {
         const status = await this.host();
         return !status || (!status.thinking && !status.consolidating);

@@ -76,6 +76,40 @@ ${close || "        pass"}
 }
 
 
+test("the perception protocol loads and reloads Unicode source with a legacy Python stdio encoding", async () => {
+  const f = await fixture({ env: { PYTHONIOENCODING: "cp936" } });
+  try {
+    const first = await f.load(source('        return {"text": "画面 🐟"}'));
+    expect(first.state).toBe("ready");
+    expect((await f.latest()).records[0]?.text).toBe("画面 🐟");
+    const next = await f.load(source('        return {"text": "重载 ✅"}'));
+    expect(next.state).toBe("ready");
+    expect(next.generation).not.toBe(first.generation);
+    expect((await f.latest()).records[0]?.text).toBe("重载 ✅");
+  } finally { await f.cleanup(); }
+});
+
+test("handback completes while replacing a perception worker stuck in close", async () => {
+  const f = await fixture();
+  const host = createTestRuntime({ controllers: [] });
+  host.attach({ perception: f.runtime });
+  try {
+    const first = await f.load(source('        return {"text": "ready"}', "",
+      '        Path("closing").write_text("started")\n        time.sleep(60)'), { lease: null });
+    await host.start();
+    expect(host.status().mode).toBe("auto");
+    await writeFile(join(f.workspace, "perception.py"),
+      source('        return {}', '        raise RuntimeError("broken replacement")'));
+    const replacing = f.runtime.reload();
+    await f.wait(() => existsSync(join(f.workspace, "closing")));
+    await host.stop("human");
+    expect(host.status().mode).toBe("manual");
+    const next = await replacing;
+    expect(next.generation).not.toBe(first.generation);
+    expect(next.error).toContain("broken replacement");
+  } finally { await host.close(); await f.cleanup(); }
+}, 15_000);
+
 test("workspace sample_hz attribute is ignored; LUDENS_PERCEPTION_SAMPLE_HZ chooses the rate", async () => {
   const plain = await fixture();
   try {
@@ -260,7 +294,7 @@ test("editing python sources auto-reloads the worker, preserves generations, and
     await writeFile(join(f.workspace, "weights.txt"), "old weights");
     const code = source('        return {"text": self.value}',
       '        import helper\n        self.value = helper.VALUE + ":" + Path("weights.txt").read_text()',
-      '        Path("closed").write_text(str(os.getpid()))');
+      '        Path("closed").write_text(self.value)');
     const old = await f.load(code);
     const first = await f.latest();
     await writeFile(helper, 'VALUE = "new"\n'); await utimes(helper, stamp, new Date());
@@ -272,7 +306,7 @@ test("editing python sources auto-reloads the worker, preserves generations, and
     expect((await f.latest()).records[0]!.text).toBe("new:new weights");
     const fresh = f.runtime.status();
     expect(fresh.pid).not.toBe(old.pid);
-    expect(await readFile(join(f.workspace, "closed"), "utf8")).toBe(String(old.pid));
+    expect(await readFile(join(f.workspace, "closed"), "utf8")).toBe("old:old weights");
     expect(fresh.state).toBe("ready");
     const history = await f.observe({ at: first.records[0]!.recordedAt });
     expect(history.records[0]?.generation).toBe(old.generation!);
@@ -336,7 +370,7 @@ test("status never reports the previous ready worker while stop or reload is flu
 });
 
 test("invalid query does not damage sampler health and stuck startup is recoverable", async () => {
-  const f = await fixture({ startTimeoutMs: 200 });
+  const f = await fixture({ startTimeoutMs: 1_500 });
   try {
     await writeFile(join(f.workspace, "perception.py"), source('        return {}', '        time.sleep(10)'));
     expect((await f.runtime.reload()).error).toContain("start timed out");
@@ -364,7 +398,13 @@ console.log(JSON.stringify(await runtime.reload())); process.exit(0);`);
       closed = await readFile(join(f.workspace, "closed"), "utf8").catch(() => "");
       if (!closed) await Bun.sleep(10);
     }
-    expect(closed).toBe(String(status.pid));
+    expect(closed).toMatch(/^[1-9]\d*$/);
+    // The Windows virtualenv launcher has a different PID from the Python interpreter.
+    if (process.platform !== "win32") expect(closed).toBe(String(status.pid));
+    await f.wait(() => [Number(closed), status.pid].every(pid => {
+      try { process.kill(pid, 0); return false; }
+      catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+    }));
   } finally { await f.cleanup(); }
 });
 

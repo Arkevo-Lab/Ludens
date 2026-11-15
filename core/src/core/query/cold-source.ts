@@ -1,5 +1,5 @@
 import { open, realpath, readdir, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { eventFiles } from "./event-files";
 import type { CapturedSource } from "./cold-build-protocol";
@@ -8,7 +8,7 @@ const hash = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("h
 const changed = () => Object.assign(new Error("构建期间日志源被替换、截断或改写"), { code: "ARCHIVE_SOURCE_CHANGED" });
 async function sourceFile(root: string, relative: string, external?: string) {
   const path = external ?? join(root, relative);
-  if (await realpath(path) !== path || (!external && !path.startsWith(root + "/"))) throw changed();
+  if (await realpath(path) !== path || (!external && !path.startsWith(root + sep))) throw changed();
   return path;
 }
 async function slice(handle: Awaited<ReturnType<typeof open>>, offset: number, length: number) {

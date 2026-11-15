@@ -1,9 +1,15 @@
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { ServiceLaunchOrigin } from "../core/query/types.ts";
 import { isPidAlive, probeBackgroundJob, readJobRecord } from "./process-manager.ts";
 
 export { isPidAlive, readJobRecord };
+
+export function cliCommand(path: string): [string, ...string[]] {
+  if (process.platform !== "win32") return [path];
+  const entry = basename(path) === "baseware" ? "src/main.ts" : "src/cli/main.ts";
+  return [process.versions.bun ? process.execPath : "bun.exe", resolve(dirname(path), "..", entry)];
+}
 
 export interface BackgroundJobStatus {
   target: string;

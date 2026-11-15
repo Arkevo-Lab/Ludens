@@ -1,6 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { randomUUID } from "node:crypto";
 import { getLogIndex, indexStorageRoot, type LogIndex } from "./log-index";
@@ -201,7 +201,7 @@ export class ArchiveBuildManager {
       sourceInvalid = (error as { code?: string }).code === "ARCHIVE_SOURCE_CHANGED" || (error as Error).name === "SourceChanged";
       if (sourceInvalid) {
         index.invalidate();
-        if (activeGeneration(job.root) === index.directory.split("/").at(-1)) rmSync(join(job.root, "active.json"), { force: true });
+        if (activeGeneration(job.root) === basename(index.directory)) rmSync(join(job.root, "active.json"), { force: true });
         getLogIndex(job.path);
       }
       job.state = { ...job.state, state: job.abort.signal.aborted ? "cancelled" : "failed",

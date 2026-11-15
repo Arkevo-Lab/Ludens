@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, join } from "node:path";
+import { cliCommand } from "../../daemon/background-jobs";
 import { repoRoot } from "./repo";
 
 export interface DiscoveredDriver {
@@ -24,8 +25,8 @@ export async function discoverDriver(spec: string, signal?: AbortSignal): Promis
     throw Object.assign(new Error("Dashboard 的 file: 包地址必须使用绝对路径"), { status: 400 });
   }
   signal?.throwIfAborted();
-  const bin = join(repoRoot, "baseware", "bin", "baseware");
-  const child = spawn(bin, ["driver", "discover", "--package", text], {
+  const [executable, ...prefix] = cliCommand(join(repoRoot, "baseware", "bin", "baseware"));
+  const child = spawn(executable, [...prefix, "driver", "discover", "--package", text], {
     cwd: repoRoot, detached: true, stdio: ["ignore", "pipe", "pipe"],
   });
   const output: Buffer[] = [], errors: Buffer[] = [];

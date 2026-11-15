@@ -1,19 +1,12 @@
-import { createServer, connect, type Socket } from "node:net";
-import { lstat, unlink } from "node:fs/promises";
+import { createServer, type Socket } from "node:net";
+import { unlink } from "node:fs/promises";
+import { clearStaleLocalSocket } from "@ludens/protocol/local-socket";
 import type { BasewareCore, ClientContext } from "./core.ts";
 import type { Envelope, Message, Response } from "./protocol.ts";
 
 export async function listen(path: string, source: BasewareCore | (() => BasewareCore)) {
   const getCore = () => typeof source === "function" ? source() : source;
-  try {
-    if (!(await lstat(path)).isSocket()) throw new Error(`Not a Unix socket: ${path}`);
-    await new Promise<void>((resolve, reject) => {
-      const probe = connect(path);
-      probe.once("connect", () => { probe.destroy(); reject(new Error(`Baseware already running: ${path}`)); });
-      probe.once("error", (error: NodeJS.ErrnoException) => { if (error.code === "ECONNREFUSED") resolve(); else reject(error); });
-    });
-    await unlink(path);
-  } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  await clearStaleLocalSocket(path, () => new Error(`Baseware already running: ${path}`));
   const sockets = new Set<Socket>();
   const server = createServer(socket => {
     sockets.add(socket);

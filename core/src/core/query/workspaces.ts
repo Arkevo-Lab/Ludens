@@ -5,7 +5,7 @@ import { createConnection } from "node:net";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repoRoot } from "./repo";
 import { discoverDriver } from "./drivers";
-import { jobStateFilePath, jobTargetLabel, ludensSocketPath, readBackgroundJobState } from "../../daemon/background-jobs";
+import { cliCommand, jobStateFilePath, jobTargetLabel, ludensSocketPath, readBackgroundJobState } from "../../daemon/background-jobs";
 import {
   readGlobalConfig,
   updateGlobalConfig,
@@ -451,7 +451,7 @@ async function inspectWorkspaceServices(workspacePath: string, home: string): Pr
   const canonical = await realpath(workspacePath).catch(() => resolve(workspacePath));
   const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
   const hostSocket = ludensSocketPath("core", hash);
-  const hostSocketExists = await stat(hostSocket).then(() => true).catch(() => false);
+  const hostSocketExists = await localSocketExists(hostSocket);
   const names = ["emulator", "baseware", "host", "dashboard", "pet"] as const;
   const jobs = await Promise.all(
     names.map(async (name): Promise<WorkspaceServiceJobSnapshot> => {
@@ -912,11 +912,11 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
     const basewareSocket = ludensSocketPath("baseware", hash);
     const [services, basewareSocketExists] = await Promise.all([
       inspectWorkspaceServices(entry.workspace, resolve(home)),
-      stat(basewareSocket).then(() => true).catch(() => false),
+      localSocketExists(basewareSocket),
     ]);
     let status: WorkspaceBasewareSnapshot["daemon"]["status"] = null;
     if (basewareSocketExists) {
-      const result = await runCommandShort([join(repoRoot, "baseware/bin/baseware"), "status"], 1500, {
+      const result = await runCommandShort([...cliCommand(join(repoRoot, "baseware/bin/baseware")), "status"], 1500, {
         BASEWARE_SOCKET: basewareSocket,
       });
       if (result.code === 0) {
@@ -1115,14 +1115,24 @@ export async function removeBasewareMachine(id: unknown, home = globalHome): Pro
   return { removed: res.removed, machines: res.registry.machines };
 }
 
+function probeLocalSocket(socketPath: string): Promise<boolean> {
+  const { promise, resolve: resolveProbe } = Promise.withResolvers<boolean>();
+  const socket = createConnection(socketPath);
+  const timer = setTimeout(() => { socket.destroy(); resolveProbe(false); }, 500);
+  socket.once("connect", () => { clearTimeout(timer); socket.destroy(); resolveProbe(true); });
+  socket.once("error", () => { clearTimeout(timer); resolveProbe(false); });
+  return promise;
+}
+
+function localSocketExists(socketPath: string): Promise<boolean> {
+  return process.platform === "win32"
+    ? probeLocalSocket(socketPath)
+    : stat(socketPath).then(() => true).catch(() => false);
+}
+
 export async function probeBasewareSocket(workspace: string): Promise<string | null> {
   const socketPath = await defaultSocket(workspace);
-  const { promise, resolve: resolveProbe } = Promise.withResolvers<string | null>();
-  const socket = createConnection(socketPath);
-  const timer = setTimeout(() => { socket.destroy(); resolveProbe(null); }, 500);
-  socket.once("connect", () => { clearTimeout(timer); socket.destroy(); resolveProbe(socketPath); });
-  socket.once("error", () => { clearTimeout(timer); resolveProbe(null); });
-  return promise;
+  return await probeLocalSocket(socketPath) ? socketPath : null;
 }
 
 export async function updateWorkspaceMachines(id: unknown, input: unknown, home = globalHome): Promise<WorkspaceBasewareSnapshot> {
@@ -1408,25 +1418,25 @@ export async function controlWorkspaceService(
     };
   }
 
-  const ludensBin = join(repoRoot, "core/bin/ludens");
-  const envHome = ["env", `LUDENS_HOME=${resolve(home)}`];
+  const command = [...cliCommand(join(repoRoot, "core/bin/ludens")), "--workspace", entry.workspace];
+  const envHome = { LUDENS_HOME: resolve(home) };
   let code: number;
   let stdout = "";
   let stderr = "";
   if (operation === "up") {
-    const result = await runCommandShort([...envHome, ludensBin, "--workspace", entry.workspace, "up"], 25_000);
+    const result = await runCommandShort([...command, "up"], 25_000, envHome);
     code = result.code;
     stdout = result.stdout;
     stderr = result.stderr;
   } else if (operation === "down") {
-    const result = await runCommandShort([...envHome, ludensBin, "--workspace", entry.workspace, "down"], 25_000);
+    const result = await runCommandShort([...command, "down"], 25_000, envHome);
     code = result.code;
     stdout = result.stdout;
     stderr = result.stderr;
   } else {
     const down = await runCommandShort(
-      [...envHome, ludensBin, "--workspace", entry.workspace, "down", "--keep-emulator"], 25_000);
-    const up = await runCommandShort([...envHome, ludensBin, "--workspace", entry.workspace, "up"], 25_000);
+      [...command, "down", "--keep-emulator"], 25_000, envHome);
+    const up = await runCommandShort([...command, "up"], 25_000, envHome);
     code = down.code === 0 ? up.code : down.code;
     stdout = `${down.stdout}\n${up.stdout}`;
     stderr = `${down.stderr}\n${up.stderr}`;
@@ -1878,7 +1888,8 @@ export async function createWorkspace(input: unknown, signal?: AbortSignal, home
   for (const key of Object.keys(env)) {
     if (key === "LUDENS_WORKSPACE" || key === "LUDENS_SOCKET" || key.startsWith("BASEWARE_")) delete env[key];
   }
-  const child = spawn(join(repository, "core/bin/ludens"), args, {
+  const [executable, ...prefix] = cliCommand(join(repository, "core/bin/ludens"));
+  const child = spawn(executable, [...prefix, ...args], {
     cwd: repository, env, detached: true, stdio: ["ignore", "pipe", "pipe"],
   });
   const errors: Buffer[] = [];
