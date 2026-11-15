@@ -327,9 +327,11 @@ test("data-only and mixed model inputs expose lazy record details without duplic
     ]);
     const html = renderToStaticMarkup(createElement(LocaleProvider, null, createElement(ObservationPanel, {
       data: { ...result, project: "test", run: "test" } as RunData, call: result.calls[0], onImage() {},
+      onOpenReplayAt() {},
     })));
     assert.match(html, /Record #1 · perception data/);
     assert.match(html, /Record #2 · perception data/);
+    assert.match(html, /class="codex-replay-jump-link"/);
     assert.doesNotMatch(html, /No viewable input frame|Loading timeline record/);
     if (!withImage) assert.match(html, /This input contains 2 timeline records/);
     assert.deepEqual(result.calls[0].perception?.records?.map(item => item.snapshot.timeline), snapshots.map(item => item.timeline));

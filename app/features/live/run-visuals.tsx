@@ -349,7 +349,8 @@ export function ObservationPanel({
     .map(record => [record.timeline!.recordId, record])).values()];
   const age = perceptionAgeMs(perception);
   const samplingMs = samplingDurationMs(snapshot);
-  const timestamp = (o: Observation) => o.perception ? o.perception.snapshot?.recordedAt : o.at;
+  const timestamp = (o?: Observation) => o?.perception ? o.perception.snapshot?.recordedAt : o?.at;
+  const replayTimestamp = timestamp(observation) ?? snapshot?.recordedAt;
   const duration = (ms: number | null | undefined) => ms != null && ms < 1000
     ? ms.toFixed(1) + " ms" : seconds(ms);
   const mediaResolver = useMediaResolver();
@@ -569,8 +570,7 @@ export function ObservationPanel({
               type="button"
               className="codex-replay-jump-link"
               onClick={() => {
-                const rawTs = (observation ? timestamp(observation) : undefined) ?? snapshot?.recordedAt;
-                const parsedAt = rawTs ? Date.parse(rawTs) : NaN;
+                const parsedAt = replayTimestamp ? Date.parse(replayTimestamp) : NaN;
                 onOpenReplayAt({
                   run: data.run,
                   at: Number.isFinite(parsedAt) ? parsedAt : undefined,
@@ -579,7 +579,7 @@ export function ObservationPanel({
                 });
               }}
             >
-              ⏱ {observationTime(timestamp(observation!) ?? snapshot?.recordedAt, rootT)} ↗
+              ⏱ {observationTime(replayTimestamp, rootT)} ↗
             </button>
           )}
         {observation?.sourceSequence != null && (
