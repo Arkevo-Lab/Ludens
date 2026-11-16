@@ -188,6 +188,35 @@ export function summarizeStepBlock(block: ActivityBlock): { badge: string; detai
   return { badge: block.source?.component ?? "step", detail: previewText || block.title };
 }
 
+export type SystemStepCategory = "device" | "perception" | "timer" | "compaction" | "host";
+
+export function summarizeSystemCategories(steps: ActivityBlock[]): SystemStepCategory[] {
+  const seen = new Set<SystemStepCategory>();
+  for (const step of steps) {
+    if (step.kind !== "system") continue;
+    const title = step.title.toLowerCase();
+    const text = (step.text || "").toLowerCase();
+    if (
+      title.includes("device") ||
+      title.includes("baseware") ||
+      text.includes("econnreset") ||
+      text.includes("device disconnected")
+    ) {
+      seen.add("device");
+    } else if (title.includes("perception")) {
+      seen.add("perception");
+    } else if (title === "control_budget") {
+      seen.add("timer");
+    } else if (title.includes("compaction")) {
+      seen.add("compaction");
+    } else {
+      seen.add("host");
+    }
+  }
+  const order: SystemStepCategory[] = ["device", "perception", "timer", "compaction", "host"];
+  return order.filter(cat => seen.has(cat));
+}
+
 export function isBackgroundResultBlock(block: ActivityBlock): boolean {
   return block.kind === "system" && block.title === "background_result";
 }
@@ -259,6 +288,7 @@ export type StreamSegment =
       steps: ActivityBlock[];
       responseBlock: ActivityBlock | null;
       responseText: string | null;
+      standby?: boolean;
     };
 
 export function isPoolReceiptBlock(block: ActivityBlock): boolean {
@@ -420,11 +450,12 @@ export function buildCodexSegments(
   const cyclesByEpoch = new Map((options.cycles ?? []).map((c, idx) => [c.epoch, { ...c, index: idx + 1 }]));
   const emittedCallInputIds = new Set<string>();
   const emittedDividerEpochs = new Set<string>();
+  const closedEpochs = new Set<string>();
   const segments: StreamSegment[] = [];
   let pendingSteps: ActivityBlock[] = [];
   let currentEpoch: string | null = null;
   let lastSegmentEndedAt: string | null = options.prevEndedAt ?? null;
-  let lastPostBlockMs = 0;
+  let emittedPostAfterCycle = false;
   let autoCycleCounter = 0;
 
   // Pre-scan control(manual) blocks so we know end times and stop reasons even before cycle index updates
@@ -623,6 +654,7 @@ export function buildCodexSegments(
         steps: pendingSteps,
         responseBlock: null,
         responseText: null,
+        ...(currentEpoch === null ? { standby: true } : {}),
       });
     }
     pendingSteps = [];
@@ -690,27 +722,44 @@ export function buildCodexSegments(
         if (!onlyBootSystemSteps) {
           flushTurn();
         }
+        if (ep) closedEpochs.delete(ep);
         currentEpoch = ep;
-        lastPostBlockMs = 0;
+        emittedPostAfterCycle = false;
         emitDividerForEpoch(ep, block.at, rec);
       } else if (rec?.mode === "manual") {
-        flushTurn();
+        // Only flush and record a cycle boundary when transitioning out of an active cycle.
+        // Redundant `control(manual)` snapshots emitted during standby (e.g. device reconnects)
+        // must not split ongoing passive standby system events into separate step groups.
         if (ep || currentEpoch) {
+          flushTurn();
+          if (ep) closedEpochs.add(ep);
+          if (currentEpoch) closedEpochs.add(currentEpoch);
           lastSegmentEndedAt = block.at;
+          currentEpoch = null;
+          emittedPostAfterCycle = false;
         }
-        currentEpoch = null;
-        lastPostBlockMs = 0;
       } else {
         flushTurn();
       }
       continue;
     }
 
-    const blockEpoch = block.trace?.epoch ?? null;
+    const passiveStandby =
+      block.kind === "system" &&
+      !isUserMessageBlock(block) &&
+      !isBackgroundResultBlock(block) &&
+      !isPoolReceiptBlock(block);
+    const rawBlockEpoch = block.trace?.epoch ?? null;
+    const blockEpoch = rawBlockEpoch && !(passiveStandby && closedEpochs.has(rawBlockEpoch)) ? rawBlockEpoch : null;
+    const hasDedicatedCard =
+      isUserMessageBlock(block) ||
+      isOutboundPoolEventBlock(block) ||
+      isPoolReceiptBlock(block);
+
     if (blockEpoch && blockEpoch !== currentEpoch) {
       flushTurn();
       currentEpoch = blockEpoch;
-      lastPostBlockMs = 0;
+      emittedPostAfterCycle = false;
       emitDividerForEpoch(blockEpoch, block.at);
     } else if (!blockEpoch && currentEpoch) {
       const closedEnd =
@@ -718,26 +767,25 @@ export function buildCodexSegments(
       const closedMs = closedEnd ? Date.parse(closedEnd) : NaN;
       if (Number.isFinite(closedMs) && blockMs > closedMs + 30_000) {
         flushTurn();
+        closedEpochs.add(currentEpoch);
         lastSegmentEndedAt = closedEnd;
         currentEpoch = null;
-        lastPostBlockMs = blockMs;
-        emitDividerForEpoch(`post:${block.id}`, block.at);
+        emittedPostAfterCycle = false;
+        if (!passiveStandby && !hasDedicatedCard) {
+          emittedPostAfterCycle = true;
+          emitDividerForEpoch(`post:${block.id}`, block.at);
+        }
       }
     } else if (!blockEpoch && !currentEpoch && segments.length > 0 && blockMs > 0) {
-      if (lastPostBlockMs === 0) {
+      // Passive standby system events (device reconnects, perception status/faults) stay coalesced
+      // in a single standby disclosure without emitting repeated session dividers.
+      if (!passiveStandby && !hasDedicatedCard && !emittedPostAfterCycle) {
         const prevEndMs = lastSegmentEndedAt ? Date.parse(lastSegmentEndedAt) : NaN;
         if (Number.isFinite(prevEndMs) && blockMs > prevEndMs + 30_000) {
           flushTurn();
-          lastPostBlockMs = blockMs;
+          emittedPostAfterCycle = true;
           emitDividerForEpoch(`post:${block.id}`, block.at);
         }
-      } else if (blockMs - lastPostBlockMs > 5 * 60_000) {
-        flushTurn();
-        lastSegmentEndedAt = new Date(lastPostBlockMs).toISOString();
-        lastPostBlockMs = blockMs;
-        emitDividerForEpoch(`post:${block.id}`, block.at);
-      } else {
-        lastPostBlockMs = Math.max(lastPostBlockMs, blockMs);
       }
     } else if (!blockEpoch && segments.length === 0 && pendingSteps.length === 0 && options.runId) {
       const fallbackCycle = options.cycles?.[0];
@@ -747,13 +795,16 @@ export function buildCodexSegments(
       if (fallbackCycle && Number.isFinite(fallbackStartMs) && blockMs > 0 && blockMs < fallbackStartMs - 250) {
         // Pre-cycle block arrived before cycles[0] started: never emit cycles[0] prematurely out of chronological order.
         if (fallbackStartMs - blockMs > 60_000 || block.kind !== "system") {
-          lastPostBlockMs = blockMs;
           emitDividerForEpoch(`post:pre:${options.runId}`, block.at);
         }
       } else if (fallbackCycle && Number.isFinite(fallbackClosedMs) && blockMs > fallbackClosedMs + 30_000) {
         emitDividerForEpoch(fallbackCycle.epoch, fallbackCycle.startedAt);
-        lastPostBlockMs = blockMs;
-        emitDividerForEpoch(`post:${block.id}`, block.at);
+        closedEpochs.add(fallbackCycle.epoch);
+        lastSegmentEndedAt = fallbackClosedEnd;
+        if (!passiveStandby && !hasDedicatedCard) {
+          emittedPostAfterCycle = true;
+          emitDividerForEpoch(`post:${block.id}`, block.at);
+        }
       } else {
         emitDividerForEpoch(fallbackCycle?.epoch ?? `post:standby:${options.runId}`, block.at);
       }
@@ -1006,7 +1057,10 @@ export function reconcileSegments(previous: StreamSegment[], next: StreamSegment
       case "turn": {
         const p = prior as Extract<StreamSegment, { kind: "turn" }>;
         const stepsUnchanged = sameStepsArray(p.steps, seg.steps);
-        const respUnchanged = sameBlockRefOrRev(p.responseBlock, seg.responseBlock) && p.responseText === seg.responseText;
+        const respUnchanged =
+          sameBlockRefOrRev(p.responseBlock, seg.responseBlock) &&
+          p.responseText === seg.responseText &&
+          p.standby === seg.standby;
         if (p.runId === seg.runId && stepsUnchanged && respUnchanged) {
           keepPrior = true;
         } else if (stepsUnchanged && p.steps !== seg.steps) {

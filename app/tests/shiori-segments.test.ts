@@ -511,3 +511,207 @@ test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100p
     /\.observation-priority\s+\.surface-heading\s*>\s*span\s*\{[^}]*max-width:\s*none;[^}]*white-space:\s*nowrap;/,
   );
 });
+
+test("post-cycle standby system events coalesce into one closed <details> disclosure without repeated post dividers", async () => {
+  const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
+
+  const blocks = [
+    block({
+      id: "ctl-auto-1",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:06:03.000Z",
+      data: { mode: "auto", epoch: "epoch-1" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "reply-done",
+      kind: "text",
+      title: "Assistant",
+      at: "2026-11-07T13:09:39.000Z",
+      text: "已完成双设备单次按键及帧号验证。保持停止，未追加输入。",
+      data: { role: "assistant", text: "已完成双设备单次按键及帧号验证。保持停止，未追加输入。" },
+      source: { component: "shiori" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "ctl-manual-end",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:09:42.000Z",
+      data: {
+        mode: "manual",
+        epoch: "epoch-1",
+        reason: "Device disconnected after 3 reconnect attempts: read ECONNRESET",
+      },
+      trace: { epoch: "epoch-1" },
+    }),
+    // 1m 16s later: reconnect + redundant manual control snapshot + perception fault
+    block({
+      id: "sys-reconn-1",
+      kind: "system",
+      title: "device_reconnected",
+      at: "2026-11-07T13:10:58.000Z",
+      data: { source: "baseware_event" },
+    }),
+    block({
+      id: "ctl-manual-standby",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:10:58.500Z",
+      data: { mode: "manual", epoch: null, reason: "reconnected" },
+    }),
+    // 29m later
+    block({
+      id: "sys-fault-1",
+      kind: "system",
+      title: "perception_fault",
+      at: "2026-11-07T13:40:01.000Z",
+      text: "LudensError: read ECONNRESET",
+    }),
+    // 8m 25s later
+    block({
+      id: "sys-fault-end-1",
+      kind: "system",
+      title: "perception_fault_end",
+      at: "2026-11-07T13:48:26.000Z",
+      data: { reason: "recovered" },
+    }),
+  ];
+
+  const cycles = [
+    {
+      epoch: "epoch-1",
+      startedAt: "2026-11-07T13:06:03.000Z",
+      endedAt: "2026-11-07T13:09:42.000Z",
+      maxSeconds: 1800,
+      reason: "Device disconnected after 3 reconnect attempts: read ECONNRESET",
+    },
+  ];
+
+  const segments = buildCodexSegments(blocks, [], [], {
+    runId: RUN_ID,
+    isLatestRun: false,
+    isAuto: false,
+    cycles,
+  });
+
+  const dividers = segments.filter(item => item.kind === "session_divider");
+  assert.equal(dividers.length, 1, "only the real #1 cycle divider is emitted; standby noise emits zero post: dividers");
+  assert.equal(dividers[0]?.epoch, "epoch-1");
+
+  const turns = segments.filter((item): item is Extract<(typeof segments)[number], { kind: "turn" }> => item.kind === "turn");
+  assert.equal(turns.length, 2, "one completed reply turn + one coalesced standby system turn");
+  assert.deepEqual(
+    turns[1]?.steps.map(step => step.id),
+    ["sys-reconn-1", "sys-fault-1", "sys-fault-end-1"],
+    "all standby system events across 1m/29m/8m gaps stay coalesced in one group",
+  );
+
+  const runData = {
+    ...sampleWorkbenchRunData(),
+    cycles,
+    live: null,
+  };
+  const feed = { ...sampleWorkbenchFeed(false), blocks };
+  const html = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-ws",
+        workspace: "/tmp/demo-ws",
+        workspaceTitle: "Demo Workspace",
+        data: runData,
+        feed,
+        isLiveRun: false,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", null, "viewport"),
+      }),
+    ),
+  );
+
+  assert.doesNotMatch(html, /codex-session-gap/, "stacked floating gap pill is eliminated");
+  assert.match(
+    html,
+    /<details class="codex-step-group" data-variant="system"><summary class="codex-step-group-toggle" data-step-group-toggle="">/,
+    "standby system log renders as a closed native <details> with <summary>",
+  );
+  assert.match(html, /Standby system events · 3/, "summary clearly labels standby system count");
+  assert.match(html, /device link \/ perception/, "summary surfaces categorized system causes");
+  assert.match(html, /id="sys-fault-1"/, "collapsed step rows remain in DOM inside <details> for Find-in-Page");
+  assert.match(html, /Device disconnected/, "raw ECONNRESET stop reason is humanized on the #1 cycle divider");
+});
+
+test("multi-cycle transition renders inline idle metadata inside the single cycle divider pill", async () => {
+  const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
+
+  const cycles = [
+    {
+      epoch: "epoch-1",
+      startedAt: "2026-11-07T13:00:00.000Z",
+      endedAt: "2026-11-07T13:05:00.000Z",
+      maxSeconds: 1800,
+      reason: "manual",
+    },
+    {
+      epoch: "epoch-2",
+      startedAt: "2026-11-07T13:35:20.000Z",
+      maxSeconds: 1800,
+    },
+  ];
+
+  const blocks = [
+    block({
+      id: "ctl-1",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:00:00.000Z",
+      data: { mode: "auto", epoch: "epoch-1" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "ctl-1-end",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:05:00.000Z",
+      data: { mode: "manual", epoch: "epoch-1", reason: "manual" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "ctl-2",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:35:20.000Z",
+      data: { mode: "auto", epoch: "epoch-2" },
+      trace: { epoch: "epoch-2" },
+    }),
+  ];
+
+  const html = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-ws",
+        workspace: "/tmp/demo-ws",
+        workspaceTitle: "Demo Workspace",
+        data: { ...sampleWorkbenchRunData(), cycles },
+        feed: { ...sampleWorkbenchFeed(false), blocks },
+        isLiveRun: true,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", null, "viewport"),
+      }),
+    ),
+  );
+
+  assert.doesNotMatch(html, /class="codex-session-gap"/, "no separate stacked gap pill");
+  assert.match(html, /class="codex-session-divider-idle" data-session-gap=""/, "idle metadata sits inline inside #2 pill");
+  assert.match(html, /after 30m idle/, "30m 20s idle gap rounds away sub-minute noise cleanly");
+});
