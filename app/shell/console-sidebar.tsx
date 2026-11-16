@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { MenuIcon, PanelLeftClose, XIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PixelMark, type PixelMarkState } from "@/components/ui/pixel-mark";
+import { useAnimatedPresence } from "@/components/use-motion-preferences";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
@@ -145,6 +146,7 @@ export function ConsoleSidebar({
   const lastSidebarFocus = useRef<HTMLElement | null>(null);
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(false);
   const expanded = mobileOpen ?? uncontrolledExpanded;
+  const backdropPresence = useAnimatedPresence(expanded, 180);
   const setExpanded = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
     const resolved = typeof next === "function" ? next(expanded) : next;
     if (mobileOpen === undefined) setUncontrolledExpanded(resolved);
@@ -282,7 +284,14 @@ export function ConsoleSidebar({
         .replace("{shortcut}", collapseShortcut)
     : ct("collapseSidebar");
   return <>
-    {expanded && <div className="sidebar-backdrop" aria-hidden="true" onClick={closeMenu} />}
+    {backdropPresence.mounted && (
+      <div
+        className="sidebar-backdrop"
+        data-motion-state={backdropPresence.state}
+        aria-hidden="true"
+        onClick={closeMenu}
+      />
+    )}
     <aside
       ref={sidebar}
       className="sidebar"

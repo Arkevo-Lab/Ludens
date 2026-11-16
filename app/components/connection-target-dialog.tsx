@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent, type PointerEvent }
 import { Eye, EyeOff, Link2, RefreshCw, Unplug, XIcon } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { useAnimatedNativeDialog } from "@/components/use-motion-preferences";
 import {
   clearStoredConnectionTarget,
   isSameOriginAvailable,
@@ -54,6 +55,18 @@ export function ConnectionTargetDialog({ open, onOpenChange }: ConnectionTargetD
   const tokenInputId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const pointerDownOnBackdrop = useRef(false);
+  const closingProgrammaticallyRef = useRef(false);
+
+  useAnimatedNativeDialog(dialogRef, open, {
+    closeDurationMs: 180,
+    manualShowModal: true,
+    onBeforeProgrammaticClose: () => {
+      closingProgrammaticallyRef.current = true;
+      if (dialogRef.current) {
+        dialogRef.current.returnValue = "";
+      }
+    },
+  });
 
   const {
     target,
@@ -89,25 +102,12 @@ export function ConnectionTargetDialog({ open, onOpenChange }: ConnectionTargetD
 
   useEffect(() => {
     const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    if (open) {
-      if (!dialog.open) {
-        if (typeof dialog.showModal === "function") {
-          dialog.showModal();
-        } else {
-          dialog.setAttribute("open", "");
-        }
-      }
-      return;
-    }
-
-    if (dialog.open) {
-      if (typeof dialog.close === "function") {
-        dialog.close();
-      } else {
-        dialog.removeAttribute("open");
-      }
+    if (!dialog || !open || dialog.open) return;
+    dialog.returnValue = "";
+    if (typeof dialog.showModal === "function") {
+      dialog.showModal();
+    } else {
+      dialog.setAttribute("open", "");
     }
   }, [open]);
 
@@ -117,6 +117,10 @@ export function ConnectionTargetDialog({ open, onOpenChange }: ConnectionTargetD
       dialog.returnValue = "";
     }
     pointerDownOnBackdrop.current = false;
+    if (closingProgrammaticallyRef.current) {
+      closingProgrammaticallyRef.current = false;
+      return;
+    }
     onOpenChange(false);
   };
 

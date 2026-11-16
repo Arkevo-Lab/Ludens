@@ -158,7 +158,7 @@ export function DriverRegisterDialog({
 
         {submitting && (
           <Alert>
-            <CheckCircle2 className="size-4 animate-pulse" aria-hidden="true" />
+            <CheckCircle2 className="size-4 motion-safe:animate-pulse" aria-hidden="true" />
             <AlertDescription className="text-xs">
               {t("driverRegisterSubmitting")}
             </AlertDescription>

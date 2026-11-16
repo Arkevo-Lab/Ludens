@@ -103,7 +103,9 @@
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  transition: background-color 120ms ease, border-color 120ms ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo);
 }
 .pool-compose-btn:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--pool-in) 55%, var(--pool-line));
@@ -150,7 +152,9 @@
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
 }
 .pool-filter:hover {
   color: var(--foreground);
@@ -176,7 +180,7 @@
   border: 1px solid var(--pool-line);
   border-radius: 7px;
   background: var(--pool-inset);
-  transition: border-color 120ms ease;
+  transition: border-color var(--duration-fast) var(--ease-out-expo);
 }
 .pool-search:focus-within {
   border-color: color-mix(in srgb, var(--foreground) 28%, var(--pool-line));
@@ -213,6 +217,9 @@
   border-radius: 4px;
   background: transparent;
   color: var(--pool-muted);
+  transition:
+    background-color var(--duration-instant) var(--ease-out-expo),
+    color var(--duration-instant) var(--ease-out-expo);
 }
 .pool-search-clear:hover {
   background: var(--secondary, #161a23);
@@ -285,7 +292,19 @@
   border-radius: 9px;
   background: var(--pool-card);
   scroll-margin: 12px;
-  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo),
+    opacity var(--duration-fast) var(--ease-out-expo),
+    transform var(--duration-fast) var(--ease-out-expo);
+}
+@starting-style {
+  .pool-card {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 .pool-card::before {
   content: "";
@@ -343,6 +362,9 @@
   color: var(--foreground);
   font: 600 11px/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
 }
 .pool-seq:hover,
 .pool-seq[aria-pressed="true"] {
@@ -409,6 +431,9 @@
   background: transparent;
   color: var(--pool-muted);
   font: 500 11px/1 var(--font-mono);
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
 }
 button.pool-reply-chip:hover {
   border-style: solid;
@@ -441,6 +466,19 @@ button.pool-reply-chip:hover {
   line-clamp: 6;
   overflow: hidden;
 }
+.pool-card-body[data-expanded="true"] {
+  animation: pool-card-body-reveal var(--duration-fast) var(--ease-out-expo);
+}
+@keyframes pool-card-body-reveal {
+  from {
+    opacity: 0.72;
+    clip-path: inset(0 0 18% 0);
+  }
+  to {
+    opacity: 1;
+    clip-path: inset(0 0 0 0);
+  }
+}
 .pool-body-toggle {
   align-self: flex-start;
   margin-top: -3px;
@@ -453,6 +491,7 @@ button.pool-reply-chip:hover {
   text-decoration: underline;
   text-decoration-color: var(--pool-line);
   text-underline-offset: 3px;
+  transition: color var(--duration-fast) var(--ease-out-expo);
 }
 .pool-body-toggle:hover {
   color: var(--foreground);
@@ -560,7 +599,10 @@ button.pool-reply-chip:hover {
   font-size: 11.5px;
   font-weight: 500;
   white-space: nowrap;
-  transition: border-color 120ms ease, background-color 120ms ease, color 120ms ease;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
 }
 .pool-btn:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--foreground) 24%, var(--pool-line));
@@ -639,8 +681,16 @@ button.pool-reply-chip:hover {
 
 @media (prefers-reduced-motion: reduce) {
   .pool-card,
-  .pool-btn,
-  .pool-filter {
+  .pool-compose-btn,
+  .pool-filter,
+  .pool-search,
+  .pool-search-clear,
+  .pool-seq,
+  .pool-reply-chip,
+  .pool-card-body,
+  .pool-body-toggle,
+  .pool-btn {
     transition: none;
+    animation: none;
   }
 }
