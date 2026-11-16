@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useMediaResolver, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -194,33 +195,72 @@ export function RequestChart({
   );
 }
 
-function TimelineRecordData({ url }: { url: string }) {
+interface TimelineRecordQuery {
+  project: string;
+  run: string;
+  record: string;
+  sequence: number;
+  source: { call?: string; observation?: string };
+}
+
+function TimelineRecordData({ query }: { query: TimelineRecordQuery }) {
   const t = useTranslations("runVisuals");
   const { t: rootT } = useLocale();
+  const rpcCtx = useOptionalLudensRpc();
+  const rpcCall = rpcCtx?.call;
   const [record, setRecord] = useState<TimelineRecordDetail | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
+    if (!rpcCall) {
+      setError(mediaFailureMessage(0, rootT));
+      return;
+    }
     const controller = new AbortController();
-    void fetch(url, { cache: "no-store", signal: controller.signal }).then(async response => {
-      if (!response.ok) throw new Error(mediaFailureMessage(response.status, rootT));
-      setRecord(await response.json());
-    }).catch(error => { if (!controller.signal.aborted) setError(error.message); });
+    void rpcCall(
+      "run/timelineRecord",
+      {
+        project: query.project,
+        run: query.run,
+        record: query.record,
+        sequence: query.sequence,
+        source: query.source,
+      },
+      { signal: controller.signal },
+    )
+      .then(result => {
+        if (!controller.signal.aborted) {
+          setRecord(result as unknown as TimelineRecordDetail);
+        }
+      })
+      .catch(err => {
+        if (!controller.signal.aborted) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      });
     return () => controller.abort();
-  }, [url]);
+  }, [query.project, query.run, query.record, query.sequence, query.source.call, query.source.observation, rpcCall, rootT]);
   if (error) return <p role="status">{error}</p>;
   if (!record) return <p role="status">{t("record.loading")}</p>;
   if (record.data === undefined && record.space === undefined) return <p>{t("record.empty")}</p>;
   return <pre className="observation-text">{JSON.stringify({ data: record.data, space: record.space }, null, 2)}</pre>;
 }
 
-function TimelineRecordDetails({ snapshot, url }: { snapshot: PerceptionSnapshot; url: string }) {
+function TimelineRecordDetails({
+  snapshot,
+  query,
+}: {
+  snapshot: PerceptionSnapshot;
+  query: TimelineRecordQuery;
+}) {
   const t = useTranslations("runVisuals");
-  const { t: rootT } = useLocale();
   const [open, setOpen] = useState(false);
-  return <details className="observation-metadata" onToggle={event => setOpen(event.currentTarget.open)}>
-    <summary>{t("record.summary")} #{snapshot.sequence} · {t("record.detail")}</summary>
-    {open && <TimelineRecordData key={url} url={url} />}
-  </details>;
+  const queryKey = `${query.project}:${query.run}:${query.record}:${query.sequence}:${query.source.call ?? query.source.observation ?? ""}`;
+  return (
+    <details className="observation-metadata" onToggle={event => setOpen(event.currentTarget.open)}>
+      <summary>{t("record.summary")} #{snapshot.sequence} · {t("record.detail")}</summary>
+      {open && <TimelineRecordData key={queryKey} query={query} />}
+    </details>
+  );
 }
 
 function observationMachineId(o?: Observation): string | null {
@@ -312,9 +352,9 @@ export function ObservationPanel({
   const timestamp = (o: Observation) => o.perception ? o.perception.snapshot?.recordedAt : o.at;
   const duration = (ms: number | null | undefined) => ms != null && ms < 1000
     ? ms.toFixed(1) + " ms" : seconds(ms);
+  const mediaResolver = useMediaResolver();
   const media = (o: Observation) =>
-    "/api/media?" +
-    new URLSearchParams({ project: data.project, run: data.run, id: o.id });
+    mediaResolver.resolve({ kind: "asset", project: data.project, run: data.run, id: o.id }) ?? "";
   const samples = (items: Observation[], label: string) => (
     <div className="sample-strip">
       {items.map((o) => (
@@ -377,10 +417,23 @@ export function ObservationPanel({
           )}
         </details>
       )}
-      {records.map(record => <TimelineRecordDetails key={record.timeline!.recordId} snapshot={record}
-        url={"/api/media?" + new URLSearchParams({ project: data.project, run: data.run,
-          record: record.timeline!.recordId, sequence: String(record.timeline!.sequence),
-          ...(showingInput && call ? { call: call.id } : observation ? { id: observation.id } : {}) })} />)}
+      {records.map(record => (
+        <TimelineRecordDetails
+          key={record.timeline!.recordId}
+          snapshot={record}
+          query={{
+            project: data.project,
+            run: data.run,
+            record: record.timeline!.recordId,
+            sequence: record.timeline!.sequence,
+            source: showingInput && call
+              ? { call: call.id }
+              : observation
+                ? { observation: observation.id }
+                : {},
+          }}
+        />
+      ))}
     </>);
   return (
     <section
@@ -462,7 +515,8 @@ export function ObservationPanel({
             prefetchUrls={inputs
               .filter(item => item.id !== observation.id && item.mediaStorage !== "unrecorded" && item.mediaType.startsWith("image/"))
               .slice(0, 6)
-              .map(media)}
+              .map(media)
+              .filter(Boolean)}
             alt={(showingInput ? t("panel.altInput") : t("panel.altSaved")) + " · " + observation.controller + " · " + observationTime(timestamp(observation), rootT)}
           />
         ) : text ? (

@@ -1,12 +1,13 @@
 # @ludens/app
 
-First-class **Ludens Desktop App** (Electron) and shared static SPA observability & control **Console** for Ludens workspaces. Both the desktop app and browser mode share the same React 19, Tailwind CSS 4, and shadcn/ui primitives backed by `@ludens/core`'s unified `ludens app-server` — with zero Next.js server runtime in production.
+First-class **Ludens Desktop App** (Electron) and shared responsive **Vite Static SPA Console** for Ludens workspaces. Desktop, hosted web, remote, and mobile clients share the same React 19, Vite, Tailwind CSS 4, and shadcn/ui codebase communicating over `@ludens/protocol/app-rpc` JSON-RPC 2.0 (`events/subscribe` + `sinceSeq` catch-up and dual-plane `MediaResolver`) backed by `@ludens/core`'s unified `ludens app-server` — with zero Next.js runtime anywhere.
 
 ## Architecture & Host Modes
 
-- **Ludens Desktop App (`app/bin/ludens-app` / packaged installer)**: Automatically spawns and supervises `ludens app-server --port 0 --parent-watchdog --static-dir <out>` on launch, opens the main Console window alongside the tray icon (plus optional **Desktop Pet** widget), minimizes to tray on close (`×`), and tears down `app-server` plus any UI-managed workspace processes cleanly on Quit (`⌘Q`, tray Quit, or `stdin` watchdog exit).
-- **Web Dev Mode (`npm run dev`)**: Runs `scripts/dev.mjs`, spawning an ephemeral `ludens app-server` (`--port 0 --parent-watchdog --trusted-origin`) and proxying `/api/*` from `next dev` for instant HMR in any browser.
-- **Static Production Server (`npm run build && npm start`)**: Exports pure static SPA assets into `app/out/` (stamped at `app/out/.ludens-build.json`) and serves them directly from `ludens app-server`.
+- **Ludens Desktop App (`app/bin/ludens-app` / packaged installer, Zero Listening TCP Ports)**: Uses Pure-Node `ensureLocalAppDaemon` per `LUDENS_HOME` to start or reuse a singleton `ludens app-server` over a Unix Domain Socket (`app-server.sock`) with **0 listening TCP ports**. Registers `ludens-app://console/` for packaged static SPA assets and `ludens-media://local/media?...` for local media over UDS `media/resolve` (with HTTP `206 Partial Content` `Range` support). Bridges renderer and `PetSessionCoordinator` calls through `window.ludens.rpc`, minimizes to tray on close (`×`), and applies `ActiveCoreQuitGuard` on Quit (`⌘Q` / tray Quit): exits immediately while keeping the background daemon alive when 0 Cores are running, or offers a 3-choice dialog (**Keep Running in Background**, **Stop All Cores & Quit**, or **Cancel**) when active Cores exist.
+- **Hosted Web / Remote Mode (`ludens app-server` / `ludens daemon start`)**: Builds the static SPA into `app/out/` and serves it alongside WebSocket JSON-RPC `/rpc`, HMAC capability-ticket `/media` (`mt=`, `206 Range`), and `/health`. URL hash bootstraps (`http(s)://host:port/#token=...`) capture credentials and immediately scrub `#token=` from the URL via `history.replaceState`.
+- **Web Dev Mode (`npm run dev`)**: Runs `scripts/dev.mjs`, starting a local `ludens app-server` and Vite dev server (default `127.0.0.1:3015`) proxying `/rpc` (WS), `/media`, and `/health` for instant HMR in any browser.
+- **Mobile & Multi-Target Console (`<ConnectionTargetDialog>`)**: The responsive SPA switches cleanly between `electron-local` (Desktop IPC), `same-origin` (hosted WebSocket `/rpc`), and `remote` (`ws://` / `wss://` + token) targets, keeping the transport ready for future Outbound Relay extensions.
 
 ## Console Views
 
@@ -21,10 +22,10 @@ First-class **Ludens Desktop App** (Electron) and shared static SPA observabilit
 ## Scripts
 
 ```sh
-cd app && npm run dev            # Auto-spawn ludens app-server + Next dev proxy (default :3015, or -- --port 3099)
-cd app && npm run build          # Static SPA export (app/out/) + Electron bundle (app/dist/electron/)
+cd app && npm run dev            # Auto-spawn ludens app-server + Vite dev proxy (default 127.0.0.1:3015, or -- --port 3099)
+cd app && npm run build          # Static Vite SPA build (app/out/) + Electron bundle (app/dist/electron/)
 cd app && npm run build:check    # Verify app/out/index.html & app/out/.ludens-build.json match sources
-cd app && npm start              # Serve app/out/ via ludens app-server on 127.0.0.1:3015
+cd app && npm start              # Serve app/out/ via ludens app-server --listen ws://127.0.0.1:3015 --static-dir app/out
 cd app && npm run desktop:start  # Launch Ludens Desktop App directly
 cd app && npm run desktop:pack   # Build unpacked desktop bundle via electron-builder (--dir)
 cd app && npm run desktop:dist   # Build macOS (.dmg/.zip) or Windows (NSIS .exe) installer in app/release/
@@ -34,7 +35,7 @@ cd app && npm test               # Run console & desktop test suites
 
 ## Desktop CLI Flags & Chrome
 
-- **CLI Flags**: `--workspace <path>` (initial workspace), `--server <url>` / `--dashboard <url>` (attach to an external local dev server instead of spawning `app-server`), `--profile <path>` (override `~/.ludens/desktop/profile`), `--background` (launch hidden in tray), `--show-window`, and `--help`.
+- **CLI Flags**: `--workspace <path>` (initial workspace), `--server <url>` / `--dashboard <url>` (override `ludens-app://console/` to load an external Vite dev or hosted origin), `--profile <path>` (override `~/.ludens/desktop/profile`), `--background` (launch hidden in tray), `--show-window`, and `--help`.
 - **Unified 38px Titlebar**: Frameless `#090a0d` desktop window across macOS (`titleBarStyle: "hiddenInset"`, centered traffic lights) and Windows 10/11 (`titleBarStyle: "hidden"` with native Window Controls Overlay and no legacy in-window menu bar).
 - **Window State & Shortcuts**: Persists bounds/maximized/fullscreen state in `window-state.json` with multi-display clamping; supports `Cmd/Ctrl+B` (toggle sidebar), `Cmd/Ctrl+K` (quick switcher), and `Cmd/Ctrl+[` / `]` (back/forward).
 - **Platform Launchers**: Use `app/bin/ludens-app` on macOS/Linux or `app/bin/ludens-app.cmd` on Windows.

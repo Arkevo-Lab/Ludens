@@ -18,8 +18,8 @@ Ludens 将设备协议、工作区代码、智能体调度与人工观测面板�
 
 ```mermaid
 flowchart LR
-    U["操作者"] --> Con["控制台 Console（浏览器 / 桌面应用）"]
-    Con --> Srv["ludens app-server"]
+    U["操作者（桌面 / 网页 / 移动端 / CLI --remote）"] --> Con["控制台 Vite SPA（app/out）与 ludens CLI"]
+    Con -->|"UDS app-server.sock / WS /rpc"| Srv["ludens app-server（JSON-RPC 2.0 + EventHub + HMAC /media）"]
     Srv --> Sh["Shiori（Agent 线程核心）"]
     Sh --> Ws["工作区与常驻感知（30 Hz 时间轴 / 技能与记忆）"]
     Ws --> Cat["统一能力目录（ludens controller）"]
@@ -57,7 +57,14 @@ flowchart LR
 
 ### 4. 控制台 —— 观测、回放与人机协同面板
 
-**控制台（Console）**（`@ludens/app`）由 `ludens app-server` 统一承载，既可在浏览器打开（默认 `http://127.0.0.1:3015`），也可通过原生 **Ludens 桌面应用**（`ludens-app`）运行。归档解析与索引维护隔离在后台查询 Worker 中，生产态不运行 Next.js 服务端进程。
+**控制台（Console）**（`@ludens/app`）是基于 React 19 + Vite 构建的单一静态 SPA（`app/out`，零 Next.js 运行时），通过 JSON-RPC 2.0（`@ludens/protocol/app-rpc`）、`events/subscribe` 事件推送（含 `sinceSeq` 增量补齐）与双平面 `MediaResolver` 连接 `ludens app-server`，覆盖四种工况：
+
+- **零端口桌面端（`ludens-app`）**：经 Unix Domain Socket（`app-server.sock`，**0 个监听 TCP 端口**）通信，使用 `ludens-app://console/`、`ludens-media://local/media?...`、`window.ludens.rpc` 与 `ActiveCoreQuitGuard`。
+- **托管 Web / 远端微型服务**：通过 `ludens app-server` / `ludens daemon start`（`--listen ws://HOST:PORT --auth token`）同时提供 `app/out`、WS `/rpc` 与 HMAC `/media`（`#token=` 通过 `history.replaceState` 即时擦除）。
+- **统一 CLI（`ludens`）**：通过 `ludens daemon` 管理单例守护进程，并支持操作者命令在本地 `app-server.sock` 与 `--remote ws(s)://...` 之间透明切换。
+- **移动端与多目标浏览器**：通过 `<ConnectionTargetDialog>` 在 `electron-local`、`same-origin` 与 `remote` 目标间无缝切换。
+
+归档解析与索引维护隔离在 `ludens app-server` 后台查询 Worker 中，即使面对长达数小时的多模态录像也能保持流畅响应。
 
 控制台通过十个侧边栏视图提供完整的可观测与操控能力：
 

@@ -6,50 +6,92 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { readArchiveJson } from "@/lib/archive-client";
+import type { AppRpcParams } from "@ludens/protocol/app-rpc";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useMediaResolver, useOptionalLudensRpc, type LudensRpcCaller } from "@/lib/ludens-rpc";
 import type { ReplayDetail } from "@/lib/replay-types";
-import { replayEvidenceUrl, type ReplayEvidenceSelection } from "@/features/replay/replay-evidence-model";
+import {
+  replayEvidenceParams,
+  replayEvidenceRequestKey,
+  type ReplayEvidenceSelection,
+} from "@/features/replay/replay-evidence-model";
 
 export type { ReplayEvidenceSelection } from "@/features/replay/replay-evidence-model";
 
 interface EvidenceRead {
-  url: string;
+  key: string;
   detail?: ReplayDetail;
   loading: boolean;
   error: string;
 }
 
-function useEvidenceRead(url: string, onLoaded?: (detail: ReplayDetail) => void, refreshRevision = 0) {
+function useEvidenceRead(
+  rpc: LudensRpcCaller | null,
+  reconnectGeneration: number,
+  key: string,
+  params: AppRpcParams<"replay/get">,
+  onLoaded?: (detail: ReplayDetail) => void,
+  refreshRevision = 0,
+) {
   const [state, setState] = useState<EvidenceRead | null>(null);
   const [revision, setRevision] = useState(0);
-  const currentUrl = useRef(url);
+  const currentKey = useRef(key);
+  const rpcRef = useRef(rpc);
+  const paramsRef = useRef(params);
   const request = useRef<AbortController | null>(null);
   const loaded = useRef(onLoaded);
-  currentUrl.current = url;
+  currentKey.current = key;
+  rpcRef.current = rpc;
+  paramsRef.current = params;
   loaded.current = onLoaded;
   useEffect(() => {
     const controller = new AbortController();
     request.current = controller;
-    const current = () => !controller.signal.aborted && request.current === controller && currentUrl.current === url;
-    setState(previous => ({ url, detail: previous?.url === url ? previous.detail : undefined,
-      error: previous?.url === url ? previous.error : "", loading: true }));
-    void readArchiveJson<ReplayDetail>(url, controller.signal).then(detail => {
-      if (!current()) return;
-      setState({ url, detail, error: "", loading: false });
-      loaded.current?.(detail);
-    }).catch(error => {
-      if (current()) setState(previous => ({ url, detail: previous?.url === url ? previous.detail : undefined,
-        error: error instanceof Error ? error.message : String(error), loading: false }));
-    }).finally(() => { if (request.current === controller) request.current = null; });
+    const current = () => !controller.signal.aborted && request.current === controller && currentKey.current === key;
+    setState(previous => ({
+      key,
+      detail: previous?.key === key ? previous.detail : undefined,
+      error: previous?.key === key ? previous.error : "",
+      loading: true,
+    }));
+    void readArchiveJson<ReplayDetail>(async signal => {
+      const caller = rpcRef.current;
+      if (!caller) throw new Error("RPC client is unavailable");
+      return (await caller.call("replay/get", paramsRef.current, { signal })) as ReplayDetail;
+    }, controller.signal)
+      .then(detail => {
+        if (!current()) return;
+        setState({ key, detail, error: "", loading: false });
+        loaded.current?.(detail);
+      })
+      .catch(error => {
+        if (current()) {
+          setState(previous => ({
+            key,
+            detail: previous?.key === key ? previous.detail : undefined,
+            error: error instanceof Error ? error.message : String(error),
+            loading: false,
+          }));
+        }
+      })
+      .finally(() => {
+        if (request.current === controller) request.current = null;
+      });
     return () => {
       controller.abort();
       if (request.current === controller) request.current = null;
     };
-  }, [url, revision, refreshRevision]);
-  const current = state?.url === url ? state : null;
+  }, [key, revision, refreshRevision, reconnectGeneration, Boolean(rpc)]);
+  const current = state?.key === key ? state : null;
   const loading = !current || current.loading;
-  return { detail: current?.detail, error: current?.error ?? "", loading,
-    retry: () => { if (!loading && !request.current) setRevision(value => value + 1); } };
+  return {
+    detail: current?.detail,
+    error: current?.error ?? "",
+    loading,
+    retry: () => {
+      if (!loading && !request.current) setRevision(value => value + 1);
+    },
+  };
 }
 
 const statuses: Record<string, string> = {
@@ -61,12 +103,14 @@ const sourceKeys = ["recordId", "sequence", "eventId", "seq", "sourceId", "model
 function RecordedInput({ observation }: { observation: NonNullable<ReplayDetail["observations"]>[number] }) {
   const t = useTranslations("replayEvidence");
   const timeline = useTranslations("timelinePlayer");
+  const resolveMedia = useMediaResolver();
+  const resolvedUrl = observation.url ? (resolveMedia.resolve(observation.url) ?? observation.url) : undefined;
   const [failedObservation, setFailedObservation] = useState<typeof observation | null>(null);
   // A successful detail refresh may make the same recorded asset available again.
-  const unavailable = !observation.url || failedObservation === observation;
+  const unavailable = !resolvedUrl || failedObservation === observation;
   return <figure className="space-y-2 rounded-lg border bg-muted/20 p-3">
     {unavailable ? <p className="text-sm text-muted-foreground" role="status">{observation.url ? t("mediaUnavailable") : timeline("unrecordedMedia")}</p>
-      : <img src={observation.url} alt={`${timeline("modelInput")} ${observation.id}`} loading="lazy"
+      : <img src={resolvedUrl} alt={`${timeline("modelInput")} ${observation.id}`} loading="lazy"
         className="max-h-64 w-full rounded object-contain" onError={() => setFailedObservation(observation)} />}
     <figcaption className="space-y-1 text-xs text-muted-foreground">
       <p className="break-all font-mono">{observation.id}</p>
@@ -99,9 +143,18 @@ export function ReplayEvidencePanel({ scope, selection, refreshRevision = 0, onC
   const t = useTranslations("replayEvidence");
   const timeline = useTranslations("timelinePlayer");
   const { locale } = useLocale();
+  const rpc = useOptionalLudensRpc();
   const headingId = useId();
-  const url = replayEvidenceUrl(scope, selection);
-  const { detail, error, loading, retry } = useEvidenceRead(url, onLoaded, refreshRevision);
+  const params = useMemo(() => replayEvidenceParams(scope, selection), [scope, selection]);
+  const requestKey = replayEvidenceRequestKey(scope, selection);
+  const { detail, error, loading, retry } = useEvidenceRead(
+    rpc,
+    rpc?.reconnectGeneration ?? 0,
+    requestKey,
+    params,
+    onLoaded,
+    refreshRevision,
+  );
   const summary = detail?.summary;
   const statusKey = summary?.status && Object.hasOwn(statuses, summary.status) ? statuses[summary.status] : null;
   const source: NonNullable<ReplayDetail["summary"]>["source"] = summary?.source
@@ -157,7 +210,7 @@ export function ReplayEvidencePanel({ scope, selection, refreshRevision = 0, onC
         {detail.observations?.length ? detail.observations.map(observation => <RecordedInput key={`${observation.id}:${observation.url ?? ""}`} observation={observation} />)
           : <p className="text-sm text-muted-foreground">{t("noObservations")}</p>}
       </section>}
-      <details className="rounded-lg border p-3 text-xs" key={`source:${url}`}>
+      <details className="rounded-lg border p-3 text-xs" key={`source:${requestKey}`}>
         <summary className="cursor-pointer font-medium">{t("sourceTitle")}</summary>
         <dl className="mt-3 grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2">
           {sourceKeys.map(key => source[key] !== undefined && <div key={key} className="contents">
@@ -165,7 +218,7 @@ export function ReplayEvidencePanel({ scope, selection, refreshRevision = 0, onC
           </div>)}
         </dl>
       </details>
-      {detail && <RawRecord key={url} data={detail.data} />}
+      {detail && <RawRecord key={requestKey} data={detail.data} />}
     </div>
   </section>;
 }

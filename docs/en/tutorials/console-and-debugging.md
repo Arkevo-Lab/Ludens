@@ -1,6 +1,6 @@
 # Console Operations & Debugging
 
-Ludens provides a unified **Console** (accessible inside the Desktop App or at `http://127.0.0.1:3015` via `ludens app-server`) backed by structured event logs, 30 Hz fMP4 archives, and CLI diagnostic commands. This guide covers operating every Console view, investigating failed capability checks and stalled Control Cycles, verifying daemon and socket health, and running targeted verification checks before reporting issues.
+Ludens provides a unified **Console** (built as one Vite SPA in `app/out` over `@ludens/protocol/app-rpc` JSON-RPC 2.0 — accessible inside the zero-port Desktop App via `app-server.sock`, on hosted Web/Remote `ludens app-server --listen ws://...`, via Vite dev proxy `npm run dev` on `http://127.0.0.1:3015`, or on mobile browsers via `<ConnectionTargetDialog>`) backed by structured event logs, 30 Hz fMP4 archives, and CLI diagnostic commands. This guide covers operating every Console view, investigating failed capability checks and stalled Control Cycles, verifying daemon and socket health, and running targeted verification checks before reporting issues.
 
 ## 1. Console View Reference
 
@@ -8,7 +8,7 @@ Ludens provides a unified **Console** (accessible inside the Desktop App or at `
 
 | Sidebar Item | Query | Primary Operations |
 | --- | --- | --- |
-| **Live** | `?view=live` | Enter any workspace (even 0-run) with zero barrier and spawn Core + Baseware on demand when clicking **Start Auto Run**, manage all concurrent runs via the sidebar **Active Cores** list (`App`/`CLI` origin badges, `🆘` count, `■` stop), resolve **Device Contention** modals (`409 DEVICE_BUSY` -> Switch / Preempt), click **Reclaim Control**, switch mounted device viewports (`[machineId]`), send async notes via **Event Pool**, triage outbound notices/requests (**Reply**, **Reply & Resume**, **Mark Handled**), interrupt mid-turn with **Steer Now**, run **Consolidate skills/ & memory/ notes**, and inspect **Stage & Telemetry** alongside live activity events |
+| **Live** | `?view=live` | Enter any workspace (even 0-run) with zero barrier and spawn Core + Baseware on demand when clicking **Start Auto Run**, manage all concurrent runs via the sidebar **Active Cores** list (`App`/`CLI` origin badges, `🆘` count, `■` stop), resolve **Device Contention** modals (`CONFLICT -32009 DEVICE_BUSY` -> Switch / Preempt), click **Reclaim Control**, switch mounted device viewports (`[machineId]`), send async notes via **Event Pool**, triage outbound notices/requests (**Reply**, **Reply & Resume**, **Mark Handled**), interrupt mid-turn with **Steer Now**, run **Consolidate skills/ & memory/ notes**, and inspect **Stage & Telemetry** alongside live event-driven activity pushes (`events/subscribe`) |
 | **Replay** | `?view=replay` | Scrub the bounded 30-second fMP4 frame window (60s cap) and 15-minute event window, **Jump to time** at millisecond precision, search across **All tracks** in the **Event Stream**, and inspect **Node details** (delivered screenshots, tool calls, and `observation_context` receipts) |
 | **Performance** | `?view=perf` | Monitor **Performance overview** (`Completed turns`, `P95`, `Median turn`, `Prompt cache hit`, `Decode speed`, `Duty cycle`, `Sampler rate`, `Autonomy ratio`) and inspect per-request latency and compaction history in **Request & Trace History** |
 | **Capabilities** | `?view=caps` | Inspect the **Capability – Eval – Env** triad, filter by status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), review **Workspace sources** (`baseware.json` vs static Python `@capability`), check **Core connection check** and **Community driver verification**, and click **Run All Evals** or individual eval runs |
@@ -21,7 +21,7 @@ Ludens provides a unified **Console** (accessible inside the Desktop App or at `
 | **Workspaces** | `?view=workspaces` | Browse registered workspaces, create or import workspaces, and switch active context (also reachable via `Cmd/Ctrl+K`; toggle sidebar with `Cmd/Ctrl+B`; navigate back/forward with `Cmd/Ctrl+[` and `Cmd/Ctrl+]`) |
 | **Devices** | `?view=baseware` | **Devices & Nodes · Baseware**: Manage **Controlled Devices** (`~/.ludens/machines.json` and `workspace-default`) and **Driver Packages** (`~/.ludens/drivers.json`), probe **Node & Controllers**, and inspect or revoke leases in **Daemon & Lease** |
 | **Docs** | `?view=docs` | Read synchronized English and Chinese documentation offline inside Console |
-| **Settings** | `?view=settings` | Configure machine-wide **General**, **Workspace Defaults**, **Model & Transport**, and optional **Desktop Pet** display and `!auto` multi-Core auto-follow preferences |
+| **Settings** | `?view=settings` | Configure machine-wide **General**, **Workspace Defaults**, **Model & Transport**, and optional **Desktop Pet** display and `!auto` multi-Core auto-follow preferences (plus switching connection targets between `electron-local`, `same-origin`, and `remote` via `<ConnectionTargetDialog>`) |
 | **Developer** | `?view=dev` | **Loop Lab**: Simulate context-window growth, delivered frame tokens, and compaction thresholds across scenario presets |
 
 ## 2. Inspecting Evidence in Replay (`?view=replay`)
@@ -42,6 +42,7 @@ If a subtle issue only reproduces infrequently, record the exact timeline slice 
 2. **Inspect Core and daemon state**: Run the status commands in the workspace directory:
 
 ```sh
+ludens daemon status
 ludens status
 ludens services
 ludens perception status

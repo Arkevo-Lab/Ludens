@@ -86,6 +86,13 @@ test("native <dialog> styles use @starting-style, allow-discrete, and [data-clos
   assert.match(basewareCss, /\[data-closing="true"\]/);
   assert.match(basewareCss, /\.baseware-drawer[\s\S]*?translateX\(100%\)/);
   assert.match(basewareCss, /\.baseware-drawer\[open\][\s\S]*?translateX\(0\)/);
+
+  const globalsCss = readAppFile("app/globals.css");
+  assert.match(globalsCss, /dialog\.connection-target-dialog[\s\S]*?overlay/);
+  assert.match(globalsCss, /dialog\.connection-target-dialog[\s\S]*?transition-behavior:\s*allow-discrete;/);
+  assert.match(globalsCss, /dialog\.connection-target-dialog[\s\S]*?@starting-style/);
+  assert.match(globalsCss, /dialog\.connection-target-dialog\[open\]\[data-closing="true"\]/);
+  assert.match(globalsCss, /dialog\.connection-target-dialog[\s\S]*?@media \(prefers-reduced-motion:\s*no-preference\)/);
 });
 
 test("ReplayCursor positions via compositor cqi transform with container-type: inline-size", () => {

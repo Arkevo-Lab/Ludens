@@ -1,15 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { AppRpcParams, ReplayRpcQuery } from "@ludens/protocol/app-rpc";
 import type { ReplayFrame, ReplayItem, ReplayOverview, ReplayOverviewResult, ReplayCoverage, ReplayWindow } from "@/lib/replay-types";
 import { buildReplayFrameIndex, clampReplayTime, indexedAdjacentFrame, indexedStageFramesAt, mergeReplayPages, REPLAY_WINDOW_MS,
   replayFrameSignature, replayWindowBounds, type ReplayFrameIndex } from "@/features/replay/replay-model";
 import { ReplayWindowCache, replayPrefetchPlan, replayWindowKey, type ReplayWindowMode } from "@/features/replay/replay-window-cache";
 import { readArchiveJson } from "@/lib/archive-client";
+import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { replayRpcParams } from "@/features/replay/replay-evidence-model";
 
 /**
  * Single owner of every Replay read and of the playback clock:
- * overview + coverage polling, frame/event windows (interval cache, lookahead prefetch, dedupe, stale cancellation),
+ * overview + coverage updates, frame/event windows (interval cache, lookahead prefetch, dedupe, stale cancellation),
  * pending-segment refresh, frame stepping and the playhead.
  *
  * The playhead runs in a ref driven by requestAnimationFrame and is published two ways:
@@ -20,17 +23,26 @@ export const REPLAY_COARSE_TICK_MS = 250;
 const SCRUB_SETTLE_MS = 120;
 const PENDING_REFRESH_MS = 2000;
 
-export const replayEndpoint = (scope: string, params: Record<string, string | number>) =>
-  "/api/replay?" + scope + "&" + new URLSearchParams(Object.entries(params).map(([key, value]) => [key, String(value)]));
+export type ReplayWindowReader = (params: AppRpcParams<"replay/get">, signal: AbortSignal) => Promise<ReplayWindow>;
 
 /** Follow a window's cursor to the end (bounded), publishing each merged page as it arrives. */
-export async function readReplayWindow(scope: string, mode: ReplayWindowMode, startAt: number, endAt: number, signal: AbortSignal,
-  onPage?: (page: ReplayWindow) => void, initial?: ReplayWindow, read = readArchiveJson) {
+export async function readReplayWindow(
+  scope: string,
+  mode: ReplayWindowMode,
+  startAt: number,
+  endAt: number,
+  signal: AbortSignal,
+  onPage?: (page: ReplayWindow) => void,
+  initial?: ReplayWindow,
+  read?: ReplayWindowReader,
+) {
+  if (!read) throw new Error("Replay RPC reader is unavailable");
   let merged = initial, cursor = initial?.nextCursor;
   const seen = new Set<string>();
   const maxPages = mode === "frames" ? 50 : 20;
   for (let n = 0; n < maxPages; n++) {
-    const page = await read<ReplayWindow>(replayEndpoint(scope, { mode, start: startAt, end: endAt, ...(cursor ? { cursor } : {}) }), signal);
+    const query: ReplayRpcQuery = { mode, start: startAt, end: endAt, ...(cursor ? { cursor } : {}) };
+    const page = await read(replayRpcParams(scope, query), signal);
     signal.throwIfAborted();
     merged = merged ? mergeReplayPages([merged, page]) : page;
     onPage?.(merged);
@@ -101,11 +113,24 @@ export function useReplaySession(options: ReplaySessionOptions) {
     atRef.current = next; clock.set(next); setAt(next); setClockRevision(value => value + 1); setScrubbing(!!motion.scrub);
   }, [clock]);
 
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
+  const readWindow = useCallback<ReplayWindowReader>(
+    (params, signal) =>
+      readArchiveJson<ReplayWindow>(async readSignal => {
+        const caller = rpcRef.current;
+        if (!caller) throw new Error("RPC client is unavailable");
+        return (await caller.call("replay/get", params, { signal: readSignal })) as ReplayWindow;
+      }, signal),
+    [],
+  );
+
   // ---- window cache ---------------------------------------------------------------------------
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const cache = useMemo(() => new ReplayWindowCache((mode, startAt, endAt, signal, onPage) =>
-    readReplayWindow(scopeRef.current, mode, startAt, endAt, signal, onPage)), []);
+    readReplayWindow(scopeRef.current, mode, startAt, endAt, signal, onPage, undefined, readWindow)), [readWindow]);
   // Abort in-flight reads on unmount; StrictMode remounts reuse the same (still valid) cache.
   useEffect(() => () => cache.clear(), [cache]);
   const version = useSyncExternalStore(cache.subscribe, cache.getVersion, cache.getVersion);
@@ -123,7 +148,13 @@ export function useReplaySession(options: ReplaySessionOptions) {
     if (!project || !run) return;
     const controller = new AbortController();
     setRefreshing(true); setOverviewError("");
-    void readArchiveJson<ReplayOverviewResult>(replayEndpoint(requestedScope, { mode: "overview" }), controller.signal).then(next => {
+    void readArchiveJson<ReplayOverviewResult>(async signal => {
+      const caller = rpcRef.current;
+      if (!caller) throw new Error("RPC client is unavailable");
+      return (await caller.call("replay/get", replayRpcParams(requestedScope, { mode: "overview" }), {
+        signal,
+      })) as ReplayOverviewResult;
+    }, controller.signal).then(next => {
       if (controller.signal.aborted) return;
       optionsRef.current.onOverview?.(next);
       setCoverage(next.coverage ?? null);
@@ -143,7 +174,16 @@ export function useReplaySession(options: ReplaySessionOptions) {
     }).catch(error => { if (!controller.signal.aborted) setOverviewError(error.message); })
       .finally(() => { if (!controller.signal.aborted) setRefreshing(false); });
     return () => controller.abort();
-  }, [requestedScope, project, run, refreshRevision, overviewPoll, move, archiveRevision, cache]);
+  }, [requestedScope, project, run, refreshRevision, overviewPoll, move, archiveRevision, cache, rpc?.reconnectGeneration ?? 0, Boolean(rpc)]);
+  useLudensEvent(
+    "run",
+    event => {
+      if (event.workspaceId === project && (!event.runId || event.runId === run)) {
+        setOverviewPoll(value => value + 1);
+      }
+    },
+    { enabled: Boolean(project && run), workspaceId: project, runId: run },
+  );
   useEffect(() => {
     if (!coverage || coverage.complete || overviewError) return;
     const timer = setTimeout(() => setOverviewPoll(value => value + 1), 750);
@@ -282,7 +322,7 @@ export function useReplaySession(options: ReplaySessionOptions) {
     continueRequest.current = controller;
     setContinuing(true); setContinueError("");
     try {
-      const next = await readReplayWindow(origin, "events", eventBounds.startAt, eventBounds.endAt, controller.signal, undefined, current);
+      const next = await readReplayWindow(origin, "events", eventBounds.startAt, eventBounds.endAt, controller.signal, undefined, current, readWindow);
       if (!controller.signal.aborted && scopeRef.current === origin && refreshGeneration.current === gen) {
         cache.store("events", eventBounds.startAt, eventBounds.endAt, next);
       }

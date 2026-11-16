@@ -184,17 +184,21 @@ export async function serveStaticFile(
   try {
     const mimeType = mimeTypeForPath(matched.path);
     const isHtml = extname(matched.path).toLowerCase() === ".html";
-    const cacheControl = decodedPathname.startsWith("/_next/static/")
-      ? "public, max-age=31536000, immutable"
-      : isHtml
-        ? "no-cache"
-        : "public, max-age=3600";
+    const cacheControl =
+      decodedPathname.startsWith("/assets/") || decodedPathname.startsWith("/_next/static/")
+        ? "public, max-age=31536000, immutable"
+        : isHtml
+          ? "no-cache"
+          : "public, max-age=3600";
 
     const headers = new Headers({
       "Content-Type": mimeType,
       "Content-Length": String(matched.size),
       "Cache-Control": cacheControl,
       "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "strict-origin-when-cross-origin",
+      "X-Frame-Options": "DENY",
+      "Content-Security-Policy": "frame-ancestors 'none'; base-uri 'none'; object-src 'none'",
     });
 
     if (request.method === "HEAD" || matched.size === 0) {

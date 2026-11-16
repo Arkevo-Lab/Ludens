@@ -97,11 +97,24 @@ export interface DesktopSnapshot {
   dashboardUrl: string;
   runId: string | null;
 }
+export interface DesktopRpcStatus {
+  readonly state: "connecting" | "connected" | "disconnected";
+  readonly error?: string;
+}
+
+export interface DesktopRpcBridge {
+  send(frameJson: string): void;
+  onMessage(callback: (frameJson: string) => void): () => void;
+  onStatus?(callback: (status: DesktopRpcStatus) => void): () => void;
+  reconnect?(): Promise<void>;
+}
+
 declare global {
   interface Window {
     readonly ludens?: {
       readonly companion?: DesktopCompanion;
       readonly window?: DesktopWindowBridge;
+      readonly rpc?: DesktopRpcBridge;
     };
     readonly ludensPet?: {
       getSnapshot(): Promise<DesktopSnapshot>;

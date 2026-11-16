@@ -1,12 +1,14 @@
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
-import { access, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
 const sources = [
   "app",
   "shell",
@@ -16,10 +18,12 @@ const sources = [
   "messages",
   "scripts",
   "public",
+  "index.html",
   "package.json",
   "../package.json",
   "../bun.lock",
-  "next.config.ts",
+  "vite.config.ts",
+  "vite-env.d.ts",
   "tsconfig.json",
   "postcss.config.mjs",
   "../protocol",
@@ -42,6 +46,17 @@ export function resolveBunBinary(env = process.env, platform = process.platform,
     if (existsSync(candidate)) return candidate;
   }
   return binName;
+}
+
+export function resolveViteBin(appRoot = directory) {
+  const candidates = [
+    join(appRoot, "node_modules/vite/bin/vite.js"),
+    resolve(appRoot, "../node_modules/vite/bin/vite.js"),
+  ];
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return join(dirname(require.resolve("vite/package.json")), "bin/vite.js");
 }
 
 export function withBunNodePath(env = process.env, appRoot = directory) {
@@ -116,34 +131,26 @@ async function runProcess(command, args, options = {}) {
   }
 }
 
-export async function cleanStaleDevTypes(root = directory) {
-  await rm(join(root, ".next/dev/types"), { recursive: true, force: true });
-}
-
-async function nextBuild(args) {
-  await cleanStaleDevTypes(directory);
+async function viteBuild(args) {
   const env = withBunNodePath(process.env, directory);
-  delete env.LUDENS_NEXT_DEV;
   delete env.LUDENS_APP_SERVER_URL;
   await runProcess(
     process.execPath,
-    [join(directory, "node_modules/next/dist/bin/next"), "build", ...args],
-    { env, label: "Next build" },
+    [resolveViteBin(directory), "build", ...args],
+    { env, label: "Vite build" },
   );
 }
 
-async function nextTypegen(args) {
-  await cleanStaleDevTypes(directory);
-  const env = withBunNodePath(process.env, directory);
-  await runProcess(
-    process.execPath,
-    [join(directory, "node_modules/next/dist/bin/next"), "typegen", ...args],
-    { env, label: "Next typegen" },
+function hasListenArg(args) {
+  return args.some(
+    arg =>
+      arg === "--listen" ||
+      arg.startsWith("--listen=") ||
+      arg === "--port" ||
+      arg === "-p" ||
+      arg.startsWith("--port=") ||
+      arg.startsWith("-p="),
   );
-}
-
-function hasPortArg(args) {
-  return args.some(arg => arg === "--port" || arg === "-p" || arg.startsWith("--port=") || arg.startsWith("-p="));
 }
 
 function hasStaticDirArg(args) {
@@ -156,7 +163,7 @@ async function startAppServer(args) {
   const serverArgs = [
     cliEntry,
     "app-server",
-    ...(hasPortArg(args) ? [] : ["--port", "3015"]),
+    ...(hasListenArg(args) ? [] : ["--listen", "ws://127.0.0.1:3015"]),
     ...(hasStaticDirArg(args) ? [] : ["--static-dir", join(directory, "out")]),
     ...args,
   ];
@@ -171,20 +178,18 @@ async function main() {
   const [mode, ...args] = process.argv.slice(2);
   if (mode === "build") {
     const before = await sourceHash();
-    await nextBuild(args);
+    await viteBuild(args);
     if ((await sourceHash()) !== before) {
       throw new Error("Dashboard source changed during build; run the build again.");
     }
     await stampBuild(directory, before);
-  } else if (mode === "typegen") {
-    await nextTypegen(args);
   } else if (mode === "check") {
     await checkBuild();
   } else if (mode === "start") {
     await checkBuild();
     await startAppServer(args);
   } else {
-    throw new Error("Use production.mjs build | typegen | check | start");
+    throw new Error("Use production.mjs build | check | start");
   }
 }
 

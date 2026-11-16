@@ -1,32 +1,62 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readArchiveJson } from "../lib/archive-client";
+import { readArchiveJson, type ArchiveProgress } from "../lib/archive-client";
 
 test("archive preparation is retried rather than consumed as an empty history response", async () => {
-  const previous = global.fetch; let calls = 0;
-  global.fetch = async () => ++calls === 1 ? Response.json({ code: "ARCHIVE_PREPARING", progress: { bytes: 10, totalBytes: 100 } }, { status: 202 })
-    : Response.json({ blocks: [{ id: "historical" }] });
-  try { assert.deepEqual(await readArchiveJson("http://localhost/api/activity"), { blocks: [{ id: "historical" }] }); assert.equal(calls, 2); }
-  finally { global.fetch = previous; }
+  let calls = 0;
+  const progressEvents: ArchiveProgress[] = [];
+  const result = await readArchiveJson(
+    async () => {
+      calls += 1;
+      if (calls === 1) {
+        throw Object.assign(new Error("Archive preparing"), {
+          data: {
+            code: "ARCHIVE_PREPARING",
+            progress: { bytes: 10, totalBytes: 100 },
+          },
+        });
+      }
+      return { blocks: [{ id: "historical" }] };
+    },
+    undefined,
+    progress => {
+      progressEvents.push(progress);
+    },
+  );
+  assert.deepEqual(result, { blocks: [{ id: "historical" }] });
+  assert.equal(calls, 2);
+  assert.deepEqual(progressEvents, [{ bytes: 10, totalBytes: 100 }]);
 });
 
-test("leaving the view cancels preparation retries without another HTTP request", async () => {
-  const previous = global.fetch; let calls = 0;
+test("leaving the view cancels preparation retries without another RPC request", async () => {
+  let calls = 0;
   const controller = new AbortController();
-  global.fetch = async () => { calls++; setTimeout(() => controller.abort(), 5);
-    return Response.json({ code: "ARCHIVE_PREPARING" }, { status: 202 }); };
-  try { await assert.rejects(readArchiveJson("http://localhost/api/run", controller.signal), { name: "AbortError" }); assert.equal(calls, 1); }
-  finally { global.fetch = previous; }
+  await assert.rejects(
+    readArchiveJson(
+      async () => {
+        calls += 1;
+        setTimeout(() => controller.abort(), 5);
+        throw Object.assign(new Error("Archive preparing"), {
+          code: "ARCHIVE_PREPARING",
+        });
+      },
+      controller.signal,
+    ),
+    { name: "AbortError" },
+  );
+  assert.equal(calls, 1);
 });
 
 test("cancelled and failed builds leave polling with an explicit error until the user retries", async () => {
-  const previous = global.fetch;
-  try {
-    for (const code of ["ARCHIVE_BUILD_CANCELLED", "ARCHIVE_BUILD_FAILED"]) {
-      let calls = 0;
-      global.fetch = async () => { calls++; return Response.json({ error: "构建已停止", code }, { status: 409 }); };
-      await assert.rejects(readArchiveJson("http://localhost/api/run"), { message: "构建已停止", code });
-      assert.equal(calls, 1);
-    }
-  } finally { global.fetch = previous; }
+  for (const code of ["ARCHIVE_BUILD_CANCELLED", "ARCHIVE_BUILD_FAILED"]) {
+    let calls = 0;
+    await assert.rejects(
+      readArchiveJson(async () => {
+        calls += 1;
+        throw Object.assign(new Error("构建已停止"), { code });
+      }),
+      { message: "构建已停止", code },
+    );
+    assert.equal(calls, 1);
+  }
 });

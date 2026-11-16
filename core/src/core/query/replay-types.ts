@@ -96,7 +96,7 @@ export interface ReplayDetail {
   observations?: { id: string; url?: string; recordId?: string; sequence?: number; approximate?: boolean }[];
 }
 
-// GET /api/replay?project=&run=&epoch=&mode=overview|frames|events|search|detail|media|segment
+// GET /media?kind=replay&project=&run=&epoch=&mode=media|segment (and RPC replay/get)
 // frames/events have independent cursors and return only their own track in ReplayWindow.
 // frames spans at most 60 seconds; events at most 15 minutes, both with bounded pages.
 // search: q=<literal title/status/ID query>&track=all|action|model|tool|log&cursor=.

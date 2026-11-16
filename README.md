@@ -23,7 +23,7 @@ Instead of confining agents to static prompts and fixed action schemas, **Ludens
 - **Any Screen, Any Device (`Baseware`)** — Connect local desktops (`cua`), camera/HID hardware bridges (such as embedded controllers over SSH or TCP JSON-line bridges), simulators, or MCP endpoints. Mount multiple target nodes into one workspace and route actions uniformly.
 - **Code-First Perception (`perception.py`)** — A resident Python worker continuously records fMP4 video into a searchable 30 Hz timeline while running and hot-reloading detectors and closed-loop state machines written by the agent.
 - **Self-Verified Capabilities (`@capability` & `ludens eval`)** — Turn trial-and-error behaviors into typed Python capabilities paired with offline `@eval_env` surrogates and `@eval_capability` checks, verifying regressions in milliseconds before running on physical devices.
-- **Unified Console, Multi-Modal Loops & Replay** — Operate workspaces from the native **Ludens Desktop App** or local **Console** (`ludens app-server`): launch workspaces with one click, trigger **Auto Run**, send async guidance through the duplex **Event Pool**, interrupt mid-turn (`steer`), execute **Reclaim Control** at any instant, and inspect 30 Hz timeline replays alongside model traces. *(Includes an optional tray **Desktop Pet** widget.)*
+- **Unified Console, Multi-Modal Loops & Replay** — Operate workspaces across four surfaces—the zero-port **Ludens Desktop App**, hosted web **Console**, remote `wss://` targets, and mobile browsers—all backed by one Vite SPA and JSON-RPC 2.0 (`ludens app-server`): launch workspaces with one click, trigger **Auto Run**, send async guidance through the duplex **Event Pool**, interrupt mid-turn (`steer`), execute **Reclaim Control** at any instant, and inspect 30 Hz timeline replays alongside model traces. *(Includes an optional tray **Desktop Pet** widget.)*
 
 ## How It Works
 
@@ -88,11 +88,11 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 
 ### 2. Launch Modes
 
-Ludens runs over a single `@ludens/core` `app-server` (zero Next.js production runtime, pure-TypeScript process supervision) across three workflows:
+Ludens runs a single React 19 + Vite static SPA (`app/out`) and a unified JSON-RPC 2.0 `@ludens/core` `app-server` (zero Next.js runtime, pure-TypeScript process supervision) across four operating modes:
 
-- **Desktop App**: Build once with `(cd app && npm run desktop:build)` and launch `ludens-app --show-window` (or package native macOS `.dmg` / Windows `.exe` installers via `npm --prefix app run desktop:dist`). Spawns and supervises `ludens app-server`, lets you **Start / Reload / Stop** workspaces cleanly without a terminal, optionally hides to tray + Desktop Pet when closed (`×`), and shuts down managed processes on Quit (`⌘Q` / tray **Quit**).
-- **Browser Console (`ludens app-server` / `npm run dev`)**: Start `ludens app-server` (alias `ludens serve`) to serve `/api/*` and the static Console (`app/out`) on [`http://127.0.0.1:3015`](http://127.0.0.1:3015), or run `(cd app && npm run dev)` for frontend HMR.
-- **Headless CLI**: Initialize and orchestrate workspaces directly in a terminal (see [Devices & Drivers](docs/en/tutorials/devices.md) to attach external drivers via `--driver-package` or SSH/bridge targets):
+- **Desktop App (Zero-Port Local Mode)**: Build once with `(cd app && npm run desktop:build)` and launch `ludens-app --show-window` (or package native macOS `.dmg` / Windows `.exe` installers via `npm --prefix app run desktop:dist`). Uses `ensureLocalAppDaemon` per `LUDENS_HOME` over a Unix Domain Socket (`app-server.sock`) with **0 listening TCP ports**, loading the bundled SPA via `ludens-app://console/`, local media via `ludens-media://local/media?...`, and renderer/pet RPC via `window.ludens.rpc`. Closing (`×`) hides to tray + optional Desktop Pet; Quit (`⌘Q` / tray **Quit**) exits immediately if no Cores are active (keeping the background daemon intact) or asks whether to **Keep Running in Background**, **Stop All Cores & Quit**, or **Cancel**.
+- **Hosted Web / Remote App-Server (`ludens app-server` / `ludens daemon start`)**: Serve the static Console SPA, WebSocket JSON-RPC `/rpc`, and HMAC capability-ticket `/media` endpoint over TCP with explicit auth: `ludens daemon start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN` (non-loopback `--listen ws://` requires `--auth token`; URL `#token=...` bootstraps are scrubbed immediately via `history.replaceState`). For frontend HMR development, run `(cd app && npm run dev)` (Vite dev server on `127.0.0.1:3015` proxying `/rpc`, `/media`, and `/health`).
+- **Unified CLI (`ludens` — Local UDS & `--remote`)**: Manage the background App-Server daemon (`ludens daemon status|start|stop|restart`), initialize and orchestrate workspaces over local `app-server.sock`, or pass `--remote ws(s)://... [--token ...]` on operator commands (`up`, `down`, `services`, `workspace`, `config`, `status`, `auto`, `steer`, `consolidate`, `stop`, `model`) to target a remote `app-server` (see [Devices & Drivers](docs/en/tutorials/devices.md) to attach external drivers via `--driver-package` or SSH/bridge targets):
 
 ```sh
 ludens init --name my-agent --driver cua
@@ -100,9 +100,11 @@ cd "$HOME/.ludens/workspaces/my-agent"
 ludens up
 ```
 
+- **Mobile & Multi-Target Console**: Open the same responsive Vite SPA from mobile or desktop browsers and switch cleanly between `electron-local` (IPC UDS), `same-origin` (hosted WebSocket `/rpc`), and `remote` (`ws://` / `wss://` + token) targets via `<ConnectionTargetDialog>`.
+
 ### 3. Auto Run, Reclaim Control & Async Collaboration
 
-Open **Live** (`?view=live`) in the Desktop App or [`http://127.0.0.1:3015`](http://127.0.0.1:3015) to click **Start Auto Run**, or control the loop from CLI:
+Open **Live** (`?view=live`) in the Desktop App or your connected Web Console to click **Start Auto Run**, or control the loop from CLI (locally or with `--remote`):
 
 ```sh
 ludens auto on --message "Explore the target environment and build verified capabilities"
@@ -115,10 +117,10 @@ ludens auto off
 
 | Package | Role |
 | --- | --- |
-| [`@ludens/protocol`](protocol/README.md) | Zero-dependency RPC schemas, event envelopes, and content-addressed archive contracts. |
+| [`@ludens/protocol`](protocol/README.md) | Zero-dependency contract layer: JSON-RPC 2.0 wire schemas (`@ludens/protocol/app-rpc`), event envelopes, connection policies, and content-addressed archive contracts. |
 | [`@ludens/baseware`](baseware/README.md) | Cross-device integration layer: driver loader, multi-node pool (`stdio`/`bridge`/`ssh`/`http`/`sse`), and `epoch` control lease arbitration. |
-| [`@ludens/core`](core/README.md) | Harness runtime & unified `app-server`: **Shiori** (Agent Thread Core), resident Python `perception.py` worker, `/api/*` + Console backend, pure-TS supervisor, and `ludens eval`. |
-| [`@ludens/app`](app/README.md) | Static Web **Console** (`app/out` — Live, Replay, Performance, Capabilities, Config, Devices, Workspaces, Docs, Settings, Developer), Electron Desktop App, and optional Desktop Pet. |
+| [`@ludens/core`](core/README.md) | Harness runtime & unified `app-server`: **Shiori** (Agent Thread Core), resident Python `perception.py` worker, UDS/WS JSON-RPC 2.0 + `EventHub` + HMAC `/media`, `ludens daemon`, pure-TS supervisor, and `ludens eval`. |
+| [`@ludens/app`](app/README.md) | Responsive React 19 + Vite static SPA **Console** (`app/out` — Live, Replay, Performance, Capabilities, Config, Devices, Workspaces, Docs, Settings, Developer), zero-port Electron Desktop App (`ludens-app://` / `ludens-media://`), `<ConnectionTargetDialog>`, and optional Desktop Pet. |
 
 ## Documentation
 

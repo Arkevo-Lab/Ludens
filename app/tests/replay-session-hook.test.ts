@@ -5,7 +5,7 @@ import { buildReplayFrameIndex, indexedAdjacentFrame, indexedFramesAfter, indexe
   replayFrameSignature, replayWindowBounds, upperBoundFrame } from "../features/replay/replay-model";
 import { ReplayWindowCache, replayPrefetchPlan, replayWindowKey, type ReplayWindowMode } from "../features/replay/replay-window-cache";
 import { replayUpcomingVideos, type VideoSource } from "../features/replay/replay-video-model";
-import { readReplayWindow, ReplayClock } from "../features/replay/use-replay-session";
+import { readReplayWindow, ReplayClock, type ReplayWindowReader } from "../features/replay/use-replay-session";
 
 const range = { startAt: 1_000_000, endAt: 1_000_000 + 10 * REPLAY_WINDOW_MS };
 const boundsOf = (at: number, windowMs: number) => replayWindowBounds(at, range, windowMs);
@@ -195,11 +195,15 @@ test("window reader follows cursors, publishes merged pages and rejects a stalle
     c1: { startAt: 0, endAt: 30_000, frames: [frame("2", 2)], items: [] },
   };
   const seen: number[] = [];
-  const read = async <T,>(url: string) => pages[new URL(url, "http://x").searchParams.get("cursor") ?? ""] as T;
+  const read: ReplayWindowReader = async params => {
+    assert.equal(params.project, "p");
+    assert.equal(params.run, "r");
+    return pages[params.query.cursor ?? ""];
+  };
   const window = await readReplayWindow("project=p&run=r", "frames", 0, 30_000, new AbortController().signal, page => seen.push(page.frames.length), undefined, read);
   assert.deepEqual(window.frames.map(value => value.id), ["1", "2"]);
   assert.deepEqual(seen, [1, 2]);
-  const stalled = async <T,>() => ({ startAt: 0, endAt: 1, frames: [], items: [], nextCursor: "same" }) as T;
+  const stalled: ReplayWindowReader = async () => ({ startAt: 0, endAt: 1, frames: [], items: [], nextCursor: "same" });
   await assert.rejects(readReplayWindow("s", "events", 0, 1, new AbortController().signal, undefined, undefined, stalled), /stalled/);
 });
 

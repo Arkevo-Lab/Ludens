@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { workspaceName } from "@/features/workspaces/workspace-picker";
+import { useOptionalLudensRpc, type LudensRpcCaller } from "@/lib/ludens-rpc";
 import type { Project, ServiceLaunchOrigin } from "@/lib/types";
 
 export interface ActiveCoreItem {
@@ -21,7 +22,7 @@ export interface ActiveCoreItem {
 export interface UseActiveCoresOptions {
   projects: readonly Project[];
   onRefresh?: () => void;
-  fetchImpl?: typeof fetch;
+  rpc?: LudensRpcCaller;
 }
 
 export interface UseActiveCoresResult {
@@ -79,44 +80,29 @@ export function deriveActiveCores(projects: readonly Project[]): ActiveCoreItem[
   });
 }
 
-/** Stop an individual workspace's Core via `/api/workspaces/service`. */
+/** Stop an individual workspace's Core via `workspaces/serviceControl` RPC. */
 export async function stopWorkspaceCore(
+  rpc: LudensRpcCaller,
   projectId: string,
-  options?: { fetchImpl?: typeof fetch; signal?: AbortSignal },
+  options?: { signal?: AbortSignal },
 ): Promise<void> {
   const id = projectId.trim();
   if (!id) throw new Error("Project ID is required");
 
-  const fetchFn = options?.fetchImpl ?? fetch;
-  const response = await fetchFn("/api/workspaces/service", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      project: id,
-      service: "host",
-      action: "stop",
-    }),
-    signal: options?.signal,
-  });
+  const payload = await rpc.call(
+    "workspaces/serviceControl",
+    {
+      workspaceId: id,
+      action: "down",
+      services: ["host"],
+    },
+    { signal: options?.signal },
+  );
 
-  if (!response.ok) {
-    let message = "";
-    try {
-      const text = await response.text();
-      if (text.trim()) {
-        try {
-          const parsed = JSON.parse(text) as { error?: unknown };
-          if (typeof parsed?.error === "string" && parsed.error.trim()) {
-            message = parsed.error.trim();
-          }
-        } catch {
-          message = text.trim();
-        }
-      }
-    } catch {
-      message = "";
-    }
-    throw new Error(message || `Failed to stop Core (${response.status})`);
+  if (payload && payload.ok === false) {
+    const stderr = typeof payload.stderr === "string" ? payload.stderr.trim() : "";
+    const stdout = typeof payload.stdout === "string" ? payload.stdout.trim() : "";
+    throw new Error(stderr || stdout || "Failed to stop Core");
   }
 }
 
@@ -124,14 +110,16 @@ export async function stopWorkspaceCore(
 export function useActiveCores({
   projects,
   onRefresh,
-  fetchImpl,
+  rpc,
 }: UseActiveCoresOptions): UseActiveCoresResult {
+  const rpcCtx = useOptionalLudensRpc();
+  const activeRpc = rpc ?? rpcCtx ?? undefined;
   const activeCores = useMemo(() => deriveActiveCores(projects), [projects]);
   const [stoppingProjectId, setStoppingProjectId] = useState<string | null>(null);
   const [stopError, setStopError] = useState<string | null>(null);
   const stoppingRef = useRef<string | null>(null);
-  const callbacksRef = useRef({ onRefresh, fetchImpl });
-  callbacksRef.current = { onRefresh, fetchImpl };
+  const callbacksRef = useRef({ onRefresh, activeRpc });
+  callbacksRef.current = { onRefresh, activeRpc };
 
   const clearStopError = useCallback(() => {
     setStopError(null);
@@ -140,13 +128,18 @@ export function useActiveCores({
   const stopCore = useCallback(async (projectId: string): Promise<boolean> => {
     const id = projectId.trim();
     if (!id || stoppingRef.current !== null) return false;
+    const caller = callbacksRef.current.activeRpc;
+    if (!caller) {
+      setStopError("RPC client is unavailable");
+      return false;
+    }
 
     stoppingRef.current = id;
     setStoppingProjectId(id);
     setStopError(null);
 
     try {
-      await stopWorkspaceCore(id, { fetchImpl: callbacksRef.current.fetchImpl });
+      await stopWorkspaceCore(caller, id);
       callbacksRef.current.onRefresh?.();
       return true;
     } catch (error) {

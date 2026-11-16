@@ -14,9 +14,12 @@ import {
   type ActivityFilter,
   type ActivityScope,
 } from "@/features/live/activity-feed-model";
-import { getLiveSessionEngine } from "@/features/live/live-session-store";
-import { ActivityChangesClient, requestActivity } from "@ludens/protocol/activity";
-import { ReadPoller } from "@/lib/read-poller";
+import {
+  activityRpcParamsFromSearchParams,
+  getLiveSessionEngine,
+} from "@/features/live/live-session-store";
+import { ActivityChangesClient } from "@ludens/protocol/activity";
+import { useLudensEvent, useOptionalLudensRpc, type LudensRpcCaller } from "@/lib/ludens-rpc";
 import { useTranslations } from "@/lib/locale";
 
 interface FeedState {
@@ -127,10 +130,39 @@ export function useActivityFeed(options: {
   const activeArchiveRevision = followedArchive.current ?? 0;
 
   // ── 1. Primary Unfiltered Continuous Live Session Store (Monotonic + Warm across View Switches) ──
+  const rpcCtx = useOptionalLudensRpc();
+  const rpcCall = rpcCtx?.call;
+  const rpcCaller = useMemo<LudensRpcCaller | null>(
+    () => (rpcCall ? { call: rpcCall } : null),
+    [rpcCall],
+  );
   const isFilteredMode = filter !== "all" || search !== "";
   const useSessionEngine = continuousStream && !isFilteredMode;
-  const engine = useMemo(() => getLiveSessionEngine(project), [project]);
+  const engine = useMemo(() => getLiveSessionEngine(project, rpcCaller), [project, rpcCaller]);
   engine.setScopeChangedMessage(scopeChangedError.current);
+
+  useEffect(() => {
+    engine.setRpc(rpcCaller);
+  }, [engine, rpcCaller]);
+
+  useLudensEvent(
+    ["run", "observation", "core", "eventPool"],
+    () => {
+      engine.nudgeChanges();
+    },
+    {
+      enabled: Boolean(continuousStream && !isFilteredMode && enabled && refresh && run),
+      workspaceId: project,
+      runId: run,
+    },
+  );
+
+  const reconnectGen = rpcCtx?.snapshot.reconnectGeneration ?? 0;
+  useEffect(() => {
+    if (reconnectGen > 0 && continuousStream && !isFilteredMode && enabled && run) {
+      engine.nudgeChanges();
+    }
+  }, [continuousStream, enabled, engine, isFilteredMode, reconnectGen, run]);
 
   const engineSnap = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
 
@@ -183,7 +215,9 @@ export function useActivityFeed(options: {
   const historyRequest = useRef<AbortController | null>(null);
   const selectionRequest = useRef<AbortController | null>(null);
   const historyLoading = useRef(false);
-  const poller = useRef<ReadPoller | null>(null);
+  const boundedNudgeRef = useRef<(() => void) | null>(null);
+  const rpcRef = useRef(rpcCtx);
+  rpcRef.current = rpcCtx;
   const automatic = useRef(refresh);
   automatic.current = refresh;
 
@@ -194,69 +228,141 @@ export function useActivityFeed(options: {
 
   useEffect(() => {
     if (!boundedEnabled || !project || !run) {
+      boundedNudgeRef.current = null;
       update(() => emptyState(resetRevision));
       return;
     }
     update(() => emptyState(resetRevision));
-    const reader = new ActivityChangesClient({ project, run, epoch, limit: ACTIVITY_PAGE_SIZE });
-    const active = new ReadPoller(async signal => {
-      let more = false;
-      try {
-        const result = await reader.read(signal);
-        if (signal.aborted) return 2500;
-        more = result.hasMore;
-        const previous = current.current;
-        const reset =
-          result.mode === "snapshot" ||
-          !sameScope(previous.scope, result.scope) ||
-          previous.generation !== result.projection.generation;
-        const merged = mergeActivity(reset ? [] : previous.blocks, result.blocks, {
-          ...criteria.current,
-          append: reset || !previous.historical,
-          keep: previous.historical && !reset ? "oldest" : "latest",
-          limit: ACTIVITY_WINDOW_SIZE,
-        });
-        update(value => ({
-          ...(reset ? emptyState(resetRevision) : value),
-          scope: reset ? result.scope : value.scope,
-          generation: result.projection.generation,
-          snapshot: value.snapshot + (reset ? 1 : 0),
-          blocks: merged,
-          error: "",
-          ...(selection.current
-            ? {
-                selected: result.blocks
-                  .filter(block => block.id === selection.current)
-                  .reduce<ActivityBlock | undefined>(
-                    (block, next) => newerBlock(block, next),
-                    reset ? undefined : value.selected,
-                  ),
-              }
-            : {}),
-        }));
-        result.acknowledge();
-        if (!reset && !previous.historical && merged.length > ACTIVITY_LIVE_SIZE && !historyLoading.current) {
-          setReload(value => value + 1);
-        }
-      } catch (error) {
-        if (!signal.aborted) update(value => ({ ...value, loading: false, error: String(error) }));
+    if (!rpcCaller) {
+      update(value => ({ ...value, loading: false, error: "RPC client is unavailable" }));
+      return;
+    }
+
+    const reader = new ActivityChangesClient({
+      project,
+      run,
+      epoch,
+      limit: ACTIVITY_PAGE_SIZE,
+      reader: (req, signal) =>
+        rpcCaller.call(
+          "activity/get",
+          {
+            project: req.project,
+            ...(req.run ? { run: req.run } : {}),
+            ...(req.epoch ? { epoch: req.epoch } : {}),
+            query: {
+              mode: "changes",
+              ...(req.limit !== undefined ? { limit: req.limit } : {}),
+              ...(req.cursor !== undefined ? { cursor: req.cursor } : {}),
+            },
+          },
+          { signal },
+        ),
+    });
+
+    let disposed = false;
+    let inFlight = false;
+    let pending = false;
+    let activeController: AbortController | null = null;
+
+    const drainChanges = async () => {
+      if (disposed) return;
+      if (inFlight) {
+        pending = true;
+        return;
       }
-      return more ? 0 : 2500;
-    }, automatic.current);
-    poller.current = active;
-    void active.readOnce();
+      inFlight = true;
+      try {
+        while (!disposed) {
+          pending = false;
+          const controller = new AbortController();
+          activeController = controller;
+          let more = false;
+          try {
+            const result = await reader.read(controller.signal);
+            if (controller.signal.aborted || disposed) break;
+            more = result.hasMore;
+            const previous = current.current;
+            const reset =
+              result.mode === "snapshot" ||
+              !sameScope(previous.scope, result.scope) ||
+              previous.generation !== result.projection.generation;
+            const merged = mergeActivity(reset ? [] : previous.blocks, result.blocks, {
+              ...criteria.current,
+              append: reset || !previous.historical,
+              keep: previous.historical && !reset ? "oldest" : "latest",
+              limit: ACTIVITY_WINDOW_SIZE,
+            });
+            update(value => ({
+              ...(reset ? emptyState(resetRevision) : value),
+              scope: reset ? result.scope : value.scope,
+              generation: result.projection.generation,
+              snapshot: value.snapshot + (reset ? 1 : 0),
+              blocks: merged,
+              error: "",
+              ...(selection.current
+                ? {
+                    selected: result.blocks
+                      .filter(block => block.id === selection.current)
+                      .reduce<ActivityBlock | undefined>(
+                        (block, next) => newerBlock(block, next),
+                        reset ? undefined : value.selected,
+                      ),
+                  }
+                : {}),
+            }));
+            result.acknowledge();
+            if (!reset && !previous.historical && merged.length > ACTIVITY_LIVE_SIZE && !historyLoading.current) {
+              setReload(value => value + 1);
+            }
+          } catch (error) {
+            if (!controller.signal.aborted && !disposed) {
+              update(value => ({ ...value, loading: false, error: String(error) }));
+            }
+            break;
+          }
+          if (!more && !pending) break;
+        }
+      } finally {
+        inFlight = false;
+        activeController = null;
+      }
+    };
+
+    boundedNudgeRef.current = () => {
+      void drainChanges();
+    };
+    void drainChanges();
+
     return () => {
-      active.dispose();
-      if (poller.current === active) poller.current = null;
+      disposed = true;
+      if (boundedNudgeRef.current) boundedNudgeRef.current = null;
+      activeController?.abort();
       historyRequest.current?.abort();
       selectionRequest.current?.abort();
       historyLoading.current = false;
     };
-  }, [project, run, epoch, boundedEnabled, activeArchiveRevision, resetRevision, update]);
+  }, [project, run, epoch, boundedEnabled, activeArchiveRevision, resetRevision, rpcCaller, update]);
+
+  useLudensEvent(
+    ["run", "observation", "core"],
+    () => {
+      if (boundedEnabled && refresh) {
+        boundedNudgeRef.current?.();
+      }
+    },
+    {
+      enabled: Boolean(boundedEnabled && refresh && project && run),
+      workspaceId: project,
+      runId: run,
+    },
+  );
 
   useEffect(() => {
-    poller.current?.setEnabled(boundedEnabled && refresh);
-  }, [boundedEnabled, refresh]);
+    if (boundedEnabled && reconnectGen > 0) {
+      boundedNudgeRef.current?.();
+    }
+  }, [boundedEnabled, reconnectGen]);
 
   const scope = state.scope;
   const generation = state.generation;
@@ -286,7 +392,13 @@ export function useActivityFeed(options: {
     params.set("kind", filter);
     params.set("q", search);
     params.set("limit", String(ACTIVITY_PAGE_SIZE));
-    void requestActivity(params, controller.signal)
+    const rpc = rpcRef.current;
+    if (!rpc) {
+      update(value => ({ ...value, loading: false, error: "RPC client is unavailable" }));
+      return;
+    }
+    void rpc
+      .call("activity/get", activityRpcParamsFromSearchParams(params), { signal: controller.signal })
       .then(result => {
         if (!isCurrentRequest()) return;
         if (!sameScope(result.scope, scope) || result.projection.generation !== generation) {
@@ -349,7 +461,13 @@ export function useActivityFeed(options: {
     const params = scopeParams(scope);
     params.set("mode", "block");
     params.set("id", selectedBlock);
-    void requestActivity(params, controller.signal)
+    const rpc = rpcRef.current;
+    if (!rpc) {
+      update(value => ({ ...value, selectionReady: true, error: "RPC client is unavailable" }));
+      return;
+    }
+    void rpc
+      .call("activity/get", activityRpcParamsFromSearchParams(params), { signal: controller.signal })
       .then(result => {
         if (!isCurrentRequest()) return;
         if (!sameScope(result.scope, scope) || result.projection.generation !== generation) {
@@ -397,7 +515,15 @@ export function useActivityFeed(options: {
     params.set("before", previous.before);
     params.set("limit", String(ACTIVITY_PAGE_SIZE));
     try {
-      const result = await requestActivity(params, controller.signal);
+      const rpc = rpcRef.current;
+      if (!rpc) {
+        throw new Error("RPC client is unavailable");
+      }
+      const result = await rpc.call(
+        "activity/get",
+        activityRpcParamsFromSearchParams(params),
+        { signal: controller.signal },
+      );
       if (!isCurrentRequest()) return;
       if (!sameScope(result.scope, previous.scope) || result.projection.generation !== previous.generation) {
         update(value => ({ ...value, loadingOlder: false, error: scopeChangedError.current }));

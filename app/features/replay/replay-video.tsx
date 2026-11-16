@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReplayFrame } from "@/lib/replay-types";
 import { selectVideoSource, videoPosition, videoResourceKey, videoSyncState } from "@/features/replay/replay-video-model";
 import { useTranslations } from "@/lib/locale";
+import { useMediaResolver } from "@/lib/ludens-rpc";
 
 type Source = NonNullable<ReplayFrame["media"][number]["video"]>;
 type Ready = (slot: string, url: string, ready: boolean) => void;
@@ -13,6 +14,16 @@ function Surface({ source, at, liveAt, sampledAt, playing, clockReady, speed, vi
   source: Source; at: number; liveAt?: () => number; sampledAt: number; playing: boolean; clockReady: boolean; speed: number; visible: boolean; current: boolean; revision: number;
   onReady(url: string, ready: boolean): void; onError(url: string): void; label: string;
 }) {
+  const resolveMedia = useMediaResolver();
+  const [resolvedSrc, setResolvedSrc] = useState(() => resolveMedia.resolve(source.url) ?? source.url);
+  const rawSourceRef = useRef(source.url);
+  useEffect(() => {
+    const nextResolved = resolveMedia.resolve(source.url) ?? source.url;
+    if (rawSourceRef.current !== source.url || (resolvedSrc === source.url && nextResolved !== source.url)) {
+      rawSourceRef.current = source.url;
+      setResolvedSrc(nextResolved);
+    }
+  }, [source.url, resolveMedia, resolvedSrc]);
   const element = useRef<HTMLVideoElement>(null);
   // A warmed (not yet current) decoder already sits at its segment start: crossing into it is not an explicit seek.
   const lastRevision = useRef(current ? -1 : revision);
@@ -58,7 +69,7 @@ function Surface({ source, at, liveAt, sampledAt, playing, clockReady, speed, vi
   useEffect(() => {
     const video = element.current;
     // Development StrictMode replays setup after cleanup without remounting the DOM node.
-    if (video && video.getAttribute("src") !== source.url) video.src = source.url;
+    if (video && video.getAttribute("src") !== resolvedSrc) video.src = resolvedSrc;
     return () => {
       queueMicrotask(() => {
         if (video && !video.isConnected) {
@@ -68,8 +79,8 @@ function Surface({ source, at, liveAt, sampledAt, playing, clockReady, speed, vi
         }
       });
     };
-  }, [source.url]);
-  return <video ref={element} src={source.url} muted playsInline preload="auto" aria-label={label} aria-hidden={!visible}
+  }, [resolvedSrc]);
+  return <video ref={element} src={resolvedSrc} muted playsInline preload="auto" aria-label={label} aria-hidden={!visible}
     width={source.width} height={source.height} className={visible ? "replay-video-surface visible" : "replay-video-surface"}
     onLoadedMetadata={sync} onLoadedData={resumed} onSeeked={resumed} onCanPlay={resumed} onPlaying={resumed} onEnded={resumed}
     onTimeUpdate={() => { if (element.current && element.current.readyState >= 2 && !element.current.seeking) waiting.current = false; sync(); }}

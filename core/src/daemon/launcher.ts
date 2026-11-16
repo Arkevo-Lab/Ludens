@@ -18,6 +18,9 @@ import {
   type WorkspaceMachinesBinding,
 } from "@ludens/protocol/machines";
 import type { ServiceLaunchOrigin } from "../core/query/types.ts";
+import { NodeUdsRpcClient, WsAppRpcClient } from "../cli/app-rpc-client.ts";
+import { probeAppDaemon, readAppDaemonRuntime } from "./app-daemon.ts";
+import { resolveAppServerSocketPath } from "./app-server-paths.ts";
 import { jobStateFilePath, jobTargetLabel } from "./background-jobs.ts";
 import {
   probeBackgroundJob,
@@ -208,7 +211,7 @@ export async function launchPlan(
   }
 
   return {
-    workspace, config, manifest, ...(activeMachine ? { activeMachine } : {}), dashboardUrl: "http://127.0.0.1:3015", background, sharedPet,
+    workspace, config, manifest, ...(activeMachine ? { activeMachine } : {}), dashboardUrl: resolveAppServerSocketPath(ludensHome()), background, sharedPet,
     dashboardCheck: ["npm", "--prefix", join(repo, "app"), "run", "build:check"],
     launcher: join(repo, "core/src/daemon/process-manager.ts"), ludens, baseware, basewareSocket,
     commands: {
@@ -224,7 +227,7 @@ export async function launchPlan(
           ? ["--compaction-threshold", String(config.compactionThreshold)] : []),
         "--diagnostics", config.logging.diagnostics,
       ],
-      ...(config.dashboard ? { dashboard: [ludens, "app-server", "--port", "3015", "--static-dir", join(repo, "app/out")] } : {}),
+      ...(config.dashboard ? { dashboard: [ludens, "app-server", "--static-dir", join(repo, "app/out")] } : {}),
       ...(config.pet ? { pet: petLaunchCommand(repo, workspace) } : {}),
     },
   };
@@ -296,19 +299,50 @@ export function createSystemLaunchIO(options: { env?: NodeJS.ProcessEnv; note?: 
         return { code, stdout, stderr };
       } finally { clearTimeout(timer); }
     },
-    async dashboardReady(url) {
-      try {
-        const response = await fetch(`${url}/api/catalog`, { signal: AbortSignal.timeout(2000) });
-        if (!response.ok || !Array.isArray(await response.json())) return false;
-        const settings = await fetch(`${url}/api/workspaces`, { signal: AbortSignal.timeout(2000) });
-        return settings.ok && (await settings.json()).home === effectiveHome;
-      } catch { return false; }
+    async dashboardReady(target) {
+      if (target && /^(https?|wss?):\/\//i.test(target)) {
+        const client = new WsAppRpcClient({ url: target, connectTimeoutMs: 2000 });
+        try {
+          await client.connect();
+          const status = await client.call("daemon/status", undefined, { timeoutMs: 2000 });
+          return resolve(status.home) === effectiveHome;
+        } catch {
+          return false;
+        } finally {
+          await client.close().catch(() => {});
+        }
+      }
+      const status = await probeAppDaemon(effectiveHome, {
+        timeoutMs: 2000,
+        ...(target ? { socketPath: target } : {}),
+      });
+      return status !== null && resolve(status.home) === effectiveHome;
     },
-    async petReady(url) {
+    async petReady(target) {
+      if (target && /^(https?|wss?):\/\//i.test(target)) {
+        const client = new WsAppRpcClient({ url: target, connectTimeoutMs: 5000 });
+        try {
+          await client.connect();
+          const state = await client.call("pet/getState", undefined, { timeoutMs: 5000 });
+          return (state as { connected?: unknown }).connected === true;
+        } catch {
+          return false;
+        } finally {
+          await client.close().catch(() => {});
+        }
+      }
+      const runtime = await readAppDaemonRuntime(effectiveHome);
+      const socketPath = target || runtime?.socketPath || resolveAppServerSocketPath(effectiveHome);
+      const client = new NodeUdsRpcClient({ socketPath, connectTimeoutMs: 5000 });
       try {
-        const response = await fetch(`${url}/api/pet`, { signal: AbortSignal.timeout(10_000) });
-        return response.ok && (await response.json()).connected === true;
-      } catch { return false; }
+        await client.connect();
+        const state = await client.call("pet/getState", undefined, { timeoutMs: 5000 });
+        return (state as { connected?: unknown }).connected === true;
+      } catch {
+        return false;
+      } finally {
+        await client.close().catch(() => {});
+      }
     },
     sleep: () => Bun.sleep(500),
     now: Date.now,
@@ -531,7 +565,9 @@ export class WorkspaceLauncher {
     if (wantDashboard && !dashboard) {
       const build = await this.run(this.plan.dashboardCheck);
       if (build.code !== 0) throw new Error(build.stderr || build.stdout || "Build the Console before starting it.");
-      if ((await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied by a Console with a different Ludens home or an unready service. Stop that Console before switching global homes.");
+      if ((await this.job("dashboard")).pid) {
+        throw new Error("A Console daemon job is registered for a different Ludens home or unready service. Stop that Console before switching global homes.");
+      }
     }
     if (wantEmulatorOnly && this.plan.commands.emulator) {
       const emulator = await this.job("emulator");
@@ -618,7 +654,6 @@ export class WorkspaceLauncher {
       dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
     }
     if (wantDashboard && !dashboard) {
-      if (!(await this.job("dashboard")).pid && (await this.listeningPids(3015)).length) throw new Error("Port 3015 is occupied but the Ludens Console API is not ready; inspect that service before retrying.");
       await this.ensure("dashboard", provenance);
       dashboard = await this.waitFor("Console API", async () => {
         if (await this.io.dashboardReady(this.plan.dashboardUrl)) return true;

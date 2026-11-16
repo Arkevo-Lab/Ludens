@@ -50,6 +50,7 @@ import {
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
 import { useTranslations } from "@/lib/locale";
+import { useMediaResolver } from "@/lib/ludens-rpc";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
@@ -559,6 +560,7 @@ const CodexInputCard = memo(function CodexInputCard({
   onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
 }) {
   const t = useTranslations("shioriCockpit");
+  const mediaResolver = useMediaResolver();
   const [expandedPayload, setExpandedPayload] = useState(false);
   const payloadPresence = useAnimatedPresence(expandedPayload, 160);
 
@@ -689,7 +691,7 @@ const CodexInputCard = memo(function CodexInputCard({
                 }}
               >
                 <CachedObservationImg
-                  src={`/api/media?project=${encodeURIComponent(project)}&run=${encodeURIComponent(run)}&id=${encodeURIComponent(obs.id)}`}
+                  src={mediaResolver.resolve({ kind: "asset", project, run, id: obs.id }) ?? ""}
                   alt={obs.origin || obs.id}
                   width={96}
                   height={54}

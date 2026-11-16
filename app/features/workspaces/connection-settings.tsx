@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/settings-primitives";
 import { Switch } from "@/components/ui/switch";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 
 const BACKEND_FAMILY: Record<ImageUrlBackend, "api" | "tunnel" | "host"> = {
   "provider-files": "api",
@@ -85,6 +86,9 @@ export function ConnectionSettings({
   const isGlobal = !initialScope || initialScope === "global";
   const scope = isGlobal ? "global" : initialScope;
   const workspaceProject = !isGlobal ? projects.find(item => item.id === scope) : undefined;
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
 
   const [saved, setSaved] = useState<ModelConnectionConfig>({});
   const [draft, setDraft] = useState<ModelConnectionConfig>({});
@@ -104,15 +108,16 @@ export function ConnectionSettings({
     setReadError(null);
     setWriteError(null);
     setJustSaved(false);
-    const url = isGlobal
-      ? "/api/workspaces"
-      : `/api/workspaces?workspaceId=${encodeURIComponent(scope)}`;
-    void fetch(url, { signal: controller.signal, cache: "no-store" })
-      .then(async response => {
-        const value = await response.json();
-        if (!response.ok) throw new Error(value?.error ?? t("readFailed"));
-        return value;
-      })
+    const caller = rpcRef.current;
+    if (!caller) {
+      setLoading(false);
+      setReadError(t("readFailed"));
+      return () => controller.abort();
+    }
+    const readPromise = isGlobal
+      ? caller.call("workspaces/getSettings", undefined, { signal: controller.signal })
+      : caller.call("workspaces/getConnection", { workspaceId: scope }, { signal: controller.signal });
+    void readPromise
       .then(value => {
         if (controller.signal.aborted || version !== requestVersion.current) return;
         if (isGlobal) {
@@ -122,7 +127,7 @@ export function ConnectionSettings({
           setDraft(next);
           setWorkspaceMeta(null);
         } else {
-          const snapshot = value as WorkspaceConnectionSnapshot;
+          const snapshot = value as unknown as WorkspaceConnectionSnapshot;
           const next = normalizeConnection(snapshot.connection);
           setSaved(next);
           setDraft(next);
@@ -137,7 +142,7 @@ export function ConnectionSettings({
         if (!controller.signal.aborted && version === requestVersion.current) setLoading(false);
       });
     return () => controller.abort();
-  }, [isGlobal, scope, reloadTick, t]);
+  }, [isGlobal, scope, reloadTick, t, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
 
   const dirty = !sameConnection(saved, draft);
   const hasSavedOverrides = Object.keys(normalizeConnection(saved)).length > 0;
@@ -194,22 +199,23 @@ export function ConnectionSettings({
 
   const saveConnection = async (nextConfig: ModelConnectionConfig) => {
     if (saving || loading) return;
+    const caller = rpcRef.current;
+    if (!caller) {
+      setWriteError("RPC client is unavailable");
+      return;
+    }
     const version = ++requestVersion.current;
     setSaving(true);
     setWriteError(null);
     setJustSaved(false);
     try {
       const normalized = normalizeConnection(nextConfig);
-      const body = isGlobal
-        ? { action: "globalConnection", connection: normalized }
-        : { action: "workspaceConnection", id: scope, connection: normalized };
-      const response = await fetch("/api/workspaces", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value?.error ?? t("readFailed"));
+      const value = await caller.call(
+        "workspaces/mutate",
+        isGlobal
+          ? { action: "updateGlobalConnection", connection: normalized }
+          : { action: "updateConnection", workspaceId: scope, connection: normalized },
+      );
       if (version !== requestVersion.current) return;
       const committed = isGlobal
         ? normalizeConnection((value as GlobalConnectionResult).config.defaults.connection)

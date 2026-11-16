@@ -2,11 +2,11 @@
 
 This reference documents every user-facing command, flag, default value, and environment variable exposed by the three Ludens repository binaries:
 
-- `ludens` ([`core/bin/ludens`](../../../core/bin/ludens)): workspace management, global settings, the Shiori Agent Thread Core daemon, runtime control, perception/evaluation tooling, log archives, and the Console app-server.
+- `ludens` ([`core/bin/ludens`](../../../core/bin/ludens)): unified operator & runtime CLI — manages global config, workspace registry, singleton App-Server daemon (`ludens daemon`), workspace lifecycle (`init`/`up`/`services`/`down`), Shiori runtime control (`status`/`auto`/`steer`/`consolidate`/`stop`/`model` over local UDS or `--remote ws(s)://...`), perception/evaluation tooling, log archives, and `ludens app-server`.
 - `baseware` ([`baseware/bin/baseware`](../../../baseware/bin/baseware)): standalone **Baseware** Cross-device Integration Layer daemon, driver/package discovery, multi-machine routing, direct controller invocation, and MCP bridge mode.
-- `ludens-app` ([`app/bin/ludens-app`](../../../app/bin/ludens-app), Windows [`app/bin/ludens-app.cmd`](../../../app/bin/ludens-app.cmd)): the Electron desktop shell hosting the Console and optional Desktop Pet.
+- `ludens-app` ([`app/bin/ludens-app`](../../../app/bin/ludens-app), Windows [`app/bin/ludens-app.cmd`](../../../app/bin/ludens-app.cmd)): the zero-port Electron desktop shell (`ludens-app://console/` + `ludens-media://local/media?...`) communicating with `app-server.sock` via IPC UDS RPC and hosting the optional Desktop Pet.
 
-> **Workspace prefix**: Any `ludens` subcommand accepts a leading `--workspace <path>` before the subcommand name (for example `ludens --workspace /path/to/ws status`), overriding `LUDENS_WORKSPACE` and the current working directory.
+> **Global operator flags**: `ludens` subcommands accept `--workspace <path>` (before or inline with operator commands, overriding `LUDENS_WORKSPACE` and the current working directory), plus `--remote <ws(s)://...>` and `--token <secret>` (overriding `LUDENS_REMOTE_URL` and `LUDENS_REMOTE_TOKEN`) to target a remote App-Server over WebSocket JSON-RPC instead of local `app-server.sock`.
 
 ---
 
@@ -16,12 +16,12 @@ Implemented in [`core/src/cli/global.ts`](../../../core/src/cli/global.ts) and [
 
 ### `ludens config`
 
-Inspect or update global defaults shared across newly initialized and launched workspaces.
+Inspect or update global defaults shared across newly initialized and launched workspaces (supports `--remote` and `--token`).
 
 ```bash
-ludens config [show]
-ludens config set workspaceRoot <directory>
-ludens config set defaults.<field> <value>
+ludens config [show] [--remote <url>] [--token <secret>]
+ludens config set workspaceRoot <directory> [--remote <url>] [--token <secret>]
+ludens config set defaults.<field> <value> [--remote <url>] [--token <secret>]
 ```
 
 Allowed `defaults.<field>` keys:
@@ -44,12 +44,12 @@ Allowed `defaults.<field>` keys:
 
 ### `ludens workspace`
 
-Manage registered workspaces in the global registry.
+Manage registered workspaces in the global registry (`list`, `open`, and `forget` support `--remote`; `import` and `--new-id` operate on the local host filesystem).
 
 ```bash
-ludens workspace list
-ludens workspace open <directory> [--new-id]
-ludens workspace forget <id>
+ludens workspace list [--remote <url>] [--token <secret>]
+ludens workspace open <directory> [--new-id] [--remote <url>] [--token <secret>]
+ludens workspace forget <id> [--remote <url>] [--token <secret>]
 ludens workspace import <directory> [--legacy-state <directory>] [--previous-workspace <directory>]
 ```
 
@@ -57,11 +57,27 @@ ludens workspace import <directory> [--legacy-state <directory>] [--previous-wor
 
 ## Workspace Lifecycle & App Server
 
-Implemented in [`core/src/cli/workspace.ts`](../../../core/src/cli/workspace.ts), [`core/src/cli/main.ts`](../../../core/src/cli/main.ts), [`core/src/cli/app-server-cli.ts`](../../../core/src/cli/app-server-cli.ts), and [`core/src/daemon/launcher.ts`](../../../core/src/daemon/launcher.ts).
+Implemented in [`core/src/cli/workspace.ts`](../../../core/src/cli/workspace.ts), [`core/src/cli/daemon-cli.ts`](../../../core/src/cli/daemon-cli.ts), [`core/src/cli/main.ts`](../../../core/src/cli/main.ts), [`core/src/cli/app-server-cli.ts`](../../../core/src/cli/app-server-cli.ts), and [`core/src/daemon/launcher.ts`](../../../core/src/daemon/launcher.ts).
+
+### `ludens daemon`
+
+Inspect, start, stop, or restart the per-`LUDENS_HOME` singleton `ludens app-server` daemon (`<home>/run/app-server.sock` by default, or `/tmp/ludens-app-<uid>-<sha256_12>.sock` if path length approaches `APP_SERVER_SUN_PATH_LIMIT = 96`).
+
+```bash
+ludens daemon status
+ludens daemon start [--listen <unix://PATH|ws://HOST:PORT>] [--auth <none|token>] \
+  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>]
+ludens daemon stop [--keep-cores | --stop-cores]
+ludens daemon restart [--listen <unix://PATH|ws://HOST:PORT>] [--auth <none|token>] \
+  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>]
+```
+
+- `ludens daemon stop` cleanly shuts down managed workspace Cores before stopping App-Server unless `--keep-cores` is passed (`--stop-cores` is the default).
+- When `--listen ws://HOST:PORT` binds a non-loopback address, `--auth token` is mandatory.
 
 ### `ludens init`
 
-Create a workspace directory and write `ludens.json`.
+Create a workspace directory and write `ludens.json` (also supports `--remote` when creating workspaces on a remote App-Server).
 
 ```bash
 ludens init --driver <id> \
@@ -80,29 +96,36 @@ Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `ope
 
 ### `ludens up` / `ludens services` / `ludens down`
 
-Manage supervised workspace processes (**Baseware**, per-workspace **Core** hosting **Shiori** with `launchedBy: "cli"` so it survives Desktop App Quit, optional target/simulator launch command, **App Daemon**, and optional **Desktop Pet**) following **1 Workspace = 1 Core** isolation.
+Manage supervised workspace processes (**Baseware**, per-workspace **Core** hosting **Shiori** with `launchedBy: "cli"`, optional target/simulator launch command, singleton **App Daemon**, and optional **Desktop Pet**) locally via `app-server.sock` or remotely via `--remote`, following **1 Workspace = 1 Core** isolation.
 
 ```bash
-ludens up [--dry-run] [--dashboard | --no-dashboard] [--pet | --no-pet]
-ludens services
-ludens down [--keep-emulator] [--dashboard] [--pet]
+ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] \
+  [--dashboard | --no-dashboard] [--pet | --no-pet] [--remote <url>] [--token <secret>]
+ludens services [--remote <url>] [--token <secret>]
+ludens down [--services <emulator,baseware,core>] [--keep-emulator] \
+  [--dashboard] [--pet] [--remote <url>] [--token <secret>]
 ```
 
-- `--dashboard` / `--no-dashboard` controls launching the multi-workspace Console **App Daemon** (`ludens app-server`) and desktop window.
+- `--preempt` preempts a conflicting workspace Core holding the same physical device.
+- `--services` scopes `up` / `down` to specific managed components (`emulator`, `baseware`, `core`).
+- `--dashboard` / `--no-dashboard` controls ensuring the local `ludens app-server` daemon.
 - `--pet` / `--no-pet` toggles the optional Desktop Pet widget during `up` / `down`.
 - `--keep-emulator` keeps target simulator/runtime processes alive while stopping Ludens daemons.
 
 ### `ludens app-server` / `ludens serve`
 
-Start the unified multi-workspace **App Daemon** (HTTP + WebSocket backend for Console, multi-Core supervision, device contention arbitration, and docs/playback APIs).
+Start the unified multi-workspace **App Daemon** serving JSON-RPC 2.0 (`@ludens/protocol/app-rpc`) over UDS NDJSON and WebSocket `/rpc`, real-time `EventHub` subscriptions, HMAC capability-ticket `/media` (`mt=`, `206 Range`), `/health`, and static Vite SPA assets (`app/out`, returning `404` for `/api/*`).
 
 ```bash
-ludens app-server [--host 127.0.0.1] [--port <0|1..65535>] [-p <port>] \
+ludens app-server [--listen <unix://PATH | ws://HOST:PORT>] \
+  [--auth <none|token>] [--token <secret> | --token-env <var>] \
   [--static-dir <path>] [--trusted-origin <origin>] [--parent-watchdog] [-h | --help]
 ludens serve ...   # Alias of app-server
 ```
 
-Defaults: `--host 127.0.0.1`, `--port 3015` (pass `0` for an ephemeral port). `--trusted-origin <origin>` may be repeated. `--parent-watchdog` binds server lifetime to its parent process stdin/exit.
+- With no `--listen` argument, `app-server` binds **UDS-only (`app-server.sock`, 0 listening TCP ports)** and `--auth none`.
+- Non-loopback `ws://` listeners refuse to start without `--auth token` (`--token` or `--token-env`).
+- `--trusted-origin <origin>` may be repeated to allowlist browser `Origin` headers. `--parent-watchdog` binds server lifetime to parent stdin/exit, and startup emits a single-line JSON readiness handshake on stdout.
 
 ### `ludens run`
 
@@ -128,19 +151,20 @@ Defaults in [`core/src/cli/main.ts`](../../../core/src/cli/main.ts): `--seconds 
 
 ## Live Control, Event Pool, Perception, Controllers & Machines
 
-Commands below communicate with the running workspace daemon over its Unix domain socket (see [`core/src/cli/control-cli.ts`](../../../core/src/cli/control-cli.ts), [`core/src/cli/event-cli.ts`](../../../core/src/cli/event-cli.ts), and [`core/src/daemon/transport.ts`](../../../core/src/daemon/transport.ts)).
+Operator control commands (`status`, `auto`, `steer`, `consolidate`, `stop`, `model`) communicate through local `app-server.sock` or `--remote ws(s)://... [--token ...]`, falling back to direct workspace Core socket (`core.sock`) when inside a runtime or directly targeting `LUDENS_SOCKET`. Runtime-internal commands (`event`, `perception`, `observe`, `controller`, `machine`) communicate directly with the workspace Core daemon (`core.sock`) (see [`core/src/cli/control-cli.ts`](../../../core/src/cli/control-cli.ts), [`core/src/cli/operator-rpc.ts`](../../../core/src/cli/operator-rpc.ts), [`core/src/cli/event-cli.ts`](../../../core/src/cli/event-cli.ts), and [`core/src/daemon/transport.ts`](../../../core/src/daemon/transport.ts)).
 
 ### Status, Auto Run & Steer
 
 ```bash
-ludens status
-ludens auto on [--message <text>] [--seconds <n>]
-ludens auto timer <seconds|off|unbounded|none>
-ludens auto off
-ludens steer [--message <text> | <text>]
-ludens consolidate [--seconds <n>]
+ludens status [--remote <url>] [--token <secret>]
+ludens auto on [--message <text>] [--seconds <n>] [--remote <url>] [--token <secret>]
+ludens auto timer <seconds|off|unbounded|none> [--remote <url>] [--token <secret>]
+ludens auto off [--remote <url>] [--token <secret>]
+ludens steer [--message <text> | <text>] [--remote <url>] [--token <secret>]
+ludens consolidate [--seconds <n>] [--remote <url>] [--token <secret>]
+ludens stop [--remote <url>] [--token <secret>]
 ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
-  [--effort none|minimal|low|medium|high|xhigh|max]
+  [--effort none|minimal|low|medium|high|xhigh|max] [--remote <url>] [--token <secret>]
 ```
 
 - `ludens auto on` starts an **Auto Run** control cycle (`--seconds` sets the timed control cycle duration).
@@ -148,6 +172,7 @@ ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
 - `ludens auto off` executes **Reclaim Control**, returning Shiori to **Manual Standby** (`manual`) and revoking device control at Baseware.
 - `ludens steer` interrupts or queues a steering instruction for Shiori.
 - `ludens consolidate` runs memory consolidation (`--seconds` defaults to `600`).
+- `ludens stop` stops the workspace Core daemon cleanly.
 - `ludens model` switches the active model, service tier, or thinking effort while in Manual Standby.
 
 ### `ludens event` (Event Pool)
@@ -275,7 +300,7 @@ baseware mcp                               # Expose Baseware controllers over st
 
 ## `ludens-app` Desktop CLI
 
-Implemented in [`app/desktop/main.ts`](../../../app/desktop/main.ts). Launches the Electron desktop app hosting the Console and optional Desktop Pet.
+Implemented in [`app/desktop/main.ts`](../../../app/desktop/main.ts). Launches the zero-port Electron desktop app loading the bundled Vite SPA (`ludens-app://console/`) and local media (`ludens-media://local/media?...`) over UDS `app-server.sock` via `AppServerHost` (`ensureLocalAppDaemon`), with `ActiveCoreQuitGuard` and the optional Desktop Pet (`PetSessionCoordinator`).
 
 ```bash
 ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
@@ -285,7 +310,7 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 | Flag | Purpose |
 | --- | --- |
 | `--workspace <path>` | Focus or attach to a workspace directory |
-| `--server <url>` / `--dashboard <url>` | Connect to an existing `ludens app-server` HTTP origin (`--dashboard` is the CLI flag alias) |
+| `--server <url>` / `--dashboard <url>` | Override `ludens-app://console/` to load an external dev/Vite renderer URL (also via `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL`) |
 | `--profile <path>` | Override the Electron user-data profile directory |
 | `--background` | Start minimized / tray-resident without forcing the main window open |
 | `--show-window` | Show and focus the Console window immediately on launch |
@@ -328,7 +353,12 @@ Verified across [`core/`](../../../core/src/), [`baseware/`](../../../baseware/s
 | `LUDENS_APP_INDEX_MAX_RUNS` | `3` | Max run indexes retained simultaneously in memory |
 | `LUDENS_APP_INDEX_IDLE_MS` | `300000` | Idle eviction delay for cached Console run indexes |
 | `LUDENS_APP_INDEX_ROOT` | Workspace `.dashboard-index` | Override Console rebuildable index directory |
-| `LUDENS_STATIC_DIR` | — | Static Next.js Console asset directory served by `app-server` |
+| `LUDENS_REMOTE_URL` | — | Default `--remote ws(s)://...` App-Server URL for unified CLI operator commands |
+| `LUDENS_REMOTE_TOKEN` | — | Default bearer token paired with `LUDENS_REMOTE_URL` / `--remote` |
+| `LUDENS_APP_TOKEN` | — | Bearer token environment variable forwarded/read when running authenticated `app-server` or `ludens daemon start --token-env LUDENS_APP_TOKEN` |
+| `LUDENS_STATIC_DIR` | — | Static Vite SPA Console asset directory (`app/out`) served by `app-server` |
+| `LUDENS_APP_SERVER_URL` | — | Upstream `app-server` target proxied by `app/scripts/dev.mjs` / `vite.config.ts` |
+| `LUDENS_APP_DEV_URL` | — | Dev renderer URL loaded by `ludens-app` (`LUDENS_DEV_URL` alias) |
 | `LUDENS_BUN` | — | Path override for the Bun executable |
 | `LUDENS_APP_SERVER_BIN` | — | Binary path override when `ludens-app` spawns `app-server` |
 | `LUDENS_DISABLE_COMPANION` | — | Disable launching the optional Desktop Pet from the Electron shell |

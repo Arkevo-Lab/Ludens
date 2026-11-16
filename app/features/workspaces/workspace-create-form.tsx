@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import type { DiscoveredDriver } from "@/lib/drivers";
 import type { CreateWorkspaceInput } from "@/lib/workspaces";
 import {
@@ -26,6 +27,7 @@ export function WorkspaceCreateForm({ defaultRoot, initialIntent, pending, error
   onCancel(): void;
 }) {
   const t = useTranslations("workspaceSetup");
+  const rpc = useOptionalLudensRpc();
   const id = useId();
   const form = useRef<HTMLFormElement>(null);
   const request = useRef<AbortController | null>(null);
@@ -60,16 +62,15 @@ export function WorkspaceCreateForm({ defaultRoot, initialIntent, pending, error
   const discover = async () => {
     const spec = draft.driverPackage.trim();
     if (!spec || pending || request.current) return;
+    if (!rpc) {
+      setDiscoveryError(t("verificationFailed"));
+      return;
+    }
     const controller = new AbortController(); request.current = controller;
     setDiscovering(true); setDiscoveryError(""); setDriver(null); setIssue(null);
     try {
-      const response = await fetch("/api/drivers/discover", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spec }), signal: controller.signal,
-      });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error ?? t("verificationFailed"));
-      if (!controller.signal.aborted) setDriver(value as DiscoveredDriver);
+      const value = await rpc.call("drivers/discover", { spec }, { signal: controller.signal });
+      if (!controller.signal.aborted) setDriver(value as unknown as DiscoveredDriver);
     } catch (error) {
       if (!controller.signal.aborted) setDiscoveryError(error instanceof Error ? error.message : String(error));
     } finally {

@@ -1,12 +1,16 @@
 "use client";
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { PerceptionSettingsPatch } from "@/lib/perception-config";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { createPerceptionSession, EMPTY_PERCEPTION_SESSION, type PerceptionSession, type SavedPerception } from "@/features/capabilities/perception-draft";
 
 const sessions = new Map<string, PerceptionSession>();
 const emptySubscribe = () => () => {};
 const emptySnapshot = () => EMPTY_PERCEPTION_SESSION;
 export function usePerceptionSession(project: string, workspace: string) {
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
   const scope = JSON.stringify([project, workspace]);
   const [active, setActive] = useState<{ scope: string; session: PerceptionSession } | null>(null);
   useEffect(() => {
@@ -14,20 +18,26 @@ export function usePerceptionSession(project: string, workspace: string) {
     if (!session) {
       let storage: Storage | undefined;
       try { storage = window.sessionStorage; } catch { /* In-memory recovery remains available. */ }
-      const url = "/api/perception-config?" + new URLSearchParams({ project, workspace });
-      const request = async (patch?: PerceptionSettingsPatch, signal?: AbortSignal): Promise<SavedPerception> => {
-        const response = await fetch(url, { cache: "no-store", signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15000)]) : AbortSignal.timeout(25000),
-          ...(patch ? { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(patch) } : {}) });
-        const value = await response.json();
-        if (!response.ok) throw new Error(value.error ?? `HTTP ${response.status}`);
-        return value;
+      const read = async (signal?: AbortSignal): Promise<SavedPerception> => {
+        const caller = rpcRef.current;
+        if (!caller) throw new Error("RPC client is unavailable");
+        return (await caller.call("perception/getSettings", { project, workspace }, { signal, timeoutMs: 25_000 })) as SavedPerception;
       };
-      session = createPerceptionSession({ scope, storage, read: signal => request(undefined, signal), write: patch => request(patch) });
+      const write = async (patch: PerceptionSettingsPatch): Promise<SavedPerception> => {
+        const caller = rpcRef.current;
+        if (!caller) throw new Error("RPC client is unavailable");
+        return (await caller.call(
+          "perception/updateSettings",
+          { project, workspace, patch: patch as Record<string, unknown> },
+          { timeoutMs: 25_000 },
+        )) as SavedPerception;
+      };
+      session = createPerceptionSession({ scope, storage, read, write });
       sessions.set(scope, session);
     }
     setActive({ scope, session });
-    void session.refresh();
-  }, [scope, project, workspace]);
+    if (rpcRef.current) void session.refresh();
+  }, [scope, project, workspace, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
   const session = active?.scope === scope ? active.session : null;
   const subscribe = useCallback((listener: () => void) => session ? session.subscribe(listener) : emptySubscribe(), [session]);
   const state = useSyncExternalStore(subscribe, session?.snapshot ?? emptySnapshot, emptySnapshot);

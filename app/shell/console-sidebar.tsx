@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { PixelMark, type PixelMarkState } from "@/components/ui/pixel-mark";
 import { useAnimatedPresence } from "@/components/use-motion-preferences";
 import { useLocale, useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import type { ActiveCoreItem } from "@/shell/use-active-cores";
 
@@ -106,6 +107,7 @@ export interface ConsoleSidebarProps {
   onOpenCore?(projectId: string): void;
   onStopCore?(projectId: string): void;
   activeCoresStopError?: string | null;
+  onOpenConnectionDialog?: () => void;
 }
 
 export function ConsoleSidebar({
@@ -126,11 +128,14 @@ export function ConsoleSidebar({
   onOpenCore,
   onStopCore,
   activeCoresStopError = null,
+  onOpenConnectionDialog,
 }: ConsoleSidebarProps) {
   const { t } = useLocale();
   const dt = useTranslations("dashboard");
   const st = useTranslations("consoleSidebar");
   const ct = useTranslations("desktopChrome");
+  const connT = useTranslations("connectionTarget");
+  const rpcCtx = useOptionalLudensRpc();
   const id = useId();
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -258,7 +263,7 @@ export function ConsoleSidebar({
     if (!expanded) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || event.defaultPrevented) return;
-      if (document.querySelector('[role="dialog"]')) return;
+      if (document.querySelector('[role="dialog"], dialog[open]')) return;
       event.preventDefault();
       closeMenu();
     };
@@ -494,6 +499,36 @@ export function ConsoleSidebar({
       </div>
       <footer ref={footer} id={`${id}-footer`} className="sidebar-footer">
         {workspaceSlot && <div className="sidebar-workspace-slot">{workspaceSlot}</div>}
+        {rpcCtx && onOpenConnectionDialog && (() => {
+          const snap = rpcCtx.snapshot;
+          const dotClass =
+            snap.status === "connected"
+              ? "is-connected"
+              : snap.status === "connecting" || snap.status === "reconnecting"
+                ? "is-connecting"
+                : "is-disconnected";
+          const label =
+            snap.status === "auth-required"
+              ? connT("statusAuthRequired")
+              : snap.status === "unconfigured"
+                ? connT("statusUnconfigured")
+                : snap.resolved.displayTarget;
+          return (
+            <button
+              type="button"
+              className="sidebar-connection-pill"
+              aria-label={connT("sidebarTriggerLabel").replace("{target}", label)}
+              title={connT("sidebarTriggerLabel").replace("{target}", label)}
+              onClick={() => {
+                if (expanded) closeMenu();
+                onOpenConnectionDialog();
+              }}
+            >
+              <span className={`connection-status-dot ${dotClass}`} aria-hidden="true" />
+              <span>{label}</span>
+            </button>
+          );
+        })()}
         <nav className="sidebar-settings" aria-label={t("nav.settings")}>{renderLink("settings")}</nav>
       </footer>
     </aside>

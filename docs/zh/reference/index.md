@@ -6,8 +6,8 @@
 
 | 层级 | 核心关注点 | 规范文档 | 权威源码位置 |
 | --- | --- | --- | --- |
-| **系统拓扑与控制循环** | 五组件边界、Shiori Agent 线程核心、OMP 会话装配、控制周期 `epoch`、事件池与跨进程存储归属 | [架构与边界](architecture.md) | `core/src/core/shiori/runtime.ts` · `core/src/core/agent-omp/session.ts` |
-| **CLI 与环境变量** | `ludens`、`baseware` 与 `ludens-app` 全部子命令、参数选项、默认值与宿主/感知环境变量 | [CLI 命令参考](cli.md) | `core/src/cli/main.ts` · `baseware/src/cli.ts` · `app/desktop/main.ts` |
+| **系统拓扑与控制循环** | 四层边界、四工况 App Daemon（`app-server.sock` / WS `/rpc` / HMAC `/media`）、Shiori Agent 线程核心、OMP 会话装配、控制周期 `epoch`、事件池与跨进程存储归属 | [架构与边界](architecture.md) | `protocol/src/app-rpc.ts` · `core/src/server/app-server.ts` · `core/src/core/shiori/runtime.ts` · `core/src/core/agent-omp/session.ts` |
+| **CLI 与环境变量** | `ludens`（含 `daemon` 与 `--remote`）、`baseware` 与 `ludens-app` 全部子命令、参数选项、默认值与宿主/感知环境变量 | [CLI 命令参考](cli.md) | `core/src/cli/main.ts` · `core/src/cli/daemon-cli.ts` · `baseware/src/cli.ts` · `app/desktop/main.ts` |
 | **跨设备集成与能力目录** | CUA 原生工具结构、`ExecutionResult` 信封、`requiresControl` 仲裁、外部驱动包发现与多节点池化 | [Baseware 设计理念与能力契约](baseware.md) | `baseware/src/contracts.ts` · `baseware/src/catalog.ts` |
 | **Bridge 底层通信** | TCP 单客户端行协议、`HELLO / OWN / APPLY / CAPTURE / TOUCH` 指令集与错误码 | [Driver Bridge 协议](driver-bridge-protocol.md) | `baseware/src/drivers/bridge.ts` · 外部驱动 Provider |
 | **可观测性与控制台消费** | `normal / full` 记录模式、`.ludens/timeline/` 与 `.ludens/archive/` 存储、Trace 配对、控制台冷热索引与回放 | [日志与调用链](logging.md) | `core/src/core/storage/events.ts` · `protocol/src/log-archive.ts` · `core/src/core/query/` |

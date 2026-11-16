@@ -40,29 +40,24 @@ test("deriveActiveCores filters online Cores and sorts SOS > auto > consolidatin
   assert.equal(derived[1].launchedBy, "cli");
 });
 
-test("stopWorkspaceCore posts { project, service: 'host', action: 'stop' } to /api/workspaces/service", async () => {
-  const calls: Array<{ url: string; method?: string; body: unknown }> = [];
-  await stopWorkspaceCore("ws-alpha", {
-    fetchImpl: async (input, init) => {
-      calls.push({
-        url: String(input),
-        method: init?.method,
-        body: init?.body ? JSON.parse(String(init.body)) : null,
-      });
-      return new Response(JSON.stringify({ ok: true }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
+test("stopWorkspaceCore calls workspaces/serviceControl with { workspaceId, action: 'down', services: ['host'] }", async () => {
+  const calls: Array<{ method: string; params: unknown }> = [];
+  await stopWorkspaceCore(
+    {
+      call: (async (method: string, params: unknown) => {
+        calls.push({ method, params });
+        return { ok: true };
+      }) as never,
     },
-  });
+    "  ws-alpha  ",
+  );
 
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, "/api/workspaces/service");
-  assert.equal(calls[0].method, "POST");
-  assert.deepEqual(calls[0].body, {
-    project: "ws-alpha",
-    service: "host",
-    action: "stop",
+  assert.equal(calls[0].method, "workspaces/serviceControl");
+  assert.deepEqual(calls[0].params, {
+    workspaceId: "ws-alpha",
+    action: "down",
+    services: ["host"],
   });
 });
 

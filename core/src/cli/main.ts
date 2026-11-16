@@ -2,7 +2,9 @@
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
-import { cli, HELP } from "./control-cli.ts";
+import { cli, HELP, runRemoteControlCli } from "./control-cli.ts";
+import { daemonCommand, DAEMON_HELP } from "./daemon-cli.ts";
+import { extractRemoteArgs, type RemoteConnectionConfig } from "./operator-rpc.ts";
 import { Runtime } from "../core/shiori/runtime.ts";
 import { listen } from "../daemon/transport.ts";
 import { connectBaseware } from "../core/subsystems/baseware.ts";
@@ -38,32 +40,90 @@ async function main() {
   const args = process.argv.slice(2);
   let selectedWorkspace = process.env.LUDENS_WORKSPACE ?? process.cwd();
   let explicitWorkspace = !!process.env.LUDENS_WORKSPACE;
-  if (args[0] === "--workspace") {
-    if (!args[1] || args[1].startsWith("--")) throw new Error("--workspace requires a path");
-    selectedWorkspace = args[1];
-    explicitWorkspace = true;
-    args.splice(0, 2);
+  let remoteUrl = process.env.LUDENS_REMOTE_URL?.trim() || undefined;
+  let remoteToken = process.env.LUDENS_REMOTE_TOKEN?.trim() || undefined;
+
+  while (args.length > 0 && args[0]!.startsWith("--") && args[0] !== "--help") {
+    const flag = args[0]!;
+    if (flag === "--workspace") {
+      if (!args[1] || args[1].startsWith("--")) throw new Error("--workspace requires a path");
+      selectedWorkspace = args[1];
+      explicitWorkspace = true;
+      args.splice(0, 2);
+      continue;
+    }
+    if (flag.startsWith("--workspace=")) {
+      selectedWorkspace = flag.slice("--workspace=".length);
+      if (!selectedWorkspace) throw new Error("--workspace requires a path");
+      explicitWorkspace = true;
+      args.splice(0, 1);
+      continue;
+    }
+    if (flag === "--remote") {
+      if (!args[1] || args[1].startsWith("--")) throw new Error("--remote requires a URL");
+      remoteUrl = args[1];
+      args.splice(0, 2);
+      continue;
+    }
+    if (flag.startsWith("--remote=")) {
+      remoteUrl = flag.slice("--remote=".length);
+      if (!remoteUrl) throw new Error("--remote requires a URL");
+      args.splice(0, 1);
+      continue;
+    }
+    if (flag === "--token") {
+      if (args[1] === undefined || args[1].startsWith("--")) throw new Error("--token requires a secret");
+      remoteToken = args[1];
+      args.splice(0, 2);
+      continue;
+    }
+    if (flag.startsWith("--token=")) {
+      remoteToken = flag.slice("--token=".length);
+      args.splice(0, 1);
+      continue;
+    }
+    break;
   }
+
   if (args[0] === "__supervise-job") {
     process.exitCode = await runBackgroundJobCli(["--supervise", ...args.slice(1)]);
     return;
   }
   if (!args.length || args[0] === "--help" || (args[0] === "run" && args.includes("--help"))) {
-    console.log(`${GLOBAL_HELP}\n\n${WORKSPACE_HELP}\n\n${APP_SERVER_HELP}\n\n${RUN_HELP}\n${HELP}\nludens eval <list|run|history> — workspace capability evaluations; ludens eval --help\n${LOG_HELP}`);
+    console.log(`${GLOBAL_HELP}\n\n${DAEMON_HELP}\n\n${WORKSPACE_HELP}\n\n${APP_SERVER_HELP}\n\n${RUN_HELP}\n${HELP}\nludens eval <list|run|history> — workspace capability evaluations; ludens eval --help\n${LOG_HELP}`);
     return;
   }
   if (args[0] === "app-server" || args[0] === "serve") return appServerCommand(args.slice(1), globalHome);
-  if (args[0] === "config" || args[0] === "workspace") return globalCommand(args[0], args.slice(1), globalHome);
+  if (args[0] === "daemon") return daemonCommand(args.slice(1), globalHome);
+
+  const remoteSeed: RemoteConnectionConfig | undefined = remoteUrl
+    ? { url: remoteUrl, ...(remoteToken ? { token: remoteToken } : {}) }
+    : undefined;
+
+  if (args[0] === "config" || args[0] === "workspace") {
+    const parsed = extractRemoteArgs(args.slice(1));
+    const remote = parsed.remote ?? remoteSeed;
+    return globalCommand(args[0]!, parsed.remaining, globalHome, remote);
+  }
   if (args[0] === "eval") return evalCommand(args.slice(1), selectedWorkspace);
   if (args[0] === "event") {
     const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(selectedWorkspace)).socket;
     return eventCommand(args.slice(1), selectedWorkspace, socket, globalHome);
   }
   if (args[0] === "logs") return logCommand(args.slice(1));
-  if (["init", "up", "services", "down"].includes(args[0]!)) return workspaceCommand(args[0]!, args.slice(1), selectedWorkspace, explicitWorkspace);
+  if (["init", "up", "services", "down"].includes(args[0]!)) {
+    const parsed = extractRemoteArgs(args.slice(1));
+    const remote = parsed.remote ?? remoteSeed;
+    return workspaceCommand(args[0]!, parsed.remaining, selectedWorkspace, explicitWorkspace, globalHome, remote);
+  }
   if (args[0] !== "run") {
+    const parsed = extractRemoteArgs(args);
+    const remote = parsed.remote ?? remoteSeed;
+    if (remote?.url && ["status", "auto", "steer", "consolidate", "stop", "model"].includes(parsed.remaining[0] ?? "")) {
+      return runRemoteControlCli(parsed.remaining, selectedWorkspace, explicitWorkspace, globalHome, remote);
+    }
     const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(selectedWorkspace)).socket;
-    return cli(args, socket);
+    return cli(parsed.remaining, socket);
   }
   const { values } = parseArgs({ args: args.slice(1), options: {
     workspace: { type: "string", default: selectedWorkspace },

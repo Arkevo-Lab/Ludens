@@ -4,6 +4,7 @@ import { chmod, cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, wr
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { launchPlan, parseConfig, petLaunchCommand, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
+import { stopLocalAppDaemon } from "../src/daemon/app-daemon.ts";
 import { getDriver } from "@ludens/baseware/drivers/registry.ts";
 import { ensureWorkspaceIdentity, ludensHome, mergeConnectionConfig, registerWorkspace, validateConnectionConfig } from "@ludens/protocol/ludens";
 import { ompSettingsOverrides } from "../src/core/agent-omp/session.ts";
@@ -47,7 +48,6 @@ class FakeServices implements LaunchIO {
   bridgeClientPids: number[] = [];
   bridgePort: number | undefined;
   dashboard = false;
-  occupiedDashboard = false;
   dashboardBuild = true;
   mode = "manual";
   cleanupReads = 0;
@@ -126,7 +126,6 @@ class FakeServices implements LaunchIO {
     }
     if (argv[0] === "pgrep") return result(this.externalEmulator ? "999\n" : "", this.externalEmulator ? 0 : 1);
     if (argv[0] === "lsof") {
-      if (argv.includes("-iTCP:3015")) return this.occupiedDashboard ? result("3015\n") : result("", 1);
       const pid = this.jobs.get(this.target("emulator")) ?? this.preparedBridgePid;
       if (argv.includes("-p")) return pid ? result(`p${pid}\nn127.0.0.1:${this.bridgePort}\n`) : result("", 1);
       if (!argv.includes(`-iTCP:${this.bridgePort}`) || !pid) return result("", 1);
@@ -172,7 +171,10 @@ test("up rejects unidentified and conflicting workspaces before loading drivers,
     expect(await Bun.file(marker).exists()).toBe(false);
     expect(await readdir(legacy)).toEqual(["ludens.json"]);
     expect(await readFile(join(home, "registry", `${identity.id}.json`), "utf8")).toBe(registration);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await stopLocalAppDaemon(join(directory, "global"), { stopCores: true }).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("default web startup starts the Dashboard without launching or waiting for Electron", async () => {
@@ -193,31 +195,114 @@ test("default web startup starts the Dashboard without launching or waiting for 
   expect(io.calls.some(argv => argv[2] === "--stop")).toBe(false);
 });
 
-test("system Pet readiness uses the Dashboard pet endpoint", async () => {
-  const paths: string[] = [];
-  let connected = true, status = 200;
-  const server = Bun.serve({ port: 0, fetch(request) {
-    const path = new URL(request.url).pathname;
-    paths.push(path);
-    return path === "/api/pet" ? Response.json({ connected }, { status }) : new Response("missing", { status: 404 });
-  } });
-  // Exercise the real HTTP probe without running any service or device command.
+test("system Pet readiness uses the Dashboard pet/getState RPC method", async () => {
+  const methods: string[] = [];
+  let connected = true;
+  let failGetState = false;
+  const server = Bun.serve({
+    port: 0,
+    fetch(request, bunServer) {
+      if (new URL(request.url).pathname === "/rpc" && bunServer.upgrade(request)) {
+        return;
+      }
+      return new Response("missing", { status: 404 });
+    },
+    websocket: {
+      message(ws, raw) {
+        const msg = JSON.parse(String(raw)) as { id: number; method: string };
+        methods.push(msg.method);
+        if (msg.method === "initialize") {
+          ws.send(JSON.stringify({
+            jsonrpc: "2.0",
+            id: msg.id,
+            result: {
+              serverVersion: "test",
+              pid: process.pid,
+              home: ludensHome(),
+              transport: "ws",
+              authenticated: true,
+              serverSeq: 0,
+              activeCoreCount: 0,
+              managedWorkspaces: [],
+              media: { basePath: "/media", liveStreamCapabilities: ["none"] },
+            },
+          }));
+          return;
+        }
+        if (msg.method === "pet/getState") {
+          if (failGetState) {
+            ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, error: { code: -32000, message: "unavailable" } }));
+            return;
+          }
+          ws.send(JSON.stringify({ jsonrpc: "2.0", id: msg.id, result: { connected } }));
+        }
+      },
+    },
+  });
   const io = new WorkspaceLauncher(await plan())["io"];
   try {
     expect(await io.petReady(server.url.origin)).toBe(true);
     connected = false;
     expect(await io.petReady(server.url.origin)).toBe(false);
-    connected = true; status = 503;
+    connected = true;
+    failGetState = true;
     expect(await io.petReady(server.url.origin)).toBe(false);
-    expect(paths).toEqual(["/api/pet", "/api/pet", "/api/pet"]);
-  } finally { server.stop(true); }
+    expect(methods).toEqual(["initialize", "pet/getState", "initialize", "pet/getState", "initialize", "pet/getState"]);
+  } finally {
+    server.stop(true);
+  }
 });
 
-test("Dashboard reuse requires the same global home and rejects occupied mismatched services before startup", async () => {
+test("Dashboard reuse requires the same global home and rejects unready registered services before startup", async () => {
   let home = ludensHome();
-  const server = Bun.serve({ port: 0, fetch(request) {
-    return new URL(request.url).pathname === "/api/catalog" ? Response.json([]) : Response.json({ home });
-  } });
+  const server = Bun.serve({
+    port: 0,
+    fetch(request, bunServer) {
+      if (new URL(request.url).pathname === "/rpc" && bunServer.upgrade(request)) {
+        return;
+      }
+      return new Response("missing", { status: 404 });
+    },
+    websocket: {
+      message(ws, raw) {
+        const msg = JSON.parse(String(raw)) as { id: number; method: string };
+        if (msg.method === "initialize") {
+          ws.send(JSON.stringify({
+            jsonrpc: "2.0",
+            id: msg.id,
+            result: {
+              serverVersion: "test",
+              pid: process.pid,
+              home,
+              transport: "ws",
+              authenticated: true,
+              serverSeq: 0,
+              activeCoreCount: 0,
+              managedWorkspaces: [],
+              media: { basePath: "/media", liveStreamCapabilities: ["none"] },
+            },
+          }));
+          return;
+        }
+        if (msg.method === "daemon/status") {
+          ws.send(JSON.stringify({
+            jsonrpc: "2.0",
+            id: msg.id,
+            result: {
+              pid: process.pid,
+              home,
+              socketPath: "",
+              wsUrl: null,
+              authMode: "none",
+              serverSeq: 0,
+              activeCores: [],
+              managedWorkspaces: [],
+            },
+          }));
+        }
+      },
+    },
+  });
   try {
     const value = await plan();
     const io = new WorkspaceLauncher(value)["io"];
@@ -225,11 +310,13 @@ test("Dashboard reuse requires the same global home and rejects occupied mismatc
     home = "/tmp/different-ludens-home";
     expect(await io.dashboardReady(server.url.origin)).toBe(false);
     const occupied = new FakeServices(value);
-    occupied.occupiedDashboard = true;
+    occupied.seed("dashboard");
     await expect(new WorkspaceLauncher(value, occupied).up()).rejects.toThrow("different Ludens home");
     expect(occupied.starts).toEqual([]);
     expect(occupied.calls.some(argv => argv[2] === "--stop")).toBe(false);
-  } finally { server.stop(true); }
+  } finally {
+    server.stop(true);
+  }
 });
 
 test("managed Dashboard uses a current production build and fails before starting devices when stale", async () => {
@@ -237,8 +324,6 @@ test("managed Dashboard uses a current production build and fails before startin
   expect(value.commands.dashboard).toEqual([
     "/tmp/Source with spaces/core/bin/ludens",
     "app-server",
-    "--port",
-    "3015",
     "--static-dir",
     "/tmp/Source with spaces/app/out",
   ]);
@@ -403,7 +488,10 @@ test("init and dry-run preserve existing workspace files and never invoke servic
     expect(JSON.parse(webOnly.stdout).commands.pet).toBeUndefined();
     expect(JSON.parse(await readFile(join(desktop, "ludens.json"), "utf8")).pet).toBe(true);
     expect(await Bun.file(marker).exists()).toBe(false);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await stopLocalAppDaemon(join(directory, "global"), { stopCores: true }).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("external packages resolve workspace-relative file specs and check only executable argv", async () => {
@@ -452,7 +540,10 @@ test("external packages resolve workspace-relative file specs and check only exe
       const unavailable = await run("up");
       expect(unavailable.stderr).toContain("Missing executable fixture-emulator");
     }
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await stopLocalAppDaemon(join(directory, "global"), { stopCores: true }).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
 }, 15_000); // Real CLI startup includes two independently bounded Dashboard probes.
 
 test("failed startup preserves ready services and repeated up resumes without duplicate hosts or takeover", async () => {
@@ -659,7 +750,10 @@ test("detached background launcher preserves environment, records exit codes, an
     }
     expect(() => process.kill(grandchildPid, 0)).toThrow();
     expect(await readdir(stableCwd)).toEqual([]);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await stopLocalAppDaemon(join(directory, "global"), { stopCores: true }).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("another emulator process on a different port does not block multi-core startup", async () => {
@@ -758,7 +852,10 @@ test("a package-linked CLI initializes a workspace through mixed symlink chains"
     expect(created.workspace).toBe(await realpath(workspace));
     expect(JSON.parse(await readFile(created.configPath, "utf8")).driver).toBe("cua");
     expect(JSON.parse(await readFile(join(workspace, ".ludens/workspace.json"), "utf8")).id).toBe(created.id);
-  } finally { await rm(directory, { recursive: true, force: true }); }
+  } finally {
+    await stopLocalAppDaemon(join(directory, "global"), { stopCores: true }).catch(() => {});
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 
 test("Baseware machine bindings validate and persist across registry and workspace updates", async () => {

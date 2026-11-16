@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { JsonRpcError, JsonRpcSuccess } from "@ludens/protocol/app-rpc";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { openWorkspaceEventPool } from "../src/core/storage/event-pool.ts";
 import { clearCatalogCache } from "../src/core/query/data.ts";
@@ -21,7 +22,9 @@ import {
   stopBackgroundJob,
 } from "../src/daemon/process-manager.ts";
 import { DeviceBusyError, WorkspaceSupervisor } from "../src/daemon/supervisor.ts";
-import { handleApiRequest } from "../src/server/http-routes.ts";
+import { EventHub } from "../src/server/event-hub.ts";
+import { generateMediaTicketSecret } from "../src/server/media-ticket.ts";
+import { RpcRouter, type RpcSession } from "../src/server/rpc-router.ts";
 
 const tempRoots: string[] = [];
 
@@ -62,11 +65,24 @@ function tinyBridgeDriverSource() {
   `;
 }
 
-function callApi(
-  request: Request,
-  ctx: Parameters<typeof handleApiRequest>[2],
-): Promise<Response> {
-  return handleApiRequest(request, new URL(request.url), ctx);
+type RpcReply<T> = { ok: true; result: T } | { ok: false; error: JsonRpcError["error"] };
+
+async function callRpc<T = unknown>(
+  session: RpcSession,
+  inbox: Map<number, JsonRpcSuccess | JsonRpcError>,
+  nextId: { current: number },
+  method: string,
+  params?: unknown,
+): Promise<RpcReply<T>> {
+  const id = ++nextId.current;
+  await session.handleMessage({ jsonrpc: "2.0", id, method, params });
+  const msg = inbox.get(id);
+  inbox.delete(id);
+  if (!msg) throw new Error(`Missing RPC response for ${method}`);
+  if ("error" in msg) {
+    return { ok: false, error: msg.error };
+  }
+  return { ok: true, result: msg.result as T };
 }
 
 async function createBridgeWorkspace(
@@ -488,27 +504,45 @@ test("HTTP boundary handles 0-run cold spawn, DEVICE_BUSY preempt, service stop,
       preparedPorts: [sharedPort],
     }),
   });
-  const ctx = {
+  const eventHub = new EventHub({ home });
+  const router = new RpcRouter({
     home,
+    serverVersion: "test",
+    pid: process.pid,
+    authMode: "none",
+    mediaSecret: generateMediaTicketSecret(),
+    eventHub,
     worker,
     supervisor,
-    trustedOrigins: new Set<string>(),
-    requestShutdown: () => {},
-  };
+    getConnectionInfo: () => ({ socketPath: "", wsUrl: null, startedAt: new Date().toISOString() }),
+    scheduleShutdown: () => {},
+  });
+  const inbox = new Map<number, JsonRpcSuccess | JsonRpcError>();
+  const nextId = { current: 0 };
+  const session = router.createSession({
+    transport: "uds",
+    sendMessage: msg => {
+      if ("id" in msg && typeof msg.id === "number") {
+        inbox.set(msg.id, msg);
+      }
+    },
+  });
+  const rpc = <T = unknown>(method: string, params?: unknown) =>
+    callRpc<T>(session, inbox, nextId, method, params);
 
   try {
-    // 1. /api/catalog?includeEmpty=1 exposes workspace defaults and offline core state for 0-run workspace.
-    const catRes = await callApi(
-      new Request("http://127.0.0.1:3015/api/catalog?includeEmpty=1", { headers: { host: "127.0.0.1:3015" } }),
-      ctx,
-    );
-    expect(catRes.status).toBe(200);
-    const projects = (await catRes.json()) as Array<{
-      id: string;
-      runs: unknown[];
-      core?: { online: boolean; launchedBy?: string; mode?: string };
-      defaults?: { model?: string; serviceTier?: string; effort?: string; maxSeconds?: number };
-    }>;
+    // 1. catalog/get (includeEmpty: true) exposes workspace defaults and offline core state for 0-run workspace.
+    const catRes = await rpc<
+      Array<{
+        id: string;
+        runs: unknown[];
+        core?: { online: boolean; launchedBy?: string; mode?: string };
+        defaults?: { model?: string; serviceTier?: string; effort?: string; maxSeconds?: number };
+      }>
+    >("catalog/get", { includeEmpty: true });
+    expect(catRes.ok).toBe(true);
+    if (!catRes.ok) throw new Error(catRes.error.message);
+    const projects = catRes.result;
     const coldProj = projects.find(p => p.id === wsCold.id)!;
     expect(coldProj.runs).toEqual([]);
     expect(coldProj.core).toEqual({ online: false });
@@ -519,136 +553,78 @@ test("HTTP boundary handles 0-run cold spawn, DEVICE_BUSY preempt, service stop,
       maxSeconds: 900,
     });
 
-    // 2. POST /api/runtime/control (auto_on) on offline 0-run workspace cold-spawns Core,
+    // 2. runtime/control (auto_on) on offline 0-run workspace cold-spawns Core,
     //    strips stale runId/expectedEpoch, enters auto, and returns spawned: true.
-    const spawnRes = await callApi(
-      new Request("http://127.0.0.1:3015/api/runtime/control", {
-        method: "POST",
-        headers: {
-          host: "127.0.0.1:3015",
-          origin: "http://127.0.0.1:3015",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          project: wsCold.id,
-          workspace: wsCold.workspace,
-          command: { action: "auto_on", message: "start play", runId: "stale-run", expectedEpoch: "stale-ep" },
-        }),
-      }),
-      ctx,
-    );
-    expect(spawnRes.status).toBe(200);
-    const spawnJson = (await spawnRes.json()) as { mode: string; spawned?: boolean; launchedBy?: string };
-    expect(spawnJson).toMatchObject({ mode: "auto", spawned: true, launchedBy: "app" });
+    const spawnRes = await rpc<{ mode: string; spawned?: boolean; launchedBy?: string }>("runtime/control", {
+      project: wsCold.id,
+      workspace: wsCold.workspace,
+      command: { action: "auto_on", message: "start play", runId: "stale-run", expectedEpoch: "stale-ep" },
+    });
+    expect(spawnRes.ok).toBe(true);
+    if (!spawnRes.ok) throw new Error(spawnRes.error.message);
+    expect(spawnRes.result).toMatchObject({ mode: "auto", spawned: true, launchedBy: "app" });
 
     // 3. Catalog now shows wsCold Core online even with 0 historical run directories.
     await worker.call("clearCatalogCache", []);
-    const catOnlineRes = await callApi(
-      new Request("http://127.0.0.1:3015/api/catalog?includeEmpty=1", { headers: { host: "127.0.0.1:3015" } }),
-      ctx,
-    );
-    const onlineProjects = (await catOnlineRes.json()) as typeof projects;
-    expect(onlineProjects.find(p => p.id === wsCold.id)?.core).toMatchObject({
+    const catOnlineRes = await rpc<typeof projects>("catalog/get", { includeEmpty: true });
+    expect(catOnlineRes.ok).toBe(true);
+    if (!catOnlineRes.ok) throw new Error(catOnlineRes.error.message);
+    expect(catOnlineRes.result.find(p => p.id === wsCold.id)?.core).toMatchObject({
       online: true,
       mode: "auto",
       launchedBy: "app",
     });
 
-    // 4. POST /api/runtime/control on wsBusy without preempt returns 409 DEVICE_BUSY + conflict;
+    // 4. runtime/control on wsBusy without preempt returns -32009 CONFLICT (DEVICE_BUSY + conflict);
     //    retrying with preempt: true steals device and returns spawned: true.
-    const conflictRes = await callApi(
-      new Request("http://127.0.0.1:3015/api/runtime/control", {
-        method: "POST",
-        headers: {
-          host: "127.0.0.1:3015",
-          origin: "http://127.0.0.1:3015",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          project: wsBusy.id,
-          workspace: wsBusy.workspace,
-          command: { action: "auto_on" },
-        }),
-      }),
-      ctx,
-    );
-    expect(conflictRes.status).toBe(409);
-    const conflictJson = (await conflictRes.json()) as { code: string; conflict: { holderProjectId: string } };
-    expect(conflictJson.code).toBe("DEVICE_BUSY");
-    expect(conflictJson.conflict.holderProjectId).toBe(wsCold.id);
+    const conflictRes = await rpc("runtime/control", {
+      project: wsBusy.id,
+      workspace: wsBusy.workspace,
+      command: { action: "auto_on" },
+    });
+    expect(conflictRes.ok).toBe(false);
+    if (conflictRes.ok) throw new Error("Expected conflict");
+    expect(conflictRes.error.code).toBe(-32009);
+    const conflictData = conflictRes.error.data as { code: string; conflict: { holderProjectId: string } };
+    expect(conflictData.code).toBe("DEVICE_BUSY");
+    expect(conflictData.conflict.holderProjectId).toBe(wsCold.id);
 
-    const preemptHttpRes = await callApi(
-      new Request("http://127.0.0.1:3015/api/runtime/control", {
-        method: "POST",
-        headers: {
-          host: "127.0.0.1:3015",
-          origin: "http://127.0.0.1:3015",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          project: wsBusy.id,
-          workspace: wsBusy.workspace,
-          command: { action: "auto_on" },
-          preempt: true,
-        }),
-      }),
-      ctx,
-    );
-    expect(preemptHttpRes.status).toBe(200);
-    expect(await preemptHttpRes.json()).toMatchObject({ mode: "auto", spawned: true });
+    const preemptRes = await rpc<{ mode: string; spawned?: boolean }>("runtime/control", {
+      project: wsBusy.id,
+      workspace: wsBusy.workspace,
+      command: { action: "auto_on" },
+      preempt: true,
+    });
+    expect(preemptRes.ok).toBe(true);
+    if (!preemptRes.ok) throw new Error(preemptRes.error.message);
+    expect(preemptRes.result).toMatchObject({ mode: "auto", spawned: true });
 
-    // 5. POST /api/workspaces/service stops wsBusy, and POST /api/event-pool with reply+resumeAuto cold-spawns it back.
-    const stopRes = await callApi(
-      new Request("http://127.0.0.1:3015/api/workspaces/service", {
-        method: "POST",
-        headers: {
-          host: "127.0.0.1:3015",
-          origin: "http://127.0.0.1:3015",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ project: wsBusy.id, service: "host", action: "stop" }),
-      }),
-      ctx,
-    );
-    expect(stopRes.status).toBe(200);
-    expect(await stopRes.json()).toMatchObject({ ok: true, operation: "down" });
+    // 5. workspaces/serviceControl stops wsBusy, and eventPool/mutate with reply+resumeAuto cold-spawns it back.
+    const stopRes = await rpc("workspaces/serviceControl", {
+      workspaceId: wsBusy.id,
+      services: ["host"],
+      action: "down",
+    });
+    expect(stopRes.ok).toBe(true);
+    if (!stopRes.ok) throw new Error(stopRes.error.message);
+    expect(stopRes.result).toMatchObject({ ok: true, operation: "down" });
 
     const store = await openWorkspaceEventPool(wsBusy.workspace, home);
     const outbound = await store.emitOutbound({ kind: "help_request", text: "need input" });
-    const poolSpawnRes = await callApi(
-      new Request("http://127.0.0.1:3015/api/event-pool", {
-        method: "POST",
-        headers: {
-          host: "127.0.0.1:3015",
-          origin: "http://127.0.0.1:3015",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({
-          project: wsBusy.id,
-          workspace: wsBusy.workspace,
-          command: { action: "reply", replyTo: outbound.event.id, text: "continue", resumeAuto: true },
-        }),
-      }),
-      ctx,
-    );
-    expect(poolSpawnRes.status).toBe(200);
-    expect(await poolSpawnRes.json()).toMatchObject({ hostOnline: true, spawned: true });
+    const poolSpawnRes = await rpc("eventPool/mutate", {
+      project: wsBusy.id,
+      workspace: wsBusy.workspace,
+      command: { action: "reply", replyTo: outbound.event.id, text: "continue", resumeAuto: true },
+    });
+    expect(poolSpawnRes.ok).toBe(true);
+    if (!poolSpawnRes.ok) throw new Error(poolSpawnRes.error.message);
+    expect(poolSpawnRes.result).toMatchObject({ hostOnline: true, spawned: true });
 
     // 6. !auto pet target resets targetConfigured back to false and supports autoFollowing status.
     await setPetTarget(wsBusy.id, false, home);
     expect((await petState(home)).targetConfigured).toBe(true);
-    await callApi(
-      new Request("http://127.0.0.1:3015/api/pet", {
-        method: "PUT",
-        headers: {
-          host: "127.0.0.1:3015",
-          origin: "http://127.0.0.1:3015",
-          "content-type": "application/json",
-        },
-        body: JSON.stringify({ project: PET_AUTO_TARGET }),
-      }),
-      ctx,
-    );
+    const clearPetRes = await rpc("pet/setTarget", { project: PET_AUTO_TARGET });
+    expect(clearPetRes.ok).toBe(true);
     await recordPetConsumer(
       {
         instanceId: "pet-1",
@@ -666,6 +642,8 @@ test("HTTP boundary handles 0-run cold spawn, DEVICE_BUSY preempt, service stop,
     expect(latestPet).toMatchObject({ target: null, targetConfigured: false, connected: true, autoFollowing: true });
     expect(petStatusKey(latestPet)).toBe("autoWaiting");
   } finally {
+    session.close();
+    eventHub.close();
     await supervisor.shutdownAll({ emergency: true });
     await worker.close();
   }

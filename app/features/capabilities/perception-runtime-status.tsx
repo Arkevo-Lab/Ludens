@@ -10,6 +10,7 @@ import {
   SettingsSection,
 } from "@/components/ui/settings-primitives";
 import { useTranslations } from "@/lib/locale";
+import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import type { PerceptionRuntimeSnapshot } from "@/lib/perception-config";
 import { PERCEPTION_KEYS, type SavedPerception } from "@/features/capabilities/perception-draft";
 
@@ -17,17 +18,23 @@ export function PerceptionRuntimeStatus({ project, workspace, settings, revision
   project: string; workspace: string; settings: SavedPerception | null; revision: number; saving: boolean;
 }) {
   const t = useTranslations("perceptionSettings");
+  const rpc = useOptionalLudensRpc();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
   const [result, setResult] = useState<{ value: PerceptionRuntimeSnapshot; revision: number } | null>(null);
   const [loading, setLoading] = useState(false), [error, setError] = useState("");
   const request = useRef<AbortController | null>(null);
   const check = async () => {
     if (request.current || saving) return;
+    const caller = rpcRef.current;
+    if (!caller) { setError("RPC client is unavailable"); return; }
     const controller = new AbortController(); request.current = controller; setLoading(true);
     try {
-      const response = await fetch("/api/perception-config/runtime?" + new URLSearchParams({ project, workspace }),
-        { cache: "no-store", signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]) });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error ?? `HTTP ${response.status}`);
+      const value = (await caller.call(
+        "perception/runtime",
+        { project, workspace },
+        { signal: controller.signal, timeoutMs: 10_000 },
+      )) as unknown as PerceptionRuntimeSnapshot;
       if (!controller.signal.aborted && request.current === controller) { setResult({ value, revision }); setError(""); }
     } catch (cause) {
       if (!controller.signal.aborted && request.current === controller) setError(cause instanceof Error ? cause.message : String(cause));
@@ -36,7 +43,7 @@ export function PerceptionRuntimeStatus({ project, workspace, settings, revision
   useEffect(() => {
     void check();
     return () => { const controller = request.current; request.current = null; controller?.abort(); };
-  }, [project, workspace]);
+  }, [project, workspace, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
   const perception = result?.value.perception, values = perception?.values;
   const stale = !!result && (result.revision !== revision || !!error);
   const current = perception?.valueStatus === "current" && !stale;

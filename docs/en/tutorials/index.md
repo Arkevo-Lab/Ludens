@@ -8,7 +8,7 @@ If you want to understand the core design—including **Shiori** (Ludens's Agent
 
 | Step | Guide | What You Will Accomplish |
 | --- | --- | --- |
-| 1 | [Quickstart](quickstart.md) | Install dependencies, launch Ludens via Desktop App, local Console, or Headless CLI, start **Auto Run**, steer via the Event Pool, and **Reclaim Control** |
+| 1 | [Quickstart](quickstart.md) | Install dependencies, launch Ludens via the zero-port Desktop App, hosted Web/Remote SPA, unified CLI (`ludens daemon` / `--remote`), or mobile multi-target Console, start **Auto Run**, steer via the Event Pool, and **Reclaim Control** |
 | 2 | [Devices & Baseware](devices.md) | Configure built-in CUA desktop automation and external driver packages across `stdio`, `bridge`, `ssh`, `http`, and `sse`, and route tools across multiple machines |
 | 3 | [Workspace, Capabilities & Self-Verification](workspace.md) | Organize `ludens.json`, `MEMORY.md`, `skills/`, and `perception.py`; build `@capability`, `@eval_env`, and `@eval_capability` loops; run `ludens eval` and inspect results in **Capabilities** |
 | 4 | [Perception, Action & Performance Tuning](perception-and-action.md) | Write and hot-reload resident `perception.py` state machines, query 30 Hz fMP4 archives with `Client.observe()`, configure multimodal transport and image URL offloading, and tune latency |

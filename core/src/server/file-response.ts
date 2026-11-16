@@ -21,7 +21,11 @@ export function byteRange(value: string | null, size: number): { start: number; 
 }
 
 /** The caller authorizes and canonicalizes the file; no whole-file Buffer is created here. */
-export async function fileResponse(request: Request, media: FileMedia): Promise<Response> {
+export async function fileResponse(
+  request: Request,
+  media: FileMedia,
+  extraHeaders?: HeadersInit,
+): Promise<Response> {
   const handle = await open(media.file, "r");
   let ownsHandle = true;
   try {
@@ -38,6 +42,11 @@ export async function fileResponse(request: Request, media: FileMedia): Promise<
       "Cache-Control": media.cacheControl ?? "no-store",
       "X-Content-Type-Options": "nosniff",
     });
+    if (extraHeaders) {
+      new Headers(extraHeaders).forEach((value, key) => {
+        headers.set(key, value);
+      });
+    }
     let range: ReturnType<typeof byteRange>;
     try {
       range = byteRange(request.headers.get("range"), size);

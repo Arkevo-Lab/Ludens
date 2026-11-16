@@ -167,6 +167,10 @@ export function useAnimatedNativeDialog<T = true>(
 
     if (dialog.open) {
       dialog.dataset.closing = "true";
+      if (typeof dialog.getAnimations === "function" && dialog.getAnimations().length === 0) {
+        finishClose();
+        return;
+      }
       dialog.addEventListener("transitionend", onTransitionEnd);
     }
 

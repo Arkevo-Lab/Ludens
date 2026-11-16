@@ -97,7 +97,7 @@ Quick reference of core event contracts:
 
 ### 1. Console Worker and three-layer rebuildable index (`.dashboard-index/`)
 
-The Console isolates log parsing and index building in a dedicated Node Worker fully outside the Next.js request context. Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.ludens/archive/`, or `.ludens/timeline/`), with three parts:
+The Console isolates log parsing and index building inside a dedicated Node Worker isolated from request/RPC dispatch in `ludens app-server` (zero Next.js runtime). Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.ludens/archive/`, or `.ludens/timeline/`), with three parts:
 
 1. **Source-event location and relation catalog**: each event keeps only its file byte offset, timestamp (taken as `origin.at ?? at`), type, and call identity; model, Span, action, and observation relation tables all point at source-event byte offsets.
 2. **Activity on-demand display recipes**: each display block (Thinking / Text / Tool / System / Diagnostic) keeps only the source-event offsets or `streams/` cutoff byte counts; text is assembled from originals on recipe only when the frontend or pet requests it, never redundantly stored in the index.
@@ -106,18 +106,18 @@ The Console isolates log parsing and index building in a dedicated Node Worker f
 ### 2. Page cache and cold-history builder subprocess
 
 - **Page cache and lease eviction**: the index pages to disk at most 1024 entries or 256 KiB per page. The query Worker keeps a shared page cache of **256 MiB** by default (tunable via `LUDENS_APP_INDEX_CACHE_BYTES`), retains at most **3** idle runs (`LUDENS_APP_INDEX_MAX_RUNS`), and releases memory after **5 minutes** idle (`LUDENS_APP_INDEX_IDLE_MS`) with no in-flight read leases.
-- **Single-instance cold builder**: on first opening a historical large run with no index yet, the query Worker spawns a globally unique temporary Builder subprocess (target working set **2 GiB** by default, controlled by `LUDENS_APP_BUILD_BYTES`), which single-pass scans the event stream at a fixed cutoff and batch-generates `generations/<id>/`, then publishes via atomic replacement of `.dashboard-index/active.json` and exits to return memory to the OS. During the build, endpoints return HTTP `202 ARCHIVE_PREPARING` with live progress; closing the browser tab only cancels the current HTTP query and never interrupts the bounded background build.
+- **Single-instance cold builder**: on first opening a historical large run with no index yet, the query Worker spawns a globally unique temporary Builder subprocess (target working set **2 GiB** by default, controlled by `LUDENS_APP_BUILD_BYTES`), which single-pass scans the event stream at a fixed cutoff and batch-generates `generations/<id>/`, then publishes via atomic replacement of `.dashboard-index/active.json` and exits to return memory to the OS. During the build, JSON-RPC queries return `CONFLICT` (`-32009`, `data.code: "ARCHIVE_PREPARING"`) with live progress; disconnecting cancels only the caller's request and never interrupts the bounded background build.
 
-### 3. Console HTTP API and Desktop Pet incremental follow
+### 3. JSON-RPC Projection APIs, `EventHub` Push, and Desktop Pet Follow
 
-- **`/api/activity`**: `changes` (opaque-cursor incremental block updates, shared by web and the Desktop Pet), `history` (paged search by category and full-text keywords), and `block` (single-block detail expansion). The Desktop Pet only consumes live `changes` deltas of the followed workspace's latest run, recording its own consumption watermark under `workspace/logs/consumers/`.
-- **`/api/diagnostics`**: dedicated paged query of `full`-mode diagnostic events by `epoch`, time window, `traceId / spanId / actionId` (max 500 entries per page), never mixed into the regular Activity stream or pet bubbles.
+- **`activity/get` & `events/subscribe`**: serves `changes` (cursor incremental block updates shared by the Vite SPA Console and Desktop Pet `PetSessionCoordinator`), `history` (paged search by category and full-text keywords), and `block` (single-block detail expansion). Live updates are pushed via `events/subscribe` + `sinceSeq` replay over `EventHub`'s `1024`-event ring buffer, while `observation` events are published after media disk writes are verified; Desktop Pet consumes `changes` deltas over UDS RPC and records its consumption watermark via `pet/recordConsumer` under `workspace/logs/consumers/`.
+- **`diagnostics/events`**: dedicated JSON-RPC paged query of `full`-mode diagnostic events by `epoch`, time window, `traceId / spanId / actionId` (max 500 entries per page), never mixed into the regular Activity stream or pet bubbles.
 
 ## Experience replay
 
 ### 1. Spacetime player and frame read-ahead buffer
 
-The Console replay view (`/api/replay`) aligns `.ludens/timeline/` continuous-sample frames, device-action spans (`action_start / action_end`), model reasoning, and tool calls on one workspace wall-clock timeline:
+The Console replay view (`replay/get` JSON-RPC + dual-plane `MediaResolver`: `ludens-media://local/media?...` via UDS `media/resolve` in Desktop, or HMAC-signed `/media?...&mt=<ticket>` with `206 Partial Content` `Range` support in Web/Remote) aligns `.ludens/timeline/` continuous-sample frames, device-action spans (`action_start / action_end`), model reasoning, and tool calls on one workspace wall-clock timeline:
 
 - **Time windows and dual-frame read-ahead**: events page by at most 60-second windows with 500-entry cursors; frames use a decode-buffer Hook — atomically switching only once all screen frames for the target moment are loaded, while reading ahead at most 2 frames (max 8 images / 32 MiB read-ahead cache), releasing image memory immediately on workspace switch or page leave.
 - **Clock and decoder state**: explicit timeline moves increment a clock revision and align the decoder exactly; committed URL positions are acknowledged so their echo cannot create a second seek. Continuous playback tolerates transient drift and ordinary decoder waits. Any actual `waiting` event freezes both the shared clock and decoder until recovery, even if `readyState` still reports enough data. Only drift greater than 1 second that persists for 1 second while playing and globally ready triggers a resync; precise sparse-tail recovery is restricted to the final 100 ms sample region.

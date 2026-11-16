@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
+  LUDENS_RPC_CHANNELS,
+  type DesktopRpcBridge,
+  type DesktopRpcStatus,
+} from './rpc-channels.js'
+import {
   DESKTOP_TITLEBAR_HEIGHT,
   normalizeDesktopPlatform,
   resolveCaptionStyle,
@@ -11,6 +16,21 @@ function on(channel: string, callback: (value: any) => void) {
   return () => ipcRenderer.removeListener(channel, listener)
 }
 
+function sanitizeRpcStatus(value: unknown): DesktopRpcStatus | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as { state?: unknown; error?: unknown }
+  if (
+    candidate.state !== 'connecting' &&
+    candidate.state !== 'connected' &&
+    candidate.state !== 'disconnected'
+  ) {
+    return null
+  }
+  return typeof candidate.error === 'string' && candidate.error.length > 0
+    ? { state: candidate.state, error: candidate.error }
+    : { state: candidate.state }
+}
+
 const platform = normalizeDesktopPlatform(process.platform)
 const initialState = {
   platform,
@@ -18,8 +38,43 @@ const initialState = {
   titlebarHeight: DESKTOP_TITLEBAR_HEIGHT,
 } as const
 
-// Narrow Pet settings, activity, and window-chrome IPC bridge; no general filesystem access.
+const rpcBridge: DesktopRpcBridge = {
+  send: (frameJson: string) => {
+    if (typeof frameJson !== 'string') return
+    ipcRenderer.send(LUDENS_RPC_CHANNELS.send, frameJson)
+  },
+  onMessage: (callback: (frameJson: string) => void) =>
+    on(LUDENS_RPC_CHANNELS.message, value => {
+      if (typeof value === 'string') callback(value)
+    }),
+  onStatus: (callback: (status: DesktopRpcStatus) => void) => {
+    let active = true
+    let receivedPush = false
+    const unsubscribe = on(LUDENS_RPC_CHANNELS.status, value => {
+      if (!active) return
+      const parsed = sanitizeRpcStatus(value)
+      if (!parsed) return
+      receivedPush = true
+      callback(parsed)
+    })
+    void ipcRenderer.invoke(LUDENS_RPC_CHANNELS.ready).then(value => {
+      if (!active || receivedPush) return
+      const parsed = sanitizeRpcStatus(value)
+      if (parsed) callback(parsed)
+    }).catch(() => {})
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  },
+  reconnect: async () => {
+    await ipcRenderer.invoke(LUDENS_RPC_CHANNELS.reconnect)
+  },
+}
+
+// Narrow UDS RPC relay, Pet settings, activity, and window-chrome IPC bridge; no node:net or fs exposure.
 contextBridge.exposeInMainWorld('ludens', {
+  rpc: rpcBridge,
   companion: {
     getSound: () => ipcRenderer.invoke('ludens:companion:sound:get'),
     updateSound: (value: unknown) => ipcRenderer.invoke('ludens:companion:sound:update', value),
