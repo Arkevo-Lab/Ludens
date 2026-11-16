@@ -105,7 +105,7 @@ export class LudensSource implements LudensActivitySource {
     onSnapshot(snapshot: LudensPetSnapshot): void
     record?: ConsumerRecord
   }) {
-    this.workspace = realpathSync(options.workspace)
+    this.workspace = realpathSync.native(options.workspace)
     this.project = ludensProjectId(this.workspace)
     this.dashboardUrl = originKey(options.dashboardUrl) ?? new URL(options.dashboardUrl).origin
     this.socketPath = options.socketPath
@@ -176,7 +176,7 @@ export class LudensSource implements LudensActivitySource {
       if (page.current.workspace) {
         let canonicalWorkspace = page.current.workspace
         try {
-          canonicalWorkspace = realpathSync(page.current.workspace)
+          canonicalWorkspace = realpathSync.native(page.current.workspace)
         } catch {}
         if (canonicalWorkspace !== this.workspace) {
           throw new Error('日志服务返回了非当前工作区的状态')

@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
+import { pythonExecutable } from "@ludens/protocol/python";
 import { chmod, mkdtemp, mkdir, realpath, rm, stat, utimes, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -165,7 +167,7 @@ test("invocation validates before import, loads local helpers, and refreshes edi
     const helperPath = join(directory, "tools", "helper.py");
     await writeFile(helperPath, "def increment(value):\n    return value + 1\n");
     const helperStat = await stat(helperPath);
-    const compile = Bun.spawn(["python3", "-m", "py_compile", helperPath], {stdout: "ignore", stderr: "pipe"});
+    const compile = Bun.spawn([pythonExecutable(), "-m", "py_compile", helperPath], {stdout: "ignore", stderr: "pipe"});
     expect(await compile.exited).toBe(0);
     const path = join(directory, "tools", "actions.py");
     const source = `from ludens_tools import capability
@@ -210,7 +212,7 @@ def add(value: int, enabled: bool = True):
 test("workspace capabilities use the Baseware Python client with the caller's epoch and trace", async () => {
   const directory = await workspace();
   // Keep the Unix socket path short on macOS, where /var/folders temp paths are long.
-  const socketPath = `/tmp/ludens-py-${crypto.randomUUID()}.sock`;
+  const socketPath = testSocketPath("py");
   const requests: any[] = [];
   let connections = 0;
   const server = createServer(socket => {
@@ -297,9 +299,12 @@ test("Python spawn failure closes discovery and invocation spans without losing 
   const events: {type: string; data: any; trace: any}[] = [];
   const parent = {traceId: "1234567890abcdef1234567890abcdef", spanId: "1234567890abcdef"};
   try {
-    const executable = join(directory, "python");
-    await writeFile(executable, "#!/bin/sh\nexec python3 \"$@\"\n");
-    await chmod(executable, 0o755);
+    const executable = join(directory, process.platform === "win32" ? "python.cmd" : "python");
+    if (process.platform === "win32") await writeFile(executable, `@echo off\r\n"${pythonExecutable()}" %*\r\n`);
+    else {
+      await writeFile(executable, `#!/bin/sh\nexec "${pythonExecutable()}" "$@"\n`);
+      await chmod(executable, 0o755);
+    }
     await writeFile(join(directory, "actions.py"), 'from ludens_tools import capability\n@capability\ndef echo(value: str = "hi"):\n    """Return the supplied text."""\n    return value\n');
     const registry = new PythonCapabilities(directory, executable, (type, data, trace) => events.push({type, data, trace}));
     const {capabilities: [capability]} = await registry.discover(undefined, parent);
@@ -321,7 +326,7 @@ test("Python spawn failure closes discovery and invocation spans without losing 
 
 test("Python calls the real Baseware service using the persistent owner's lease and JSON observations", async () => {
   const directory = await workspace();
-  const socketPath = `/tmp/ludens-py-${crypto.randomUUID()}.sock`;
+  const socketPath = testSocketPath("py");
   const events: {type: string; data: any; trace: any}[] = [];
   const actions: Record<string, unknown>[] = [];
   let acquired = 0;

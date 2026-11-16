@@ -34,11 +34,12 @@ export class Workspace {
     const files: Record<string, string> = {};
     const contents = new Map<string, string>();
     for await (const file of new Bun.Glob("skills/**/*").scan({ cwd: this.path, onlyFiles: true, dot: true })) {
-      const data = await readFile(join(this.path, file));
+      const normalized = file.replaceAll("\\", "/");
+      const data = await readFile(join(this.path, normalized));
       const version = hash(data);
-      files[file] = version;
+      files[normalized] = version;
       await this.save(version, data);
-      if (/^skills\/[^/]+\/SKILL\.md$/.test(file)) contents.set(file, data.toString("utf8"));
+      if (/^skills\/[^/]+\/SKILL\.md$/.test(normalized)) contents.set(normalized, data.toString("utf8"));
     }
     const { manifest, version } = await this.saveManifest(files);
     const skills: SkillIndex["skills"] = [];
@@ -56,11 +57,12 @@ export class Workspace {
     const memoryManifest: Record<string, string> = {};
     const memoryFiles: SkillIndex["memory"]["files"] = [];
     for await (const file of new Bun.Glob("memory/**/*").scan({ cwd: this.path, onlyFiles: true, dot: true })) {
-      const data = await readFile(join(this.path, file));
+      const normalized = file.replaceAll("\\", "/");
+      const data = await readFile(join(this.path, normalized));
       const version = hash(data);
-      memoryManifest[file] = version;
+      memoryManifest[normalized] = version;
       await this.save(version, data);
-      memoryFiles.push({ path: join(this.path, file), version, bytes: data.byteLength });
+      memoryFiles.push({ path: join(this.path, normalized), version, bytes: data.byteLength });
     }
     const { version: memoryVersion } = await this.saveManifest(memoryManifest);
     const memory = { version: memoryVersion, files: memoryFiles.sort((a, b) => a.path.localeCompare(b.path)) };

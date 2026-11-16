@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, readdir, realpath, rm, writeFile } from "node
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { resolveDriver } from "../src/drivers/loader.ts";
 
 test("default driver cache uses Ludens home independently of checkout and XDG state", async () => {
@@ -64,8 +65,8 @@ test("GitHub caches preserve transport and record installed commits rather than 
       console.log(JSON.stringify({ version: registration.version, source: registration.source }));`;
     const child = Bun.spawn([process.execPath, "--eval", source], { cwd: root, stdout: "pipe", stderr: "pipe",
       env: { ...process.env, GIT_CONFIG_COUNT: "2",
-        GIT_CONFIG_KEY_0: `url.file://${repositories}/.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/org/",
-        GIT_CONFIG_KEY_1: `url.file://${sshRepositories}/.insteadOf`, GIT_CONFIG_VALUE_1: "git@github.com:org/" } });
+        GIT_CONFIG_KEY_0: `url.${pathToFileURL(repositories).href}/.insteadOf`, GIT_CONFIG_VALUE_0: "https://github.com/org/",
+        GIT_CONFIG_KEY_1: `url.${pathToFileURL(sshRepositories).href}/.insteadOf`, GIT_CONFIG_VALUE_1: "git@github.com:org/" } });
     const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
     expect(code, stderr).toBe(expectedCode);
     return expectedCode === 0 ? JSON.parse(stdout) : stderr;

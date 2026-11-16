@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import { createServer, type Socket } from 'node:net'
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -79,7 +80,9 @@ afterEach(async () => {
 describe('DesktopUdsRpcRelay', () => {
   it('relays NDJSON lines bidirectionally over a real Unix socket and validates sender trust', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'ludens-rpc-relay-'))
-    const socketPath = join(dir, 'test.sock')
+    const socketPath = process.platform === 'win32'
+      ? `\\\\.\\pipe\\ludens-test-${randomUUID()}`
+      : join(dir, 'test.sock')
     const serverSockets: Socket[] = []
     const receivedOnServer: string[] = []
 
@@ -168,7 +171,7 @@ describe('DesktopUdsRpcRelay', () => {
     const relay = new DesktopUdsRpcRelay({
       resolveSocketPath: () => {
         resolveCount += 1
-        return `/tmp/mock-${resolveCount}.sock`
+        return join(tmpdir(), `mock-${resolveCount}.sock`)
       },
       isTrustedSender: event => event === trustedEvent,
       getTargetWebContents: () => webContents,

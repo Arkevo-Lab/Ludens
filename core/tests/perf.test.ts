@@ -75,7 +75,7 @@ for (const suite of ["handoff", "perception"] as const) {
 
 test("video storage perf meets its budgets in the framework Python environment", async () => {
   await withDirectory("video", async directory => {
-    const result = spawnSync("uv", ["run", "--project", "python", "--frozen", "python", "src/perf/video-storage.py",
+    const result = spawnSync(Bun.which("uv") ?? "uv", ["run", "--project", "python", "--frozen", "python", "src/perf/video-storage.py",
       "--records", "120", "--rate", "24", "--output", join(directory, "video")],
       { cwd: core, encoding: "utf8", env: process.env });
     expect(result.stderr).toBe("");

@@ -1,5 +1,5 @@
 import { readFile, realpath, open } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { createHash } from "node:crypto";
 import { catalog, hostRequest, openRun } from "./data";
 import { prepareArchive } from "./prepare-run";
@@ -244,6 +244,8 @@ export async function activityBlocks(path: string, events: Event[], workspace?: 
 }
 function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
   const { data } = event;
+  const sourceId = event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq;
+  const blockId = `event:${basename(path)}:${sourceId}`;
     const raised = event.type === "python_call_end" && data.outcome === "error";
     const failed = !raised && (data.outcome === "error"
       || (event.type === "perception_status" && data.state === "error") || (data.outcome !== "cancelled" && !data.aborted
@@ -251,11 +253,10 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
     const system = failed || event.type === "control" || event.type === "control_budget" || ["perception_status", "perception_fault", "perception_fault_end"].includes(event.type)
     || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
     || event.type.startsWith("background_") || event.type.includes("compaction") || event.type === "run_end";
-  if (event.type === "user_message" && typeof data?.text === "string") return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`,
+  if (event.type === "user_message" && typeof data?.text === "string") return { id: blockId,
     kind: "text" as const, at: event.at, title: data.mode === "steer" ? "Steer" : "User",
     ...provenance(event), status: "complete" as const };
   if (event.type === "pool_event" && data?.action === "created" && data?.event && typeof data.event.text === "string") {
-    const blockId = `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`;
     const poolItem = data.event as { direction?: string; kind?: string };
     const title = poolItem.direction === "inbound"
       ? (poolItem.kind === "reply" ? "Reply" : "Event")
@@ -263,10 +264,10 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
     return { id: blockId, kind: "text" as const, at: event.at, title, ...provenance(event), status: "complete" as const };
   }
   if (event.type === "pool_event" && data?.action === "handled") {
-    return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`,
+    return { id: blockId,
       kind: "system" as const, at: event.at, title: "pool_receipt", ...provenance(event), status: "complete" as const };
   }
-  return { id: `event:${path.split("/").at(-1)}:${(event.serviceId ? event.origin?.eventId ?? `${event.serviceId}:${event.seq}` : event.seq)}`, kind: system ? "system" : "diagnostic",
+  return { id: blockId, kind: system ? "system" : "diagnostic",
     at: event.at, title: event.type, ...provenance(event), status: failed ? "error" : "complete",
     ...(raised ? { outcome: "raised" as const } : {}) };
 }
@@ -832,9 +833,9 @@ export function activityProgress(index: LogIndex) {
 export async function createActivityReducer(index: LogIndex, options: {
   cold?: boolean; signal?: AbortSignal; streamLimits?: ReadonlyMap<string, number>;
 } = {}) {
-  if (index.meta("activitySemantics") !== "10") {
+  if (index.meta("activitySemantics") !== "11") {
     index.resetActivity(); index.resetStores(["activity-model-ends", "activity-deliveries"]);
-    index.setMeta("activitySemantics", "10"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
+    index.setMeta("activitySemantics", "11"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
   }
   let position = Number(index.meta("activityPosition") ?? 0);
   const current = new Map<string, CurrentState>();

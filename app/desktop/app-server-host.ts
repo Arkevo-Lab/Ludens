@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, posix, resolve, win32 } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   ensureLocalAppDaemon,
@@ -56,29 +56,35 @@ export interface AppServerHostOptions extends PathResolutionOptions {
 
 const DEFAULT_HERE = dirname(fileURLToPath(import.meta.url))
 
+function pathApi(platform: NodeJS.Platform = process.platform) {
+  return platform === 'win32' ? win32 : posix
+}
+
 export function resolveStaticDir(options: PathResolutionOptions = {}): string {
+  const pathMod = pathApi(options.platform)
   const here = options.here ?? DEFAULT_HERE
   const exists = options.exists ?? existsSync
   const envDir = (options.env ?? process.env).LUDENS_STATIC_DIR?.trim()
-  if (envDir) return resolve(envDir)
+  if (envDir) return pathMod.resolve(envDir)
 
   const candidates = [
-    options.resourcesPath ? join(options.resourcesPath, 'out') : undefined,
-    resolve(here, '../../out'),
-    resolve(here, '../out'),
+    options.resourcesPath ? pathMod.join(options.resourcesPath, 'out') : undefined,
+    pathMod.resolve(here, '../../out'),
+    pathMod.resolve(here, '../out'),
   ].filter((candidate): candidate is string => Boolean(candidate))
 
   for (const candidate of candidates) {
-    if (exists(join(candidate, 'index.html'))) return candidate
+    if (exists(pathMod.join(candidate, 'index.html'))) return candidate
   }
   for (const candidate of candidates) {
     if (exists(candidate)) return candidate
   }
-  return resolve(here, '../../out')
+  return pathMod.resolve(here, '../../out')
 }
 
 export function resolveBunExecutable(options: PathResolutionOptions = {}): string {
   const platform = options.platform ?? process.platform
+  const pathMod = pathApi(platform)
   const env = options.env ?? process.env
   const home = options.homeDir ?? homedir()
   const exists = options.exists ?? existsSync
@@ -89,12 +95,12 @@ export function resolveBunExecutable(options: PathResolutionOptions = {}): strin
   const sep = platform === 'win32' ? ';' : ':'
   const pathEntries = (env.PATH ?? '').split(sep).filter(Boolean)
   for (const dir of pathEntries) {
-    const candidate = join(dir, binName)
+    const candidate = pathMod.join(dir, binName)
     if (exists(candidate)) return candidate
   }
 
   const fallbacks = [
-    join(home, '.bun', 'bin', binName),
+    pathMod.join(home, '.bun', 'bin', binName),
     ...(platform === 'win32' ? [] : ['/opt/homebrew/bin/bun', '/usr/local/bin/bun']),
   ]
   for (const candidate of fallbacks) {
@@ -105,11 +111,12 @@ export function resolveBunExecutable(options: PathResolutionOptions = {}): strin
 }
 
 export function resolveRepoCoreEntry(options: PathResolutionOptions = {}): string {
+  const pathMod = pathApi(options.platform)
   const here = options.here ?? DEFAULT_HERE
   const exists = options.exists ?? existsSync
   const candidates = [
-    resolve(here, '../../../core/src/cli/main.ts'),
-    resolve(here, '../../core/src/cli/main.ts'),
+    pathMod.resolve(here, '../../../core/src/cli/main.ts'),
+    pathMod.resolve(here, '../../core/src/cli/main.ts'),
   ]
   for (const candidate of candidates) {
     if (exists(candidate)) return candidate
@@ -118,15 +125,16 @@ export function resolveRepoCoreEntry(options: PathResolutionOptions = {}): strin
 }
 
 export function resolveLudensHome(options: PathResolutionOptions & { home?: string } = {}): string {
-  if (options.home) return resolve(options.home)
+  const pathMod = pathApi(options.platform)
+  if (options.home) return pathMod.resolve(options.home)
   const envHome = (options.env ?? process.env).LUDENS_HOME?.trim()
   if (envHome) {
-    if (!isAbsolute(envHome)) {
+    if (!pathMod.isAbsolute(envHome)) {
       throw new Error('LUDENS_HOME must be an absolute directory')
     }
-    return resolve(envHome)
+    return pathMod.resolve(envHome)
   }
-  return join(options.homeDir ?? homedir(), '.ludens')
+  return pathMod.join(options.homeDir ?? homedir(), '.ludens')
 }
 
 export function resolveDaemonLaunch(
@@ -139,13 +147,14 @@ export function resolveDaemonLaunch(
   } = {},
 ): DaemonLaunchSpec {
   const platform = options.platform ?? process.platform
+  const pathMod = pathApi(platform)
   const env = options.env ?? process.env
   const exists = options.exists ?? existsSync
   const home = resolveLudensHome(options)
   const staticDir = options.staticDir ?? resolveStaticDir(options)
   const coreEntry = resolveRepoCoreEntry(options)
   const inferredRepo = exists(coreEntry)
-    ? resolve(dirname(coreEntry), '../../..')
+    ? pathMod.resolve(pathMod.dirname(coreEntry), '../../..')
     : options.resourcesPath
   const repo = options.repo ?? inferredRepo
 
@@ -176,7 +185,7 @@ export function resolveDaemonLaunch(
   }
 
   if (options.resourcesPath) {
-    const packagedBinary = join(
+    const packagedBinary = pathMod.join(
       options.resourcesPath,
       'bin',
       platform === 'win32' ? 'ludens.exe' : 'ludens',

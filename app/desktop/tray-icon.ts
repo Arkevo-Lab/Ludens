@@ -1,6 +1,9 @@
-import * as electron from 'electron'
+import type * as Electron from 'electron'
 import { readFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
+
+const requireModule = createRequire(import.meta.url)
 
 export type LudensTrayTheme = 'dark' | 'light'
 
@@ -66,7 +69,9 @@ export function createLudensTrayIcon<T extends TrayImageTarget = Electron.Native
   factory?: TrayImageFactory<T>,
 ): T {
   const { png1x, png2x } = readLudensTrayBuffers(publicAssets, dark)
-  const targetFactory = factory ?? (electron.nativeImage as unknown as TrayImageFactory<T>)
+  const targetFactory =
+    factory ??
+    ((requireModule('electron') as typeof import('electron')).nativeImage as unknown as TrayImageFactory<T>)
   const image = targetFactory.createEmpty()
   image.addRepresentation({
     scaleFactor: 1,

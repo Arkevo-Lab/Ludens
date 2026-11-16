@@ -2,7 +2,7 @@
 import { execFile } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { pythonExecutable, pythonEnvironment } from "./python";
+import { pythonCommand, pythonExecutable, pythonEnvironment } from "./python";
 import type { TimelineAssetReference, VideoFrameReference } from "./timeline-types";
 export type { TimelineAssetReference, VideoFrameReference } from "./timeline-types";
 
@@ -24,13 +24,13 @@ export function validateVideoReference(ref: TimelineAssetReference): asserts ref
 function command(root: string, ref: TimelineAssetReference) {
   validateVideoReference(ref);
   if (ref.video.status === "gap") throw Object.assign(new Error(`Recording gap: ${ref.video.reason ?? "frame not encoded"}`), { status: 410 });
-  const canonical = realpathSync(root);
+  const canonical = realpathSync.native(root);
   if (canonical !== root)
     throw new Error("Timeline media must remain inside its canonical workspace");
   const statusPath = join(root, ref.asset + ".json");
   let state: { status: string; format?: string; error?: string; readableBytes?: number; lastReadablePts?: number | null };
   try {
-    if (realpathSync(statusPath) !== statusPath || statSync(statusPath).size > 64 * 1024)
+    if (realpathSync.native(statusPath) !== statusPath || statSync(statusPath).size > 64 * 1024)
       throw new Error("Invalid timeline video status file");
     state = JSON.parse(readFileSync(statusPath, "utf8"));
   } catch (error) {
@@ -48,7 +48,7 @@ function command(root: string, ref: TimelineAssetReference) {
       || ref.video.pts * ref.video.timeBase[0] / ref.video.timeBase[1] > state.lastReadablePts! / 1_000_000))
     throw Object.assign(new Error("Recorded video is pending: exact frame has not been flushed"), { status: 409 });
   try {
-    if (realpathSync(join(root, ref.asset)) !== join(root, ref.asset))
+    if (realpathSync.native(join(root, ref.asset)) !== join(root, ref.asset))
       throw new Error("Timeline media must remain inside its canonical workspace");
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT")
@@ -79,8 +79,9 @@ export async function decodeTimelineFrame(root: string, ref: TimelineAssetRefere
   try {
     options.signal?.throwIfAborted();
     return await new Promise<Buffer>((resolve, reject) => {
-      execFile(pythonExecutable(), args, { env: pythonEnvironment(), encoding: "buffer", timeout: 20_000,
-        maxBuffer: MAX_BYTES, signal: options.signal }, (error, stdout, stderr) => {
+      const python = pythonCommand(pythonExecutable(), args);
+      execFile(python.file, python.args, { env: pythonEnvironment(), encoding: "buffer", timeout: 20_000, windowsHide: true,
+        windowsVerbatimArguments: python.windowsVerbatimArguments, maxBuffer: MAX_BYTES, signal: options.signal }, (error, stdout, stderr) => {
         if (error) reject(new Error(`Historical frame decode failed: ${stderr.toString().slice(-2000) || error.message}`));
         else resolve(stdout);
       });

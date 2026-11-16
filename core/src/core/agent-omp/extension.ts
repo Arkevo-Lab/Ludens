@@ -1,5 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import type { ExtensionFactory, CustomTool, ReadToolResultEvent } from "@oh-my-pi/pi-coding-agent";
 import { ASYNC_RESULT_MESSAGE_TYPE } from "@oh-my-pi/pi-coding-agent/session/async-job-delivery";
 import type { ImageContent } from "@oh-my-pi/pi-ai";
@@ -118,7 +118,7 @@ export function createLudensExtension(options: {
   const python = pythonEnvironment();
   const environment = {
     LUDENS_PYTHON: python.LUDENS_PYTHON,
-    PATH: [options.binDir, resolve(import.meta.dir, "../../../../baseware/bin"), python.PATH ?? ""].join(delimiter),
+    PATH: [options.binDir, resolve(import.meta.dir, "../../../../baseware/bin"), ...(process.versions.bun ? [dirname(process.execPath)] : []), python.PATH ?? ""].filter(Boolean).join(delimiter),
     PYTHONPATH: python.PYTHONPATH,
     LUDENS_SOCKET: options.ludensSocket ?? "",
     LUDENS_WORKSPACE: workspace.path, LUDENS_RUN_ID: runtime.status().runId, LUDENS_LOG_DIAGNOSTICS: runtime.diagnostics,

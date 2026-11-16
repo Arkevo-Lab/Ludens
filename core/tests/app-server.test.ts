@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -493,7 +493,6 @@ test("CLI ludens app-server --listen ws://127.0.0.1:0 --parent-watchdog emits JS
 
   const bridgePort = await allocateEphemeralPort();
   const emulatorJs = join(wsDir, "dummy-emulator.mjs");
-  const emulatorLauncher = join(wsDir, "dummy-emulator-bin");
   await writeFile(
     emulatorJs,
     [
@@ -508,8 +507,6 @@ test("CLI ludens app-server --listen ws://127.0.0.1:0 --parent-watchdog emits JS
     ].join("\n"),
     "utf8",
   );
-  await writeFile(emulatorLauncher, `#!/bin/sh\nexec "${process.execPath}" "${emulatorJs}" "$@"\n`, "utf8");
-  await chmod(emulatorLauncher, 0o755);
 
   await writeFile(
     join(driverDir, "package.json"),
@@ -523,7 +520,7 @@ test("CLI ludens app-server --listen ws://127.0.0.1:0 --parent-watchdog emits JS
       transport: "bridge",
       defaultPort: ${bridgePort},
       needsGame: true,
-      launchCommand: [${JSON.stringify(emulatorLauncher)}],
+      launchCommand: ${JSON.stringify([process.execPath, emulatorJs])},
       async load() { throw new Error("fail fast in baseware after emulator starts"); }
     };\n`,
     "utf8",

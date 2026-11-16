@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, mkdir, readFile, realpath, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -28,7 +29,7 @@ test("OMP bootstraps empty perception and repairs it through the real reload CLI
     },
   }] }, (type, data) => events.push({ type, data }));
   const abort = new AbortController();
-  const socket = `/tmp/ludens-perception-${crypto.randomUUID()}.sock`;
+  const socket = testSocketPath("perception");
   const closeServer = await listen(socket, runtime);
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: runtime.record }) });
   await runtime.perception!.reload();

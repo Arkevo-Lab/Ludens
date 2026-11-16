@@ -15,6 +15,7 @@
     "./ludens": "./src/ludens.ts",
     "./machines": "./src/machines.ts",
     "./python": "./src/python.ts",
+    "./local-socket": "./src/local-socket.ts",
     "./timeline-media": "./src/timeline-media.ts",
     "./timeline-types": "./src/timeline-types.ts"
   },

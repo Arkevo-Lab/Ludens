@@ -177,7 +177,7 @@ async function probeCoreSummary(workspace: string): Promise<ProjectCoreSummary> 
     resolveWorkspaceAddress(workspace).catch(() => null),
   ]);
   let live: ProbeLiveStatus | null = null;
-  if (address?.socket && (probe.pid !== null || existsSync(address.socket))) {
+  if (address?.socket && (probe.pid !== null || process.platform === "win32" || existsSync(address.socket))) {
     live = await Promise.race([
       hostRequest<ProbeLiveStatus>(address.socket, { kind: "status", argv: [] }).catch(() => null),
       new Promise<null>(resolveTimeout => setTimeout(() => resolveTimeout(null), 250)),

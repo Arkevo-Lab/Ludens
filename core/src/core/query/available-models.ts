@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
+import { resolveBunExecutable } from "../../daemon/app-daemon";
 import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { repoRoot } from "./repo";
 import type { LiveStatus } from "./types";
@@ -47,9 +48,10 @@ export async function listAvailableModelsViaBun(
 ): Promise<AvailableModelsCatalog> {
   signal?.throwIfAborted();
   const script = join(repoRoot, "core", "src", "core", "agent-omp", "list-models-cli.ts");
-  const child = spawn("bun", [script, "--options", JSON.stringify(options)], {
+  const child = spawn(resolveBunExecutable(), [script, "--options", JSON.stringify(options)], {
     cwd: options.workspace ?? repoRoot,
-    detached: true,
+    detached: process.platform !== "win32",
+    windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   });
   const output: Buffer[] = [];
@@ -60,12 +62,20 @@ export async function listAvailableModelsViaBun(
   let forced: ReturnType<typeof setTimeout> | undefined;
 
   const kill = (sig: NodeJS.Signals) => {
-    if (child.pid) {
+    if (!child.pid) return;
+    if (process.platform === "win32") {
       try {
-        process.kill(-child.pid, sig);
+        child.kill(sig);
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code !== "ESRCH" && code !== "EPERM") throw error;
       }
+      return;
+    }
+    try {
+      process.kill(-child.pid, sig);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error;
     }
   };
   const stop = (reason: unknown) => {

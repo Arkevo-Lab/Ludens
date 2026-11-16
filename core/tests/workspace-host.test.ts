@@ -102,10 +102,10 @@ mock.module(${JSON.stringify(join(ludensDirectory, "src/core/agent-omp/session.t
       for (const socket of sockets) socket.destroy();
       await new Promise<void>(resolve => bridge.close(() => resolve()));
       for (const state of states) {
-        await rm(state.dir, { recursive: true, force: true });
+        await rm(state.dir, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
         await rm(state.socket, { force: true });
       }
-      await rm(directory, { recursive: true, force: true });
+      await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
     },
   };
 }

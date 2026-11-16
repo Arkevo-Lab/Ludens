@@ -4,7 +4,7 @@ import { delimiter, join } from "node:path";
 import { globalHome, hostRequest, workspaceForProject } from "./data";
 import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
 import { isObject } from "../storage/atomic-json.ts";
-import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
+import { killProcessTree, pythonCommand, pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
 import {
   historyCapabilityEvals,
   readLatestEvals,
@@ -90,12 +90,32 @@ async function workspaceCapabilities(workspace: string, signal?: AbortSignal) {
   // The bridge only parses source. Keep workspace modules out of Python's startup
   // search path so names such as json.py cannot execute while importing the bridge.
   const stdout = await new Promise<string>((resolve, reject) => {
-    const child = execFile(pythonExecutable(), ["-B", "-m", "ludens_tools._bridge"], {
-      cwd: paths[0], env, signal, timeout: 15_000, maxBuffer: 16 * 1024 * 1024, encoding: "utf8",
+    signal?.throwIfAborted();
+    const command = pythonCommand(pythonExecutable(), ["-B", "-m", "ludens_tools._bridge"]);
+    // execFile's signal/timeout only kill the direct child; on Windows a shim or
+    // venv launcher would leave Python holding the pipes, so kill the tree instead.
+    const windows = process.platform === "win32";
+    const child = execFile(command.file, command.args, {
+      cwd: paths[0], env, maxBuffer: 16 * 1024 * 1024, encoding: "utf8", windowsHide: true,
+      windowsVerbatimArguments: command.windowsVerbatimArguments, ...(windows ? {} : { signal, timeout: 15_000 }),
     }, (error, output, stderr) => {
+      cleanup();
       if (error) reject(new Error(`Python capability discovery failed: ${stderr || output || error.message}`, { cause: error }));
       else resolve(output);
     });
+    const stop = (reason: unknown) => {
+      cleanup();
+      reject(reason);
+      if (child.pid === undefined) return;
+      killProcessTree(child.pid, () => {
+        try { child.kill(); } catch {}
+        child.stdin?.destroy(); child.stdout?.destroy(); child.stderr?.destroy();
+      });
+    };
+    const abort = () => stop(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+    const timer = windows ? setTimeout(() => stop(new Error("Python capability discovery timed out")), 15_000) : undefined;
+    const cleanup = () => { clearTimeout(timer); if (windows) signal?.removeEventListener("abort", abort); };
+    if (windows) signal?.addEventListener("abort", abort, { once: true });
     child.stdin?.on("error", error => { if ((error as NodeJS.ErrnoException).code !== "EPIPE") reject(error); });
     child.stdin?.end(JSON.stringify({ action: "discover", workspace }));
   });

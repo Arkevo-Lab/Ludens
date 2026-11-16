@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -54,7 +55,7 @@ async function fixture() {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "ludens-native-bash-")));
   const workspace = join(directory, "workspace"), runDir = join(directory, "run");
   await mkdir(join(workspace, "skills"), { recursive: true });
-  const prefix = `/tmp/ludens-bash-${crypto.randomUUID()}`;
+  const prefix = testSocketPath("bash");
   const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
   const log = new EventLog(runDir, { id: "native-bash-run", now: () => performance.now() });
   const actions: { args: Record<string, unknown>; epoch?: string }[] = [];
@@ -173,7 +174,7 @@ async function fixture() {
   };
 }
 
-const worker = `import json, os, subprocess, sys, time
+const worker = `import json, os, shutil, subprocess, sys, time
 from pathlib import Path
 from ludens_tools import Client, capability
 from baseware import Client as Device
@@ -201,7 +202,7 @@ while True:
     if phase != previous:
         result = {"phase": phase, "pid": os.getpid(), "ludens": attempt(lambda: act(phase))}
         result["baseware"] = attempt(lambda: Device().controller("pad.echo", {"label": phase}))
-        cli = subprocess.run(["ludens", "controller", "controller/pad.echo", "--args", json.dumps({"label": phase})], text=True, capture_output=True)
+        cli = subprocess.run([shutil.which("ludens") or "ludens", "controller", "controller/pad.echo", "--args", json.dumps({"label": phase})], text=True, capture_output=True)
         result["cli"] = {"exitCode": cli.returncode, "stdout": cli.stdout, "stderr": cli.stderr}
         Path("result-" + phase + ".json").write_text(json.dumps(result))
         print("PHASE " + phase, flush=True)
@@ -262,7 +263,7 @@ test("native service survives OMP turns while human handback revokes its origina
     // Fresh foreground work gets the new lease; the resident process cannot inherit it.
     await f.nextEpoch();
     await f.prompt(tool("old-service-next-epoch", "write", { path: "phase", content: "next" }),
-      tool("new-foreground", "bash", { command: 'python3 -c \'from ludens_tools import Client; print(Client().call("controller/pad.echo", {"label": "fresh"})["exitCode"])\'' }));
+      tool("new-foreground", "bash", { command: '"$LUDENS_PYTHON" -c \'from ludens_tools import Client; print(Client().call("controller/pad.echo", {"label": "fresh"})["exitCode"])\'' }));
     expect({ path: process.env.PATH, python: process.env.PYTHONPATH }).toEqual(injectedPaths);
     await until(() => Bun.file(join(f.workspace, "result-next.json")).exists());
     expect(await Bun.file(join(f.workspace, "result-next.json")).json()).toMatchObject({
@@ -315,7 +316,7 @@ test("native async bash job remains readable across prompts and proc kill cancel
   try {
     await writeFile(join(f.workspace, "job.py"),
       'import os, time\nfrom pathlib import Path\nPath("job.pid").write_text(str(os.getpid()))\nprint("ASYNC_READY", flush=True)\nwhile True: time.sleep(0.05)\n');
-    await f.prompt(tool("launch-job", "bash", { command: "python3 -u job.py", async: true, timeout: 0 }));
+    await f.prompt(tool("launch-job", "bash", { command: '"$LUDENS_PYTHON" -u job.py', async: true, timeout: 0 }));
     await until(() => Bun.file(join(f.workspace, "job.pid")).exists());
     pid = Number(await Bun.file(join(f.workspace, "job.pid")).text());
     const jobs = f.session.asyncJobManager!.getAllJobs();
@@ -340,7 +341,7 @@ test("a native background completion after handback cannot start an extra model 
   try {
     await writeFile(join(f.workspace, "finish.py"),
       'import time\nfrom pathlib import Path\nwhile not Path("finish").exists(): time.sleep(0.02)\nprint("FINISHED_AFTER_HANDBACK")\n');
-    await f.prompt(tool("completion-job", "bash", { command: "python3 -u finish.py", async: true, timeout: 0 }));
+    await f.prompt(tool("completion-job", "bash", { command: '"$LUDENS_PYTHON" -u finish.py', async: true, timeout: 0 }));
     const requests = f.toolsSeen.length;
     const epoch = f.epoch();
     const job = f.session.asyncJobManager!.getAllJobs()[0]!;

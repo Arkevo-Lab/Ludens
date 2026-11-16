@@ -25,6 +25,20 @@ function npmName(spec: string): string {
   return version < 0 ? spec : spec.slice(0, version);
 }
 
+/** Point node_modules/<name> at the published checkout, repairing a missing or dangling junction. */
+async function linkPublishedCheckout(cacheDir: string, checkout: string, name: string): Promise<void> {
+  const link = join(cacheDir, "node_modules", name);
+  if (existsSync(join(link, "package.json"))) return;
+  await mkdir(dirname(link), { recursive: true });
+  await rm(link, { force: true, recursive: true });
+  try {
+    await symlink(checkout, link, "junction");
+  } catch (error) {
+    // A concurrent loader may have published the same junction first.
+    if (!existsSync(join(link, "package.json"))) throw error;
+  }
+}
+
 /** A completed cache is published only after checkout and dependency installation succeed. */
 async function externalPackage(id: string, spec: Exclude<DriverSpec, { kind: "file" }>, cacheRoot: string): Promise<ResolvedPackage> {
   const transport = spec.kind === "github" && spec.url.startsWith("git@") ? "ssh" : "https";
@@ -49,9 +63,12 @@ async function externalPackage(id: string, spec: Exclude<DriverSpec, { kind: "fi
         await run([process.execPath, "install"], checkout);
         const manifest = await packageJson(checkout);
         if (!manifest.name || !/^(@[A-Za-z0-9_.-]+\/)?[A-Za-z0-9_.-]+$/.test(manifest.name)) throw new Error("Github driver package.json must declare a valid package name");
-        const link = join(staging, "node_modules", manifest.name);
-        await mkdir(dirname(link), { recursive: true });
-        await symlink(manifest.name.startsWith("@") ? "../../package" : "../package", link);
+        // Windows junctions are absolute, so they are created after publication below.
+        if (process.platform !== "win32") {
+          const link = join(staging, "node_modules", manifest.name);
+          await mkdir(dirname(link), { recursive: true });
+          await symlink(manifest.name.startsWith("@") ? "../../package" : "../package", link);
+        }
       } else {
         await run([process.execPath, "add", spec.package], staging);
       }
@@ -68,6 +85,7 @@ async function externalPackage(id: string, spec: Exclude<DriverSpec, { kind: "fi
   const directory = spec.kind === "github" ? join(cacheDir, "package") : join(cacheDir, "node_modules", npmName(spec.package));
   const manifest = await packageJson(directory);
   const name = spec.kind === "github" ? manifest.name! : npmName(spec.package);
+  if (spec.kind === "github" && process.platform === "win32") await linkPublishedCheckout(cacheDir, directory, name);
   const entry = Bun.resolveSync(name, cacheDir);
   if (spec.kind === "github") {
     // Read the installed checkout, including a cached tag that has moved remotely.

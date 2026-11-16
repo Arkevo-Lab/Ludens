@@ -1,5 +1,5 @@
-import { homedir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { homedir, tmpdir } from 'node:os'
+import { join, posix, resolve, win32 } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { resolveAppServerSocketPath } from '@ludens/core/daemon/app-daemon'
 import {
@@ -19,24 +19,27 @@ describe('app-server-host', () => {
 
       expect(
         resolveStaticDir({
+          platform: 'darwin',
           here: hereDist,
           resourcesPath,
           env: { LUDENS_STATIC_DIR: '/custom/static-out' },
           exists: () => true,
         }),
-      ).toBe(resolve('/custom/static-out'))
+      ).toBe(posix.resolve('/custom/static-out'))
 
       expect(
         resolveStaticDir({
+          platform: 'darwin',
           here: hereDist,
           resourcesPath,
           env: {},
-          exists: p => p === join(resourcesPath, 'out', 'index.html'),
+          exists: p => p === posix.join(resourcesPath, 'out', 'index.html'),
         }),
-      ).toBe(join(resourcesPath, 'out'))
+      ).toBe(posix.join(resourcesPath, 'out'))
 
       expect(
         resolveStaticDir({
+          platform: 'darwin',
           here: hereDist,
           resourcesPath,
           env: {},
@@ -46,6 +49,7 @@ describe('app-server-host', () => {
 
       expect(
         resolveStaticDir({
+          platform: 'darwin',
           here: hereDesktop,
           env: {},
           exists: p => p === '/repo/app/out/index.html',
@@ -56,6 +60,7 @@ describe('app-server-host', () => {
     it('resolves bun executable across LUDENS_BUN, PATH, and standard locations', () => {
       expect(
         resolveBunExecutable({
+          platform: 'darwin',
           env: { LUDENS_BUN: '/custom/bin/bun', PATH: '/usr/bin' },
           exists: () => false,
         }),
@@ -84,28 +89,28 @@ describe('app-server-host', () => {
           platform: 'win32',
           env: { PATH: '' },
           homeDir: 'C:\\Users\\tester',
-          exists: p => p === join('C:\\Users\\tester', '.bun', 'bin', 'bun.exe'),
+          exists: p => p === win32.join('C:\\Users\\tester', '.bun', 'bin', 'bun.exe'),
         }),
-      ).toBe(join('C:\\Users\\tester', '.bun', 'bin', 'bun.exe'))
+      ).toBe(win32.join('C:\\Users\\tester', '.bun', 'bin', 'bun.exe'))
     })
 
     it('resolves LUDENS_HOME strictly and computes zero-port daemon launch specs', () => {
-      expect(resolveLudensHome({ env: {}, homeDir: '/Users/tester' })).toBe('/Users/tester/.ludens')
-      expect(resolveLudensHome({ env: { LUDENS_HOME: '/tmp/custom-ludens' } })).toBe(resolve('/tmp/custom-ludens'))
-      expect(() => resolveLudensHome({ env: { LUDENS_HOME: 'relative/path' } })).toThrow(/absolute/i)
+      expect(resolveLudensHome({ platform: 'darwin', env: {}, homeDir: '/Users/tester' })).toBe('/Users/tester/.ludens')
+      expect(resolveLudensHome({ platform: 'darwin', env: { LUDENS_HOME: '/tmp/custom-ludens' } })).toBe(posix.resolve('/tmp/custom-ludens'))
+      expect(() => resolveLudensHome({ platform: 'darwin', env: { LUDENS_HOME: 'relative/path' } })).toThrow(/absolute/i)
 
       const resourcesPath = '/Applications/Ludens.app/Contents/Resources'
       const packagedLaunch = resolveDaemonLaunch({
         resourcesPath,
         platform: 'darwin',
         env: { LUDENS_HOME: '/tmp/ludens-packaged' },
-        exists: p => p === join(resourcesPath, 'bin', 'ludens') || p === join(resourcesPath, 'out', 'index.html'),
+        exists: p => p === posix.join(resourcesPath, 'bin', 'ludens') || p === posix.join(resourcesPath, 'out', 'index.html'),
       })
       expect(packagedLaunch.spawnCommand).toEqual({
-        command: join(resourcesPath, 'bin', 'ludens'),
+        command: posix.join(resourcesPath, 'bin', 'ludens'),
         argsPrefix: [],
       })
-      expect(packagedLaunch.staticDir).toBe(join(resourcesPath, 'out'))
+      expect(packagedLaunch.staticDir).toBe(posix.join(resourcesPath, 'out'))
       expect(packagedLaunch.repo).toBe(resourcesPath)
 
       const repoLaunch = resolveDaemonLaunch({
@@ -174,7 +179,7 @@ describe('app-server-host', () => {
     })
 
     it('re-ensures offline daemon via ensureOnline and does not terminate background daemon on stop()', async () => {
-      const home = '/tmp/ludens-recover-test'
+      const home = join(tmpdir(), 'ludens-recover-test')
       const socketPath = resolveAppServerSocketPath(home)
       let probeOnline = false
       let launchCount = 0

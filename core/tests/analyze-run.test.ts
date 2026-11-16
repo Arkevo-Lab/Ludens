@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
+import { pythonExecutable } from "@ludens/protocol/python";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { JsonArchive } from "@ludens/protocol/log-archive";
 import { EventLog as DeviceEventLog } from "../../baseware/src/events.ts";
 
-const script = new URL("../scripts/analyze-run.py", import.meta.url).pathname;
+const script = fileURLToPath(new URL("../scripts/analyze-run.py", import.meta.url));
 const emptyStats = { count: 0, min: null, median: null, p95: null, max: null, sum: 0 };
 const emptySpeculation = { started: 0, armed: 0, invalidated: 0, waiting: 0, applied: 0, failed: 0, cancelled: 0, armedDurationMs: emptyStats };
 
@@ -22,7 +24,7 @@ async function analyze(events: unknown[] | ((directory: string) => Promise<unkno
   try {
     const rows = typeof events === "function" ? await events(directory) : events;
     await writeFile(join(directory, "events.jsonl"), rows.map(event => JSON.stringify(event)).join("\n") + "\n");
-    const result = Bun.spawnSync(["python3", script, directory, ...(epoch ? ["--epoch", epoch] : [])]);
+    const result = Bun.spawnSync([pythonExecutable(), script, directory, ...(epoch ? ["--epoch", epoch] : [])]);
     if (result.exitCode !== 0) throw new Error(result.stderr.toString());
     return JSON.parse(await readFile(join(directory, "analysis.json"), "utf8"));
   } finally {

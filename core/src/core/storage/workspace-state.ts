@@ -78,5 +78,5 @@ function sessionRelativePath(state: WorkspaceState, sessionFile: string) {
   if (!within || isAbsolute(within) || within === ".." || within.startsWith(`..${sep}`)) {
     throw new Error("Session must be stored inside this workspace's session directory; explicitly import external sessions");
   }
-  return relative(state.workspace, resolve(sessionFile));
+  return relative(state.workspace, resolve(sessionFile)).replaceAll("\\", "/");
 }

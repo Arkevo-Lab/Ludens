@@ -10,7 +10,7 @@ export class EventLog {
   constructor(directory: string, serviceId: string, private options: { segmentSeconds?: number; segmentBytes?: number } = {}) {
     const root = resolve(directory, serviceId);
     for (const channel of ["events", "diagnostics"]) mkdirSync(join(root, channel), { recursive: true });
-    this.source = { sourceId: serviceId, root: realpathSync(root), format: "baseware-events-v1" };
+    this.source = { sourceId: serviceId, root: realpathSync.native(root), format: "baseware-events-v1" };
     writeFileSync(join(this.source.root, "source.json"), JSON.stringify(this.source));
   }
   readonly record: RecordEvent = (type, data, trace = {}, metadata) => {

@@ -19,7 +19,7 @@ import re
 import sys
 import threading
 import time
-from typing import Any
+from typing import Any, Callable, TypeVar
 import uuid
 
 from ._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
@@ -49,10 +49,25 @@ def _iso(at: float) -> str:
     return datetime.fromtimestamp(at, timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
+_T = TypeVar("_T")
+
+
+def _sharing_retry(action: Callable[[], _T]) -> _T:
+    """Windows briefly denies opening or replacing a sidecar while the other side holds it."""
+    for delay in (0.01, 0.02, 0.04, 0.08, 0.16, None):
+        try:
+            return action()
+        except PermissionError:
+            if os.name != "nt" or delay is None:
+                raise
+            time.sleep(delay)
+    raise AssertionError("unreachable")
+
+
 def _state(path: Path, value: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
-    temporary.write_text(json.dumps(value, allow_nan=False) + "\n")
-    temporary.replace(path)
+    temporary.write_text(json.dumps(value, allow_nan=False) + "\n", encoding="utf-8")
+    _sharing_retry(lambda: temporary.replace(path))
 
 
 def media_path(root: Path, asset: str) -> Path:
@@ -72,7 +87,7 @@ def video_status(root: Path, asset: str, *, allow_pending: bool = False) -> dict
     status = media_path(root, asset + ".json")
     if not status.is_file():
         raise ValueError("Recorded video is unavailable: status is missing")
-    value: dict[str, Any] = json.loads(status.read_text())
+    value: dict[str, Any] = json.loads(_sharing_retry(lambda: status.read_text(encoding="utf-8")))
     state = value.get("status")
     # Fragmented segments are readable while pending: their fragments and the
     # empty moov are already on disk. Legacy +faststart segments are not.

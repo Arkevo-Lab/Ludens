@@ -1,11 +1,13 @@
 import { expect, test } from "bun:test";
+import { pythonExecutable } from "@ludens/protocol/python";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 test("Python API calls drivers with the caller's epoch, without retrying failures", async () => {
-  const socketPath = `/tmp/ludens-api-${crypto.randomUUID()}.sock`;
+  const socketPath = testSocketPath("api");
   const requests: any[] = [];
   let connections = 0;
   const server = createServer(socket => {
@@ -29,7 +31,7 @@ test("Python API calls drivers with the caller's epoch, without retrying failure
   });
   await new Promise<void>((resolve, reject) => { server.once("error", reject); server.listen(socketPath, resolve); });
   try {
-    const child = Bun.spawn(["python3", "-B", "-c", `
+    const child = Bun.spawn([pythonExecutable(), "-B", "-c", `
 import json
 from ludens_tools import Client, LudensError, capability
 @capability
@@ -78,7 +80,7 @@ print(json.dumps({"values": values, "errors": errors, "marked": probe.__ludens_c
 
 test("Python API and direct imports share local objects, while device calls retain the nested trace", async () => {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-local-api-")));
-  const socketPath = `/tmp/ludens-api-${crypto.randomUUID()}.sock`;
+  const socketPath = testSocketPath("api");
   const requests: any[] = [];
   const server = createServer(socket => {
     let buffer = "";
@@ -116,7 +118,7 @@ def peek():
     return model
 `);
     const parentTrace = {traceId: "1234567890abcdef1234567890abcdef", spanId: "1234567890abcdef", toolCallId: "outer-exec"};
-    const child = Bun.spawn(["python3", "-B", "-c", `import json, os
+    const child = Bun.spawn([pythonExecutable(), "-B", "-c", `import json, os
 from ludens_tools import Client
 from scripts.model import model, step, fault
 first = Client().call("python/scripts/model.py:loop", {"value": model})

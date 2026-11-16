@@ -83,7 +83,7 @@ def load_instance(message, role, class_name, method_name, *, recorded=False):
 
     def remember(path, raw):
         with manifest_lock:
-            manifest[str(path.relative_to(workspace))] = hashlib.sha256(raw).hexdigest()
+            manifest[path.relative_to(workspace).as_posix()] = hashlib.sha256(raw).hexdigest()
             temporary = manifest_path.with_suffix(".tmp")
             temporary.write_text(json.dumps(manifest, indent=2) + "\n")
             temporary.replace(manifest_path)

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -8,7 +9,7 @@ import { createTestRuntime } from "./runtime-fixture.ts";
 
 test("perception injection CLI changes only context policy and rejects stale epochs", async () => {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-injection-")));
-  const socket = `/tmp/ludens-injection-${crypto.randomUUID()}.sock`;
+  const socket = testSocketPath("injection");
   const events: { type: string; data: any; trace: any }[] = [];
   const runtime = createTestRuntime({ controllers: [] }, (type, data, trace) => events.push({ type, data, trace }));
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir: join(workspace, "logs", "test"), record: runtime.record }) });

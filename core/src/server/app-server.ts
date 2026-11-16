@@ -1,8 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { chmod, lstat, mkdir, rename, unlink, writeFile } from "node:fs/promises";
-import { connect, createServer, type Server as NetServer, type Socket } from "node:net";
+import { chmod, mkdir, rename, unlink, writeFile } from "node:fs/promises";
+import { createServer, type Server as NetServer, type Socket } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { ludensHome } from "@ludens/protocol/ludens";
+import { clearStaleLocalSocket, isWindowsNamedPipe } from "@ludens/protocol/local-socket";
 import { closeArchiveBuilds } from "../core/query/cold-build.ts";
 import { DashboardWorker } from "../core/query/dashboard-worker.ts";
 import { closeLogIndexes } from "../core/query/log-index.ts";
@@ -82,56 +83,13 @@ function formatHostForUrl(rawHost: string): string {
   return trimmed.includes(":") ? `[${trimmed}]` : trimmed;
 }
 
-async function probeUnixSocketAlive(socketPath: string, timeoutMs = 400): Promise<boolean> {
-  return new Promise<boolean>((resolveAlive, rejectProbe) => {
-    const client = connect(socketPath);
-    let settled = false;
-    const finish = (alive: boolean) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      client.removeAllListeners();
-      try {
-        client.destroy();
-      } catch {}
-      resolveAlive(alive);
-    };
-    const timer = setTimeout(() => finish(false), timeoutMs);
-    timer.unref?.();
-
-    client.once("connect", () => finish(true));
-    client.once("error", err => {
-      const code = (err as NodeJS.ErrnoException).code;
-      if (code === "ECONNREFUSED" || code === "ENOENT" || code === "ENOTSOCK") {
-        finish(false);
-        return;
-      }
-      if (!settled) {
-        settled = true;
-        clearTimeout(timer);
-        client.destroy();
-        rejectProbe(err);
-      }
-    });
-  });
-}
-
 async function prepareUnixSocketPath(socketPath: string): Promise<void> {
-  await mkdir(dirname(socketPath), { recursive: true });
-  const info = await lstat(socketPath).catch(() => null);
-  if (!info) return;
-
-  if (info.isSocket()) {
-    const alive = await probeUnixSocketAlive(socketPath);
-    if (alive) {
-      throw Object.assign(new Error(`app-server is already running on UDS socket: ${socketPath}`), {
-        code: "ALREADY_RUNNING",
-      });
-    }
+  if (!isWindowsNamedPipe(socketPath)) {
+    await mkdir(dirname(socketPath), { recursive: true });
   }
-  await unlink(socketPath).catch(err => {
-    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-  });
+  await clearStaleLocalSocket(socketPath, () => Object.assign(
+    new Error(`app-server is already running on UDS socket: ${socketPath}`), { code: "ALREADY_RUNNING" },
+  ));
 }
 
 async function listenUnixServer(server: NetServer, socketPath: string): Promise<void> {
@@ -148,7 +106,9 @@ async function listenUnixServer(server: NetServer, socketPath: string): Promise<
     server.once("listening", onListening);
     server.listen(socketPath);
   });
-  await chmod(socketPath, 0o600);
+  if (process.platform !== "win32") {
+    await chmod(socketPath, 0o600);
+  }
 }
 
 async function writeRuntimeFileAtomic(
@@ -194,7 +154,7 @@ export async function startAppServer(
     options.unixSocketPath === false
       ? null
       : options.unixSocketPath
-        ? resolve(options.unixSocketPath)
+        ? (isWindowsNamedPipe(options.unixSocketPath) ? options.unixSocketPath : resolve(options.unixSocketPath))
         : resolveAppServerSocketPath(home);
 
   if (!socketPath && !wsListen) {
@@ -296,7 +256,7 @@ export async function startAppServer(
             resolveClose();
           }
         });
-        if (socketPath) {
+        if (socketPath && !isWindowsNamedPipe(socketPath)) {
           await unlink(socketPath).catch(() => {});
         }
       }

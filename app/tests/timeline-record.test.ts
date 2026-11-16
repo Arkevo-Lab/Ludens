@@ -74,7 +74,7 @@ test("missing retained records return expiry without inventing data from the log
 
 test("window-only records query the matched current host once, never restart or sample", async () => {
   const f = await fixture();
-  const socket = join(f.root, "host.sock");
+  const socket = process.platform === "win32" ? `\\\\.\\pipe\\ludens-test-record-${crypto.randomUUID()}` : join(f.root, "host.sock");
   const requests: Record<string, unknown>[] = [];
   let currentRun = "run";
   const server = createServer(client => {

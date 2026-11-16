@@ -3,8 +3,10 @@ import { createHash } from "node:crypto";
 import { chmod, cp, mkdtemp, mkdir, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { launchPlan, parseConfig, petLaunchCommand, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
+import { createSystemLaunchIO, launchPlan, parseConfig, petLaunchCommand, WorkspaceLauncher, type DriverManifest, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
 import { stopLocalAppDaemon } from "../src/daemon/app-daemon.ts";
+import { cliCommand } from "../src/daemon/background-jobs.ts";
+import { resolveCommandAndEnv } from "../src/daemon/process-manager.ts";
 import { getDriver } from "@ludens/baseware/drivers/registry.ts";
 import { ensureWorkspaceIdentity, ludensHome, mergeConnectionConfig, registerWorkspace, validateConnectionConfig } from "@ludens/protocol/ludens";
 import { ompSettingsOverrides } from "../src/core/agent-omp/session.ts";
@@ -30,6 +32,12 @@ const manifestFor = (id: string): DriverManifest => {
   const { load: _load, fallbackVersion: _fallback, ...manifest } = getDriver(id);
   return { ...manifest, version: _fallback };
 };
+const ludensCommand = (repo: string) => process.platform === "win32"
+  ? [process.execPath, resolve(repo, "core/src/cli/main.ts")]
+  : [join(repo, "core/bin/ludens")];
+const basewareCommand = (repo: string) => process.platform === "win32"
+  ? [process.execPath, resolve(repo, "baseware/src/main.ts")]
+  : [join(repo, "baseware/bin/baseware")];
 
 class FakeServices implements LaunchIO {
   calls: string[][] = [];
@@ -79,21 +87,21 @@ class FakeServices implements LaunchIO {
     this.calls.push([...argv]);
     const result = (stdout = "", code = 0, stderr = "") => ({ code, stdout, stderr });
     if (argv.join("\0") === this.plan.dashboardCheck.join("\0")) return this.dashboardBuild ? result() : result("", 1, "Dashboard production build is stale; run build");
-    if (argv[0] === "env" && argv[2] === this.plan.baseware && argv[3] === "status") {
+    if (argv[0] === "env" && argv.slice(2).join("\0") === [...cliCommand(this.plan.baseware), "status"].join("\0")) {
       expect(argv[1]).toBe(`BASEWARE_SOCKET=${this.plan.basewareSocket}`);
       if (!this.jobs.has(this.target("baseware")) && !this.externalBaseware) return result("", 1);
       this.events.push(`baseware:${this.basewareMode}:${this.basewareConnected}`);
       return result(JSON.stringify({ serviceId: "device-session", mode: this.basewareMode,
         connected: this.basewareConnected, epoch: this.basewareMode === "auto" ? "another-owner" : null }));
     }
-    if (argv[0] === this.plan.ludens && argv[1] === "status") {
+    if (argv.join("\0") === [...cliCommand(this.plan.ludens), "status"].join("\0")) {
       if (!this.jobs.has(this.target("host")) && !this.externalHost) return result("", 1);
       const thinking = this.cleanupReads-- > 0;
       this.events.push(`host:${this.mode}:${thinking}`);
       return result(JSON.stringify({ runId: "original-session", mode: this.mode, connected: true,
         thinking, consolidating: false, maxSeconds: this.plan.config.seconds }));
     }
-    if (argv[0] === this.plan.ludens && argv.slice(1).join(" ") === "auto off") {
+    if (argv.join("\0") === [...cliCommand(this.plan.ludens), "auto", "off"].join("\0")) {
       this.events.push("auto off");
       this.mode = "manual";
       this.basewareMode = "manual";
@@ -124,7 +132,27 @@ class FakeServices implements LaunchIO {
       if (name === "dashboard") this.dashboard = true;
       return result();
     }
-    if (argv[0] === "pgrep") return result(this.externalEmulator ? "999\n" : "", this.externalEmulator ? 0 : 1);
+    if (argv[0] === "netstat") {
+      const rows = ["Active Connections", "  Proto  Local Address  Foreign Address  State  PID"];
+      if (this.externalEmulator) {
+        rows.push("  TCP  127.0.0.1:49100  0.0.0.0:0  LISTENING  999");
+        rows.push("  TCP  127.0.0.1:51010  127.0.0.1:49100  ESTABLISHED  998");
+      }
+      const pid = this.jobs.get(this.target("emulator")) ?? this.preparedBridgePid;
+      if (pid && this.bridgePort) {
+        rows.push(`  TCP  127.0.0.1:51100  192.0.2.1:${this.bridgePort}  ESTABLISHED  998`);
+        const address = `127.0.0.1:${this.bridgePort}`;
+        rows.push(`  TCP  ${address}  0.0.0.0:0  LISTENING  ${pid}`);
+        const baseware = this.jobs.get(this.target("baseware"));
+        const clients = [...this.bridgeClientPids, ...(baseware ? [baseware] : [])];
+        clients.forEach((client, index) => {
+          const clientAddress = `127.0.0.1:${51000 + index}`;
+          rows.push(`  TCP  ${address}  ${clientAddress}  ESTABLISHED  ${pid}`);
+          rows.push(`  TCP  ${clientAddress}  ${address}  ESTABLISHED  ${client}`);
+        });
+      }
+      return result(rows.join("\r\n"));
+    }
     if (argv[0] === "lsof") {
       const pid = this.jobs.get(this.target("emulator")) ?? this.preparedBridgePid;
       if (argv.includes("-p")) return pid ? result(`p${pid}\nn127.0.0.1:${this.bridgePort}\n`) : result("", 1);
@@ -322,10 +350,10 @@ test("Dashboard reuse requires the same global home and rejects unready register
 test("managed Dashboard uses a current production build and fails before starting devices when stale", async () => {
   const value = await plan();
   expect(value.commands.dashboard).toEqual([
-    "/tmp/Source with spaces/core/bin/ludens",
+    ...ludensCommand("/tmp/Source with spaces"),
     "app-server",
     "--static-dir",
-    "/tmp/Source with spaces/app/out",
+    join("/tmp/Source with spaces", "app", "out"),
   ]);
   const io = new FakeServices(value);
   io.dashboardBuild = false;
@@ -348,11 +376,12 @@ test("launch config keeps limits explicit and paths as literal argv entries", as
   expect(() => parseConfig({ driver: "prepared-fixture", game: "game.rom" }, manifestFor("prepared-fixture"))).toThrow("does not support launching a game");
   expect(value.commands.emulator).toEqual(["env", "FIXTURE_STACK_SIZE=200000", "LUDENS_BRIDGE_PORT=47991",
     ...manifestFor("bridge-fixture").launchCommand!,
-    "/tmp/Workspace with spaces/games/A game; $(touch BAD).rom"]);
-  expect(value.commands.baseware).toEqual(["/tmp/Source with spaces/baseware/bin/baseware", "serve",
+    resolve(value.workspace, "games/A game; $(touch BAD).rom")]);
+  expect(value.commands.baseware).toEqual([...basewareCommand("/tmp/Source with spaces"), "serve",
     "--driver", "bridge-fixture", "--port", "47991", "--socket", "/tmp/baseware-test.sock",
-    "--data-dir", "/tmp/Workspace with spaces/logs/baseware", "--diagnostics", "normal"]);
-  expect(value.commands.host).toContain("/tmp/Source with spaces/core/bin/ludens");
+    "--data-dir", join(value.workspace, "logs", "baseware"), "--diagnostics", "normal"]);
+  const hostCommand = ludensCommand("/tmp/Source with spaces");
+  expect(value.commands.host!.slice(0, hostCommand.length + 1)).toEqual([...hostCommand, "run"]);
   expect(value.commands.host).toContain("--baseware-socket");
   expect(value.commands.host).not.toContain("--driver");
   expect(value.commands.host).not.toContain("--port");
@@ -374,11 +403,11 @@ test("an explicit bridge port overrides plugin launch environment for both backe
     launchCommand: ["fixture-emulator"], launchEnv: { LUDENS_BRIDGE_PORT: "47992", FIXTURE_OPTION: "kept" } };
   const config = parseConfig({ driver: "fixture", port: 47993, game: "game.rom" }, manifest);
   const value = await launchPlan(config, "/tmp/fixture", "/tmp/Source", "/tmp/fixture.sock", manifest);
-  const command = value.commands.emulator!;
-  // Exercise env's effective value, rather than relying on an argv order assertion.
-  const child = Bun.spawn([...command.slice(0, -2), process.execPath, "-e",
+  const { command, extraEnv } = resolveCommandAndEnv(value.commands.emulator!);
+  expect(command).toEqual(["fixture-emulator", resolve(value.workspace, "game.rom")]);
+  const child = Bun.spawn([process.execPath, "-e",
     "process.stdout.write(JSON.stringify([process.env.LUDENS_BRIDGE_PORT, process.env.FIXTURE_OPTION]))"],
-    { stdout: "pipe", stderr: "pipe" });
+    { env: { ...process.env, ...extraEnv }, stdout: "pipe", stderr: "pipe" });
   expect(await child.exited).toBe(0);
   const [backendPort, option] = JSON.parse(await new Response(child.stdout).text());
   expect(backendPort).toBe("47993");
@@ -391,9 +420,9 @@ test("Cua launch config uses its native service without choosing a workspace obs
   const value = await launchPlan(config, "/tmp/Desktop workspace", "/tmp/Source", "/tmp/cua-baseware.sock", manifestFor("cua"));
   expect(config.port).toBeUndefined();
   expect(value.commands.emulator).toBeUndefined();
-  expect(value.commands.baseware).toEqual(["/tmp/Source/baseware/bin/baseware", "serve", "--driver", "cua",
+  expect(value.commands.baseware).toEqual([...basewareCommand("/tmp/Source"), "serve", "--driver", "cua",
     "--cua-command", "/Applications/Cua Driver/cua-driver", "--socket", "/tmp/cua-baseware.sock",
-    "--data-dir", "/tmp/Desktop workspace/logs/baseware", "--diagnostics", "normal"]);
+    "--data-dir", join(value.workspace, "logs", "baseware"), "--diagnostics", "normal"]);
   expect(value.commands.host).not.toContain("--auto-observe");
   const defaults = await launchPlan(parseConfig({ driver: "cua" }, manifestFor("cua")), "/tmp/Desktop workspace", "/tmp/Source", "/tmp/cua-baseware.sock", manifestFor("cua"));
   expect(defaults.commands.baseware).not.toContain("--cua-command");
@@ -415,7 +444,21 @@ test("Cua startup and shutdown only manage its services, without emulator bridge
   await launcher.down(false);
   expect(io.calls.filter(argv => argv[2] === "--stop").map(argv => io.targetForStateFile(argv[3]!))).toEqual(
     ["host", "baseware"].map(name => io.target(name)));
-  expect(io.calls.some(argv => ["pgrep", "lsof"].includes(argv[0]!))).toBe(false);
+  expect(io.calls.some(argv => ["lsof", "netstat", "ss"].includes(argv[0]!))).toBe(false);
+});
+
+test.skipIf(process.platform !== "win32")("Windows launch commands execute without POSIX shell wrappers", async () => {
+  const repo = resolve(import.meta.dir, "../..");
+  const value = await launchPlan(parseConfig({ driver: "cua" }, manifestFor("cua")), repo, repo, undefined, manifestFor("cua"));
+  const io = createSystemLaunchIO();
+  const [host, baseware] = await Promise.all([
+    io.run([...value.commands.host!.slice(0, value.commands.host!.indexOf("run")), "--help"], repo),
+    io.run([...value.commands.baseware!.slice(0, value.commands.baseware!.indexOf("serve")), "--help"], repo),
+  ]);
+  expect(host.code, host.stderr).toBe(0);
+  expect(host.stdout).toContain("Workspace startup:");
+  expect(baseware.code, baseware.stderr).toBe(0);
+  expect(baseware.stdout).toContain("baseware serve");
 });
 
 test("an external bridge manifest launches its device without desktop dependencies", async () => {
@@ -423,7 +466,7 @@ test("an external bridge manifest launches its device without desktop dependenci
   const value = await launchPlan(config, "/tmp/Dual workspace", "/tmp/Source", "/tmp/dual-baseware.sock", manifestFor("dual-fixture"));
   expect(config.port).toBe(47992);
   expect(value.commands.emulator).toEqual(["env", "LUDENS_BRIDGE_PORT=47992",
-    "/fixture/Dual.app/Contents/MacOS/dual", "/tmp/Dual workspace/games/Dual game.rom"]);
+    "/fixture/Dual.app/Contents/MacOS/dual", resolve(value.workspace, "games/Dual game.rom")]);
   expect(value.commands.baseware).toContain("dual-fixture");
   expect(value.commands.baseware).toContain("47992");
   expect(value.commands.baseware).not.toContain("--cua-command");
@@ -802,7 +845,7 @@ test("a connected Baseware service is reused without probing its occupied emulat
   const status = await new WorkspaceLauncher(value, io).up();
   expect(status.baseware?.connected).toBe(true);
   expect(io.starts).toEqual(["host", "dashboard", "pet"]);
-  expect(io.calls.some(argv => argv[0] === "pgrep" || (argv[0] === "lsof" && argv.includes(`-iTCP:${value.config.port}`)))).toBe(false);
+  expect(io.calls.some(argv => ["lsof", "netstat", "ss"].includes(argv[0]!))).toBe(false);
 });
 
 test("a failed or disconnected Baseware service never starts the Ludens host", async () => {
@@ -833,7 +876,7 @@ test("down preserves Baseware and its emulator while an unmanaged host or lease 
   }
 });
 
-test("a package-linked CLI initializes a workspace through mixed symlink chains", async () => {
+test.skipIf(process.platform === "win32")("the POSIX package launcher initializes a workspace through mixed symlink chains", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ludens linked cli "));
   try {
     const home = join(directory, "home"), workspace = join(directory, "workspace with spaces");
@@ -1015,13 +1058,13 @@ test("model connection config validates, merges, maps to OMP isolated settings, 
 
 test("petLaunchCommand uses POSIX launcher on darwin/linux and electron.exe on win32", () => {
   expect(petLaunchCommand("/repo", "/ws", "darwin")).toEqual([
-    "/repo/app/bin/ludens-app",
+    join("/repo", "app/bin/ludens-app"),
     "--workspace",
     "/ws",
     "--show-window",
   ]);
   expect(petLaunchCommand("/repo", "/ws", "linux")).toEqual([
-    "/repo/app/bin/ludens-app",
+    join("/repo", "app/bin/ludens-app"),
     "--workspace",
     "/ws",
     "--show-window",

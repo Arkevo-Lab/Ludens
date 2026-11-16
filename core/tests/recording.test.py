@@ -8,7 +8,6 @@ from pathlib import Path
 import queue
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import unittest
@@ -18,6 +17,8 @@ from unittest.mock import patch
 from ludens_tools import Client
 from ludens_tools._context import current, scope
 from ludens_tools._recording import RecordingWindow
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import TemporaryDirectory, stop_process
 
 
 SOURCE = '''from ludens_tools import capability, record
@@ -73,7 +74,7 @@ class Perception:
     def close(self): pass
 '''
         for mode in ("normal", "full"):
-            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(mode=mode), TemporaryDirectory() as directory:
                 root = Path(directory)
                 incoming, messages = queue.Queue(), []
                 environment = {**os.environ, "LUDENS_SOCKET": "missing.sock", "LUDENS_RUN_ID": "run",
@@ -108,12 +109,7 @@ class Perception:
                                 states.append(message["state"])
                         self.assertEqual(states, ["error", "ready"] * 3)
                     finally:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=4)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+                        stop_process(process)
                         process.stdin.close()
                         reader.join(timeout=2)
                         process.stdout.close()
@@ -137,7 +133,7 @@ class Perception:
     def test_successful_sampling_is_zero_call_events_at_every_rate_and_depth(self):
         for hz in (1, 10, 30):
             for nested in (False, True):
-                with self.subTest(hz=hz, nested=nested), tempfile.TemporaryDirectory() as directory:
+                with self.subTest(hz=hz, nested=nested), TemporaryDirectory() as directory:
                     clock, events, records = [0.0], [], []
                     base = context(directory, recording_purpose="continuous-perception")
                     recorder = RecordingWindow(events.append, base["trace"], "generation", hz, clock=lambda: clock[0])
@@ -168,7 +164,7 @@ class Perception:
                     self.assertTrue(all(record["trace"]["recordingPurpose"] == "continuous-perception" for record in records))
 
     def test_window_flush_reports_starvation_watermarks_and_lifetime(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             clock, events = [0.0], []
             base = context(directory, recording_purpose="continuous-perception")
             recorder = RecordingWindow(events.append, base["trace"], "generation", 10, clock=lambda: clock[0], interval=1)
@@ -196,7 +192,7 @@ class Perception:
                                              "recorded": 6, "sleepStarved": 4, "realizedHz": 6.36})
 
     def test_full_adds_diagnostics_without_changing_results_or_rpc(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             events, records = [], []
             base = context(directory, diagnostics="full", recording_purpose="continuous-perception")
             base["recording_sink"] = lambda kind, data, trace, origin, channel: events.append((kind, data, channel))
@@ -213,7 +209,7 @@ class Perception:
             self.assertTrue(all("traceback" in data for _, data, _ in events if data.get("outcome") == "error"))
 
     def test_flapping_is_one_interval_per_version_and_category(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             clock, events = [0.0], []
             base = context(directory, recording_purpose="continuous-perception")
             recorder = RecordingWindow(events.append, base["trace"], "generation", 10, clock=lambda: clock[0])
@@ -246,7 +242,7 @@ class Perception:
             self.assertEqual(sum(item["sample"]["completed"] for item in stats), 100)
 
     def test_ordinary_import_retains_metadata_and_object_identity(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             base = context(directory)
             functions = load(directory, base)
             with patch("ludens_tools._context.request") as rpc, scope(base):

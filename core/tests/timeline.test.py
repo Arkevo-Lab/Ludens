@@ -14,7 +14,6 @@ import queue
 import socketserver
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import unittest
@@ -26,6 +25,8 @@ from ludens_tools._capabilities import discover, load_function, call_local
 from ludens_tools._context import scope
 from ludens_tools._observation_history import (ObservationHistory, observation_result, MAIN_CAPABILITY,
                                                validate_sample, _StreamMediaRef)
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import TemporaryDirectory, UnixStreamServer, kill_tree, stop_process
 
 
 SAMPLING = {"clock": "test", "startedAtMs": 0, "finishedAtMs": 1}
@@ -66,17 +67,11 @@ class Worker:
         return reply
 
     def close(self):
-        self.process.terminate()
-        try:
-            self.process.wait(timeout=5)
-        finally:
-            if self.process.poll() is None:
-                self.process.kill()
-                self.process.wait()
-            self.process.stdin.close()
-            self.process.stdout.close()
-            self.reader.join(timeout=1)
-            self.stderr.close()
+        stop_process(self.process)
+        self.process.stdin.close()
+        self.process.stdout.close()
+        self.reader.join(timeout=1)
+        self.stderr.close()
 
 
 SOURCE = '''from ludens_tools import capability, record
@@ -94,7 +89,7 @@ class Perception:
 class TimelineTests(unittest.TestCase):
     def test_record_window_slices_replay(self):
         base = datetime(2026, 11, 2, tzinfo=timezone.utc)
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             for index in range(6):
                 at = base + timedelta(milliseconds=index * 30)
@@ -118,7 +113,7 @@ class TimelineTests(unittest.TestCase):
 
     def test_replay_around_event_and_paginates_beyond_single_query_limit(self):
         base = datetime(2026, 11, 2, tzinfo=timezone.utc)
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             for index in range(150):
                 at = base + timedelta(seconds=index / 30)
@@ -184,7 +179,7 @@ class TimelineTests(unittest.TestCase):
             client.replay(start=0, around="record-one")
 
     def test_generic_data_channels_record_lookup_and_cross_segment_objects(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_SEGMENT_BYTES": "1"}):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_SEGMENT_BYTES": "1"}):
             root = Path(directory)
             (root / "sample.wav").write_bytes(b"one immutable sensor payload")
             history = ObservationHistory(root)
@@ -208,7 +203,7 @@ class TimelineTests(unittest.TestCase):
             self.assertEqual(Path(sensor["media"][0]["path"]).read_bytes(), b"one immutable sensor payload")
 
     def test_decorators_discovery_direct_import_local_client_nested_and_loaded_revision(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             source = '''from ludens_tools import capability as sense, record, capability
 MODEL = object()
@@ -237,7 +232,7 @@ def invalid():
     return {}
 '''
             path = root / "sensing.py"
-            path.write_text(source)
+            path.write_bytes(source.encode())
             catalog = discover(root)
             self.assertEqual(len(catalog["capabilities"]), 3)
             self.assertEqual(len(catalog["diagnostics"]), 1)
@@ -259,7 +254,7 @@ def invalid():
                 self.assertEqual(call_local(root, "python/sensing.py:plain", {}), {"data": False})
                 module = sys.modules[parent.__module__]
                 module.Reader().sample()
-                path.write_text(source + "\n# Edited after import; not loaded.\n")
+                path.write_bytes((source + "\n# Edited after import; not loaded.\n").encode())
                 parent()
                 with self.assertRaisesRegex(ValueError, "requires @capability"):
                     module.invalid()
@@ -272,7 +267,7 @@ def invalid():
             self.assertEqual(records[-1]["runId"], "run-one")
 
     def test_observe_decorator_requires_capability_and_combines_in_any_order(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             recorded = []
 
@@ -325,7 +320,7 @@ def invalid():
                 self.assertEqual(len(recorded), 2)
 
     def test_discover_reports_one_workspace_observe_capability(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (root / "perception.py").write_text('''from ludens_tools import capability, record, observe
 @record
@@ -346,7 +341,7 @@ class Perception:
             self.assertEqual(list(entries), ["helper"])
             self.assertIs(entries["helper"]["observe"], False)
 
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (root / "observe.py").write_text('''from ludens_tools import capability, record, observe
 @observe
@@ -361,7 +356,7 @@ def inspect() -> dict:
             self.assertEqual(catalog["observeCapability"], "python/observe.py:inspect")
             self.assertIs(catalog["capabilities"][0]["observe"], True)
 
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (root / "perception.py").write_text('''from ludens_tools import capability, record, observe
 class Perception:
@@ -387,7 +382,7 @@ def inspect() -> dict:
             entry = next(item for item in catalog["capabilities"] if item["origin"]["function"] == "inspect")
             self.assertIs(entry["observe"], False)
 
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (root / "stray.py").write_text('''from ludens_tools import capability, record, observe
 @observe
@@ -402,7 +397,7 @@ def broken():
                                 for item in catalog["diagnostics"]))
 
     def test_rejects_invalid_envelopes_without_committing_a_record(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             for sample in (3, {"unknown": True}, {"data": float("nan")}, {"media": [{"mediaType": "image/png", "data": "invalid!"}]}):
                 with self.assertRaises((ValueError, TypeError)):
@@ -411,7 +406,7 @@ def broken():
             self.assertEqual(history.sequence, 0)
 
     def test_sampling_requires_finite_clock_domain_and_ordered_times(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             invalid = [None, {}, {**SAMPLING, "clock": " "}, {**SAMPLING, "clock": 1},
                        {**SAMPLING, "startedAtMs": True}, {**SAMPLING, "startedAtMs": "0"},
@@ -429,7 +424,7 @@ def broken():
                 history.append({"data": 3}, "g", SAMPLING)
 
     def test_second_process_writer_is_rejected_and_lock_survives_crash_recovery(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             first = Worker(directory)
             second = Worker(directory, run="run-two")
             try:
@@ -438,7 +433,7 @@ def broken():
                 self.assertIn("already has a writer", second.started["error"]["message"])
                 result = first.request(action="append", sample={"data": 1}, identity={"id": "python/sensor.py:read"}, sampling=SAMPLING)
                 self.assertEqual(result["result"]["timeline"]["sequence"], 1)
-                first.process.kill()
+                kill_tree(first.process)
                 first.process.wait(timeout=5)
                 restarted = second.request(action="start", workspace=directory, runDir=str(Path(directory) / "run-two"), generation="two")
                 self.assertTrue(restarted["ok"])
@@ -451,7 +446,7 @@ def broken():
                 second.close()
 
     def test_source_read_failure_preserves_writer(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             worker = Worker(directory, source_error="PermissionError: perception.py is unreadable")
             try:
                 self.assertTrue(worker.started["ok"])
@@ -465,7 +460,7 @@ def broken():
                 worker.close()
 
     def test_async_main_sample_is_rejected_without_disabling_timeline(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             worker = Worker(directory, SOURCE.replace("def sample(self):", "async def sample(self):"))
             try:
                 self.assertTrue(worker.started["ok"])
@@ -477,7 +472,7 @@ def broken():
                 worker.close()
 
     def test_window_delivery_survives_immediate_eviction_without_persistent_objects(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_BYTES": "1"}):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_BYTES": "1"}):
             history = ObservationHistory(directory)
             record = history.append({"media": [{"mediaType": "audio/wav", "data": "YWJj"}]}, "g", SAMPLING)
             self.assertEqual(base64.b64decode(record["media"][0]["data"]), b"abc")
@@ -487,7 +482,7 @@ def broken():
             history.close()
 
     def test_source_load_failure_preserves_query_and_external_recording_across_runs(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             worker = Worker(directory, "raise RuntimeError('broken user module')")
             try:
                 self.assertTrue(worker.started["ok"])
@@ -510,11 +505,11 @@ def broken():
                 second.close()
 
     def test_sampler_and_external_python_callers_share_one_writer(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             worker = Worker(root, SOURCE)
             worker.request(action="lease", epoch="sampler-lease", inputGeneration="one")
-            socket_path = "/tmp/ludens-timeline-test-" + uuid.uuid4().hex[:12] + ".sock"
+            socket_path = str(root / "timeline.sock")
             class Handler(socketserver.StreamRequestHandler):
                 def handle(self):
                     message = json.loads(self.rfile.readline())
@@ -525,7 +520,7 @@ def broken():
                     else:
                         reply = {"ok": True, "value": None}
                     self.wfile.write((json.dumps(reply) + "\n").encode())
-            server = socketserver.ThreadingUnixStreamServer(socket_path, Handler)
+            server = UnixStreamServer(socket_path, Handler)
             server.messages = []
             serving = threading.Thread(target=server.serve_forever, daemon=True)
             serving.start()
@@ -559,7 +554,7 @@ def sensor(value: int) -> dict:
                 worker.close()
 
     def test_stream_media_ref_ingests_without_base64_and_infers_sources(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             payload = b"spooled-frame-bytes"
             spool = root / "stream" / "000001-feed.bin"
@@ -585,7 +580,7 @@ def sensor(value: int) -> dict:
                 validate_sample({"media": [{"data": missing, "mediaType": "audio/wav"}]}, root)
 
     def test_append_without_media_delivery_returns_metadata_only(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             try:
                 record = history.append({"media": [{"mediaType": "audio/wav", "data": "YWJj"}]},
@@ -605,7 +600,7 @@ def sensor(value: int) -> dict:
                 history.close()
 
     def test_observe_if_none_match_sequence_short_circuits_unchanged_latest(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             try:
                 first = history.append({"data": 1}, "g", SAMPLING, "2026-11-03T00:00:00Z")
@@ -625,7 +620,7 @@ def sensor(value: int) -> dict:
                 history.close()
 
     def test_client_call_wraps_spooled_observations_into_stream_refs(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             spool = Path(directory) / "stream-1.bin"
             spool.write_bytes(b"spooled-frame")
 

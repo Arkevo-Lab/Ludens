@@ -89,13 +89,15 @@ function escapeJson(value: string, ranges: Escapes) {
   return text + value.slice(after);
 }
 
+const realpathNativeSync = realpathSync.native;
+
 /** Canonical directories only; do not follow a workspace's .ludens/archive symlink when writing. */
 function ensureDirectory(root: string, parts: string[]) {
   let path = root;
   for (const part of parts) {
     path = join(path, part);
     try { mkdirSync(path); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-    if (realpathSync(path) !== path || !statSync(path).isDirectory()) throw new Error("Archive directory must be canonical");
+    if (realpathNativeSync(path) !== path || !statSync(path).isDirectory()) throw new Error("Archive directory must be canonical");
   }
   return path;
 }
@@ -106,7 +108,7 @@ export class JsonArchive {
   // Only small identities, never bytes or parsed histories. Eviction affects discovery, not stored references.
   private media = new Map<string, TimelineAssetReference & { indexed?: boolean }>();
   constructor(workspace: string) {
-    this.workspace = realpathSync(workspace);
+    this.workspace = realpathNativeSync(workspace);
     this.root = ensureDirectory(this.workspace, [".ludens", "archive"]);
     ensureDirectory(this.root, ["objects"]);
     ensureDirectory(this.root, ["media"]);
@@ -137,7 +139,7 @@ export class JsonArchive {
     const path = join(directory, `${sha256}.json`);
     let indexed = false;
     try {
-      if (realpathSync(path) !== path || statSync(path).size > 64 * 1024) throw new Error("Invalid archived media index");
+      if (realpathNativeSync(path) !== path || statSync(path).size > 64 * 1024) throw new Error("Invalid archived media index");
       const stored = JSON.parse(readFileSync(path, "utf8")) as TimelineAssetReference;
       validateVideoReference(stored);
       // Keep the first durable source unless it expired or encoding failed.
@@ -148,7 +150,7 @@ export class JsonArchive {
         if (!replace) {
           const statePath = join(this.workspace, ".ludens", "timeline", stored.asset + ".json");
           try {
-            if (realpathSync(statePath) !== statePath || statSync(statePath).size > 64 * 1024)
+            if (realpathNativeSync(statePath) !== statePath || statSync(statePath).size > 64 * 1024)
               throw new Error("Invalid timeline video status file");
             replace = JSON.parse(readFileSync(statePath, "utf8")).status === "error";
           } catch (error) {
@@ -194,7 +196,7 @@ export class JsonArchive {
     const asset = registered?.asset ?? `objects/${sha256}.bin`;
     const root = join(this.workspace, ".ludens", "timeline"), path = join(root, mediaPath(asset));
     let available = false;
-    try { available = realpathSync(root) === root && realpathSync(path) === path && statSync(path).size === bytes.length; }
+    try { available = realpathNativeSync(root) === root && realpathNativeSync(path) === path && statSync(path).size === bytes.length; }
     catch { /* An unrecorded/expired image is metadata, never a second permanent archive. */ }
     return ["m", { sha256, bytes: bytes.length, ...(type ? { mediaType: type } : {}),
       ...(available ? { asset, status: "recorded" as const } : { status: "unrecorded" as const, reason: "not-retained" }) }];
@@ -255,7 +257,7 @@ export class JsonArchive {
     const sha = hash(bytes), path = join(this.root, objectPath(sha));
     ensureDirectory(this.workspace, [".ludens", "archive", "objects"]);
     if (existsSync(path)) {
-      if (realpathSync(path) !== path) throw new Error("Archive object must not be a symlink");
+      if (realpathNativeSync(path) !== path) throw new Error("Archive object must not be a symlink");
       if (hash(gunzipSync(readFileSync(path))) !== sha) throw new Error("Archive object checksum mismatch");
       return sha;
     }
@@ -324,7 +326,7 @@ async function readUnder(root: string, relative: string) {
 }
 function readUnderSync(root: string, relative: string) {
   const path = pathUnder(root, relative);
-  if (realpathSync(root) !== root || realpathSync(path) !== path) throw new Error("Archive path must be canonical");
+  if (realpathNativeSync(root) !== root || realpathNativeSync(path) !== path) throw new Error("Archive path must be canonical");
   return readFileSync(path);
 }
 function legacyPath(ref: any) {
@@ -341,7 +343,7 @@ function workspaceRootSync(runDir: string, explicit: string | null | undefined) 
   if (explicit === null) throw new Error("Workspace archive access is not authorized");
   const workspace = explicit ?? JSON.parse(readUnderSync(runDir, "manifest.json").toString("utf8")).workspace;
   if (typeof workspace !== "string") throw new Error("Run has no workspace archive");
-  return realpathSync(resolve(workspace));
+  return realpathNativeSync(resolve(workspace));
 }
 
 export async function readArtifact(runDir: string, ref: any, options: ReadOptions = {}): Promise<any> {
@@ -378,7 +380,7 @@ export async function readArtifact(runDir: string, ref: any, options: ReadOption
 
 /** Synchronous reader for existing offline benchmark evaluators; UI uses the async reader. */
 export function readArtifactSync(runDir: string, ref: any, options: ReadOptions = {}): any {
-  runDir = realpathSync(runDir);
+  runDir = realpathNativeSync(runDir);
   if (ref?.encoding === "gzip") return JSON.parse(gunzipSync(readUnderSync(runDir, legacyPath(ref))).toString("utf8"));
   verifyRef(ref);
   const workspace = workspaceRootSync(runDir, options.workspace), root = join(workspace, ".ludens", "archive");

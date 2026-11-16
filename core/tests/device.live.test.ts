@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testTempPath } from "./socket-path.ts";
 import { send } from "../src/daemon/transport.ts";
 import { BasewareClient } from "@ludens/baseware/client";
 import { defaultSocket } from "@ludens/baseware/address";
@@ -15,7 +16,7 @@ test.skipIf(process.env.LUDENS_LIVE_DEVICE !== "1")("real device captures PNG, c
   const workspace = process.env.LUDENS_WORKSPACE ?? process.cwd();
   const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(workspace)).socket;
   const baseware = await BasewareClient.connect(process.env.BASEWARE_SOCKET ?? await defaultSocket(workspace));
-  const sequenceFile = `/tmp/ludens-sequence-${crypto.randomUUID()}.json`;
+  const sequenceFile = testTempPath("sequence", ".json");
   try {
     await control(socket, "off");
     const { epoch } = await control(socket, "on") as { epoch: string };

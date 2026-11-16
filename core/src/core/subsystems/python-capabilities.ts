@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { delimiter, resolve } from "node:path";
-import { pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
+import { existsSync } from "node:fs";
+import { delimiter, isAbsolute, resolve } from "node:path";
+import { isWindowsShim, killProcessTree, pythonCommand, pythonExecutable, pythonEnvironment, pythonModulePaths } from "@ludens/protocol/python";
 export { pythonModulePaths } from "@ludens/protocol/python";
 import { childTrace, type EventTrace, type RecordEvent } from "../storage/events.ts";
 
@@ -195,16 +196,36 @@ export class PythonCapabilities {
     for (const name of offline ? ["LUDENS_EPOCH", "LUDENS_TRACE", "BASEWARE_EPOCH", "BASEWARE_TRACE"] : ["LUDENS_EPOCH", "LUDENS_TRACE"]) delete env[name];
     if (offline) { delete env.LUDENS_SOCKET; delete env.BASEWARE_SOCKET; }
     env.PYTHONDONTWRITEBYTECODE = "1";
+    // Bridge JSON and workspace files are UTF-8 regardless of the Windows console code page.
+    env.PYTHONUTF8 = "1"; env.PYTHONIOENCODING = "utf-8";
     return new Promise((done, fail) => {
-      const child = spawn(this.pythonPath, ["-B", "-m", "ludens_tools._bridge"], {
-        cwd: sourceOnly ? pythonModulePaths()[0] : this.workspace, env, detached: true, stdio: ["pipe", "pipe", "pipe"],
+      // cmd.exe reports a missing shim as an exit code; fail like a missing executable instead.
+      if (isWindowsShim(this.pythonPath) && isAbsolute(this.pythonPath) && !existsSync(this.pythonPath)) {
+        throw Object.assign(new Error(`spawn ${this.pythonPath} ENOENT`), { code: "ENOENT", syscall: "spawn", path: this.pythonPath });
+      }
+      const command = pythonCommand(this.pythonPath, ["-B", "-m", "ludens_tools._bridge"]);
+      const child = spawn(command.file, command.args, {
+        cwd: sourceOnly ? pythonModulePaths()[0] : this.workspace, env, windowsVerbatimArguments: command.windowsVerbatimArguments,
+        detached: process.platform !== "win32", windowsHide: true, stdio: ["pipe", "pipe", "pipe"],
       });
       let stdout = "", stderr = "";
+      child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+      const exited = () => child.exitCode !== null || child.signalCode !== null;
+      // Surviving descendants may hold inherited pipes; cancellation discards output anyway.
+      const releasePipes = () => { child.stdin.destroy(); child.stdout.destroy(); child.stderr.destroy(); };
       const cancel = () => {
-        if (child.pid) {
+        if (!child.pid) return;
+        if (process.platform !== "win32") {
           try { process.kill(-child.pid, "SIGKILL"); }
           catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") fail(error); }
+          return;
         }
+        // Windows has no process groups: kill the tree by PID, then fall back to the direct child.
+        killProcessTree(child.pid, () => {
+          if (!exited()) try { child.kill("SIGKILL"); } catch {}
+          if (exited()) releasePipes();
+          else child.once("exit", releasePipes);
+        });
       };
       const cleanup = () => options.signal?.removeEventListener("abort", cancel);
       child.stdout.on("data", data => { stdout += data; });
