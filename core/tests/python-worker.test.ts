@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { pythonExecutable } from "@ludens/protocol/python";
 import { PythonWorker } from "../src/core/subsystems/python-worker.ts";
 
-async function fixture(source: string) {
+async function fixture(source: string, options: { stopGraceMs?: number } = {}) {
   const workspace = await mkdtemp(join(tmpdir(), "ludens-python-worker-"));
   await writeFile(join(workspace, "test_worker.py"), source);
   const events: string[] = [];
@@ -13,7 +13,7 @@ async function fixture(source: string) {
     executable: pythonExecutable(), module: "test_worker", workspace, env: process.env,
     stderrPath: join(workspace, "stderr.log"),
     onEvent: message => { events.push(message.event); },
-    onExit: () => {},
+    onExit: () => {}, ...options,
   });
   return { worker, events, cleanup: () => rm(workspace, { recursive: true, force: true }) };
 }
@@ -42,7 +42,7 @@ import json, sys, time
 message = json.loads(sys.stdin.readline())
 print(json.dumps({"id": message["id"], "ok": True}))
 time.sleep(60)
-`);
+`, { stopGraceMs: 400 });
   try {
     expect((await worker.request({ action: "ping" }, 2_000)).ok).toBe(true);
     await worker.stop();

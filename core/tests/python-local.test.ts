@@ -1,11 +1,12 @@
 import { expect, test } from "bun:test";
+import { pythonExecutable } from "@ludens/protocol/python";
 import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { pythonModulePaths } from "../src/core/subsystems/python-capabilities.ts";
 
 async function runPython(workspace: string, source: string) {
-  const child = Bun.spawn(["python3", "-B", "-c", source], {cwd: workspace, stdout: "pipe", stderr: "pipe",
+  const child = Bun.spawn([pythonExecutable(), "-B", "-c", source], {cwd: workspace, stdout: "pipe", stderr: "pipe",
     env: {...process.env, LUDENS_SOCKET: "", LUDENS_WORKSPACE: workspace, PYTHONPATH: pythonModulePaths().join(delimiter)}});
   const [stdout, stderr, exitCode] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,

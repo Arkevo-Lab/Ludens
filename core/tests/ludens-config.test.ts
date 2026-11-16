@@ -234,7 +234,7 @@ test("a workspace-relative community package remains portable in saved configura
     await rename(workspace, moved);
     const preview = await f.run("--workspace", moved, "up", "--dry-run");
     expect(preview.code, preview.stderr).toBe(0);
-    expect(JSON.parse(preview.stdout).commands.baseware).toContain(`file:${moved}/driver/index.ts`);
+    expect(JSON.parse(preview.stdout).commands.baseware).toContain(`file:${join(moved, "driver", "index.ts")}`);
   } finally { await f.close(); }
 });
 

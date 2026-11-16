@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
-import { createServer } from "node:net";
+import { pathToFileURL } from "node:url";
+import { spawn, spawnSync } from "node:child_process";
+import { mkdir, mkdtemp, readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import type { LudensServerEvent } from "@ludens/protocol/app-rpc";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { NodeUdsRpcClient, WsAppRpcClient } from "../src/cli/app-rpc-client.ts";
@@ -70,8 +70,8 @@ test("startAppServer UDS-only default binds 0 TCP ports, uses macOS sun_path fal
     "very-long-workspace-home-segment-gamma",
   );
   const expectedSocket = resolveAppServerSocketPath(longHome);
-  expect(expectedSocket.startsWith("/tmp/ludens-app-")).toBe(true);
-  expect(Buffer.byteLength(expectedSocket, "utf8")).toBeLessThanOrEqual(96);
+  expect(expectedSocket.startsWith(process.platform === "win32" ? "\\\\.\\pipe\\ludens-app-" : "/tmp/ludens-app-")).toBe(true);
+  if (process.platform !== "win32") expect(Buffer.byteLength(expectedSocket, "utf8")).toBeLessThanOrEqual(96);
 
   const server = await startAppServer({ home: longHome });
   try {
@@ -103,18 +103,30 @@ test("startAppServer UDS-only default binds 0 TCP ports, uses macOS sun_path fal
 
     // Stale socket file without active listener is safely replaced.
     const staleHome = join(rootDir, "stale-home");
-    const staleSocket = resolveAppServerSocketPath(staleHome);
+    const staleSocket = join(staleHome, "run", "app-server.sock");
     await mkdir(join(staleHome, "run"), { recursive: true });
-    await new Promise<void>((resolveListen, rejectListen) => {
-      const dummy = createServer();
-      dummy.once("error", rejectListen);
-      dummy.listen(staleSocket, () => {
-        dummy.close(() => resolveListen());
+    // A real socket file left behind by a killed process (no listener).
+    const staleOwner = spawn(process.execPath, ["-e", `
+      const { createServer } = require("node:net");
+      createServer().listen(process.argv[1], () => console.log("ready"));
+      setInterval(() => {}, 1000);
+    `, staleSocket], { stdio: ["ignore", "pipe", "inherit"] });
+    try {
+      await new Promise<void>((resolveReady, rejectReady) => {
+        staleOwner.once("error", rejectReady);
+        staleOwner.once("exit", code => rejectReady(new Error(`stale owner exited early: ${code}`)));
+        staleOwner.stdout!.on("data", chunk => { if (String(chunk).includes("ready")) resolveReady(); });
       });
-    });
-    // Ensure a dead socket path exists (if OS didn't keep it, bind raw/skip only unlink check).
-    await writeFile(staleSocket, "", "utf8").catch(() => {});
-    const recoveredServer = await startAppServer({ home: staleHome });
+    } finally {
+      staleOwner.removeAllListeners("exit");
+      const exited = new Promise<void>(resolveExit => staleOwner.once("exit", () => resolveExit()));
+      staleOwner.kill("SIGKILL");
+      await exited;
+    }
+    // Bun.file().exists() is false for socket files; stat sees the leftover node.
+    // On Windows lstat/stat of the AF_UNIX reparse node can fail with EACCES; the directory entry is the proof.
+    expect(await readdir(dirname(staleSocket))).toContain(basename(staleSocket));
+    const recoveredServer = await startAppServer({ home: staleHome, unixSocketPath: staleSocket });
     expect(recoveredServer.socketPath).toBe(staleSocket);
     await recoveredServer.close({ emergency: true });
     expect(await Bun.file(recoveredServer.runtimeFilePath).exists()).toBe(false);
@@ -453,7 +465,7 @@ test("ensureLocalAppDaemon deduplicates concurrent starts, daemon CLI works end-
       encoding: "utf8",
     });
     expect(envRemoteConfig.status).toBe(0);
-    expect(envRemoteConfig.stdout).toContain(home);
+    expect(envRemoteConfig.stdout).toContain(JSON.stringify(home).slice(1, -1));
 
     // 4. Verify pure-Node.js (`node --experimental-strip-types`) imports and runs probeAppDaemon + NodeUdsRpcClient + WsAppRpcClient
     const nodeAppDaemonPath = resolve(import.meta.dir, "../src/daemon/app-daemon.ts");
@@ -465,9 +477,9 @@ test("ensureLocalAppDaemon deduplicates concurrent starts, daemon CLI works end-
         "--experimental-strip-types",
         "-e",
         [
-          `import { probeAppDaemon } from ${JSON.stringify(nodeAppDaemonPath)};`,
-          `import { NodeUdsRpcClient, WsAppRpcClient } from ${JSON.stringify(nodeClientPath)};`,
-          `import { APP_RPC_PROTOCOL_VERSION } from ${JSON.stringify(nodeProtocolPath)};`,
+          `import { probeAppDaemon } from ${JSON.stringify(pathToFileURL(nodeAppDaemonPath).href)};`,
+          `import { NodeUdsRpcClient, WsAppRpcClient } from ${JSON.stringify(pathToFileURL(nodeClientPath).href)};`,
+          `import { APP_RPC_PROTOCOL_VERSION } from ${JSON.stringify(pathToFileURL(nodeProtocolPath).href)};`,
           `const status = await probeAppDaemon(${JSON.stringify(home)});`,
           `if (!status || status.home !== ${JSON.stringify(home)}) throw new Error("probe failed");`,
           `const uds = new NodeUdsRpcClient({ socketPath: status.socketPath });`,
@@ -488,7 +500,7 @@ test("ensureLocalAppDaemon deduplicates concurrent starts, daemon CLI works end-
         encoding: "utf8",
       },
     );
-    expect(nodeCheck.status).toBe(0);
+    expect(nodeCheck.status, nodeCheck.stderr).toBe(0);
     expect(JSON.parse(nodeCheck.stdout)).toMatchObject({
       nodeOk: true,
       transport: "uds",

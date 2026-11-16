@@ -96,6 +96,12 @@ const sleep = (ms: number) => new Promise<void>(resolveSleep => setTimeout(resol
 
 const utcIsoSeconds = (date = new Date()) => date.toISOString().replace(/\.\d{3}Z$/, "Z");
 
+function windowsSystemExecutable(name: string): string {
+  const systemRoot = process.env.SystemRoot || process.env.windir || "C:\\Windows";
+  const candidate = join(systemRoot, "System32", name);
+  return existsSync(candidate) ? candidate : name;
+}
+
 export function isPidAlive(pid: unknown): pid is number {
   if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
   if (process.platform === "win32") {
@@ -104,7 +110,7 @@ export function isPidAlive(pid: unknown): pid is number {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EPERM") return false;
     }
-    const probe = spawnSync("tasklist", ["/FI", `PID eq ${pid}`, "/NH", "/FO", "CSV"], {
+    const probe = spawnSync(windowsSystemExecutable("tasklist.exe"), ["/FI", `PID eq ${pid}`, "/NH", "/FO", "CSV"], {
       encoding: "utf8",
       windowsHide: true,
       timeout: 2000,
@@ -155,7 +161,7 @@ export async function terminateProcessTree(
   if (!treeAlive()) return;
   if (process.platform === "win32") {
     await new Promise<void>(resolveKill => {
-      const child = spawn("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      const child = spawn(windowsSystemExecutable("taskkill.exe"), ["/PID", String(pid), "/T", "/F"], {
         stdio: "ignore",
         windowsHide: true,
       });
@@ -482,7 +488,7 @@ export async function startBackgroundJob(options: StartBackgroundJobOptions): Pr
       const timer = setTimeout(() => {
         if (typeof sup.pid === "number" && sup.pid > 0) {
           if (process.platform === "win32") {
-            const killer = spawn("taskkill", ["/PID", String(sup.pid), "/T", "/F"], {
+            const killer = spawn(windowsSystemExecutable("taskkill.exe"), ["/PID", String(sup.pid), "/T", "/F"], {
               stdio: "ignore",
               windowsHide: true,
             });

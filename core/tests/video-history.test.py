@@ -10,7 +10,6 @@ from pathlib import Path
 import queue
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import unittest
@@ -21,6 +20,8 @@ from PIL import Image, UnidentifiedImageError
 
 from ludens_tools._observation_history import ObservationHistory
 from ludens_tools._video import VideoRecorder, _Segment, decode_frame
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import TemporaryDirectory, stop_process
 
 
 SAMPLING = {"clock": "fixture", "startedAtMs": 0, "finishedAtMs": 1}
@@ -50,7 +51,7 @@ class VideoHistoryTests(unittest.TestCase):
         self.assertLess(max(abs(left - right) for left, right in zip(actual, color)), 8)
 
     def test_unsealed_segment_is_readable_while_recording(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory, sample_hz=30)
             rows = []
 
@@ -113,7 +114,7 @@ class VideoHistoryTests(unittest.TestCase):
 
     def test_pending_duration_uses_flushed_fragment_pts_with_irregular_sampling(self):
         for times in ((0, 0.137, 0.401), (0, 3, 8)):
-            with self.subTest(times=times), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(times=times), TemporaryDirectory() as directory:
                 root = Path(directory).resolve()
                 recorder = VideoRecorder(root, root / "video")
                 try:
@@ -140,7 +141,7 @@ class VideoHistoryTests(unittest.TestCase):
     def test_sample_hz_preserves_actual_frame_times_and_cold_queries(self):
         colors = [(200, 40, 60), (40, 160, 90), (70, 80, 190)]
         for hz in (1, 12.5, 30, 60, 30000 / 1001, 1 / 3):
-            with self.subTest(sample_hz=hz), tempfile.TemporaryDirectory() as directory:
+            with self.subTest(sample_hz=hz), TemporaryDirectory() as directory:
                 history = ObservationHistory(directory, sample_hz=hz)
                 rows = [history.append(sample(png(color)), "one", SAMPLING, "2026-10-27T00:00:" + at + "Z")
                         for at, color in zip(("00.000", "00.137", "00.401"), colors)]
@@ -175,7 +176,7 @@ class VideoHistoryTests(unittest.TestCase):
                     cold.close()
 
     def test_changing_sample_hz_rotates_video_without_losing_history(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             first = history.append(sample(png()), "one", SAMPLING, "2026-10-27T00:00:00Z")
             history.sample_hz = 12.5
@@ -190,7 +191,7 @@ class VideoHistoryTests(unittest.TestCase):
                 self.assert_picture(decode_frame(history.directory, ref["asset"], ref["video"]), (200, 40, 60))
 
     def test_worker_default_and_reloaded_rate_reach_the_encoder(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             for generation, configured, expected, override in (("one", "    sample_hz = 2.0\n", 30, {}),
                                                               ("two", "    sample_hz = 2.0\n", 12.5, {"LUDENS_PERCEPTION_SAMPLE_HZ": "12.5"})):
@@ -222,12 +223,7 @@ class VideoHistoryTests(unittest.TestCase):
                         self.assertEqual(start["result"]["sampleHz"], expected)
                         reference = sampled["mediaReferences"][0]
                     finally:
-                        process.terminate()
-                        try:
-                            process.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            process.kill()
-                            process.wait()
+                        stop_process(process)
                         process.stdin.close()
                         process.stdout.close()
                         reader.join(timeout=1)
@@ -244,7 +240,7 @@ class VideoHistoryTests(unittest.TestCase):
                     history.close()
 
     def test_two_channels_actual_timestamps_cold_queries_and_no_image_archive(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             history = ObservationHistory(root)
             colors = [(200, 40, 60), (40, 160, 90), (70, 80, 190)]
@@ -279,7 +275,7 @@ class VideoHistoryTests(unittest.TestCase):
                 cold.close()
 
     def test_rotation_dimensions_generation_and_backward_time(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             rows = []
             for at, generation, size in (("00:00:00", "one", (31, 25)), ("00:05:01", "one", (31, 25)),
@@ -299,7 +295,7 @@ class VideoHistoryTests(unittest.TestCase):
             entered.set()
             release.wait(timeout=5)
             return original_encode(recorder, *args)
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_VIDEO_QUEUE_FRAMES": "1", "LUDENS_VIDEO_QUEUE_BYTES": "4096"}), patch.object(VideoRecorder, "_encode", slow_encode):
             history = ObservationHistory(directory)
             raw = png()
@@ -321,7 +317,7 @@ class VideoHistoryTests(unittest.TestCase):
                 cold.close()
 
     def test_rejected_streams_do_not_allocate_files_or_encoder_metadata(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_VIDEO_QUEUE_BYTES": "1"}):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_VIDEO_QUEUE_BYTES": "1"}):
             root = Path(directory).resolve()
             recorder = VideoRecorder(root, root / "video")
             try:
@@ -337,7 +333,7 @@ class VideoHistoryTests(unittest.TestCase):
                 recorder.close()
 
     def test_invalid_second_image_cannot_enqueue_an_unindexed_first_image(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             try:
                 with self.assertRaises(UnidentifiedImageError):
@@ -349,7 +345,7 @@ class VideoHistoryTests(unittest.TestCase):
                 history.close()
 
     def test_image_dimensions_match_the_cross_language_reference_contract(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             try:
                 with self.assertRaisesRegex(ValueError, "at most 32768"):
@@ -361,7 +357,7 @@ class VideoHistoryTests(unittest.TestCase):
 
     def test_cold_decode_does_not_block_sampler_append_and_queries_have_byte_budget(self):
         entered, release = threading.Event(), threading.Event()
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             record = history.append(sample(png()), "one", SAMPLING)
             history.close()
@@ -387,7 +383,7 @@ class VideoHistoryTests(unittest.TestCase):
                 history.close()
 
     def test_encoder_failure_is_explicit_and_does_not_deadlock_shutdown(self):
-        with tempfile.TemporaryDirectory() as directory, patch.object(VideoRecorder, "_encode", side_effect=RuntimeError("encoder failed")):
+        with TemporaryDirectory() as directory, patch.object(VideoRecorder, "_encode", side_effect=RuntimeError("encoder failed")):
             history = ObservationHistory(directory)
             row = history.append(sample(png()), "one", SAMPLING)
             history.close()
@@ -400,7 +396,7 @@ class VideoHistoryTests(unittest.TestCase):
                 decode_frame(history.directory, source["asset"], source["video"])
 
     def test_container_is_closed_even_when_final_flush_fails(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             recorder = VideoRecorder(root, root / "video")
             container, stream = Mock(), Mock()
@@ -418,12 +414,12 @@ class VideoHistoryTests(unittest.TestCase):
                 recorder.close()
 
     def test_window_expiry_keeps_no_images_or_persistent_video(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0"}):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0"}):
             history = ObservationHistory(directory)
             row = history.append(sample(png()), "one", SAMPLING)
             self.assertTrue(row["media"][0]["timeline"]["asset"].startswith("window-"))
             history.hot_seconds = 0.001
-            time.sleep(0.01)
+            time.sleep(0.05)  # Windows clocks tick at ~15.6ms
             history.prune()
             self.assertEqual(history._hot_media, {})
             self.assertEqual(history.hot_bytes, 0)
@@ -434,7 +430,7 @@ class VideoHistoryTests(unittest.TestCase):
             self.assertEqual(list(history.segment_dir.iterdir()), [])
 
     def test_offline_cli_and_exact_frame_and_path_validation(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             row = history.append(sample(png()), "one", SAMPLING)
             history.close()
@@ -454,7 +450,7 @@ class VideoHistoryTests(unittest.TestCase):
                 decode_frame(history.directory, source["asset"], {**source["video"], "pts": 1})
 
     def test_interrupted_segment_marked_error_on_writer_restart(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             folder = history.directory / "video"
             folder.mkdir()
@@ -472,7 +468,7 @@ class VideoHistoryTests(unittest.TestCase):
     def test_offline_read_skips_unflushed_tail_while_recording(self):
         from ludens_tools._observation_history import read_timeline
 
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory, sample_hz=30)
             try:
                 for index in range(75):
@@ -500,7 +496,7 @@ class VideoHistoryTests(unittest.TestCase):
     def test_capability_channels_seal_quickly_and_read_offline(self):
         from ludens_tools._observation_history import read_timeline
 
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             try:
                 row = history.append(sample(png()), "one", SAMPLING, "2026-10-27T00:00:00Z",

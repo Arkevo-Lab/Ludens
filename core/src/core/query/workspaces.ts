@@ -1545,7 +1545,7 @@ async function inspectWorkspaceShiori(workspacePath: string, workspaceId: string
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
       const fullPath = join(sessionsDir, entry.name);
-      const relPath = relative(canonical, fullPath);
+      const relPath = relative(canonical, fullPath).split(sep).join("/");
       const info = await stat(fullPath).catch(() => null);
       if (!info) continue;
       sessions.push({
@@ -1775,7 +1775,7 @@ export async function updateWorkspaceShiori(
         throw new Error("只能选择当前工作区 .ludens/shiori/sessions 目录下的会话文件");
       }
       await stat(candidate);
-      const rel = relative(canonical, candidate);
+      const rel = relative(canonical, candidate).split(sep).join("/");
       const temporary = `${pointerPath}.${randomUUID()}.tmp`;
       try {
         await writeFile(temporary, `${JSON.stringify({ version: 1, workspaceId: entry.id, sessionFile: rel }, null, 2)}\n`, { mode: 0o600 });

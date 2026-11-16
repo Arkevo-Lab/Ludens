@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
+import { cliCommand } from "../src/daemon/background-jobs.ts";
+import { pythonExecutable } from "@ludens/protocol/python";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenBaseware } from "@ludens/baseware/server";
@@ -23,8 +26,7 @@ async function until(check: () => boolean | Promise<boolean>) {
 async function fixture() {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-controller-")));
   const runDir = join(workspace, "logs/run");
-  const prefix = `/tmp/ludens-ci-${crypto.randomUUID()}`;
-  const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
+  const basewareSocket = testSocketPath("ci-b"), ludensSocket = testSocketPath("ci-r");
   const source = join(workspace, "frame.json");
   await writeFile(source, '{"visible":true}');
   const events: { type: string; data: any; trace: any; metadata: any }[] = [];
@@ -58,7 +60,7 @@ async function fixture() {
   const devices = await connectBaseware({socket: basewareSocket, seconds: 60, runDir, record});
   const runtime = new Runtime(devices, record, 60, "integration-run");
   const env = { ...process.env, LUDENS_SOCKET: ludensSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "integration-run", BASEWARE_SOCKET: basewareSocket,
-    PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(":"),
+    PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(delimiter),
     PYTHONPATH: join(import.meta.dir, "../python") };
   runtime.attach({ controller: new WorkspaceController({workspace, devices, env, record}) });
   devices.onHandback(reason => { void runtime.stop(reason); });
@@ -74,8 +76,8 @@ async function fixture() {
   }
   return {workspace, runDir, source, ludensSocket, runtime, core, actions, events, parentTrace,
     held: () => held, cancelled: () => cancelled, released: () => released,
-    cli: (argv: string[], epoch?: string) => run([join(import.meta.dir, "../bin/ludens"), "controller", ...argv], epoch),
-    python: (source: string, epoch: string) => run(["python3", "-B", "-c", source], epoch),
+    cli: (argv: string[], epoch?: string) => run([...cliCommand(join(import.meta.dir, "../bin/ludens")), "controller", ...argv], epoch),
+    python: (source: string, epoch: string) => run([pythonExecutable(), "-B", "-c", source], epoch),
     async close() {
       await runtime.close(); devices.close(); await closeLudens(); await closeBaseware();
       await rm(workspace, {recursive: true, force: true});

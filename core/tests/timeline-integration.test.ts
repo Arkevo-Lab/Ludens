@@ -1,7 +1,10 @@
 import { expect, test } from "bun:test";
+import { cliCommand } from "../src/daemon/background-jobs.ts";
+import { pythonExecutable } from "@ludens/protocol/python";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
@@ -10,7 +13,7 @@ import { createTestDeviceSession } from "./runtime-fixture.ts";
 
 test("local Python, Controller and CLI share a workspace timeline across runs without duplicate media", async () => {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-timeline-")));
-  const socket = `/tmp/ludens-timeline-${crypto.randomUUID()}.sock`;
+  const socket = testSocketPath("timeline");
   const events: {type: string; data: any}[] = [];
   const record = (type: string, data: unknown) => { events.push({type, data}); };
   const {devices} = createTestDeviceSession({controllers: [{
@@ -19,7 +22,7 @@ test("local Python, Controller and CLI share a workspace timeline across runs wi
   }]}, record);
   const env = {...process.env, LUDENS_SOCKET: socket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "first-run",
     PYTHONPATH: join(import.meta.dir, "../python"), BASEWARE_EPOCH: undefined,
-    PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(":")};
+    PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(delimiter)};
   let runtime = new Runtime(devices, record, 60, "first-run");
   const configure = (runId: string) => {
     runtime = new Runtime(devices, record, 60, runId);
@@ -36,8 +39,8 @@ test("local Python, Controller and CLI share a workspace timeline across runs wi
     expect({exitCode, stderr}).toEqual({exitCode: 0, stderr: ""});
     return JSON.parse(stdout);
   }
-  const python = (code: string) => run(["python3", "-B", "-c", code]);
-  const cli = (...args: string[]) => run([join(import.meta.dir, "../bin/ludens"), ...args]);
+  const python = (code: string) => run([pythonExecutable(), "-B", "-c", code]);
+  const cli = (...args: string[]) => run([...cliCommand(join(import.meta.dir, "../bin/ludens")), ...args]);
   const blob = Buffer.from("shared offline audio").toString("base64");
   try {
     await writeFile(join(workspace, "senses.py"), `from ludens_tools import capability, record, Client

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -34,7 +35,7 @@ class Perception:
   const runtime = createTestRuntime({ controllers: [] }, (type, data, trace) => events.push({ type, data, trace }));
   runtime.attach({ perception: new PerceptionRuntime({ workspace, runDir, record: runtime.record,
     env: { LUDENS_PERCEPTION_HOT_SECONDS: "0.1", LUDENS_VIDEO_SEGMENT_SECONDS: "1" } }) });
-  const socket = `/tmp/ludens-omp-injection-${crypto.randomUUID()}.sock`;
+  const socket = testSocketPath("omp-injection");
   const closeServer = await listen(socket, runtime);
   const abort = new AbortController();
   const settings = Settings.isolated({ "memory.backend": "off", "autolearn.enabled": false, "retry.enabled": false,

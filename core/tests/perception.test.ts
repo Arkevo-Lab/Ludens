@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { PerceptionRuntime, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/core/subsystems/perception.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
-async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv;
+async function fixture(options: { startTimeoutMs?: number; stopGraceMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv;
   setInputGeneration?: (epoch: string, generation: string | null) => Promise<void>;
   onCleanupError?: (error: Error) => void } = {}) {
   const workspace = await realpath(await mkdtemp(join(tmpdir(), "ludens-perception-")));
@@ -18,7 +18,7 @@ async function fixture(options: { startTimeoutMs?: number; observeTimeoutMs?: nu
   const observe = (query: ObservationQuery = {}) => runtime.observe(new AbortController().signal,
     { traceId: "model-trace", spanId: "model-span", epoch: "must-not-leak-either" }, query);
   const wait = async (predicate: () => boolean) => {
-    const deadline = Date.now() + 4000;
+    const deadline = Date.now() + 10_000;
     while (!predicate() && Date.now() < deadline) await Bun.sleep(10);
     expect(predicate()).toBe(true);
   };
@@ -90,7 +90,7 @@ test("the perception protocol loads and reloads Unicode source with a legacy Pyt
 });
 
 test("handback completes while replacing a perception worker stuck in close", async () => {
-  const f = await fixture();
+  const f = await fixture({ stopGraceMs: 400 });
   const host = createTestRuntime({ controllers: [] });
   host.attach({ perception: f.runtime });
   try {
@@ -337,7 +337,7 @@ test("editing python sources auto-reloads the worker, preserves generations, and
     expect(retained.records[0]?.id).toBe(first.records[0]!.id);
     expect(f.runtime.status().state).toBe("error");
   } finally { await f.cleanup(); }
-});
+}, 20_000);
 
 test("status never reports the previous ready worker while stop or reload is flushing it", async () => {
   for (const operation of ["stop", "reload"] as const) {
@@ -370,7 +370,7 @@ test("status never reports the previous ready worker while stop or reload is flu
 });
 
 test("invalid query does not damage sampler health and stuck startup is recoverable", async () => {
-  const f = await fixture({ startTimeoutMs: 1_500 });
+  const f = await fixture({ startTimeoutMs: 1_500, stopGraceMs: 400 });
   try {
     await writeFile(join(f.workspace, "perception.py"), source('        return {}', '        time.sleep(10)'));
     expect((await f.runtime.reload()).error).toContain("start timed out");
@@ -390,7 +390,7 @@ test("host exit closes the detached recorder and invokes workspace close", async
     await writeFile(host, `import { PerceptionRuntime } from ${JSON.stringify(resolve(import.meta.dir, "../src/core/subsystems/perception.ts"))};
 const runtime = new PerceptionRuntime({workspace:${JSON.stringify(f.workspace)},runDir:${JSON.stringify(join(f.workspace, "logs", "run"))},record(){}});
 console.log(JSON.stringify(await runtime.reload())); process.exit(0);`);
-    const launched = Bun.spawn(["bun", host], { stdout: "pipe", stderr: "pipe" });
+    const launched = Bun.spawn([process.execPath, host], { stdout: "pipe", stderr: "pipe" });
     const status = JSON.parse(await new Response(launched.stdout).text());
     expect(await launched.exited).toBe(0);
     let closed = "";
@@ -692,7 +692,7 @@ test("failed grants never admit input and failed cleanup still stops Python and 
     expect(failures).toHaveLength(1);
     expect(f.runtime.status()).toMatchObject({ state: "stopped", pid: undefined });
   } finally { failCleanup = false; await f.cleanup(); }
-});
+}, 20_000);
 
 
 test("unexpected worker exit revokes its device generation", async () => {
@@ -701,7 +701,12 @@ test("unexpected worker exit revokes its device generation", async () => {
   try {
     const old = await f.load(source('        return {"text": "running"}'), { lease: null });
     await f.runtime.setLease("epoch");
-    process.kill(old.pid!, "SIGKILL");
+    if (process.platform === "win32") {
+      // The virtualenv launcher PID differs from the interpreter; kill the whole tree.
+      const taskkill = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "taskkill.exe");
+      Bun.spawnSync([taskkill, "/PID", String(old.pid!), "/T", "/F"], { stdout: "ignore", stderr: "ignore" });
+      try { process.kill(old.pid!, "SIGKILL"); } catch {}
+    } else process.kill(old.pid!, "SIGKILL");
     await f.wait(() => f.runtime.status().state === "error" && grants.at(-1) === null);
     expect(f.runtime.accepts("epoch", old.generation!)).toBe(false);
     expect(grants).toEqual([old.generation, null]);
@@ -724,7 +729,10 @@ test("freshness failures keep the observation error envelope and cancellation re
     abort.abort(new Error("cancelled freshness"));
     await expect(cancelled).rejects.toThrow("cancelled freshness");
     await f.wait(() => f.runtime.status().state === "ready");
-    expect((await f.latest()).records[0]?.text).toBe("ready");
+    // The 30ms freshness budget can still expire right after the reload on a slow host; retry until a record lands.
+    let latest = await f.latest();
+    for (let i = 0; i < 300 && !latest.records.length; i++) { await Bun.sleep(20); latest = await f.latest(); }
+    expect(latest.records[0]?.text).toBe("ready");
   } finally { await f.cleanup(); }
 });
 

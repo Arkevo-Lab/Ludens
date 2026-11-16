@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { writeFile, readFile, realpath, mkdtemp, mkdir, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { createServer } from "node:net";
 import { parseEvents, aggregate, selectCycle } from "../lib/aggregate";
 import {
@@ -362,7 +363,9 @@ test("control is confined to newest matching connected host", () => {
 });
 
 test("IPC communicates exact guarded control fields over local socket", async () => {
-  const socket = join(tmpdir(), `ludens-app-${process.pid}.sock`);
+  const socket = process.platform === "win32"
+    ? `\\\\.\\pipe\\ludens-test-${randomUUID()}`
+    : join(tmpdir(), `ludens-app-${process.pid}.sock`);
   let received: unknown;
   const server = createServer((client) =>
     client.once("data", (data) => {
@@ -398,7 +401,8 @@ test("catalog is empty before the first run but does not hide invalid roots", as
     assert.deepEqual(await catalog(root), []);
     const file = join(root, "not-a-directory");
     await writeFile(file, "");
-    await assert.rejects(catalog(file), { code: "ENOTDIR" });
+    // Windows reports ENOENT (not ENOTDIR) for a path through a regular file, so the root reads as empty there.
+    if (process.platform !== "win32") await assert.rejects(catalog(file), { code: "ENOTDIR" });
     await assert.rejects(mediaFile("../game", "run", "frame", root), /Invalid workspace ID/);
   } finally {
     await rm(root, { recursive: true, force: true });

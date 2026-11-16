@@ -7,7 +7,6 @@ import queue
 import socketserver
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import unittest
@@ -17,6 +16,8 @@ from ludens_tools import Client, capability
 from ludens_tools._capabilities import discover
 from ludens_tools._context import current, scope
 from ludens_tools._recording import RecordingWindow
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import TemporaryDirectory, UnixStreamServer, stop_process
 
 
 class Worker:
@@ -65,17 +66,11 @@ class Worker:
         raise AssertionError("Worker did not reach the expected state")
 
     def close(self):
-        self.process.terminate()
-        try:
-            self.process.wait(timeout=4)
-        finally:
-            if self.process.poll() is None:
-                self.process.kill()
-                self.process.wait()
-            self.process.stdin.close()
-            self.reader.join(timeout=1)
-            self.process.stdout.close()
-            self.stderr.close()
+        stop_process(self.process)
+        self.process.stdin.close()
+        self.reader.join(timeout=1)
+        self.process.stdout.close()
+        self.stderr.close()
 
 
 STATE_MACHINE = '''from ludens_tools import capability, record, observe
@@ -124,7 +119,7 @@ class PerceptionTests(unittest.TestCase):
         self.assertEqual(rpc.call_args.args[1]["query"], {"after": 1})
 
     def test_capability_methods_preserve_objects_without_becoming_cli_entries(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             source = '''from ludens_tools import capability, record
 MODEL = object()
@@ -176,7 +171,7 @@ def quality():
                 self.assertEqual(sum(x["data"]["sample"]["completed"] for x in events), hz * 10)
 
     def test_state_machine_shares_context_executes_effects_and_answers_rpc(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             socket_path = str(root / "controller.sock")
             controller = []
@@ -187,7 +182,7 @@ def quality():
                     controller.append(message)
                     self.wfile.write((json.dumps({"ok": True, "value": {"result": {"content": []}}}) + "\n").encode())
 
-            server = socketserver.ThreadingUnixStreamServer(socket_path, Handler)
+            server = UnixStreamServer(socket_path, Handler)
             serving = threading.Thread(target=server.serve_forever, daemon=True)
             serving.start()
             worker = None
@@ -250,7 +245,7 @@ def quality():
                 Path(socket_path).unlink(missing_ok=True)
 
     def test_top_level_observe_function_entry_transitions_across_modules(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             (root / "helper.py").write_text('''from ludens_tools import capability, record
 shared = []

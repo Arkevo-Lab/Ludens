@@ -11,6 +11,10 @@ import re
 import statistics
 import subprocess
 import tempfile
+import sys
+
+# CreateProcess cannot execute the POSIX shell launcher; Windows uses its .cmd twin.
+LUDENS_CLI = str(Path(__file__).resolve().parents[1] / "bin" / ("ludens.cmd" if sys.platform == "win32" else "ludens"))
 
 
 def stats(values):
@@ -35,7 +39,7 @@ def weighted_cache(calls):
 def read_events(run, epoch):
     """Stream canonical facts; retain only the selected epoch needed by this report."""
     manifest_path = run / "manifest.json"
-    manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
     multiple_sources = bool(manifest.get("eventSources"))
     source = {"path": "canonical" if multiple_sources else "events.jsonl", "eventCount": 0,
               "lastSeq": None, "lastEventAt": None, "ignoredPartialLastLine": False}
@@ -69,10 +73,10 @@ def read_events(run, epoch):
                 events.append(event)
 
     if multiple_sources:
-        command = [str(Path(__file__).resolve().parents[1] / "bin" / "ludens"), "logs", "events", "--run", str(run)]
+        command = [LUDENS_CLI, "logs", "events", "--run", str(run)]
         # stderr is bounded on disk; pipe backpressure keeps the producer bounded.
-        with tempfile.TemporaryFile(mode="w+") as errors:
-            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors, text=True) as process:
+        with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as errors:
+            with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors, text=True, encoding="utf-8") as process:
                 try:
                     consume(process.stdout)
                 except BaseException:
@@ -82,7 +86,7 @@ def read_events(run, epoch):
                     errors.seek(0)
                     raise ValueError("Canonical event reader failed: " + errors.read(4000))
     else:
-        with (run / "events.jsonl").open() as incoming:
+        with (run / "events.jsonl").open(encoding="utf-8") as incoming:
             consume(incoming)
     source["retainedEpochEvents"] = len(events)
     return events, controls, source, background_stats
@@ -101,9 +105,9 @@ def archived_skill_paths(run):
     @lru_cache(maxsize=64)
     def read(reference):
         try:
-            result = subprocess.run([str(Path(__file__).resolve().parents[1] / "bin" / "ludens"),
+            result = subprocess.run([LUDENS_CLI,
                 "logs", "read", "--run", str(run), "--ref", reference],
-                capture_output=True, text=True, check=True, timeout=30)
+                capture_output=True, text=True, encoding="utf-8", check=True, timeout=30)
             return skill_paths(json.loads(result.stdout)), None
         except subprocess.CalledProcessError as error:
             return None, (error.stderr.strip() or f"Archive reader exited {error.returncode}")[:1000]
@@ -986,7 +990,7 @@ def main():
     except ValueError as error:
         parser.error(str(error))
     output = args.output or run / "analysis.json"
-    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(output), "summary": report["summary"]}, ensure_ascii=False))
 
 

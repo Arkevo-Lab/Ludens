@@ -1,7 +1,8 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { finished } from "node:stream/promises";
 import type { EventMetadata, EventTrace, RecordEvent } from "../storage/events.ts";
+import { taskkillExecutable } from "../subsystems/python-worker.ts";
 
 /** A local execution mode of Shiori. No trial, score, lease or budget ownership lives here. */
 export interface Program {
@@ -22,14 +23,38 @@ export async function executeProgram(program: Program, signal: AbortSignal, reco
   const stdout = createWriteStream(program.stdout), stderr = createWriteStream(program.stderr);
   const writes = Promise.all([finished(stdout), finished(stderr)]);
   void writes.catch(() => {});
-  const child = spawn(program.argv[0]!, program.argv.slice(1), { cwd: program.cwd, env: program.env, detached: true,
+  const windows = process.platform === "win32";
+  const child = spawn(program.argv[0]!, program.argv.slice(1), { cwd: program.cwd, env: program.env,
+    detached: !windows, windowsHide: true,
     stdio: program.events ? ["ignore", "pipe", "pipe", "ipc"] : ["ignore", "pipe", "pipe"] });
   child.stdout!.pipe(stdout); child.stderr!.pipe(stderr);
-  let forced: ReturnType<typeof setTimeout> | undefined;
+  let forced: ReturnType<typeof setTimeout> | undefined, released: ReturnType<typeof setTimeout> | undefined;
   let outputError: Error | undefined;
-  let exited = false, terminating = false, interrupted = false, budgetStopped = false;
-  const kill = (name: NodeJS.Signals) => {
-    if (child.pid) try { process.kill(-child.pid, name); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+  let exited = false, settled = false, terminating = false, interrupted = false, budgetStopped = false;
+  const childExited = () => child.exitCode !== null || child.signalCode !== null;
+  // Windows has no process groups: kill the tree by PID, then fall back to the direct child.
+  const killTree = (done?: () => void) => {
+    const finish = () => {
+      if (!childExited()) try { child.kill("SIGKILL"); } catch {}
+      done?.();
+    };
+    try {
+      execFile(taskkillExecutable(), ["/PID", String(child.pid), "/T", "/F"], { windowsHide: true, timeout: 5000 }, finish);
+    } catch { finish(); }
+  };
+  // A surviving descendant can hold inherited pipes after the tree kill; stop
+  // reading them so close/finish can settle instead of waiting forever.
+  const releasePipes = () => {
+    for (const [source, sink] of [[child.stdout!, stdout], [child.stderr!, stderr]] as const) {
+      if (source.readableEnded || source.destroyed) continue;
+      source.unpipe(sink); source.destroy(); sink.end();
+    }
+    if (child.connected) try { child.disconnect(); } catch {}
+  };
+  const kill = (name: NodeJS.Signals, done?: () => void) => {
+    if (!child.pid) return;
+    if (windows) return killTree(done);
+    try { process.kill(-child.pid, name); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
   };
   const abort = () => {
     if (exited || terminating) return;
@@ -67,7 +92,8 @@ export async function executeProgram(program: Program, signal: AbortSignal, reco
     exited = true;
     signal.removeEventListener("abort", stop);
     clearTimeout(forced);
-    kill("SIGKILL");
+    // On Windows, give a normal exit time to drain its pipes before releasing them.
+    kill("SIGKILL", () => { if (!settled) released ??= setTimeout(releasePipes, 1000); });
   });
   signal.addEventListener("abort", stop, { once: true });
   cancellation?.addEventListener("abort", abort, { once: true });
@@ -81,7 +107,8 @@ export async function executeProgram(program: Program, signal: AbortSignal, reco
     if (interrupted && !budgetStopped) signal.throwIfAborted();
     if (code !== 0) throw new Error(`Program exited with code ${code}; see ${program.stderr}`);
   } finally {
-    signal.removeEventListener("abort", stop); cancellation?.removeEventListener("abort", abort); clearTimeout(forced);
+    settled = true;
+    signal.removeEventListener("abort", stop); cancellation?.removeEventListener("abort", abort); clearTimeout(forced); clearTimeout(released);
     // Spawn failures may not emit exit; otherwise the exit handler already cleaned the group.
     if (!exited) kill("SIGKILL");
     stdout.destroy(); stderr.destroy();

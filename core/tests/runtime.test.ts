@@ -1,4 +1,5 @@
 import { expect, spyOn, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Capabilities, Controller } from "@ludens/baseware/contracts";
@@ -175,7 +176,7 @@ test("Ludens IPC requires a workspace controller and an agent environment cannot
   const { runtime, devices } = fixture();
   runtime.attach({ controller: undefined });
   const acquire = spyOn(devices, "acquire");
-  const path = `/tmp/ludens-management-${crypto.randomUUID()}.sock`;
+  const path = testSocketPath("management");
   const close = await listen(path, runtime);
   try {
     await expect(send(path, { kind: "sensor", argv: ["any", "command"] })).rejects.toThrow("Unknown command");
@@ -220,8 +221,8 @@ test("a blocked background read does not delay handback, the next epoch, or host
 
 test("parallel hosts route to independent devices and reject each other's epochs", async () => {
   const a = fixture(), b = fixture();
-  const socketA = `/tmp/ludens-project-a-${crypto.randomUUID()}.sock`;
-  const socketB = `/tmp/ludens-project-b-${crypto.randomUUID()}.sock`;
+  const socketA = testSocketPath("project-a");
+  const socketB = testSocketPath("project-b");
   const closeA = await listen(socketA, a.runtime), closeB = await listen(socketB, b.runtime);
   try {
     const ownerA = await a.runtime.start(), ownerB = await b.runtime.start();

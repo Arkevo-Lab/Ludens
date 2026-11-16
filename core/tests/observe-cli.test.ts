@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,7 +13,7 @@ import type { PerceptionRead, PerceptionRecord } from "../src/core/subsystems/pe
 // The fake socket has visibly different old/current frames; no agent or device.
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), "ludens-observe-cli-"));
-  const socket = `/tmp/ludens-observe-${crypto.randomUUID()}.sock`;
+  const socket = testSocketPath("observe");
   const records: PerceptionRecord[] = [];
   for (const [index, color] of [[255, 0, 0], [0, 0, 255]].entries()) {
     const path = join(root, `${index}.png`);

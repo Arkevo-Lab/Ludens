@@ -1,30 +1,38 @@
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { createInterface } from "node:readline";
+import { pythonCommand, taskkillExecutable } from "@ludens/protocol/python";
 
 export interface WorkerReply {
   id: string; ok: boolean; result?: unknown;
   error?: { type: string; message: string; traceback?: string };
 }
 
-const STOP_GRACE_MS = 2_000;
+const DEFAULT_STOP_GRACE_MS = 8_000;
 const STOP_TIMEOUT_MS = 5_000;
+
+export { taskkillExecutable };
 
 /** JSON-line transport and bounded process-group cleanup shared by resident Python entries. */
 export class PythonWorker {
   readonly process: ChildProcessWithoutNullStreams;
   readonly exited: Promise<void>;
   expectedExit = false;
+  private readonly stopGraceMs: number;
   private stopping?: Promise<void>;
   private readonly finishExit: (error: Error) => void;
   private pending = new Map<string, { resolve(reply: WorkerReply): void; reject(error: Error): void }>();
 
   constructor(readonly generation: string, options: {
     executable: string; module: string; workspace: string; env: NodeJS.ProcessEnv; stderrPath: string;
+    stopGraceMs?: number;
     onEvent(event: any): void; onExit(error: Error): void;
   }) {
-    this.process = spawn(options.executable, ["-u", "-m", options.module], {
-      cwd: options.workspace, env: options.env, detached: true, stdio: ["pipe", "pipe", "pipe"],
+    this.stopGraceMs = options.stopGraceMs ?? DEFAULT_STOP_GRACE_MS;
+    const command = pythonCommand(options.executable, ["-u", "-m", options.module]);
+    this.process = spawn(command.file, command.args, {
+      cwd: options.workspace, env: options.env, detached: process.platform !== "win32", windowsHide: true,
+      windowsVerbatimArguments: command.windowsVerbatimArguments, stdio: ["pipe", "pipe", "pipe"],
     });
     const child = this.process;
     const stderr = createWriteStream(options.stderrPath);
@@ -83,23 +91,26 @@ export class PythonWorker {
   private async stopProcess() {
     // Closing stdin gives Python a chance to finish recording on either platform.
     this.process.stdin.end();
-    if (await this.waitForExit(STOP_GRACE_MS)) return;
+    if (await this.waitForExit(this.stopGraceMs)) return;
     const { pid } = this.process;
     if (pid !== undefined) {
       if (process.platform === "win32") {
         // A Windows Python virtualenv launcher can have its own Python child.
         if (!this.processHasExited()) {
           await new Promise<void>(resolve => {
-            execFile("taskkill.exe", ["/PID", String(pid), "/T", "/F"],
+            execFile(taskkillExecutable(), ["/PID", String(pid), "/T", "/F"],
               { windowsHide: true, timeout: STOP_TIMEOUT_MS }, () => resolve());
           });
+          if (!this.processHasExited()) {
+            try { this.process.kill("SIGKILL"); } catch {}
+          }
         }
       } else {
         try { process.kill(-pid, "SIGKILL"); }
         catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
       }
     }
-    if (this.closeExitedTransport() || await this.waitForExit(STOP_TIMEOUT_MS) || this.closeExitedTransport()) return;
+    if (this.closeExitedTransport() || await this.waitForExitOrProcessExit(STOP_TIMEOUT_MS) || this.closeExitedTransport()) return;
     throw new Error("Python worker did not exit after shutdown");
   }
 
@@ -125,5 +136,23 @@ export class PythonWorker {
         new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); }),
       ]);
     } finally { clearTimeout(timer); }
+  }
+
+  private async waitForExitOrProcessExit(timeoutMs: number): Promise<boolean> {
+    if (this.processHasExited()) return true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const processExited = Promise.withResolvers<boolean>();
+    const onProcessExit = () => processExited.resolve(true);
+    this.process.once("exit", onProcessExit);
+    try {
+      return await Promise.race([
+        this.exited.then(() => true),
+        processExited.promise,
+        new Promise<false>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs); }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+      this.process.off("exit", onProcessExit);
+    }
   }
 }

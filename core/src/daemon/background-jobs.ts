@@ -1,4 +1,4 @@
-import { tmpdir } from "node:os";
+import { localServiceSocketPath } from "@ludens/protocol/local-socket";
 import { basename, dirname, join, resolve } from "node:path";
 import type { ServiceLaunchOrigin } from "../core/query/types.ts";
 import { isPidAlive, probeBackgroundJob, readJobRecord } from "./process-manager.ts";
@@ -22,9 +22,7 @@ export interface BackgroundJobStatus {
 }
 
 export function ludensSocketPath(service: "core" | "baseware", workspaceHash: string): string {
-  const uid = process.getuid?.() ?? "user";
-  const dir = process.platform === "win32" ? tmpdir() : "/tmp";
-  return join(dir, `ludens-${service}-${uid}-${workspaceHash}.sock`);
+  return localServiceSocketPath(service, workspaceHash);
 }
 
 export function jobTargetLabel(workspaceHash: string, name: string): string {

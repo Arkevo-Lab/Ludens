@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { channel } from "node:diagnostics_channel";
 import { mkdtemp, mkdir, readFile, rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -335,7 +336,7 @@ test("real OMP preserves image prefixes and native tool traces while shell IPC r
       sourceSequence: samples * 100,
       timing: {clock: "wire-test", requestedAtMs: performance.now(), receivedAtMs: performance.now()}}]);
   }}]} });
-  const basewareSocket = `/tmp/baseware-wire-${crypto.randomUUID()}.sock`;
+  const basewareSocket = testSocketPath("wire");
   const closeSocket = await listenBaseware(basewareSocket, core);
   const devices = await connectBaseware({socket: basewareSocket, seconds: 300, runDir: directory, record: log.record});
   const runtime = new Runtime(devices, log.record);

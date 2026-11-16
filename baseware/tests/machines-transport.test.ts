@@ -1,9 +1,9 @@
 import { expect, test } from "bun:test";
-import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { Bridge } from "../src/drivers/bridge.ts";
 import { createCuaProvider, cuaCapabilities } from "../src/drivers/cua/provider.ts";
@@ -59,7 +59,7 @@ test("Bridge.open reaches an explicitly given host", async () => {
 });
 
 test("createCuaProvider spawns stdio with custom args and speaks MCP end to end", async () => {
-  const root = await mkdtemp(join(tmpdir(), "baseware-cua-stdio-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "baseware-cua-stdio-")));
   const argvFile = join(root, "argv.json");
   const serverFile = join(root, "server.ts");
   await writeFile(serverFile, fixtureServerSource(argvFile));
@@ -75,7 +75,7 @@ test("createCuaProvider spawns stdio with custom args and speaks MCP end to end"
 });
 
 test("ssh transport mode builds the documented ssh argv and runs the remote command over it", async () => {
-  const root = await mkdtemp(join(tmpdir(), "baseware-cua-ssh-"));
+  const root = await realpath(await mkdtemp(join(tmpdir(), "baseware-cua-ssh-")));
   const sshArgsFile = join(root, "ssh-argv.txt");
   const serverFile = join(root, "server.ts");
   await writeFile(serverFile, fixtureServerSource());
@@ -86,8 +86,19 @@ printf '%s\\n' "$@" > ${JSON.stringify(sshArgsFile)}
 exec ${JSON.stringify(process.execPath)} ${JSON.stringify(serverFile)}
 `);
   await chmod(sshFile, 0o755);
+  if (process.platform === "win32") {
+    // Windows resolves ssh.cmd through PATHEXT; the recorder is a Bun script so no CR/LF or quoting drift reaches the file.
+    const recorder = join(root, "ssh-recorder.js");
+    await writeFile(recorder, `import { writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+writeFileSync(${JSON.stringify(sshArgsFile)}, process.argv.slice(2).join("\\n") + "\\n");
+const child = spawn(${JSON.stringify(process.execPath)}, [${JSON.stringify(serverFile)}], { stdio: "inherit" });
+child.on("exit", code => process.exit(code ?? 0));
+`);
+    await writeFile(join(root, "ssh.cmd"), `@echo off\r\n"${process.execPath}" "${recorder}" %*\r\n`);
+  }
   const path = process.env.PATH;
-  process.env.PATH = `${root}:${path}`;
+  process.env.PATH = `${root}${delimiter}${path}`;
   try {
     const configured = await createCuaProvider({ transportMode: "ssh",
       ssh: { host: "box.local", user: "dev", port: 2222, identityFile: "/keys/id_ed25519", command: "cua-remote mcp" }, clock });

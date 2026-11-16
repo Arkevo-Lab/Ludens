@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { EventLog as DeviceEventLog } from "../../../baseware/src/events.ts";
 import { atomicJson } from "../core/storage/atomic-json.ts";
 import { BasewareCore } from "@ludens/baseware/core";
@@ -14,13 +15,14 @@ import { readEvents, seqs, eventIds, until } from "./evidence.ts";
 /** Real sockets, arbitration and Python cancellation; only the physical driver is simulated. */
 export async function measureControlHandoff(ctx: PerfContext): Promise<Record<string, any>> {
   ctx.signal?.throwIfAborted();
-  const prefix = `/tmp/ludens-bench-${crypto.randomUUID()}`;
+  // macOS tmpdir() is long enough to push socket paths past the 104-byte sun_path limit.
+  const prefix = join(process.platform === "win32" ? tmpdir() : "/tmp", `ludens-bench-${crypto.randomUUID()}`);
   const basewareSocket = `${prefix}-b.sock`, ludensSocket = `${prefix}-r.sock`;
   const record = ctx.log.recorder({ component: "benchmark" });
   const root = resolve(import.meta.dir, "../../..");
   const env = { ...process.env, LUDENS_SOCKET: ludensSocket, BASEWARE_SOCKET: basewareSocket,
     LUDENS_WORKSPACE: ctx.workspace, LUDENS_RUN_ID: ctx.log.clock.id, LUDENS_LOG_DIAGNOSTICS: ctx.log.diagnostics,
-    PATH: [dirname(process.execPath), join(root, "bin"), process.env.PATH].join(":"),
+    PATH: [dirname(process.execPath), join(root, "bin"), process.env.PATH].filter(Boolean).join(delimiter),
     PYTHONPATH: join(root, "python") };
   await mkdir(ctx.workspace, { recursive: true });
   await writeFile(join(ctx.workspace, "handoff.py"), `from pathlib import Path

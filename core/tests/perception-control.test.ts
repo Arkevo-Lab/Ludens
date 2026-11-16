@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,8 +15,8 @@ test("unified resident effects rotate real Baseware authority, reset inputs, and
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-perception-control-")));
   const state = await initializeWorkspaceState(join(root, "workspace"), join(root, "home"));
   const workspace = join(root, "workspace"), runDir = join(workspace, "logs", "control");
-  const socket = `/tmp/ludens-perception-${crypto.randomUUID()}.sock`;
-  const deviceSocket = `/tmp/ludens-device-${crypto.randomUUID()}.sock`;
+  const socket = testSocketPath("perception");
+  const deviceSocket = testSocketPath("device");
   const log = new EventLog(runDir, { id: "control", now: () => performance.now() }, workspace);
   let held = false, calls = 0;
   const core = new BasewareCore({ drivers: [], record: () => {}, capabilities: { controllers: [{

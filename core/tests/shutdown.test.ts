@@ -8,7 +8,7 @@ import { readRunEvents } from "@ludens/protocol/event-sources";
 import { send } from "../src/daemon/transport.ts";
 import { initializeWorkspaceState } from "../src/core/storage/workspace-state.ts";
 
-test("SIGTERM waits for runtime cleanup before recording run_end with OMP's real signal handler", async () => {
+test.skipIf(process.platform === "win32")("SIGTERM waits for runtime cleanup before recording run_end with OMP's real signal handler", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ludens-shutdown-"));
   const state = await initializeWorkspaceState(join(directory, "workspace"), join(directory, "global"));
   const socketPath = join(directory, "host.sock");

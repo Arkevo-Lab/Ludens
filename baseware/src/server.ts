@@ -1,6 +1,6 @@
 import { createServer, type Socket } from "node:net";
 import { unlink } from "node:fs/promises";
-import { clearStaleLocalSocket } from "@ludens/protocol/local-socket";
+import { clearStaleLocalSocket, isWindowsNamedPipe } from "@ludens/protocol/local-socket";
 import type { BasewareCore, ClientContext } from "./core.ts";
 import type { Envelope, Message, Response } from "./protocol.ts";
 
@@ -60,6 +60,8 @@ export async function listen(path: string, source: BasewareCore | (() => Basewar
     await core?.close();
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
-    await unlink(path).catch(error => { if (error.code !== "ENOENT") throw error; });
+    if (!isWindowsNamedPipe(path)) {
+      await unlink(path).catch(error => { if (error.code !== "ENOENT") throw error; });
+    }
   };
 }

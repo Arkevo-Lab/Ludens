@@ -102,7 +102,7 @@ test("unreadable target blocks removal before unlink and permits explicit recove
   } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test("failed target write leaves registration and the original target intact", { skip: process.getuid?.() === 0 }, async () => {
+test("failed target write leaves registration and the original target intact", { skip: process.platform === "win32" || process.getuid?.() === 0 }, async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-removal-write-failure-")));
   const home = join(root, "home"), workspace = join(root, "workspace"), pet = join(home, "pet");
   try {

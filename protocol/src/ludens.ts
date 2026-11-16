@@ -200,9 +200,10 @@ export async function registeredWorkspace(id: string, home = ludensHome()): Prom
   return { id, workspace: value.workspace, name: value.name, updatedAt: value.updatedAt };
 }
 
+const LOCK_BUSY_CODES = process.platform === "win32" ? ["EEXIST", "ENOTEMPTY", "EPERM", "EACCES"] : ["EEXIST", "ENOTEMPTY"];
 async function removeEmptyLock(path: string) {
   await rmdir(path).catch(error => {
-    if (!["ENOENT", "ENOTEMPTY", "EEXIST"].includes(error.code)) throw error;
+    if (error.code !== "ENOENT" && !LOCK_BUSY_CODES.includes(error.code)) throw error;
   });
 }
 async function releaseStateLock(path: string, owner: string) {
@@ -213,7 +214,7 @@ async function releaseStateLock(path: string, owner: string) {
 }
 async function recoverStateLock(path: string) {
   const entries = await readdir(path).catch(error => {
-    if (!["ENOENT", "ENOTDIR"].includes(error.code)) throw error;
+    if (!["ENOENT", "ENOTDIR", ...(process.platform === "win32" ? ["EPERM", "EACCES"] : [])].includes(error.code)) throw error;
     return undefined;
   });
   if (!entries) return;
@@ -236,7 +237,7 @@ async function withStateLock<T>(path: string, work: () => Promise<T>): Promise<T
     for (;;) {
       try { await rename(pending, path); acquired = true; break; }
       catch (error) {
-        if (!["EEXIST", "ENOTEMPTY"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+        if (!LOCK_BUSY_CODES.includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
         await recoverStateLock(path);
         if (Date.now() >= deadline) throw new Error(`Ludens state is busy; retry or inspect ${path}`);
         await new Promise(done => setTimeout(done, 20));

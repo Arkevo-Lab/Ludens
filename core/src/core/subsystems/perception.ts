@@ -101,7 +101,7 @@ export class PerceptionRuntime {
   constructor(private readonly options: {
     workspace: string; runDir: string; env?: NodeJS.ProcessEnv; record: RecordEvent; clock?: Clock;
     registerMedia?: RegisterMedia; diagnostics?: DiagnosticsMode;
-    startTimeoutMs?: number; observeTimeoutMs?: number;
+    startTimeoutMs?: number; observeTimeoutMs?: number; stopGraceMs?: number;
     setInputGeneration?: (epoch: string, generation: string | null) => Promise<void>;
     onCleanupError?: (error: Error) => void;
   }) {
@@ -396,6 +396,7 @@ export class PerceptionRuntime {
     const worker = new PythonWorker(generation, {
       executable: pythonExecutable(env), module: "ludens_tools._perception", workspace: this.workspace, env,
       stderrPath: join(directory, "stderr.log"),
+      ...(this.options.stopGraceMs !== undefined ? { stopGraceMs: this.options.stopGraceMs } : {}),
       onEvent: reply => {
         // Expected exits still flush statistics and media registrations.
         if (this.worker !== worker) return;

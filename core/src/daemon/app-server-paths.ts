@@ -28,17 +28,22 @@ export function appServerLockFilePath(home: string): string {
 }
 
 /**
- * Resolve the local Unix Domain Socket path for a given Ludens home.
- * Automatically falls back to `/tmp/ludens-app-<uid>-<sha256>.sock` when
- * `<home>/run/app-server.sock` exceeds the macOS/BSD `sun_path` limit cleanly.
+ * Resolve the local IPC socket / Named Pipe path for a given Ludens home.
+ * On Windows, returns a Named Pipe (`\\.\pipe\ludens-app-<sha256>`) so Bun, Node,
+ * Electron, and Python interoperate without Winsock/libuv `.sock` incompatibilities.
+ * On POSIX, uses `<home>/run/app-server.sock` or falls back to
+ * `/tmp/ludens-app-<uid>-<sha256>.sock` when `sun_path` exceeds the BSD limit.
  */
 export function resolveAppServerSocketPath(home: string): string {
   const canonicalHome = resolve(home);
+  const homeHash = createHash("sha256").update(canonicalHome, "utf8").digest("hex").slice(0, 12);
+  if (process.platform === "win32") {
+    return `\\\\.\\pipe\\ludens-app-${homeHash}`;
+  }
   const preferred = join(canonicalHome, "run", "app-server.sock");
   if (Buffer.byteLength(preferred, "utf8") <= APP_SERVER_SUN_PATH_LIMIT) {
     return preferred;
   }
   const uid = typeof process.getuid === "function" ? process.getuid() : 0;
-  const homeHash = createHash("sha256").update(canonicalHome, "utf8").digest("hex").slice(0, 12);
   return `/tmp/ludens-app-${uid}-${homeHash}.sock`;
 }

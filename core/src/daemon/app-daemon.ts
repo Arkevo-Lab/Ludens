@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { closeSync, existsSync, openSync } from "node:fs";
 import { mkdir, open, readFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DaemonStatusResult } from "@ludens/protocol/app-rpc";
 import { NodeUdsRpcClient } from "../cli/app-rpc-client.ts";
@@ -138,6 +138,29 @@ export async function probeAppDaemon(
   }
 }
 
+export function resolveBunExecutable(environment: NodeJS.ProcessEnv = process.env): string {
+  if (typeof (globalThis as { Bun?: unknown }).Bun !== "undefined") {
+    return process.execPath;
+  }
+  const explicit = environment.LUDENS_BUN?.trim();
+  if (explicit) return explicit;
+
+  const binName = process.platform === "win32" ? "bun.exe" : "bun";
+  for (const dir of (environment.PATH ?? "").split(delimiter).filter(Boolean)) {
+    const candidate = join(dir, binName);
+    if (existsSync(candidate)) return candidate;
+  }
+
+  const fallbacks = [
+    join(homedir(), ".bun", "bin", binName),
+    ...(process.platform === "win32" ? [] : ["/opt/homebrew/bin/bun", "/usr/local/bin/bun"]),
+  ];
+  for (const candidate of fallbacks) {
+    if (existsSync(candidate)) return candidate;
+  }
+  return binName;
+}
+
 function resolveDefaultSpawnCommand(repoOverride?: string): { command: string; argsPrefix: string[] } {
   const repoRoot =
     repoOverride ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -149,23 +172,26 @@ function resolveDefaultSpawnCommand(repoOverride?: string): { command: string; a
     return { command: process.execPath, argsPrefix: [mainCli] };
   }
 
-  if (existsSync(ludensBin)) {
+  if (process.platform !== "win32" && existsSync(ludensBin)) {
     return { command: ludensBin, argsPrefix: [] };
   }
 
-  return { command: "bun", argsPrefix: [mainCli] };
+  return { command: resolveBunExecutable(), argsPrefix: [mainCli] };
 }
 
 function augmentedDaemonEnv(home: string, token?: string): { env: NodeJS.ProcessEnv; tokenEnvName?: string } {
   const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
   // Preserve caller PATH under Bun (so tests isolating PATH behave deterministically);
-  // only supplement standard Homebrew locations when running inside packaged GUI Node/Electron.
+  // supplement standard Bun / Homebrew locations when running inside packaged GUI Node/Electron.
   if (typeof (globalThis as { Bun?: unknown }).Bun === "undefined") {
     const currentPath = env.PATH ?? "";
-    const extraPaths = ["/opt/homebrew/bin", "/usr/local/bin"];
-    const missing = extraPaths.filter(p => !currentPath.split(":").includes(p));
+    const extraPaths = process.platform === "win32"
+      ? [join(homedir(), ".bun", "bin")]
+      : [join(homedir(), ".bun", "bin"), "/opt/homebrew/bin", "/usr/local/bin"];
+    const parts = currentPath.split(delimiter).filter(Boolean);
+    const missing = extraPaths.filter(p => !parts.includes(p));
     if (missing.length > 0) {
-      env.PATH = currentPath ? `${currentPath}:${missing.join(":")}` : missing.join(":");
+      env.PATH = currentPath ? `${currentPath}${delimiter}${missing.join(delimiter)}` : missing.join(delimiter);
     }
   }
   if (token !== undefined) {

@@ -11,7 +11,6 @@ from pathlib import Path
 import queue
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 import tracemalloc
@@ -19,13 +18,15 @@ import unittest
 from unittest.mock import patch
 
 from ludens_tools._observation_history import ObservationHistory, validate_sample
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _support import TemporaryDirectory, stop_process
 
 
 SAMPLING = {"clock": "test", "startedAtMs": 0, "finishedAtMs": 1}
 
 class HistoryTests(unittest.TestCase):
     def test_workspace_settings_override_environment_defaults(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_PERCEPTION_HOT_SECONDS": "300", "LUDENS_VIDEO_SEGMENT_SECONDS": "60"}):
             (Path(directory) / ".ludens").mkdir(parents=True, exist_ok=True)
             (Path(directory) / ".ludens" / "settings.json").write_text(json.dumps(
@@ -41,7 +42,7 @@ class HistoryTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "hotSeconds"):
                 ObservationHistory(directory)
 
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             raw = base64.b64encode(b"original").decode()
             first = history.append({"media": [{"data": raw, "mediaType": "application/octet-stream"}]}, "one", SAMPLING)
@@ -69,7 +70,7 @@ class HistoryTests(unittest.TestCase):
             history.close()
 
     def test_window_derivatives_expire_with_the_source_without_promotion(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_SECONDS": "10"}):
             clock = [0.0]
             with patch("ludens_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
@@ -96,7 +97,7 @@ class HistoryTests(unittest.TestCase):
                 history.close()
 
     def test_immutable_media_paged_queries_and_generation_reload(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "frame.txt"
             history = ObservationHistory(root)
@@ -123,7 +124,7 @@ class HistoryTests(unittest.TestCase):
                     history.observe(invalid)
 
     def test_content_deduplication_and_unfinished_tail_recovery(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "frame.txt"
             source.write_text("unchanged")
@@ -152,7 +153,7 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(recovered.observe()["records"][0]["sequence"], 4)
 
     def test_defaults_and_old_run_history_remains_untouched(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             legacy = root / "perception/history/records.jsonl"
             legacy.parent.mkdir(parents=True)
@@ -174,7 +175,7 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(legacy.read_bytes(), original)
 
     def test_hot_expiry_hourly_segments_and_cold_pages_after_reload(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_PERCEPTION_HOT_SECONDS": "10", "LUDENS_PERCEPTION_SEGMENT_SECONDS": "3600"}):
             clock = [0.0]
             with patch("ludens_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
@@ -206,7 +207,7 @@ class HistoryTests(unittest.TestCase):
                 self.assertFalse(page["availability"]["expired"])
 
     def test_budget_pressure_shrinks_the_largest_channel_not_the_smallest(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_PERCEPTION_HOT_SECONDS": "600", "LUDENS_PERCEPTION_HOT_BYTES": "8192"}):
             clock = [0.0]
             with patch("ludens_tools._observation_history.time.monotonic", side_effect=lambda: clock[0]):
@@ -229,7 +230,7 @@ class HistoryTests(unittest.TestCase):
                 history.close()
 
     def test_window_expiry_keeps_the_highest_evicted_cursor_across_channels(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_BYTES": "3500"}):
             history = ObservationHistory(directory)
             try:
@@ -247,7 +248,7 @@ class HistoryTests(unittest.TestCase):
                 history.close()
 
     def test_window_only_expiry_inline_delivery_and_source_media_ownership(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_PERCEPTION_PERSIST": "0", "LUDENS_PERCEPTION_HOT_SECONDS": "10"}):
             root, clock = Path(directory), [0.0]
             source = root / "source.png"
@@ -287,7 +288,7 @@ class HistoryTests(unittest.TestCase):
                 reloaded.close()
 
     def test_window_cleanup_never_removes_a_live_instances_files(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0"}):
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {"LUDENS_PERCEPTION_PERSIST": "0"}):
             history = ObservationHistory(directory)
             live = history._temporary
             marker = live / "marker"
@@ -313,7 +314,7 @@ class HistoryTests(unittest.TestCase):
             other.close()
 
     def test_hot_byte_budget_and_process_allocations_do_not_follow_total_history(self):
-        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {
+        with TemporaryDirectory() as directory, patch.dict(os.environ, {
                 "LUDENS_PERCEPTION_HOT_BYTES": "65536", "LUDENS_PERCEPTION_SEGMENT_BYTES": "262144"}):
             history = ObservationHistory(directory)
             tracemalloc.start()
@@ -340,7 +341,7 @@ class HistoryTests(unittest.TestCase):
                 tracemalloc.stop()
 
     def test_optional_tool_fields_and_real_query_conflicts(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             for second in range(3):
                 history.append({"text": str(second)}, "one", SAMPLING, f"2026-10-22T06:45:5{second}Z")
@@ -371,7 +372,7 @@ class HistoryTests(unittest.TestCase):
                     history.observe(invalid)
 
     def test_effect_and_transition_envelopes_validate_and_persist(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             for sample in (
                 {"data": 1, "effect": {"id": "controller/arm.move", "arguments": {"x": 1}}},
                 {"data": 2, "effect": {"id": "controller/arm.move", "args": {"x": 1}}},
@@ -418,7 +419,7 @@ class HistoryTests(unittest.TestCase):
                 history.close()
 
     def test_clock_correction_does_not_lose_records_between_pages(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             history = ObservationHistory(directory)
             for second in (3, 1, 2):
                 history.append({"text": str(second)}, "one", SAMPLING, f"2026-10-22T00:00:0{second}Z")
@@ -430,7 +431,7 @@ class HistoryTests(unittest.TestCase):
             self.assertEqual(history.observe({"at": "2026-10-22T00:00:03Z"})["records"][0]["sequence"], 1)
 
     def test_slow_sampling_does_not_block_reads_and_close_runs(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             source = """
 import json, time
@@ -501,12 +502,7 @@ class Perception:
                     send({"id": "alive", "action": "observe"})
                     self.assertTrue(reply("alive")["ok"])
                 finally:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=3)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
+                    stop_process(process)
                     process.stdin.close()
                     process.stdout.close()
                     reader.join(timeout=1)
@@ -533,7 +529,7 @@ class Perception:
     def close(self):
         pass
 """
-        with tempfile.TemporaryDirectory() as directory:
+        with TemporaryDirectory() as directory:
             root = Path(directory)
             environment = {**os.environ, "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "python")}
             with (root / "stderr.log").open("w") as stderr:
@@ -602,12 +598,7 @@ class Perception:
                     self.assertEqual((root / "sampling").read_text(), stopped_at)
                     self.assertEqual(revoked["history"]["persistent"], True)
                 finally:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait()
+                    stop_process(process)
                     process.stdin.close()
                     process.stdout.close()
                     reader.join(timeout=1)

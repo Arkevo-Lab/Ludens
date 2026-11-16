@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pythonExecutable } from "@ludens/protocol/python";
 import { BasewareCore } from "../src/core.ts";
 import { listen } from "../src/server.ts";
 import { capabilityDocument } from "../src/catalog.ts";
@@ -45,8 +46,8 @@ test("catalog, CLI JSON/file and Python share the same native arguments without 
     const file = join(workspace, "args.json");
     await writeFile(file, JSON.stringify(args));
     await invoke([process.execPath, entry, "controller", "fixture.echo", "--file", file]);
-    const python = `import sys, json\nsys.path.insert(0, ${JSON.stringify(resolve(import.meta.dir, "../python"))})\nfrom baseware import Client\nargs = json.load(open(${JSON.stringify(file)}))\nprint(json.dumps(Client().controller('fixture.echo', args)))`;
-    const pythonResult = JSON.parse(await invoke(["python3", "-B", "-c", python]));
+    const python = `import sys, json\nsys.path.insert(0, ${JSON.stringify(resolve(import.meta.dir, "../python"))})\nfrom baseware import Client\nargs = json.load(open(${JSON.stringify(file)}, encoding='utf-8'))\nprint(json.dumps(Client().controller('fixture.echo', args)))`;
+    const pythonResult = JSON.parse(await invoke([pythonExecutable(), "-B", "-c", python]));
     expect(pythonResult.result.structuredContent).toEqual(args);
     expect(pythonResult.result.content[0]).toEqual(image);
     expect(inputs).toEqual([args, args, args]);

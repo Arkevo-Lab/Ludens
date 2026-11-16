@@ -20,7 +20,7 @@ def _mark(target, kind):
     if flags is None:
         source = Path(target.__code__.co_filename).resolve()
         workspace = Path(current()["workspace"]).resolve()
-        path = os.path.relpath(source, workspace)
+        path = Path(os.path.relpath(source, workspace)).as_posix()
         # This is the loaded version, not whatever may be edited later on disk.
         code_sha = target.__globals__.get("__ludens_source_sha__")
         if code_sha is None and source.is_file():
@@ -102,7 +102,7 @@ def _target_identity(target):
         return marked["id"]
     source = Path(target.__code__.co_filename).resolve()
     workspace = Path(current()["workspace"]).resolve()
-    return "python/" + os.path.relpath(source, workspace).replace(os.sep, "/") + ":" + target.__qualname__
+    return "python/" + Path(os.path.relpath(source, workspace)).as_posix() + ":" + target.__qualname__
 
 def _declaration_identity(target):
     """Stable identity for a top-level declaration (function or class)."""
@@ -113,7 +113,7 @@ def _declaration_identity(target):
         line = inspect.getsourcelines(target)[1]
     source = Path(filename).resolve()
     workspace = Path(current()["workspace"]).resolve()
-    path = os.path.relpath(source, workspace)
+    path = Path(os.path.relpath(source, workspace)).as_posix()
     code_sha = target.__globals__.get("__ludens_source_sha__") if inspect.isfunction(target) else None
     if code_sha is None and source.is_file():
         code_sha = hashlib.sha256(source.read_bytes()).hexdigest()

@@ -192,10 +192,21 @@ test("capability reads require the expected canonical directory and reject a sta
   } finally { await f.cleanup(); }
 });
 
+/** Executable stand-in for the Python interpreter: a shebang script on POSIX, a `.cmd` shim around a CommonJS file on Windows. */
+async function fakeInterpreter(path: string, source: string): Promise<string> {
+  if (process.platform !== "win32") {
+    await writeFile(path, `#!${process.execPath}\n${source}\n`);
+    await chmod(path, 0o755);
+    return path;
+  }
+  await writeFile(`${path}.cjs`, `${source}\n`);
+  await writeFile(`${path}.cmd`, `@echo off\r\n"${process.execPath}" "${path}.cjs" %*\r\n`);
+  return `${path}.cmd`;
+}
+
 test("the configured Python interpreter can fail without losing the device snapshot", async () => {
-  const f = await fixture(), interpreter = join(f.base, "python-failure");
-  await writeFile(interpreter, `#!${process.execPath}\nprocess.stderr.write("fixture interpreter failed"); process.exit(3);\n`);
-  await chmod(interpreter, 0o755);
+  const f = await fixture();
+  const interpreter = await fakeInterpreter(join(f.base, "python-failure"), `process.stderr.write("fixture interpreter failed"); process.exit(3);`);
   const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: f.root, LUDENS_PYTHON: interpreter } });
   try {
     const page = await worker.call("capabilities", ["ws-capabilities", f.workspace]);
@@ -206,9 +217,8 @@ test("the configured Python interpreter can fail without losing the device snaps
 });
 
 test("slow Python discovery leaves the shared worker responsive and request cancellation stops its process", async () => {
-  const f = await fixture(), interpreter = join(f.base, "python-slow"), started = join(f.base, "started");
-  await writeFile(interpreter, `#!${process.execPath}\nrequire("node:fs").writeFileSync(${JSON.stringify(started)}, String(process.pid)); setInterval(() => {}, 1000);\n`);
-  await chmod(interpreter, 0o755);
+  const f = await fixture(), started = join(f.base, "started");
+  const interpreter = await fakeInterpreter(join(f.base, "python-slow"), `require("node:fs").writeFileSync(${JSON.stringify(started)}, String(process.pid)); setInterval(() => {}, 1000);`);
   const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: f.root, LUDENS_PYTHON: interpreter } });
   const abort = new AbortController();
   try {

@@ -11,7 +11,7 @@ import { clearCatalogCache } from "../src/core/query/data.ts";
 import { DashboardWorker } from "../src/core/query/dashboard-worker.ts";
 import { PET_AUTO_TARGET, petStatusKey } from "../src/core/query/pet.ts";
 import { petState, recordPetConsumer, setPetTarget } from "../src/core/query/pet-state.ts";
-import { ludensSocketPath, readBackgroundJobState } from "../src/daemon/background-jobs.ts";
+import { cliCommand, ludensSocketPath, readBackgroundJobState } from "../src/daemon/background-jobs.ts";
 import { resolveWorkspaceDeviceIdentity } from "../src/daemon/device-arbitration.ts";
 import type { LaunchIO, LaunchPlan } from "../src/daemon/launcher.ts";
 import {
@@ -130,8 +130,11 @@ function hostStubCommand(socketPath: string, runId: string, initialMode: "manual
     const launchedBy = process.env.LUDENS_LAUNCHED_BY === "app" ? "app" : "cli";
     const events = [];
     let seq = 0;
-    mkdirSync(dirname(socketPath), { recursive: true });
-    try { unlinkSync(socketPath); } catch {}
+    const namedPipe = ${JSON.stringify(socketPath.startsWith("\\\\.\\pipe\\"))};
+    if (!namedPipe) {
+      mkdirSync(dirname(socketPath), { recursive: true });
+      try { unlinkSync(socketPath); } catch {}
+    }
 
     let bridgeServer = null;
     ${
@@ -195,15 +198,23 @@ function hostStubCommand(socketPath: string, runId: string, initialMode: "manual
     });
     server.listen(socketPath);
     const shutdown = () => {
-      try { unlinkSync(socketPath); } catch {}
+      if (!namedPipe) try { unlinkSync(socketPath); } catch {}
       try { bridgeServer?.close(); } catch {}
       server.close(() => process.exit(0));
       setTimeout(() => process.exit(0), 150);
     };
-    process.on("SIGTERM", shutdown);
+    // Windows has no catchable SIGTERM; the process manager terminates the stub directly.
+    if (process.platform !== "win32") process.on("SIGTERM", shutdown);
     process.on("SIGINT", shutdown);
   `;
   return [process.execPath, "-e", script];
+}
+
+/** True when `argv` is `[...cliCommand(path), ...rest]` (the CLI entry is a bare path on POSIX, bun + script on win32). */
+function isCliInvocation(argv: readonly string[], path: string, ...rest: string[]): boolean {
+  const cli = cliCommand(path);
+  const expected = [...cli, ...rest];
+  return argv.length === expected.length && expected.every((part, index) => argv[index] === part);
 }
 
 function makeStubSupervisorIO(
@@ -237,15 +248,15 @@ function makeStubSupervisorIO(
     const runningPorts = new Set<number>();
     return {
       async run(argv) {
-        if (argv[0] === plan.ludens && argv[1] === "status") {
+        if (isCliInvocation(argv, plan.ludens, "status")) {
           return hostStatusFromSocket();
         }
-        if (argv[0] === plan.ludens && argv[1] === "auto" && argv[2] === "off") {
+        if (isCliInvocation(argv, plan.ludens, "auto", "off")) {
           const { send } = await import("../src/daemon/transport.ts");
           await send(hostSocket, { kind: "auto", argv: ["off"] }).catch(() => null);
           return { code: 0, stdout: "{}", stderr: "" };
         }
-        if (argv[0] === "env" && argv[2] === plan.baseware && argv[3] === "status") {
+        if (argv[0] === "env" && isCliInvocation(argv.slice(2), plan.baseware, "status")) {
           const bwProbe = await probeBackgroundJob(join(plan.background, "baseware.job.json"));
           if (!bwProbe.pid) return { code: 1, stdout: "", stderr: "offline" };
           return {
@@ -253,6 +264,26 @@ function makeStubSupervisorIO(
             stdout: JSON.stringify({ serviceId: "bw-1", mode: "manual", connected: true, epoch: null }),
             stderr: "",
           };
+        }
+        if (argv[0] === "netstat" && argv.includes("-ano")) {
+          // Windows launcher probe: synthesize `netstat -ano -p tcp` rows for tracked and really-open ports.
+          const probed = new Set<number>([...runningPorts, ...preparedPorts]);
+          if (port !== undefined) probed.add(port);
+          const rows: string[] = ["Active Connections", "", "  Proto  Local Address          Foreign Address        State           PID"];
+          for (const candidate of probed) {
+            let pid: number | undefined;
+            if (runningPorts.has(candidate) || preparedPorts.has(candidate)) pid = process.pid;
+            else {
+              const isOpen = await new Promise<boolean>(resolveOpen => {
+                const s = createServer();
+                s.once("error", () => resolveOpen(true));
+                s.listen(candidate, "127.0.0.1", () => s.close(() => resolveOpen(false)));
+              });
+              if (isOpen) pid = 999999;
+            }
+            if (pid !== undefined) rows.push(`  TCP    127.0.0.1:${candidate}    0.0.0.0:0    LISTENING    ${pid}`);
+          }
+          return { code: 0, stdout: rows.join("\r\n") + "\r\n", stderr: "" };
         }
         if (argv[0] === "lsof" && argv[2]?.startsWith("-iTCP:")) {
           const targetPort = Number(argv[2].slice(6));
