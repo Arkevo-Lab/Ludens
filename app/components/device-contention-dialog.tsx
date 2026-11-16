@@ -4,6 +4,7 @@ import { useEffect, useId, useRef } from "react";
 import { AlertTriangle, X } from "lucide-react";
 import { useTranslations } from "@/lib/locale";
 import type { DeviceContentionConflict } from "@/lib/types";
+import { useAnimatedNativeDialog } from "./use-motion-preferences";
 
 function formatTemplate(template: string, vars: Record<string, string>): string {
   return Object.entries(vars).reduce(
@@ -41,6 +42,16 @@ export function DeviceContentionDialog({
   const openedConflictRef = useRef<DeviceContentionConflict | null>(null);
   const prevErrorRef = useRef<string | null>(null);
   const closingProgrammaticallyRef = useRef(false);
+  const renderedConflict = useAnimatedNativeDialog(dialogRef, conflict, {
+    closeDurationMs: 180,
+    manualShowModal: true,
+    onBeforeProgrammaticClose: () => {
+      closingProgrammaticallyRef.current = true;
+      if (dialogRef.current) {
+        dialogRef.current.returnValue = "";
+      }
+    },
+  });
 
   // Open via `showModal()` when a new conflict arrives or when preemption fails with a new error.
   useEffect(() => {
@@ -53,11 +64,6 @@ export function DeviceContentionDialog({
 
     if (!conflict) {
       openedConflictRef.current = null;
-      if (dialog.open) {
-        closingProgrammaticallyRef.current = true;
-        dialog.returnValue = "";
-        dialog.close();
-      }
       return;
     }
 
@@ -65,6 +71,8 @@ export function DeviceContentionDialog({
       openedConflictRef.current = conflict;
       dialog.returnValue = "";
       dialog.showModal();
+    } else if (isNewConflict && dialog.open) {
+      openedConflictRef.current = conflict;
     }
   }, [conflict, error]);
 
@@ -132,13 +140,13 @@ export function DeviceContentionDialog({
     onDismiss();
   };
 
-  const holderName = conflict?.holderWorkspaceName || conflict?.holderProjectId || "";
-  const deviceName = conflict?.deviceLabel || conflict?.deviceKey || "";
-  const modeLabel = conflict?.holderMode === "auto" ? t("modeAuto") : t("modeManual");
+  const holderName = renderedConflict?.holderWorkspaceName || renderedConflict?.holderProjectId || "";
+  const deviceName = renderedConflict?.deviceLabel || renderedConflict?.deviceKey || "";
+  const modeLabel = renderedConflict?.holderMode === "auto" ? t("modeAuto") : t("modeManual");
   const originLabel =
-    conflict?.holderOrigin === "cli"
+    renderedConflict?.holderOrigin === "cli"
       ? t("originCli")
-      : conflict?.holderOrigin === "app"
+      : renderedConflict?.holderOrigin === "app"
         ? t("originApp")
         : null;
 
@@ -151,7 +159,7 @@ export function DeviceContentionDialog({
       onClose={handleClose}
       {...({ closedby: "any" } as Record<string, string>)}
     >
-      {conflict ? (
+      {renderedConflict ? (
         <form method="dialog">
           <div className="dcd-header">
             <div className="dcd-title-row">

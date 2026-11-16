@@ -7,6 +7,16 @@
     border-color: color-mix(in srgb, var(--gold) 35%, var(--border));
     white-space: normal;
     line-height: 1.4;
+    transition:
+      color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      border-color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      background-color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      box-shadow var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+  }
+
+  .pet-follow-save-badge:hover {
+    border-color: color-mix(in srgb, var(--gold) 55%, var(--border));
+    background-color: color-mix(in srgb, var(--gold) 8%, transparent);
   }
 
   .pet-follow-save-badge > svg {
@@ -45,6 +55,11 @@
     max-width: 100%;
     white-space: normal;
     line-height: 1.4;
+    transition:
+      color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      border-color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      background-color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      box-shadow var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
   }
 
   .pet-follow-desktop-badge .status-dot {
@@ -117,6 +132,27 @@
     border: 1px solid var(--line, #1e2330);
     border-radius: var(--radius, 6px);
     box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity var(--duration-normal, 180ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      transform var(--duration-normal, 180ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      border-color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+  }
+
+  @starting-style {
+    .desktop-notification {
+      opacity: 0;
+      transform: translateY(8px) scale(0.98);
+    }
+  }
+
+  .desktop-notification[data-closing="true"] {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    pointer-events: none;
+    transition-duration: 160ms;
+    transition-timing-function: var(--ease-in-out-cubic, cubic-bezier(0.4, 0, 0.2, 1));
   }
 
   .desktop-notification.is-error {
@@ -128,6 +164,18 @@
     justify-content: space-between;
     align-items: center;
     margin-bottom: 10px;
+  }
+
+  .desktop-notification button {
+    transition:
+      color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      background-color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      border-color var(--duration-fast, 140ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1)),
+      transform var(--duration-instant, 90ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+  }
+
+  .desktop-notification button:active {
+    transform: scale(0.98);
   }
 
   .desktop-notification-label {
@@ -148,6 +196,49 @@
     white-space: pre-wrap;
     max-height: 160px;
     overflow: auto;
+  }
+
+  .pet-settings-hydrated,
+  .pet-settings-status,
+  .pet-settings-root [data-slot="alert"],
+  .desktop-notifications > [data-slot="alert"],
+  .pet-follow-saving,
+  .pet-follow-desktop-note,
+  [data-pet-resource] .settings-row {
+    animation: pet-fade-in var(--duration-normal, 180ms) var(--ease-out-expo, cubic-bezier(0.16, 1, 0.3, 1));
+  }
+
+  @keyframes pet-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
+    }
+
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .desktop-notification,
+    .desktop-notification[data-closing="true"],
+    .desktop-notification button,
+    .pet-follow-save-badge,
+    .pet-follow-desktop-badge {
+      transition-duration: 0.01ms !important;
+      transform: none;
+    }
+
+    .pet-settings-hydrated,
+    .pet-settings-status,
+    .pet-settings-root [data-slot="alert"],
+    .desktop-notifications > [data-slot="alert"],
+    .pet-follow-saving,
+    .pet-follow-desktop-note,
+    [data-pet-resource] .settings-row {
+      animation: none;
+    }
   }
 
   @media (max-width: 700px) {

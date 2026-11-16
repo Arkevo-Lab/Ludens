@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef } from "react";
-import { Folder, HardDrive, Play, RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { ChevronRight, Folder, HardDrive, Play, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -117,7 +117,7 @@ export function WorkspaceRunEmpty({
                   type="button"
                   aria-label={t("dismissError")}
                   onClick={service.clearError}
-                  className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  className="rounded p-0.5 text-muted-foreground transition-colors duration-150 hover:text-foreground"
                 >
                   <X className="size-3.5" aria-hidden="true" />
                 </button>
@@ -165,7 +165,7 @@ export function WorkspaceRunEmpty({
                     if (!retrying) onRetry(event.currentTarget);
                   }}
                 >
-                  <RefreshCw className={retrying ? "animate-spin" : undefined} />
+                  <RefreshCw className={retrying ? "motion-safe:animate-spin" : undefined} />
                   {t(retrying ? "retrying" : "retry")}
                 </Button>
               ) : isNoRun && project ? (
@@ -178,7 +178,7 @@ export function WorkspaceRunEmpty({
                     data-empty-start-workspace=""
                   >
                     {starting ? (
-                      <RefreshCw className="size-3.5 animate-spin" aria-hidden="true" />
+                      <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
                     ) : (
                       <Play className="size-3.5 fill-current" aria-hidden="true" />
                     )}
@@ -211,8 +211,9 @@ export function WorkspaceRunEmpty({
           )}
 
           {isNoRun && workspacePath && (
-            <details className="pt-0.5 text-xs text-muted-foreground">
-              <summary className="cursor-pointer select-none font-medium hover:text-foreground">
+            <details className="settings-disclosure border-y-0 pt-0.5 text-xs text-muted-foreground">
+              <summary className="settings-disclosure-summary min-h-0 py-1 font-medium text-muted-foreground hover:text-foreground">
+                <ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />
                 {t("cliCommandSummary")}
               </summary>
               <pre className="mt-2 overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs text-foreground">

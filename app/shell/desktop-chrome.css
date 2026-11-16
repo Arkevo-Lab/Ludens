@@ -41,7 +41,9 @@
   border-right: 1px solid var(--line);
   border-bottom: 1px solid transparent;
   -webkit-app-region: drag;
-  transition: background-color 140ms ease, border-color 140ms ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    border-color var(--duration-fast) var(--ease-out-expo);
 }
 
 /* Collapsed sidebar or <=680px narrow drawer: left cell melts seamlessly into main titlebar,
@@ -83,7 +85,9 @@
   border-radius: 999px;
   border: 0.5px solid rgba(0, 0, 0, 0.25);
   display: inline-block;
-  transition: filter 120ms ease, background-color 140ms ease;
+  transition:
+    filter var(--duration-instant) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
 }
 
 .desktop-preview-dot.close {
@@ -140,7 +144,10 @@
   border-radius: 6px;
   background: transparent;
   color: #aeb5c4;
-  transition: background-color 120ms ease, color 120ms ease, opacity 140ms ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    opacity var(--duration-fast) var(--ease-out-expo);
   -webkit-app-region: no-drag;
 }
 
@@ -192,7 +199,7 @@
   white-space: nowrap;
   overflow: hidden;
   pointer-events: none;
-  transition: opacity 150ms ease;
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
 
 .desktop-breadcrumb-product {
@@ -252,7 +259,7 @@
   align-items: center;
   gap: 5px;
   padding-right: 8px;
-  transition: opacity 150ms ease;
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
 
 /* Companion Pet quick toggle capsule */
@@ -269,7 +276,10 @@
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
-  transition: border-color 120ms ease, color 120ms ease, background-color 120ms ease;
+  transition:
+    border-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo),
+    background-color var(--duration-fast) var(--ease-out-expo);
 }
 
 .desktop-pet-pill:hover {
@@ -321,7 +331,9 @@
   font-size: 10.5px;
   font-weight: 500;
   line-height: 1;
-  transition: background-color 120ms ease, color 120ms ease;
+  transition:
+    background-color var(--duration-fast) var(--ease-out-expo),
+    color var(--duration-fast) var(--ease-out-expo);
 }
 
 .desktop-preview-btn:hover {
@@ -366,7 +378,7 @@
   align-items: stretch;
   height: 100%;
   margin-left: 2px;
-  transition: opacity 150ms ease;
+  transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
 
 .desktop-win-btn {
@@ -380,7 +392,9 @@
   border-radius: 0;
   background: transparent;
   color: #cfd5e2;
-  transition: background-color 100ms ease, color 100ms ease;
+  transition:
+    background-color var(--duration-instant) var(--ease-out-expo),
+    color var(--duration-instant) var(--ease-out-expo);
   -webkit-app-region: no-drag;
 }
 
@@ -430,6 +444,20 @@
   padding: min(11vh, 76px) 16px 24px;
   background: rgba(4, 5, 8, 0.62);
   backdrop-filter: blur(4px);
+  opacity: 1;
+  transition: opacity 160ms var(--ease-out-expo);
+}
+
+.desktop-qs-backdrop[data-motion-state="closed"] {
+  opacity: 0;
+  pointer-events: none;
+  transition-duration: 130ms;
+}
+
+@starting-style {
+  .desktop-qs-backdrop {
+    opacity: 0;
+  }
 }
 
 .desktop-qs-dialog {
@@ -444,6 +472,25 @@
     0 24px 64px rgba(0, 0, 0, 0.68),
     0 0 0 1px rgba(255, 255, 255, 0.03) inset;
   overflow: hidden;
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 160ms var(--ease-out-expo),
+    transform 160ms var(--ease-out-expo);
+}
+
+.desktop-qs-dialog[data-motion-state="closed"] {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.985);
+  pointer-events: none;
+  transition-duration: 130ms;
+}
+
+@starting-style {
+  .desktop-qs-dialog {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.985);
+  }
 }
 
 .desktop-qs-input-row {
@@ -513,7 +560,9 @@
   background: transparent;
   color: var(--muted-foreground);
   text-align: left;
-  transition: background-color 80ms ease, color 80ms ease;
+  transition:
+    background-color var(--duration-instant) var(--ease-out-expo),
+    color var(--duration-instant) var(--ease-out-expo);
 }
 
 .desktop-qs-item[data-active="true"] {
@@ -532,6 +581,22 @@
 .desktop-qs-item-icon {
   color: var(--muted-foreground);
   flex-shrink: 0;
+  transition: color var(--duration-instant) var(--ease-out-expo);
+}
+
+.desktop-qs-item-icon-reload {
+  transition:
+    color var(--duration-instant) var(--ease-out-expo),
+    transform var(--duration-normal) var(--ease-out-expo);
+}
+
+.desktop-qs-item:hover .desktop-qs-item-icon-reload,
+.desktop-qs-item[data-active="true"] .desktop-qs-item-icon-reload {
+  transform: rotate(90deg);
+}
+
+.desktop-qs-item:active .desktop-qs-item-icon-reload {
+  transform: rotate(180deg);
 }
 
 .desktop-qs-item[data-active="true"] .desktop-qs-item-icon {

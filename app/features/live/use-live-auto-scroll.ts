@@ -15,6 +15,7 @@ import {
 } from "react";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import type { StreamSegment } from "@/features/live/shiori-segments";
+import { prefersSmoothScrollBehavior } from "@/components/use-motion-preferences";
 
 export const BOTTOM_REATTACH_THRESHOLD_PX = 36;
 export const BOTTOM_DETACH_MIN_DISTANCE_PX = 44;
@@ -460,7 +461,8 @@ export function useLiveAutoScroll(options: UseLiveAutoScrollOptions) {
 
       const el = streamRef.current;
       if (!el) return;
-      const behavior = opts?.behavior ?? "smooth";
+      const requestedBehavior = opts?.behavior ?? prefersSmoothScrollBehavior();
+      const behavior = requestedBehavior === "smooth" ? prefersSmoothScrollBehavior() : requestedBehavior;
       const distance = computeBottomDistance({
         scrollHeight: el.scrollHeight,
         scrollTop: el.scrollTop,
@@ -479,10 +481,10 @@ export function useLiveAutoScroll(options: UseLiveAutoScrollOptions) {
         el.scrollTop = Math.max(0, el.scrollHeight - el.clientHeight - 520);
         requestAnimationFrame(() => {
           markProgrammaticScroll(850);
-          el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+          el.scrollTo({ top: el.scrollHeight, behavior });
         });
       } else {
-        el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+        el.scrollTo({ top: el.scrollHeight, behavior });
       }
     },
     [applyFollowing, markProgrammaticScroll, onReachedBottom],
@@ -500,7 +502,7 @@ export function useLiveAutoScroll(options: UseLiveAutoScrollOptions) {
       if (isFollowingRef.current && !historical) {
         pauseFollow({ manualHold: true });
       } else {
-        scrollToBottom({ behavior: "smooth", onBeforeScroll: onResumeBeforeScroll });
+        scrollToBottom({ behavior: prefersSmoothScrollBehavior(), onBeforeScroll: onResumeBeforeScroll });
       }
     },
     [historical, pauseFollow, scrollToBottom],
@@ -578,7 +580,7 @@ export function useLiveAutoScroll(options: UseLiveAutoScrollOptions) {
         upwardIntentUntilRef.current = 0;
         manualHoldRef.current = false;
       } else if (event.key === "End") {
-        scrollToBottom({ behavior: "smooth" });
+        scrollToBottom({ behavior: prefersSmoothScrollBehavior() });
       }
     },
     [scrollToBottom],

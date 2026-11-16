@@ -144,7 +144,7 @@ function WorkspacePerceptionSettings({ project, workspace }: { project: string; 
               if (!pending && !state.reading) void session?.refresh();
             }}
           >
-            <RefreshCw className={"size-3.5" + (state.reading ? " animate-spin" : "")} aria-hidden="true" />
+            <RefreshCw className={"size-3.5" + (state.reading ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
             {t(state.reading ? "retrying" : state.readError || state.writeState === "unconfirmed" ? "retryRead" : "refresh")}
           </Button>
         }

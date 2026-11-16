@@ -15,6 +15,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useAnimatedPresence } from "@/components/use-motion-preferences";
 import "@/features/live/activity-feed.css";
 
 interface ActivityFeedProps {
@@ -133,6 +134,12 @@ function Content({ text, code = false }: { text: string; code?: boolean }) {
   const t = useTranslations("activityFeed");
   const [requestedExpanded, setExpanded] = useState(false);
   const { canExpand, expanded, text: visibleText, characters } = activityContentView(text, requestedExpanded);
+  const fullPresence = useAnimatedPresence(expanded, 160);
+  const retainedFullTextRef = useRef(visibleText);
+  if (expanded) {
+    retainedFullTextRef.current = visibleText;
+  }
+  const fullBodyText = expanded ? visibleText : retainedFullTextRef.current;
   return (
     <div className={`block-content${code ? " block-code" : ""}`} data-activity-content>
       {canExpand ? (
@@ -141,7 +148,11 @@ function Content({ text, code = false }: { text: string; code?: boolean }) {
             {expanded ? t("collapseLabel") : t("expandLabel")}
             <span>{characters.toLocaleString()}{t("charsUnit")}</span>
           </summary>
-          {expanded && <pre className="block-body block-full" tabIndex={0} role="region" aria-label={t("fullContentLabel")}>{visibleText}</pre>}
+          {fullPresence.mounted && (
+            <pre className="block-body block-full" tabIndex={0} role="region" aria-label={t("fullContentLabel")}>
+              {fullBodyText}
+            </pre>
+          )}
         </details>
       ) : null}
       {!expanded && <pre className="block-body">{visibleText}{canExpand ? "…" : ""}</pre>}

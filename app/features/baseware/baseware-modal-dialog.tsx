@@ -3,6 +3,7 @@
 import React, { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAnimatedNativeDialog } from "@/components/use-motion-preferences";
 
 export interface BasewareModalDialogProps {
   open: boolean;
@@ -41,21 +42,15 @@ export function BasewareModalDialog({
 }: BasewareModalDialogProps) {
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const pointerStartedOutsideRef = useRef(false);
+  const closingProgrammaticallyRef = useRef(false);
   const titleId = useId();
   const subtitleId = useId();
-
-  useEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-
-    if (open) {
-      if (!dialog.open) {
-        dialog.showModal();
-      }
-    } else if (dialog.open) {
-      dialog.close();
-    }
-  }, [open]);
+  const renderedOpen = useAnimatedNativeDialog(dialogRef, open, {
+    closeDurationMs: 180,
+    onBeforeProgrammaticClose: () => {
+      closingProgrammaticallyRef.current = true;
+    },
+  });
 
   // Light-dismiss fallback when browser lacks HTMLDialogElement.prototype.closedBy
   useEffect(() => {
@@ -93,6 +88,10 @@ export function BasewareModalDialog({
     if (dialog && dialog.returnValue) {
       dialog.returnValue = "";
     }
+    if (closingProgrammaticallyRef.current) {
+      closingProgrammaticallyRef.current = false;
+      return;
+    }
     onClose();
   };
 
@@ -127,7 +126,7 @@ export function BasewareModalDialog({
           <X className="size-4" aria-hidden="true" />
         </Button>
       </div>
-      <div className="baseware-dialog-body">{open ? children : null}</div>
+      <div className="baseware-dialog-body">{renderedOpen ? children : null}</div>
     </dialog>
   );
 }

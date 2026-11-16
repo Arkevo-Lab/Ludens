@@ -15,6 +15,7 @@ import { replayRpcParams } from "@/features/replay/replay-evidence-model";
 import { replayElapsedInput } from "@/features/replay/replay-navigation";
 import { replayItemActive } from "@/features/replay/replay-model";
 import { useRetryFocus } from "@/components/use-retry-focus";
+import { prefersSmoothScrollBehavior } from "@/components/use-motion-preferences";
 
 type Track = "all" | ReplayTrack;
 interface SearchState {
@@ -67,7 +68,7 @@ export function ReplayEventSearch({ scope, startAt, at, refreshRevision = 0, ite
     }
     requestAnimationFrame(() => {
       const el = listRef.current?.querySelector<HTMLElement>(`[data-replay-item="${CSS.escape(best.id)}"]`);
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      el?.scrollIntoView({ block: "center", behavior: prefersSmoothScrollBehavior() });
     });
   }, []);
 

@@ -7,12 +7,14 @@ import { Label } from "@/components/ui/label";
 import { useTranslations } from "@/lib/locale";
 import { replayDuration } from "@/features/replay/replay-model";
 import { parseReplayElapsed, replayElapsedInput } from "@/features/replay/replay-navigation";
+import { useAnimatedPresence } from "@/components/use-motion-preferences";
 
 export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number; duration: number; onJump(elapsed: number): void }) {
   const t = useTranslations("replayNavigation");
   const id = useId();
   const elapsedInput = replayElapsedInput(elapsed, "milliseconds");
   const [editing, setEditing] = useState(false);
+  const { mounted: popoverMounted, state: popoverState } = useAnimatedPresence(editing, 140);
   const [draft, setDraft] = useState(elapsedInput);
   const [invalid, setInvalid] = useState(false);
   const [clamped, setClamped] = useState(false);
@@ -73,9 +75,10 @@ export function ReplayTimeJump({ elapsed, duration, onJump }: { elapsed: number;
           {t("clampedTime").replace("{time}", replayElapsedInput(duration, "milliseconds"))}
         </span>
       )}
-      {editing && (
+      {popoverMounted && (
         <form
           className="replay-time-jump-popover"
+          data-state={popoverState}
           onSubmit={event => {
             event.preventDefault();
             const target = parseReplayElapsed(draft);

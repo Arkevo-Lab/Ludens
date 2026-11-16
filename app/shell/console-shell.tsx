@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, type CSSProperties, type ComponentProps, type ComponentType, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ComponentProps, type ComponentType, type ReactNode } from "react";
 import { MenuIcon, PanelLeft, Search } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -29,8 +29,18 @@ import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clo
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { ConnectionTargetDialog } from "@/components/connection-target-dialog";
+import type { Project, RunData } from "@/lib/types";
 import { useActiveCores } from "@/shell/use-active-cores";
 import { synthesizeEmptyRunData, useDashboardController } from "@/shell/use-dashboard-controller";
+
+type LiveWorkspaceSnapshot = {
+  projectId: string;
+  workspace: string | null;
+  workspaceTitle: string;
+  runs: Project["runs"];
+  data: RunData;
+  feed: ComponentProps<typeof ShioriWorkbench>["feed"];
+};
 
 type ShellHeaderSlots = {
   runPicker?: ReactNode;
@@ -250,9 +260,31 @@ export default function ConsoleShell() {
   };
   const allowZeroRunLive = view === "live" && entry === "no-run" && Boolean(project);
   const liveData = data ?? (allowZeroRunLive && project ? synthesizeEmptyRunData(project, locale) : null);
+  const [cachedLiveSnapshot, setCachedLiveSnapshot] = useState<LiveWorkspaceSnapshot | null>(null);
+  useEffect(() => {
+    if (view !== "live" || (entry !== "ready" && !allowZeroRunLive) || error) {
+      setCachedLiveSnapshot(null);
+      return;
+    }
+    if (liveData) {
+      setCachedLiveSnapshot({
+        projectId: selection.project,
+        workspace: project?.workspace ?? liveData.manifest.workspace ?? null,
+        workspaceTitle: workspaceName(project),
+        runs: project?.runs ?? [],
+        data: liveData,
+        feed: activity,
+      });
+    }
+  }, [view, entry, allowZeroRunLive, error, liveData, selection.project, project, activity]);
+  const isLiveWorkspaceSwitching = Boolean(view === "live" && entry === "ready" && !error && !liveData && cachedLiveSnapshot);
+  const effectiveLiveSnapshot = isLiveWorkspaceSwitching ? cachedLiveSnapshot : null;
+  const effectiveLiveData = liveData ?? effectiveLiveSnapshot?.data ?? null;
   const hasWorkbenchHeader =
     (view === "replay" && entry === "ready") ||
-    ((view === "live" || view === "perf") && Boolean(liveData) && (entry === "ready" || allowZeroRunLive));
+    ((view === "live" || view === "perf") &&
+      Boolean(view === "live" ? effectiveLiveData : liveData) &&
+      (entry === "ready" || allowZeroRunLive));
   const hasContextualBarPicker = Boolean(runControls && (entry === "ready" || allowZeroRunLive) && contextualRunPicker);
   const activeWorkspaceLabel = workspaceScopedView ? workspaceName(project) : "";
   return (
@@ -381,8 +413,12 @@ export default function ConsoleShell() {
               </div>
             </header>
           )}
-        <main ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
-          tabIndex={runControls ? -1 : undefined} aria-label={runControls ? t(`views.${view}.title`) : undefined}
+        <main
+          key={view}
+          ref={element => { runContent.current = element; catalogFocus.target.current = element; }}
+          tabIndex={runControls ? -1 : undefined}
+          aria-label={runControls ? t(`views.${view}.title`) : undefined}
+          data-workspace-switching={isLiveWorkspaceSwitching ? "true" : undefined}
           className={"page-content outline-none focus-visible:ring-2 focus-visible:ring-ring" + (view === "live" ? " live-page" : view === "replay" && entry === "ready" ? " replay-page" : view === "perf" ? " perf-page" : "")}>
           {rpcCtx && !rpcCtx.snapshot.isReady && rpcCtx.snapshot.status !== "connecting" && (
             <Alert
@@ -488,20 +524,20 @@ export default function ConsoleShell() {
                 );
               }}
               onEvidence={nextEvidence => navigate(replayEvidencePatch(nextEvidence))} />
-          ) : view === "live" && liveData ? (
+          ) : view === "live" && effectiveLiveData ? (
             <SlottedShioriWorkbench
-                  project={selection.project}
-                  workspace={project?.workspace ?? liveData.manifest.workspace ?? null}
-                  workspaceTitle={workspaceName(project)}
-                  runs={project?.runs ?? []}
+                  project={effectiveLiveSnapshot ? effectiveLiveSnapshot.projectId : selection.project}
+                  workspace={effectiveLiveSnapshot ? effectiveLiveSnapshot.workspace : (project?.workspace ?? effectiveLiveData.manifest.workspace ?? null)}
+                  workspaceTitle={effectiveLiveSnapshot ? effectiveLiveSnapshot.workspaceTitle : workspaceName(project)}
+                  runs={effectiveLiveSnapshot ? effectiveLiveSnapshot.runs : (project?.runs ?? [])}
                   runPicker={contextualRunPicker}
                   mobileNavSlot={mobileNavButton}
                   renderEventPoolPanel={props => <EventPoolOverviewPanel {...props} />}
                   jumpTarget={liveJumpTarget}
                   onClearJumpTarget={clearLiveJumpTarget}
                   onActiveSegmentChange={setActiveLiveSegment}
-                  data={liveData}
-                  feed={activity}
+                  data={effectiveLiveData}
+                  feed={effectiveLiveSnapshot ? effectiveLiveSnapshot.feed : activity}
                   refresh={refresh}
                   isLiveRun={true}
                   phaseLabel={!staleStatus ? phase?.label : null}
@@ -523,7 +559,7 @@ export default function ConsoleShell() {
                   onOpenReplayAt={openReplayAtFrame}
                   onReturnLatest={returnToLatest}
                   renderObservation={({ data: overrideData, call: overrideCall, selectedImage: overrideImage, onSelectImage }) => {
-                    const targetData = overrideData ?? liveData;
+                    const targetData = overrideData ?? effectiveLiveData;
                     const obsById = new Map(targetData.observations.map(o => [o.id, o]));
                     const hasRecordedVisual = (candidate?: typeof call) =>
                       Boolean(
@@ -533,8 +569,8 @@ export default function ConsoleShell() {
                         }),
                       );
                     const latestRunCall = targetData.calls.at(-1);
-                    const defaultCall = targetData === liveData ? call : latestRunCall;
-                    const explicitSelection = Boolean(overrideCall || (targetData === liveData && requestedCall));
+                    const defaultCall = targetData === effectiveLiveData ? call : latestRunCall;
+                    const explicitSelection = Boolean(overrideCall || (targetData === effectiveLiveData && requestedCall));
                     const effectiveCall = explicitSelection
                       ? (overrideCall ?? defaultCall)
                       : hasRecordedVisual(defaultCall)
@@ -544,7 +580,7 @@ export default function ConsoleShell() {
                           defaultCall;
                     const effectiveImage =
                       overrideImage ??
-                      (targetData === liveData ? selectedImage : undefined) ??
+                      (targetData === effectiveLiveData ? selectedImage : undefined) ??
                       (!effectiveCall?.inputObservations.length
                         ? [...targetData.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
                           targetData.observations.at(-1)?.id
@@ -564,9 +600,9 @@ export default function ConsoleShell() {
                   observationSlot={
                     <ObservationPanel
                       priority
-                      data={liveData}
+                      data={effectiveLiveData}
                       call={(() => {
-                        const obsById = new Map(liveData.observations.map(o => [o.id, o]));
+                        const obsById = new Map(effectiveLiveData.observations.map(o => [o.id, o]));
                         const hasRecordedVisual = (candidate?: typeof call) =>
                           Boolean(
                             candidate?.inputObservations.some(id => {
@@ -577,17 +613,17 @@ export default function ConsoleShell() {
                         if (requestedCall) return call;
                         if (hasRecordedVisual(call)) return call;
                         return (
-                          [...liveData.calls].reverse().find(hasRecordedVisual) ??
-                          [...liveData.calls].reverse().find(c => c.inputObservations.length > 0) ??
+                          [...effectiveLiveData.calls].reverse().find(hasRecordedVisual) ??
+                          [...effectiveLiveData.calls].reverse().find(c => c.inputObservations.length > 0) ??
                           call
                         );
                       })()}
-                      latestCall={!requestedCall ? liveData.calls.at(-1) : undefined}
+                      latestCall={!requestedCall ? effectiveLiveData.calls.at(-1) : undefined}
                       selectedImage={
                         selectedImage ??
                         (!call?.inputObservations.length
-                          ? [...liveData.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
-                            liveData.observations.at(-1)?.id
+                          ? [...effectiveLiveData.observations].reverse().find(o => o.mediaStorage !== "unrecorded")?.id ??
+                            effectiveLiveData.observations.at(-1)?.id
                           : undefined)
                       }
                       onImage={(id) => navigate({ ...pinned, image: id })}
