@@ -217,7 +217,13 @@ test("run-index reducers-9 re-projects stale caches and activity projects loop_s
       e(
         "capability_end",
         { action: "call", id: "python/actions.py:tap_confirm", outcome: "success", durationMs: 38 },
-        { traceId: "t-cap", spanId: "s-cap" },
+        { traceId: "t-cap", spanId: "s-cap", recordingPurpose: "loop" },
+      ),
+      // Ordinary bash subprocess capability call inside active epoch lacks modelCallId AND lacks recordingPurpose="loop" -> must stay diagnostic!
+      e(
+        "capability_end",
+        { action: "call", id: "python/actions.py:from_bash_tool", outcome: "success", durationMs: 19 },
+        { traceId: "t-bash-cap", spanId: "s-bash-cap" },
       ),
       e("loop_fault", {
         phase: "step",
@@ -279,7 +285,7 @@ test("run-index reducers-9 re-projects stale caches and activity projects loop_s
     // Direct activityBlocks + indexed refreshActivity / queryActivity parity
     const directBlocks = await activityBlocks(root, rows);
     await refreshActivity(index);
-    expect(index.meta("activitySemantics")).toBe("12");
+    expect(index.meta("activitySemantics")).toBe("13");
     const snap = await queryActivity(index, { project: "p", runId: "run-1", epoch: "epoch-loop" });
     const visible = snap.blocks.filter(b => b.kind !== "diagnostic");
 
@@ -302,6 +308,7 @@ test("run-index reducers-9 re-projects stale caches and activity projects loop_s
     expect(capBlock).toMatchObject({
       kind: "system",
       status: "complete",
+      recordingPurpose: "loop",
       text: "python/actions.py:tap_confirm (38ms)",
       data: {
         role: "loop_capability",
@@ -309,6 +316,10 @@ test("run-index reducers-9 re-projects stale caches and activity projects loop_s
         outcome: "success",
       },
     });
+    expect(visible.some(b => b.text.includes("from_bash_tool"))).toBe(false);
+    const bashCapDiag = directBlocks.find(b => b.trace?.spanId === "s-bash-cap");
+    expect(bashCapDiag?.kind).toBe("diagnostic");
+    expect(bashCapDiag?.recordingPurpose).toBeUndefined();
 
     const faultBlock = visible.find(b => b.title === "loop_fault");
     expect(faultBlock).toMatchObject({

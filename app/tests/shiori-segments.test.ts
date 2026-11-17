@@ -966,7 +966,7 @@ test("Loop orchestration blocks and inter-turn python-call items group into coll
       at: "2026-11-07T13:00:03.000Z",
       text: "python/macros.py:advance_dialog (35ms)",
       data: { capability: "python/macros.py:advance_dialog" },
-      trace: { epoch: "epoch-1" },
+      trace: { epoch: "epoch-1", recordingPurpose: "loop" },
     }),
     block({
       id: "loop-step-2",
@@ -977,7 +977,7 @@ test("Loop orchestration blocks and inter-turn python-call items group into coll
       data: { role: "loop_step", turn: 2, action: "prompt" },
       trace: { epoch: "epoch-1" },
     }),
-    // Model turn with modelCallId (must NOT merge with loop group!)
+    // Model turn with modelCallId — plus an ordinary !modelCallId python-call from a bash subprocess (no recordingPurpose="loop") that MUST NOT split the LLM turn!
     block({
       id: "m1-think",
       kind: "thinking",
@@ -985,6 +985,15 @@ test("Loop orchestration blocks and inter-turn python-call items group into coll
       at: "2026-11-07T13:00:05.000Z",
       text: "Checking current battle state.",
       trace: { epoch: "epoch-1", modelCallId: "call-1" },
+    }),
+    block({
+      id: "m1-bash-subproc-py",
+      kind: "tool",
+      title: "python-call",
+      at: "2026-11-07T13:00:05.500Z",
+      text: "python/macros.py:probe_from_bash (18ms)",
+      data: { capability: "python/macros.py:probe_from_bash" },
+      trace: { epoch: "epoch-1" },
     }),
     block({
       id: "m1-cap-tool",
@@ -1064,8 +1073,8 @@ test("Loop orchestration blocks and inter-turn python-call items group into coll
   assert.equal(turns[1]?.stepGroupVariant, undefined);
   assert.deepEqual(
     turns[1]?.steps.map(s => s.id),
-    ["m1-think", "m1-cap-tool"],
-    "model-invoked tool with modelCallId stays inside the LLM turn steps",
+    ["m1-think", "m1-bash-subproc-py", "m1-cap-tool"],
+    "!modelCallId python-call without recordingPurpose='loop' stays inside the LLM turn without splitting it",
   );
   assert.equal(turns[1]?.responseBlock?.id, "m1-reply");
 
