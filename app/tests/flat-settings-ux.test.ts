@@ -116,7 +116,7 @@ function makeStudioSnapshot(): WorkspaceStudioSnapshot {
 
 const escapeHtml = (text: string) => text.replace(/&/g, "&amp;");
 
-test("SettingsView renders 4 flat left-rail categories, GlobalDefaults browse trigger, and omits old jump strip", () => {
+test("SettingsView renders 5 flat left-rail categories, GlobalDefaults browse trigger, and omits old jump strip", () => {
   const defaultHtml = renderToStaticMarkup(
     createElement(
       LocaleProvider,
@@ -128,10 +128,11 @@ test("SettingsView renders 4 flat left-rail categories, GlobalDefaults browse tr
   assert.doesNotMatch(defaultHtml, /settings-jump-strip|data-settings-jump-nav/);
   assert.match(defaultHtml, /class="settings-workspace-nav"/);
   const navButtons = defaultHtml.match(/data-slot="settings-nav-item"/g) ?? [];
-  assert.equal(navButtons.length, 4);
+  assert.equal(navButtons.length, 5);
   for (const label of [
     en.settings.categories.general,
     en.settings.categories.defaults,
+    en.settings.categories.storage,
     en.settings.categories.transport,
     en.settings.categories.pet,
   ]) {
