@@ -248,11 +248,18 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
   const blockId = `event:${basename(path)}:${sourceId}`;
     const raised = event.type === "python_call_end" && data.outcome === "error";
     const failed = !raised && (data.outcome === "error"
-      || (event.type === "perception_status" && data.state === "error") || (data.outcome !== "cancelled" && !data.aborted
+      || ((event.type === "perception_status" || event.type === "loop_status") && data.state === "error")
+      || event.type === "loop_fault"
+      || (data.outcome !== "cancelled" && !data.aborted
       && (event.type.endsWith("_error") || event.type === "perception_fault" || (event.type === "event_source_gap" && data.phase === "start") || data.isError === true || data.stopReason === "error")));
-    const system = failed || event.type === "control" || event.type === "control_budget" || ["perception_status", "perception_fault", "perception_fault_end"].includes(event.type)
-    || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
-    || event.type.startsWith("background_") || event.type.includes("compaction") || event.type === "run_end";
+    const isInterTurnLoopCapability = event.type === "capability_end" && data?.action === "call"
+      && Boolean(event.trace?.epoch) && !event.trace?.modelCallId
+      && event.trace?.recordingPurpose !== "continuous-perception" && data?.outcome !== "cancelled";
+    const system = failed || event.type === "control" || event.type === "control_budget"
+      || ["perception_status", "perception_fault", "perception_fault_end", "loop_step", "loop_fault", "loop_status"].includes(event.type)
+      || isInterTurnLoopCapability
+      || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
+      || event.type.startsWith("background_") || event.type.includes("compaction") || event.type === "run_end";
   if (event.type === "user_message" && typeof data?.text === "string") return { id: blockId,
     kind: "text" as const, at: event.at, title: data.mode === "steer" ? "Steer" : "User",
     ...provenance(event), status: "complete" as const };
@@ -367,6 +374,91 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
       blocks.set(header.id, { ...header,
         text: data?.requestedSeconds == null ? "Timer cleared (continuous run)" : `Timer set: ${data.requestedSeconds}s`,
         data: { requestedSeconds: data?.requestedSeconds ?? null, maxSeconds: data?.maxSeconds ?? null, remainingSeconds: data?.remainingSeconds ?? null } });
+      continue;
+    }
+    if (event.type === "loop_step") {
+      const turnLabel = typeof data?.turn === "number" ? `Turn #${data.turn}` : "Loop";
+      const action = typeof data?.action === "string" ? data.action : "step";
+      let actionSummary = action;
+      if (action === "wait") {
+        const sec = typeof data?.seconds === "number" && Number.isFinite(data.seconds)
+          ? `${Number(data.seconds.toFixed(2))}s`
+          : "";
+        const waitParts = [sec, typeof data?.reason === "string" && data.reason ? `(${data.reason})` : ""].filter(Boolean);
+        actionSummary = waitParts.length ? `wait ${waitParts.join(" ")}` : "wait";
+      } else if (action === "stop") {
+        actionSummary = typeof data?.reason === "string" && data.reason ? `stop (${data.reason})` : "stop";
+      } else if (action === "prompt") {
+        const mode = typeof data?.injectionMode === "string" && data.injectionMode !== "structured"
+          ? ` [${data.injectionMode}]`
+          : "";
+        actionSummary = `prompt${mode}`;
+      }
+      blocks.set(header.id, {
+        ...header,
+        text: `${turnLabel} · ${actionSummary}`,
+        data: {
+          role: "loop_step",
+          turn: data?.turn,
+          action: data?.action,
+          durationMs: data?.durationMs,
+          seconds: data?.seconds,
+          reason: data?.reason,
+          ...(data?.customPrompt !== undefined ? { customPrompt: data.customPrompt } : {}),
+          injectionMode: data?.injectionMode,
+        },
+      });
+      continue;
+    }
+    if (event.type === "loop_fault") {
+      const phase = typeof data?.phase === "string" ? data.phase : "runtime";
+      const err = typeof data?.error === "string" ? data.error : String(data?.error ?? "unknown error");
+      blocks.set(header.id, {
+        ...header,
+        status: "error",
+        text: `loop.py ${phase} fault: ${err}`,
+        data: {
+          role: "loop_fault",
+          phase: data?.phase,
+          error: data?.error,
+          fallback: data?.fallback,
+          ...(data?.codeSHA ? { codeSHA: data.codeSHA } : {}),
+        },
+      });
+      continue;
+    }
+    if (event.type === "loop_status") {
+      const state = typeof data?.state === "string" ? data.state : "unknown";
+      const err = typeof data?.error === "string" && data.error ? `: ${data.error}` : "";
+      blocks.set(header.id, {
+        ...header,
+        status: data?.state === "error" ? "error" : "complete",
+        text: `loop.py ${state}${err}`,
+        data: {
+          role: "loop_status",
+          state: data?.state,
+          error: data?.error,
+          ...(data?.generation !== undefined ? { generation: data.generation } : {}),
+          ...(data?.codeSHA ? { codeSHA: data.codeSHA } : {}),
+        },
+      });
+      continue;
+    }
+    if (event.type === "capability_end" && data?.action === "call" && Boolean(trace?.epoch) && !trace?.modelCallId
+      && trace?.recordingPurpose !== "continuous-perception" && data?.outcome !== "cancelled") {
+      const capId = typeof data.id === "string" ? data.id : "capability";
+      const dur = typeof data.durationMs === "number" && Number.isFinite(data.durationMs) ? ` (${Math.round(data.durationMs)}ms)` : "";
+      blocks.set(header.id, {
+        ...header,
+        text: `${capId}${dur}${data.error ? ` · ${data.error}` : ""}`,
+        data: {
+          role: "loop_capability",
+          capability: capId,
+          outcome: data.outcome,
+          ...(typeof data.durationMs === "number" ? { durationMs: data.durationMs } : {}),
+          ...(data.error ? { error: data.error } : {}),
+        },
+      });
       continue;
     }
     const text = readable(data);
@@ -833,9 +925,9 @@ export function activityProgress(index: LogIndex) {
 export async function createActivityReducer(index: LogIndex, options: {
   cold?: boolean; signal?: AbortSignal; streamLimits?: ReadonlyMap<string, number>;
 } = {}) {
-  if (index.meta("activitySemantics") !== "11") {
+  if (index.meta("activitySemantics") !== "12") {
     index.resetActivity(); index.resetStores(["activity-model-ends", "activity-deliveries"]);
-    index.setMeta("activitySemantics", "11"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
+    index.setMeta("activitySemantics", "12"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
   }
   let position = Number(index.meta("activityPosition") ?? 0);
   const current = new Map<string, CurrentState>();
@@ -908,7 +1000,7 @@ export async function createActivityReducer(index: LogIndex, options: {
           index.store("images").index(observation.id, {});
       }
       if (event.type === "observation_context" && typeof event.data.id === "string")
-        index.store("activity-deliveries").index(JSON.stringify([event.trace?.epoch, event.data.id]), { observations: event.data.observations ?? [] });
+        index.store("activity-deliveries").index(JSON.stringify([event.trace?.epoch, event.data.id]), { observations: event.data.observations ?? event.data.observationIds ?? [] });
       if (event.type === "model_start") {
         const delivered = Array.isArray(event.data.deliveryIds)
           ? event.data.deliveryIds.flatMap((id: string) => index.store("activity-deliveries").meta(JSON.stringify([event.trace?.epoch, id]))?.observations ?? [])

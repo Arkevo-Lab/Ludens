@@ -25,15 +25,23 @@ function queryOk(data: Event["data"]): boolean | undefined {
   return data.outcome === "success" ? true : ["error", "cancelled"].includes(data.outcome) ? false : undefined;
 }
 
+const VALID_INJECTION_MODES = new Set(["structured", "custom_json", "custom_text", "none"]);
+
+function parseInjectionMode(value: unknown): PerceptionRead["injectionMode"] {
+  return typeof value === "string" && VALID_INJECTION_MODES.has(value)
+    ? (value as PerceptionRead["injectionMode"])
+    : undefined;
+}
+
 /** Normalize historical event envelopes only at this reader boundary. */
 export function perceptionRead(event: Event): PerceptionRead | null {
   if (event.type !== "perception_observe_end" && event.type !== "perception_input_error") return null;
   const { queryId, status, snapshot, records, query, hasMore, nextAfter, reused, durationMs, availability, error } = event.data;
   if (typeof queryId === "string") {
-    const selected = (records ?? []).map(({ text, media, data: _data, space: _space, ...snapshot }: any) => ({
+    const selected = (records ?? []).map(({ text, media, ...snapshot }: any) => ({
       snapshot, text: text ?? "", observations: (media ?? []).map(({ id }: ArchivedObservation) => ({ id })),
     }));
-    return { at: event.at, queryId, ok: queryOk(event.data), query, records: selected, snapshot: selected.at(-1)?.snapshot,
+    return { at: event.at, queryId, ok: queryOk(event.data), query, records: selected,
       hasMore, nextAfter, durationMs, availability, error: typeof error === "string" ? error : error?.message };
   }
   return { at: event.at, status, snapshot, query, hasMore, nextAfter, legacyRepeated: reused, durationMs,
@@ -43,6 +51,72 @@ export function perceptionRead(event: Event): PerceptionRead | null {
       snapshot: record.snapshot, text: record.text,
       observations: record.observations.map(({ id }) => ({ id })),
     })),
+  };
+}
+
+/** Merge `observation_context` delivery metadata (`deliveredPayload`, `injectionMode`, `attachImages`) with its underlying perception query. */
+export function contextPerception(event: Event, baseRead?: PerceptionRead): PerceptionRead | null {
+  if (event.type !== "observation_context") return baseRead ?? null;
+  const data = event.data ?? {};
+  const injectionMode = parseInjectionMode(data.injectionMode);
+  const attachImages = typeof data.attachImages === "boolean" ? data.attachImages : undefined;
+  const deliveryError = typeof data.deliveryError === "string" ? data.deliveryError : undefined;
+  const hasPayload = data.deliveredPayload !== undefined;
+  const directRecords = Array.isArray(data.records)
+    ? data.records.map(({ text, media, observations, ...snapshot }: any) => ({
+        snapshot,
+        text: text ?? "",
+        observations: (media ?? observations ?? []).map((item: any) => ({
+          id: typeof item === "string" ? item : item.id,
+        })),
+      }))
+    : undefined;
+
+  if (!baseRead && !hasPayload && injectionMode === undefined && attachImages === undefined && deliveryError === undefined && !directRecords) {
+    return null;
+  }
+
+  let mergedRecords = directRecords ?? baseRead?.records;
+  if (
+    !directRecords &&
+    mergedRecords &&
+    data.deliveredPayload &&
+    typeof data.deliveredPayload === "object" &&
+    !Array.isArray(data.deliveredPayload) &&
+    Array.isArray((data.deliveredPayload as Record<string, unknown>).records)
+  ) {
+    const payloadRecords = (data.deliveredPayload as { records: unknown[] }).records;
+    const byId = new Map<string, Record<string, unknown>>();
+    for (const item of payloadRecords) {
+      if (item && typeof item === "object" && !Array.isArray(item) && typeof (item as Record<string, unknown>).id === "string") {
+        byId.set((item as Record<string, unknown>).id as string, item as Record<string, unknown>);
+      }
+    }
+    if (byId.size > 0) {
+      mergedRecords = mergedRecords.map(entry => {
+        const extra = byId.get(entry.snapshot.id);
+        if (!extra) return entry;
+        const nextSnapshot = { ...entry.snapshot };
+        for (const key of ["data", "space", "effect", "transition"] as const) {
+          if (nextSnapshot[key] === undefined && extra[key] !== undefined) {
+            nextSnapshot[key] = extra[key];
+          }
+        }
+        return { ...entry, snapshot: nextSnapshot };
+      });
+    }
+  }
+
+  const { snapshot: _legacySnapshot, ...restBase } = baseRead ?? { at: event.at };
+  return {
+    ...restBase,
+    ...(baseRead?.snapshot && !mergedRecords ? { snapshot: baseRead.snapshot } : {}),
+    ...(typeof data.queryId === "string" && !restBase.queryId ? { queryId: data.queryId } : {}),
+    ...(mergedRecords ? { records: mergedRecords } : {}),
+    ...(hasPayload ? { deliveredPayload: data.deliveredPayload } : {}),
+    ...(injectionMode !== undefined ? { injectionMode } : {}),
+    ...(attachImages !== undefined ? { attachImages } : {}),
+    ...(deliveryError !== undefined && !restBase.deliveryError ? { deliveryError } : {}),
   };
 }
 
@@ -89,6 +163,7 @@ export async function modelInputEvents(index: LogIndex, start: Event, position: 
       if (!delivery) continue;
       contexts.push(delivery.event);
       for (const queryId of delivery.event.data.queries ?? []) queries.add(queryId);
+      if (typeof delivery.event.data.queryId === "string") queries.add(delivery.event.data.queryId);
     }
     const queryEvents: { position: number; event: Event }[] = [];
     for (const queryId of queries) {
@@ -133,7 +208,7 @@ export function eventObservations(event: Event): ArchivedObservation[] {
   if (perception) {
     if (perception.queryId) {
       if (!perception.ok) return [];
-      return (event.data.records ?? []).flatMap(({ media, text, data: _data, space: _space, ...snapshot }: any) =>
+      return (event.data.records ?? []).flatMap(({ media, text, ...snapshot }: any) =>
         (media ?? []).map((observation: ArchivedObservation) => ({ ...observation, origin: "perception", text,
           perception: { ...perception, records: undefined, snapshot } })));
     }
