@@ -1,6 +1,6 @@
 import type { Event, Call, Observation, Notice, SkillEvidence, PerceptionRead } from "./types";
 import { p95 } from "./telemetry";
-import { perceptionQueryFailed, eventObservations, observationInput, perceptionStatus } from "./observation-events";
+import { contextPerception, perceptionQueryFailed, eventObservations, observationInput, perceptionStatus } from "./observation-events";
 export function parseEvents(text: string): Event[] {
   const lines = text.split("\n");
   if (!text.endsWith("\n")) lines.pop(); // An append in progress is not a malformed event.
@@ -48,7 +48,9 @@ export function aggregate(events: Event[], now = Date.now()) {
   const observationRequests = new Map<string, Observation["request"]>();
   const observationResults = new Map<string, { text: string; perception?: PerceptionRead }>();
   const deliveryErrors = new Map<string, string>();
-  const deliveries = new Map<string, { observations: string[]; queries: string[] }>();
+  type DeliveryEntry = { event: Event; observations: string[]; queries: string[] };
+  const deliveries = new Map<string, DeliveryEntry>();
+  const unkeyedDeliveries = new Map<string, DeliveryEntry>();
   const contexts = new Map<string, { observations: string[]; executions: string[] }>();
   const notices: Notice[] = [];
   const skills: SkillEvidence[] = [];
@@ -78,8 +80,15 @@ export function aggregate(events: Event[], now = Date.now()) {
     });
     if (event.type === "perception_input_error" && typeof d.queryId === "string")
       deliveryErrors.set(JSON.stringify([t.epoch, d.queryId]), String(d.error));
-    if (event.type === "observation_context" && typeof d.id === "string")
-      deliveries.set(JSON.stringify([t.epoch, d.id]), { observations: d.observations ?? [], queries: d.queries ?? [] });
+    if (event.type === "observation_context") {
+      const entry: DeliveryEntry = {
+        event,
+        observations: d.observations ?? d.observationIds ?? [],
+        queries: Array.isArray(d.queries) ? d.queries : typeof d.queryId === "string" ? [d.queryId] : [],
+      };
+      if (typeof d.id === "string") deliveries.set(JSON.stringify([t.epoch, d.id]), entry);
+      else unkeyedDeliveries.set(t.epoch, entry);
+    }
     if (event.type === "context")
       contexts.set(t.epoch, { observations: d.observations ?? [], executions: d.executions ?? [] });
     if ((event.type === "observation_start" || event.type === "command" || event.type === "capability_start" && event.data.action === "call") && (t.operationId || t.spanId))
@@ -96,8 +105,11 @@ export function aggregate(events: Event[], now = Date.now()) {
     let call = byId.get(t.modelCallId);
     if (event.type === "model_start") {
       const context = contexts.get(t.epoch);
+      const unkeyed = !Array.isArray(d.deliveryIds) && !context ? unkeyedDeliveries.get(t.epoch) : undefined;
+      if (unkeyed) unkeyedDeliveries.delete(t.epoch);
       const selectedDeliveries = Array.isArray(d.deliveryIds)
-        ? d.deliveryIds.flatMap((id: string) => { const delivery = deliveries.get(JSON.stringify([t.epoch, id])); return delivery ? [delivery] : []; }) : undefined;
+        ? d.deliveryIds.flatMap((id: string) => { const delivery = deliveries.get(JSON.stringify([t.epoch, id])); return delivery ? [delivery] : []; })
+        : unkeyed ? [unkeyed] : undefined;
       const queryIds = selectedDeliveries
         ? [...new Set<string>(selectedDeliveries.flatMap((delivery: { queries: string[] }) => delivery.queries))]
         : context && JSON.stringify(context.observations) === JSON.stringify(d.observations ?? []) ? context.executions : [];
@@ -108,7 +120,11 @@ export function aggregate(events: Event[], now = Date.now()) {
           perception: result.perception ? { ...result.perception, deliveryError } : undefined }];
       });
       const inputText = inputResults.map(result => result.text).filter(Boolean).join("\n\n");
-      const perception = inputResults.findLast(result => result.perception)?.perception;
+      const basePerception = inputResults.findLast(result => result.perception)?.perception;
+      const overlayDelivery = selectedDeliveries?.findLast(delivery => contextPerception(delivery.event) !== null);
+      const perception = overlayDelivery
+        ? (contextPerception(overlayDelivery.event, basePerception) ?? basePerception)
+        : basePerception;
       call = {
         id: t.modelCallId,
         index: calls.length + 1,

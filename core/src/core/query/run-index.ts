@@ -7,7 +7,7 @@ import { eventObservations, modelInputEvents, type ArchivedObservation } from ".
 import { advanceLivePhase, emptyLivePhase, livePhaseValue, type LivePhaseState } from "./live-phase";
 import type { Call, Event, Manifest, NativeLoop, Observation, PerceptionSamplerSummary, RunData, RunEfficiencySummary, SpanStats, TraceSpan } from "./types";
 
-const VERSION = "reducers-8";
+const VERSION = "reducers-9";
 const PAGE_SIZE = 100;
 type Meta = RecordPointer;
 type CycleState = { phase: LivePhaseState; lastControl: Record<string, any> | null; autoStarted?: number;
@@ -446,7 +446,7 @@ export function refreshRunProjection(index: LogIndex, options: ProjectionBatch =
 export interface RunPage { beforeCall?: number; call?: string; image?: string }
 export async function selectIndexedCycle(index: LogIndex, manifest: Manifest, epoch?: string) {
   const cycles = await Promise.all([...rows(index, "run-cycles")].sort((a, b) => a.position - b.position)
-    .map(entry => index.store("run-cycles").get<{ epoch: string; startedAt: string; maxSeconds?: number | null }>(entry.id)));
+    .map(entry => index.store("run-cycles").get<RunData["cycles"][number]>(entry.id)));
   const complete = cycles.filter((cycle): cycle is NonNullable<typeof cycle> => !!cycle);
   // epoch="all" selects the whole run; the latest cycle still anchors live state.
   if (epoch === "all") return { cycles: complete, selectedEpoch: complete.at(-1)?.epoch ?? null, wholeRun: true };

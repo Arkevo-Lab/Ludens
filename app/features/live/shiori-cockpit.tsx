@@ -65,7 +65,9 @@ import {
   asRecord,
   buildCodexSegments,
   cleanErrorMessage,
+  formatModelInputPayload,
   mergePoolSnapshotSegments,
+  summarizeLoopActions,
   summarizeStepBlock,
   summarizeSystemCategories,
   type BuildSegmentsOptions,
@@ -92,6 +94,7 @@ export type EventPoolClientCommand = EventPoolCommand;
 export {
   buildCodexSegments,
   canSwitchShioriModel,
+  formatModelInputPayload,
   mergePoolSnapshotSegments,
   resolveShioriActiveModel,
   type BuildSegmentsOptions,
@@ -407,10 +410,17 @@ function renderInlineFormatting(text: string): ReactNode[] {
   });
 }
 
-function formatStopReason(reason: string | null, t: (key: string) => string): string | null {
+export function formatCycleReason(reason: string | null, t: (key: string) => string): string | null {
   if (!reason || reason === "enabled") return null;
   if (reason === "manual") return t("stopReasonManual");
   if (reason === "awaiting human") return t("stopReasonAwaitingHuman");
+  if (reason.startsWith("loop:")) {
+    const detail = reason.slice("loop:".length).trim();
+    if (!detail || detail === "completed") {
+      return t("stopReasonLoopCompleted");
+    }
+    return t("stopReasonLoopCustom").replace("{reason}", detail);
+  }
   const lower = reason.toLowerCase();
   if (lower.includes("budget exhausted") || reason === "time budget") return t("stopReasonBudget");
   if (lower.includes("device disconnected") || lower.includes("econnreset")) {
@@ -418,6 +428,8 @@ function formatStopReason(reason: string | null, t: (key: string) => string): st
   }
   return reason;
 }
+
+const formatStopReason = formatCycleReason;
 
 const SYSTEM_CATEGORY_KEYS: Record<SystemStepCategory, string> = {
   device: "sysCatDevice",
@@ -537,6 +549,8 @@ function CodexStepPreDisclosure({ open, text }: { open: boolean; text: string })
 
 function CodexStepGroup({
   steps,
+  variant,
+  hasFault = false,
   forceExpanded,
   defaultOpen = false,
   standby = false,
@@ -544,6 +558,8 @@ function CodexStepGroup({
   onSelect,
 }: {
   steps: ActivityBlock[];
+  variant?: "loop" | "system";
+  hasFault?: boolean;
   forceExpanded: boolean;
   defaultOpen?: boolean;
   standby?: boolean;
@@ -551,12 +567,27 @@ function CodexStepGroup({
   onSelect?: (block: ActivityBlock) => void;
 }) {
   const t = useTranslations("shioriCockpit");
-  const [open, setOpen] = useState(() => defaultOpen);
+  const hasErrorStep =
+    Boolean(hasFault) ||
+    steps.some(
+      s =>
+        s.status === "error" ||
+        s.title === "loop_fault" ||
+        asRecord(s.data)?.role === "loop_fault",
+    );
+  const [open, setOpen] = useState(() => defaultOpen || (variant === "loop" && hasErrorStep));
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
   const prevForceRef = useRef(forceExpanded);
   if (prevForceRef.current !== forceExpanded) {
     prevForceRef.current = forceExpanded;
     setOpen(forceExpanded);
+  }
+  const prevFaultRef = useRef(hasErrorStep);
+  if (variant === "loop" && !prevFaultRef.current && hasErrorStep) {
+    prevFaultRef.current = true;
+    setOpen(true);
+  } else if (prevFaultRef.current !== hasErrorStep) {
+    prevFaultRef.current = hasErrorStep;
   }
 
   const containsSelected = Boolean(selectedBlock && steps.some(s => s.id === selectedBlock));
@@ -564,7 +595,8 @@ function CodexStepGroup({
 
   if (steps.length === 0) return null;
 
-  const isSystemOnly = steps.every(s => s.kind === "system");
+  const isSystemOnly = variant !== "loop" && steps.every(s => s.kind === "system");
+  const effectiveVariant = variant ?? (isSystemOnly ? "system" : undefined);
   const toolCount = steps.filter(s => s.kind === "tool").length;
   const thinkCount = steps.filter(s => s.kind === "thinking").length;
   const obsCount = steps.filter(
@@ -573,7 +605,14 @@ function CodexStepGroup({
   const systemCount = steps.filter(s => s.kind === "system").length;
 
   let summaryText: string;
-  if (isSystemOnly) {
+  if (effectiveVariant === "loop") {
+    const prefix = (hasErrorStep ? t("loopFaultPrefix") : t("loopStepsPrefix")).replace(
+      "{count}",
+      String(steps.length),
+    );
+    const actions = summarizeLoopActions(steps);
+    summaryText = actions.length > 0 ? `${prefix} · ${actions.join(" / ")}` : prefix;
+  } else if (isSystemOnly) {
     const prefix = (standby ? t("standbySystemPrefix") : t("inlineSystemPrefix")).replace(
       "{count}",
       String(steps.length),
@@ -595,7 +634,8 @@ function CodexStepGroup({
   return (
     <details
       className="codex-step-group"
-      data-variant={isSystemOnly ? "system" : undefined}
+      data-variant={effectiveVariant}
+      data-fault={effectiveVariant === "loop" && hasErrorStep ? "true" : undefined}
       open={isExpanded}
       onToggle={event => {
         const nextOpen = event.currentTarget.open;
@@ -604,6 +644,11 @@ function CodexStepGroup({
     >
       <summary className="codex-step-group-toggle" data-step-group-toggle="">
         <ChevronRight className="size-3.5 codex-disclosure-chevron" aria-hidden="true" />
+        {effectiveVariant === "loop" && (
+          <span className="codex-loop-badge" aria-hidden="true">
+            {hasErrorStep ? "⚠ loop.py" : "↻ loop.py"}
+          </span>
+        )}
         <span>{summaryText}</span>
       </summary>
 
@@ -688,17 +733,38 @@ const CodexInputCard = memo(function CodexInputCard({
 }) {
   const t = useTranslations("shioriCockpit");
   const mediaResolver = useMediaResolver();
-  const [expandedPayload, setExpandedPayload] = useState(false);
-  const payloadPresence = useAnimatedPresence(expandedPayload, 160);
 
   const perception = call?.perception;
-  const snapshot = perception?.snapshot;
+  const recordSnapshot =
+    perception?.records?.at(-1)?.snapshot ?? perception?.records?.[0]?.snapshot;
+  const snapshot = recordSnapshot ?? perception?.snapshot;
+  const payloadObj = asRecord(perception?.deliveredPayload);
+  const firstPayloadRecord = Array.isArray(payloadObj?.records)
+    ? asRecord(payloadObj.records[0])
+    : null;
   const timeline = snapshot?.timeline ?? observations[0]?.timeline;
   const replayRecordId = timeline?.recordId;
   const replaySequence = timeline?.sequence;
-  const sequence = snapshot?.sequence ?? timeline?.sequence;
-  const capability = snapshot?.capability ?? observations[0]?.origin ?? null;
-  const durationMs = perception?.durationMs;
+  const sequence =
+    snapshot?.sequence ??
+    (typeof firstPayloadRecord?.sequence === "number" ? firstPayloadRecord.sequence : undefined) ??
+    timeline?.sequence;
+  const capability =
+    snapshot?.capability ??
+    (typeof firstPayloadRecord?.capability === "string"
+      ? firstPayloadRecord.capability
+      : undefined) ??
+    observations[0]?.origin ??
+    null;
+  const rawSamplingMs = snapshot?.sampling
+    ? snapshot.sampling.finishedAtMs - snapshot.sampling.startedAtMs
+    : null;
+  const samplingMs =
+    rawSamplingMs != null && Number.isFinite(rawSamplingMs) && rawSamplingMs > 0
+      ? rawSamplingMs
+      : null;
+  const injectionMode = perception?.injectionMode;
+  const formattedPayload = formatModelInputPayload(call, bgBlock);
 
   const bgData = asRecord(bgBlock?.data);
   const bgJobId = typeof bgData?.jobId === "string" ? bgData.jobId : null;
@@ -851,9 +917,19 @@ const CodexInputCard = memo(function CodexInputCard({
                 {t("inputSeqLabel").replace("{seq}", String(sequence))}
               </span>
             )}
-            {durationMs != null && (
+            {samplingMs != null && (
               <span className="codex-input-chip">
-                {t("inputSamplingMs").replace("{ms}", durationMs.toFixed(1))}
+                {t("inputSamplingMs").replace("{ms}", samplingMs.toFixed(1))}
+              </span>
+            )}
+            {(injectionMode === "custom_json" || injectionMode === "custom_text") && (
+              <span className="codex-input-chip" data-tone="loop">
+                {t("inputLoopCustomBadge")}
+              </span>
+            )}
+            {injectionMode === "none" && (
+              <span className="codex-input-chip" data-tone="muted">
+                {t("inputLoopSkippedBadge")}
               </span>
             )}
             {bgDurationMs != null && (
@@ -866,47 +942,20 @@ const CodexInputCard = memo(function CodexInputCard({
                 {bgExitCode != null ? `exit ${bgExitCode}` : bgStatus}
               </span>
             )}
-            <button
-              type="button"
-              className="codex-input-payload-toggle"
-              aria-expanded={expandedPayload}
-              onClick={event => {
-                event.stopPropagation();
-                setExpandedPayload(prev => !prev);
-              }}
-            >
-              <ChevronRight
-                className={"size-3 codex-disclosure-chevron" + (expandedPayload ? " is-open" : "")}
-                aria-hidden="true"
-              />
-              <span>{t("inputExpandPayload")}</span>
-            </button>
           </div>
 
-          {payloadPresence.mounted && (
-            <div
-              className="codex-disclosure-grid"
-              data-motion-state={payloadPresence.state}
-              inert={!expandedPayload || undefined}
-              onClick={event => event.stopPropagation()}
-            >
-              <div className="codex-disclosure-grid-inner">
-                <pre className="codex-input-payload-pre">
-                  {printable(
-                    call
-                      ? {
-                          callIndex: call.index,
-                          callId: call.id,
-                          ...(call.inputText ? { inputText: call.inputText } : {}),
-                          ...(call.inputObservations.length > 0 ? { inputObservations: call.inputObservations } : {}),
-                          ...(call.perception ? { perception: call.perception } : {}),
-                        }
-                      : (bgBlock?.data ?? bgBlock),
-                  )}
-                </pre>
-              </div>
-            </div>
-          )}
+          <details
+            className="codex-input-payload-details"
+            onClick={event => event.stopPropagation()}
+          >
+            <summary className="codex-input-payload-toggle" data-input-payload-toggle="">
+              <ChevronRight className="size-3 codex-disclosure-chevron" aria-hidden="true" />
+              <span>{t("inputExpandPayload")}</span>
+            </summary>
+            <pre className="codex-input-payload-pre" tabIndex={0}>
+              {formattedPayload}
+            </pre>
+          </details>
         </div>
       </div>
     </article>
@@ -935,21 +984,31 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
     : [];
   const ownerRunId = segment.runId || fallbackRunId;
 
+  const isLoopGroup = segment.stepGroupVariant === "loop";
   const isStandalone = paragraphs.length === 0;
-  const isSystemOnly = segment.steps.length > 0 && segment.steps.every(s => s.kind === "system");
+  const isSystemOnly =
+    !isLoopGroup && segment.steps.length > 0 && segment.steps.every(s => s.kind === "system");
 
   return (
     <article
       id={segment.responseBlock?.id}
       className="codex-turn-assistant"
       data-standalone-system={(isStandalone && isSystemOnly) || undefined}
+      data-loop-group={isLoopGroup || undefined}
+      data-loop-fault={segment.loopFault || undefined}
       data-stream-enter={streamEnter ? "true" : undefined}
     >
       <CodexStepGroup
         steps={segment.steps}
+        variant={isLoopGroup ? "loop" : undefined}
+        hasFault={Boolean(segment.loopFault)}
         forceExpanded={showAllSteps}
         standby={Boolean(segment.standby)}
-        defaultOpen={isStandalone && isLastSegment && !isSystemOnly}
+        defaultOpen={
+          isLoopGroup
+            ? Boolean(segment.loopFault)
+            : isStandalone && isLastSegment && !isSystemOnly
+        }
         selectedBlock={selectedStepId}
         onSelect={step => onInspectBlock(ownerRunId, step, segment.steps)}
       />
