@@ -372,7 +372,7 @@ async function assetMedia(
   video?: VideoFrameReference,
   signal?: AbortSignal,
 ): Promise<FileMedia | RemoteMedia | { bytes: Buffer; mediaType: string }> {
-  if (video) return { bytes: await decodeTimelineFrame(root, { asset, video }, { signal }), mediaType: "image/png" };
+  if (video) return { bytes: await decodeTimelineFrame(root, { asset, video }, { signal, home }), mediaType: "image/png" };
   const resolved = await resolveStoredTimelineAsset({
     timelineRoot: root,
     workspacePath,

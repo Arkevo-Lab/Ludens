@@ -4,11 +4,15 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, utimes, writeFil
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LudensServerEvent } from "@ludens/protocol/app-rpc";
+import { APP_RPC_ERROR_CODES, type LudensServerEvent } from "@ludens/protocol/app-rpc";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { SECRET_MASK } from "@ludens/protocol/storage";
-import { NodeUdsRpcClient, WsAppRpcClient } from "../src/cli/app-rpc-client.ts";
-import { maintainStorage } from "../src/core/query/storage.ts";
+import { AppRpcClientError, NodeUdsRpcClient, WsAppRpcClient } from "../src/cli/app-rpc-client.ts";
+import { mediaFile } from "../src/core/query/data.ts";
+import { getReplay } from "../src/core/query/replay.ts";
+import { maintainStorage, updateStorageSettings } from "../src/core/query/storage.ts";
+import { pythonModulePaths } from "../src/core/subsystems/python-capabilities.ts";
+import { pythonCommand, pythonExecutable } from "@ludens/protocol/python";
 import { Runtime } from "../src/core/shiori/runtime.ts";
 import type { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { dispatch as dispatchTransport } from "../src/daemon/transport.ts";
@@ -212,6 +216,184 @@ function startMockS3Server() {
     stop: () => server.stop(true),
   };
 }
+
+test("getReplay(mode=media) and mediaFile forward explicit home into decodeTimelineFrame for S3 cold hydration", async () => {
+  const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-decode-home-")));
+  const home = join(rootDir, "custom-home");
+  const wsDir = join(rootDir, "ws-decode");
+  const mockS3 = startMockS3Server();
+
+  try {
+    await mkdir(join(wsDir, ".ludens", "timeline", "video"), { recursive: true });
+    await writeFile(
+      join(wsDir, "ludens.json"),
+      JSON.stringify({ driver: "cua", storage: { mode: "profile", profileId: "s3-cold" } }),
+      "utf8",
+    );
+    const identity = await ensureWorkspaceIdentity(wsDir);
+    await registerWorkspace(wsDir, home);
+
+    await updateStorageSettings(
+      {
+        profiles: [
+          { id: "local-default", name: "Local", kind: "local" },
+          {
+            id: "s3-cold",
+            name: "Cold S3",
+            kind: "s3",
+            s3: {
+              endpoint: mockS3.endpoint,
+              region: "us-east-1",
+              bucket: "cold-bucket",
+              accessKeyId: "AKIAEXAMPLE",
+              secretAccessKey: "SECRETEXAMPLE456",
+              forcePathStyle: true,
+            },
+          },
+        ],
+      },
+      home,
+    );
+
+    const pyEnv = {
+      ...process.env,
+      LUDENS_HOME: home,
+      PYTHONPATH: [...pythonModulePaths(), ...(process.env.PYTHONPATH ? [process.env.PYTHONPATH] : [])].join(
+        process.platform === "win32" ? ";" : ":",
+      ),
+    };
+    const pyScript = `
+import io, json, sys
+from pathlib import Path
+from PIL import Image
+from ludens_tools._video import VideoRecorder
+
+ws = Path(sys.argv[1])
+tl = ws / ".ludens" / "timeline"
+buf = io.BytesIO()
+Image.new("RGB", (64, 48), (20, 120, 220)).save(buf, format="PNG")
+rec = VideoRecorder(tl, tl / "video", segment_seconds=60, idle_seconds=10)
+loc = rec.submit(buf.getvalue(), "ch0", 1700000002.5, (64, 48), sample_hz=1.0)
+rec.close()
+print(json.dumps(loc))
+`;
+    const cmd = pythonCommand(pythonExecutable(pyEnv), ["-c", pyScript, wsDir]);
+    const proc = Bun.spawnSync([cmd.file, ...cmd.args], { env: pyEnv, cwd: wsDir });
+    expect(proc.exitCode).toBe(0);
+    const loc = JSON.parse(proc.stdout.toString("utf8").trim()) as {
+      asset: string;
+      video: { pts: number; timeBase: [number, number]; width: number; height: number };
+    };
+
+    const syncRes = await maintainStorage({ action: "sync", workspaceId: identity.id }, home);
+    expect(syncRes.archivedCount).toBe(1);
+    const clearRes = await maintainStorage({ action: "clear_cache", workspaceId: identity.id }, home);
+    expect(clearRes.freedBytes).toBeGreaterThan(0);
+
+    const runId = "2026-04-01T00-00-00.000Z";
+    const t0 = Date.parse("2026-04-01T00:00:02.000Z");
+    const timelineRoot = join(wsDir, ".ludens", "timeline");
+    await writeTimelineVideoSegmentIndex(timelineRoot, "seg-cold", 1, [
+      {
+        id: "rec-cold-1",
+        capability: "cap.screen",
+        at: t0 + 500,
+        runId,
+        asset: loc.asset,
+        pts: loc.video.pts,
+      },
+    ]);
+    const exactRecord = JSON.stringify({
+      id: "rec-cold-1",
+      sequence: 1,
+      capability: "cap.screen",
+      recordedAt: new Date(t0 + 500).toISOString(),
+      runId,
+      media: [
+        {
+          mediaType: "image/png",
+          timeline: { recordId: "rec-cold-1", sequence: 1, asset: loc.asset, video: loc.video },
+        },
+      ],
+    });
+    const idx = Buffer.alloc(64);
+    idx.writeDoubleBE((t0 + 500) / 1000, 0);
+    idx.writeBigUInt64BE(1n, 8);
+    idx.writeBigUInt64BE(0n, 16);
+    idx.writeBigUInt64BE(BigInt(exactRecord.length), 24);
+    createHash("sha256").update("cap.screen").digest().subarray(0, 16).copy(idx, 32);
+    createHash("sha256").update("rec-cold-1").digest().subarray(0, 16).copy(idx, 48);
+    await writeFile(join(timelineRoot, "segments", "seg-cold.idx"), idx);
+    await writeFile(join(timelineRoot, "segments", "seg-cold.jsonl"), `${exactRecord}\n`);
+    await utimes(join(timelineRoot, "segments", "seg-cold.meta.json"), 2000, 2000);
+
+    const runDir = join(wsDir, "logs", runId);
+    await mkdir(runDir, { recursive: true });
+    await writeFile(
+      join(runDir, "manifest.json"),
+      JSON.stringify({
+        runId,
+        workspace: wsDir,
+        workspaceId: identity.id,
+        drivers: ["cua"],
+        eventSchemaVersion: 1,
+      }),
+    );
+    const events = [
+      { seq: 1, type: "run_start", at: "2026-04-01T00:00:01.000Z", trace: {}, data: { workspace: wsDir, workspaceId: identity.id } },
+      { seq: 2, type: "control", at: "2026-04-01T00:00:02.000Z", trace: { epoch: "ep-1" }, data: { mode: "auto", epoch: "ep-1" } },
+      {
+        seq: 3,
+        type: "observation",
+        at: "2026-04-01T00:00:02.500Z",
+        trace: { epoch: "ep-1" },
+        data: {
+          id: "obs-cold-1",
+          mediaType: "image/png",
+          timeline: { recordId: "rec-cold-1", sequence: 1, asset: loc.asset, video: loc.video },
+        },
+      },
+      { seq: 4, type: "control", at: "2026-04-01T00:00:04.000Z", trace: { epoch: "ep-1" }, data: { mode: "manual", epoch: "ep-1" } },
+    ];
+    await writeFile(join(runDir, "events.jsonl"), `${events.map(e => JSON.stringify(e)).join("\n")}\n`);
+
+    const prevHome = process.env.LUDENS_HOME;
+    process.env.LUDENS_HOME = join(rootDir, "empty-decoy-home");
+    try {
+      const replayPng = (await getReplay(
+        identity.id,
+        runId,
+        { mode: "media", epoch: "ep-1", record: "rec-cold-1", sequence: 1, media: 0 },
+        home,
+      )) as { bytes: Buffer; mediaType: string };
+      expect(replayPng.mediaType).toBe("image/png");
+      expect(replayPng.bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+
+      await rm(join(timelineRoot, "cache"), { recursive: true, force: true });
+      let obsPng: Awaited<ReturnType<typeof mediaFile>> | undefined;
+      for (let attempt = 0; attempt < 50; attempt++) {
+        try {
+          obsPng = await mediaFile(identity.id, runId, "obs-cold-1", home);
+          break;
+        } catch (err) {
+          if ((err as { status?: number })?.status === 202) {
+            await Bun.sleep(20);
+            continue;
+          }
+          throw err;
+        }
+      }
+      expect(obsPng?.mediaType).toBe("image/png");
+      expect(obsPng?.bytes.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    } finally {
+      if (prevHome === undefined) delete process.env.LUDENS_HOME;
+      else process.env.LUDENS_HOME = prevHome;
+    }
+  } finally {
+    mockS3.stop();
+    await rm(rootDir, { recursive: true, force: true });
+  }
+}, 25_000);
 
 test("storage RPC (get/update/test/pin), secret masking & preservation, ludens.json override, and /media Range streaming across S3 / directory / cache / evicted", async () => {
   const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-storage-rpc-")));
@@ -513,6 +695,19 @@ test("storage RPC (get/update/test/pin), secret masking & preservation, ludens.j
     expect(mockS3.requests.some(r => r.method === "DELETE" && r.pathname.includes("__ludens_probe_"))).toBe(true);
 
     // 5. Test storage/pin & ludens.json storage override persistence
+    let badPinError: unknown = null;
+    try {
+      await udsClient.call("storage/pin", {
+        workspaceId: identity.id,
+        asset: "foo/bar.txt",
+        pinned: true,
+      });
+    } catch (err) {
+      badPinError = err;
+    }
+    expect(badPinError).toBeInstanceOf(AppRpcClientError);
+    expect((badPinError as AppRpcClientError).code).toBe(APP_RPC_ERROR_CODES.INVALID_PARAMS);
+
     const pin1 = await udsClient.call("storage/pin", {
       workspaceId: identity.id,
       asset: "video/seg-local.mp4",
