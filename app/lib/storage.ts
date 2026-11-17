@@ -222,7 +222,7 @@ export function slugifyStorageProfileId(name: string): string {
   const base = name
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/[^a-z0-9_-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
   if (!base) return "";
@@ -351,7 +351,7 @@ export function validateStorageProfileDraft(
     errors.id = "required";
   } else if (!isBuiltin && trimmedId === BUILTIN_LOCAL_PROFILE_ID) {
     errors.id = "reservedId";
-  } else if (!/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(trimmedId)) {
+  } else if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/.test(trimmedId)) {
     errors.id = "invalidId";
   } else if (!isEditing && options.existingIds.includes(trimmedId)) {
     errors.id = "duplicateId";
