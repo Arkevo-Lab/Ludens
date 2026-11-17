@@ -3,7 +3,7 @@ import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import type { Call, Observation, PerceptionSnapshot, RunData } from "@/lib/types";
 
 export function cleanErrorMessage(raw: string): string {
-  return raw.replace(/(?:LudensError:\s*|Error:\s*)+/gi, "").trim() || raw;
+  return raw.replace(/(?:\b(?:LudensError|Error):\s*)+/gi, "").trim() || raw;
 }
 
 export function cleanInlinePreview(raw: string | undefined | null): string {

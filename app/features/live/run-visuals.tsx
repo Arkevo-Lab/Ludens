@@ -288,7 +288,7 @@ function observationMachineId(o?: Observation): string | null {
 }
 
 function cleanErrorPrefix(message: string): string {
-  return message.replace(/(?:LudensError:\s*|Error:\s*)+/gi, "").trim() || message;
+  return message.replace(/(?:\b(?:LudensError|Error):\s*)+/gi, "").trim() || message;
 }
 
 function formatAgeSpan(ms: number): string {
