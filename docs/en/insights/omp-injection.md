@@ -41,12 +41,20 @@ Sixty percent of context spent on screenshots the model never asked for, and whe
 As of 2026-10-29 the end-of-batch channel is deleted as a whole:
 
 - Automatic delivery happens only at `before_agent_start` (prompt start); the semantics of state transitions + new records are unchanged;
-- **When it needs a frame mid-turn, the model calls `observe` itself** — it has always been a first-class tool, supporting queries by id / timestamp / range / capability, and explicit reads always get a complete response;
+- **When it needs a frame mid-turn, the model calls `observe` itself** — it has always been a first-class tool: routine latest reads return lean dehydrated records, while queries by id / timestamp / range / capability include full pagination and availability metadata (`query`, `hasMore`, `nextAfter`, `availability`);
 - Explicit `observe` and native tool images each open their own delivery receipts (`origin` of `explicit` / `tool_result`), so trace attribution is preserved; the `tool_result` hook only records the delivery fact of native tool images and no longer rewrites any tool result.
 
 The same hook carries the Event Pool digest under the same budget discipline: `before_agent_start` appends a compact `{ eventPool: { pendingInbound, items } }` digest only when `pendingInbound > 0`, listing each pending inbound event's id, kind, optional title, and a 72-character single-line preview. An idle pool contributes zero bytes, so prefix KV cache stays valid across turns; full text is pulled on demand with `event_pool({ action: "read" })`, which acknowledges by default.
 
 The "fresh frame before deciding" need has not gone away; it just changed hands: instead of the host appending frames at every batch boundary, the model pulls on demand. The sampler-state notification at turn boundaries remains — if the sampler stops, the model is not misled into "no new frames"; the explicit `observe` error codes (`UNAVAILABLE` and friends) are the unambiguous signal.
+
+## Going Leaner: Dehydrated Envelope, Programmable `Loop.inject`, and 1:1 Input Inspection
+
+Deleting the end-of-batch channel tamed injection **frequency**, but each turn-start observation message (`customType: "ludens-observation"`, tracked via `observation_context` receipts) still carried internal runtime telemetry noise (`queryId`, `generation`, 64-char `codeSHA`, monotonic `sampling`, `sampledAt`, raw Baseware `sources`, and `media[*].id`). We subsequently tightened the turn-start observation payload contract end-to-end:
+
+1. **Lean perception envelope (`perceptionInput`)**: Routine latest reads deliver `{ ok: true, records: [{ id, sequence, recordedAt, capability?, text?, data?, space?, effect?, transition? }] }` (omitting `capability` when it matches the default primary channel `python/perception.py:Perception.sample`), conditionally attaching `perceptionState`, `eventPool` (when `pendingInbound > 0`), or `loopFault` (when `loop.py` faulted into fallback). Pagination and availability fields appear only on explicit historical/filtered queries or failed reads (`!ok`).
+2. **Programmable `Loop.inject(ctx)` in workspace `loop.py`**: When different turns call for tailored context delivery, a workspace can override `inject(self, ctx: TurnContext)` in `loop.py` — mutating `inj = ctx.default_inject()` (`TurnInjection`, e.g., setting `inj.attach_images = False` to skip vision frame attachment on pure coding turns or appending domain summaries to `inj.extra` in `structured` mode), returning a custom `dict` (`custom_json`) or `str` (`custom_text`), or returning `None` (`none` mode, omitting the turn-start observation message and vision frames completely for that turn). If `loop.py` raises an exception, `LoopRuntime` emits `loop_fault`, falls back to the built-in lean injection, and surfaces `loopFault` in the next payload for live self-repair.
+3. **1:1 Live Input Inspector (`deliveredPayload`)**: `extension.ts` records the post-`Loop.inject` `deliveredPayload`, `injectionMode`, and `attachImages` directly on the `observation_context` receipt event, and Console **Live** (`?view=live`, **View model input details**) renders `deliveredPayload` 1:1 without reconstructing or duplicating legacy `snapshot` fields — what the cockpit displays matches the observation text payload delivered to the model byte-for-byte.
 
 ## Trade-offs and record
 

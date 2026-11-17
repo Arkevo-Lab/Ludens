@@ -16,6 +16,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 | `memory/` | 阶段性运行记忆笔记（例如在 `ludens consolidate` 边界更新的 `memory/current.md`） |
 | `skills/` | 可复用技能文档（`skills/<name>/SKILL.md`）与能力/评测 Python 模块（例如 `skills/visual_guard.py`） |
 | `perception.py` | 常驻 `Perception` 状态机（实现 `start`、`sample`、`close`），在**自主运行**期间以最高 30 Hz 持续采样 |
+| `loop.py`（可选） | 可编程外层循环与轮首上下文注入器（`Loop.step` / `Loop.inject`），支持轮间热重载、零 Token `@capability` 调度与故障自动回退 |
 | `baseware.json` | 由 Baseware 导出的实时控制器目录快照（对应 `ludens controller list` / `baseware export`） |
 | `logs/<run-id>/` | 结构化运行事件流（`events.jsonl`）、`manifest.json` 与 `diagnostics.jsonl`（设备事实日志位于 `logs/baseware/`） |
 | `.ludens/timeline/` | 单写入者的工作区时空轴，保存 `@record` 观测、去重多媒体对象与 `video/` 下的 30 Hz fMP4 视频 |
@@ -153,8 +154,69 @@ ludens eval adapt python/skills/visual_guard.py:act_on_alert \
 
 接着在 Python 中用 `client.replay(around=record_id, before_seconds=2.0, after_seconds=2.0)`（或在控制台 **回放** 页拖拽定位时间点）核对真实帧序与干扰特征，先强化 `WatchdogEnv` 让旧实现明确返回 `passed: false`，再修改 `act_on_alert` 直至 `ludens eval run --all` 重新变为 `verified`。
 
-## 5. 在控制台管理能力、记忆与沉淀
+## 5. 可编程外层循环（`loop.py`）与精简感知输入
 
+默认情况下（工作区不存在 `loop.py`），Ludens 运行内置外层循环：每轮读取最新精简感知包络与视觉帧，然后进入一次模型推理。常规最新读取采用去噪后的紧凑结构：
+
+`{ ok: true, records: [{ id, sequence, recordedAt, capability?, text?, data?, space?, effect?, transition? }] }`
+
+其中默认主通道省去重复的 `capability` 字符串，并剥离 `queryId`、`generation`、`codeSHA`、`sampling`、`sources`、`media[*].id` 等内部运行噪声；当显式调用 `observe` 传入历史或过滤条件（`id`、`at`、`start`、`end`、`after`、`limit` 或 `capability`）时，才附带 `{ query, hasMore, nextAfter?, availability? }` 分页与可用范围元数据。
+
+当常规轮间轮询、确定性 `@capability` 触发或周期性整理不需要每次消耗大模型 Token 时，你可以在工作区根目录创建或由 Shiori 编写 `loop.py`：
+
+```python
+from ludens_tools import (
+    Client,
+    Consolidate,
+    Loop,
+    Prompt,
+    Stop,
+    TurnContext,
+    TurnInjection,
+    Wait,
+)
+
+
+class Loop(Loop):
+    """常规巡检在 Python 层确定性流转，仅在初始规划或触发告警后唤醒模型。"""
+
+    def inject(self, ctx: TurnContext) -> TurnInjection:
+        inj = ctx.default_inject()
+        records = inj.records
+        latest = records[-1].get("data", {}) if records else {}
+        if latest.get("event") == "nominal":
+            inj.attach_images = False
+        inj.extra.append({"turn": ctx.turn, "llm_turns": ctx.llm_turns})
+        return inj
+
+    def step(self, ctx: TurnContext) -> Prompt | Consolidate | Wait | Stop:
+        records = ctx.perception.get("records") or []
+        latest = records[-1].get("data", {}) if records else {}
+        if latest.get("goal_met"):
+            return Stop(reason="goal_met")
+        if latest.get("event") == "anomaly":
+            outcome = Client().call(
+                "python/skills/visual_guard.py:act_on_alert",
+                {"channel": 1, "threshold": 2},
+            )
+            if outcome.get("triggered"):
+                return Prompt(prompt="告警继电器已触发，请复核近期时间轴并记录处置结论。")
+        if ctx.turn > 0 and ctx.turn % 20 == 0:
+            return Consolidate()
+        if ctx.turn == 0:
+            return Prompt()
+        return Wait(seconds=1.0, reason="nominal_patrol")
+```
+
+使用 `loop.py` 时的关键运行时保障：
+
+- **双层定制接口**：`inject(ctx)` 可修改 `ctx.default_inject()` 返回的 `TurnInjection`（如关闭图片挂载 `inj.attach_images = False` 或向 `inj.extra` 追加摘要），也可直接返回自定义 `dict`、`str` 或 `None`（跳过本轮观测注入与图片挂载）；`step(ctx)` 在活跃 `epoch` 租约作用域内执行，可直接通过 `Client().call(...)` 调用 `@capability` 并返回 `Prompt`、`Consolidate`、`Wait` 或 `Stop`。
+- **热重载与 `loop_fault` 自愈回退**：编辑 `loop.py` 或其导入的工作区 `.py` 模块会在轮间自动热重载。若出现语法或运行时错误，宿主会发出 `loop_fault`、自动回退到内置默认循环，并在下一轮模型输入中附带 `loopFault` 供即时修复，绝不中断当前控制周期。
+- **人工 `Steer` 即时抢占**：发送 `ludens steer`（或点击控制台**即时插话**）会立即唤醒正在执行的 `Wait(seconds)`，并跳过 `Loop.step()` 直接进入携带人工指令的 `Prompt` 轮次（`ctx.steered = True`）。
+
+## 6. 在控制台管理能力、记忆与沉淀
+
+- **运行（Live，`?view=live`）**：在模型卡片中展开 **查看传入模型的 Input 详情** 即可 1:1 检视 `Loop.inject` 交付的真实 `deliveredPayload`；轮间 `loop_step` / `loop_fault` 事件与不经模型的 `@capability` 调用会折叠在 **Loop 调度步骤** 分组内（异常时自动展开）。
 - **能力（Capabilities，`?view=caps`）**：直观检视 **Capability – Eval – Env** 拓扑关系，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）筛选，查看 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**Core 连接检查** 与 **社区驱动验证** 结果，并可一键点击运行全部或单项评测。
 - **配置（Config，`?view=perception`）**：在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
 - **记忆与技能沉淀（`ludens consolidate` 或运行页按钮）**：开启一次禁用所有设备访问的纯文件整理轮次，自动把 `verified` 能力晋升或保留到 `skills/` 技能卡片中，清除 `unverified`/`stale`/`adapting`/`failed` 条目，并刷新 `memory/current.md`。
