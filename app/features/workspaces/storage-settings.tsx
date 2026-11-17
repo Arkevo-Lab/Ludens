@@ -34,14 +34,6 @@ import {
   SingleLineTruncate,
 } from "@/components/ui/settings-primitives";
 import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { useTranslations } from "@/lib/locale";
 import {
   BUILTIN_LOCAL_PROFILE_ID,
@@ -115,7 +107,6 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
 
   const defaultProfileSelectId = useId();
   const videoQualitySelectId = useId();
-  const usageCaptionId = useId();
 
   const [defaultsDraft, setDefaultsDraft] = useState<{
     defaultProfileId: string;
@@ -405,174 +396,135 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
         {overview.usage.length === 0 ? (
           <p className="py-4 text-xs text-muted-foreground">{t("emptyWorkspaces")}</p>
         ) : (
-          <div className="py-2">
-            <div
-              tabIndex={0}
-              role="region"
-              aria-labelledby={usageCaptionId}
-              className="rounded-md border border-border/70 bg-[var(--surface-inset)]"
-            >
-              <Table>
-                <caption id={usageCaptionId} className="sr-only">
-                  {t("tableCaption")}
-                </caption>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead scope="col">{t("colWorkspace")}</TableHead>
-                    <TableHead scope="col">{t("colBackend")}</TableHead>
-                    <TableHead scope="col">{t("colLocalBreakdown")}</TableHead>
-                    <TableHead scope="col">{t("colArchiveState")}</TableHead>
-                    <TableHead scope="col" className="text-right">
-                      {t("colActions")}
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {overview.usage.map(ws => {
-                    const pruneBusy =
-                      overview.maintainingKey ===
-                      maintainActionKey({ action: "prune", workspaceId: ws.workspaceId });
-                    const syncBusy =
-                      overview.maintainingKey ===
-                      maintainActionKey({ action: "sync", workspaceId: ws.workspaceId });
-                    const clearCacheBusy =
-                      overview.maintainingKey ===
-                      maintainActionKey({ action: "clear_cache", workspaceId: ws.workspaceId });
+          overview.usage.map(ws => {
+            const pruneBusy =
+              overview.maintainingKey ===
+              maintainActionKey({ action: "prune", workspaceId: ws.workspaceId });
+            const syncBusy =
+              overview.maintainingKey ===
+              maintainActionKey({ action: "sync", workspaceId: ws.workspaceId });
+            const clearCacheBusy =
+              overview.maintainingKey ===
+              maintainActionKey({ action: "clear_cache", workspaceId: ws.workspaceId });
 
-                    return (
-                      <TableRow key={ws.workspaceId} data-storage-workspace={ws.workspaceId}>
-                        <TableHead scope="row" className="max-w-[14rem] py-2.5 font-medium">
-                          <div className="flex flex-col gap-0.5">
-                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
-                              <span>{ws.workspaceName || ws.workspaceId}</span>
-                              {!ws.available && (
-                                <Badge variant="outline" className="text-[10px] text-destructive">
-                                  {t("wsUnavailable")}
-                                </Badge>
-                              )}
-                            </span>
-                            <SingleLineTruncate
-                              mono
-                              text={ws.workspacePath}
-                              className="max-w-[13rem] text-[11px] font-normal text-muted-foreground"
-                            />
-                          </div>
-                        </TableHead>
-
-                        <TableCell className="py-2.5">
-                          <div className="flex flex-col items-start gap-1">
-                            <Badge variant="outline" className="gap-1 text-[11px]">
-                              <BackendKindIcon kind={ws.effectiveKind} />
-                              <span>{t(`kindBadges.${ws.effectiveKind}`)}</span>
-                            </Badge>
-                            <span className="text-[11px] text-muted-foreground">
-                              {ws.effectiveProfileName}
-                              {ws.effectiveKind !== "ephemeral" &&
-                                ` · ${t("wsQuotaPrefix").replace(
-                                  "{quota}",
-                                  formatStorageBytes(ws.maxBytes, {
-                                    unlimitedLabel: unlimitedText,
-                                  }),
-                                )}`}
-                            </span>
-                          </div>
-                        </TableCell>
-
-                        <TableCell className="py-2.5">
-                          <div className="flex flex-col gap-0.5">
-                            <span className="font-mono text-xs font-semibold tabular-nums">
-                              {formatStorageBytes(ws.totalLocalBytes)}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground tabular-nums">
-                              {t("wsBreakdownLine")
-                                .replace(
-                                  "{video}",
-                                  formatStorageBytes(ws.localVideoBytes + ws.localObjectsBytes),
-                                )
-                                .replace("{cache}", formatStorageBytes(ws.localCacheBytes))
-                                .replace("{index}", formatStorageBytes(ws.segmentsIndexBytes))
-                                .replace("{logs}", formatStorageBytes(ws.logsBytes))}
-                            </span>
-                          </div>
-                        </TableCell>
-
-                        <TableCell className="py-2.5">
-                          <div className="flex flex-col gap-0.5 text-[11px] tabular-nums">
-                            <span className="text-foreground">
-                              {t("wsArchivedStat")
-                                .replace("{count}", String(ws.archivedSegments))
-                                .replace("{bytes}", formatStorageBytes(ws.archivedBytes))}
-                            </span>
-                            <span className="inline-flex flex-wrap items-center gap-2 text-muted-foreground">
-                              <span>
-                                {t("wsEvictedStat").replace("{count}", String(ws.evictedSegments))}
-                              </span>
-                              {ws.pinnedSegments > 0 && (
-                                <span className="inline-flex items-center gap-0.5 text-primary">
-                                  <Pin className="size-3" aria-hidden="true" />
-                                  {t("wsPinnedStat").replace("{count}", String(ws.pinnedSegments))}
-                                </span>
-                              )}
-                            </span>
-                          </div>
-                        </TableCell>
-
-                        <TableCell className="py-2.5 text-right">
-                          <div className="inline-flex flex-wrap justify-end gap-1.5">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="xs"
-                              disabled={!ws.available || anyMaintainBusy}
-                              onClick={() =>
-                                void overview.maintainStorage({
-                                  action: "prune",
-                                  workspaceId: ws.workspaceId,
-                                })
-                              }
-                              data-storage-ws-action="prune"
-                            >
-                              {t(pruneBusy ? "btnPruning" : "btnPrune")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="xs"
-                              disabled={!ws.available || anyMaintainBusy}
-                              onClick={() =>
-                                void overview.maintainStorage({
-                                  action: "sync",
-                                  workspaceId: ws.workspaceId,
-                                })
-                              }
-                              data-storage-ws-action="sync"
-                            >
-                              {t(syncBusy ? "btnSyncing" : "btnSync")}
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="xs"
-                              disabled={!ws.available || anyMaintainBusy}
-                              onClick={() =>
-                                void overview.maintainStorage({
-                                  action: "clear_cache",
-                                  workspaceId: ws.workspaceId,
-                                })
-                              }
-                              data-storage-ws-action="clear_cache"
-                            >
-                              {t(clearCacheBusy ? "btnClearingCache" : "btnClearCache")}
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
-          </div>
+            return (
+              <SettingsRow
+                key={ws.workspaceId}
+                label={
+                  <span
+                    className="inline-flex min-w-0 items-center gap-2 font-medium"
+                    data-storage-workspace={ws.workspaceId}
+                  >
+                    <span className="truncate">{ws.workspaceName || ws.workspaceId}</span>
+                    <span className="font-mono text-xs font-semibold tabular-nums text-foreground">
+                      {formatStorageBytes(ws.totalLocalBytes)}
+                    </span>
+                  </span>
+                }
+                badge={
+                  <>
+                    <Badge variant="outline" className="gap-1 text-[11px]">
+                      <BackendKindIcon kind={ws.effectiveKind} />
+                      <span>{t(`kindBadges.${ws.effectiveKind}`)}</span>
+                    </Badge>
+                    {!ws.available && (
+                      <Badge variant="outline" className="border-destructive/40 text-[10px] text-destructive">
+                        {t("wsUnavailable")}
+                      </Badge>
+                    )}
+                    {ws.pinnedSegments > 0 && (
+                      <Badge variant="outline" className="gap-1 border-primary/40 text-[10px] text-primary">
+                        <Pin className="size-3" aria-hidden="true" />
+                        <span>{t("wsPinnedStat").replace("{count}", String(ws.pinnedSegments))}</span>
+                      </Badge>
+                    )}
+                  </>
+                }
+                description={
+                  <span className="flex min-w-0 flex-col gap-0.5 tabular-nums">
+                    <span>
+                      {ws.effectiveProfileName}
+                      {ws.effectiveKind !== "ephemeral" &&
+                        ` · ${t("wsQuotaPrefix").replace(
+                          "{quota}",
+                          formatStorageBytes(ws.maxBytes, {
+                            unlimitedLabel: unlimitedText,
+                          }),
+                        )}`}
+                      {` · ${t("wsArchivedStat")
+                        .replace("{count}", String(ws.archivedSegments))
+                        .replace("{bytes}", formatStorageBytes(ws.archivedBytes))}`}
+                      {` · ${t("wsEvictedStat").replace("{count}", String(ws.evictedSegments))}`}
+                    </span>
+                    <span>
+                      {t("wsBreakdownLine")
+                        .replace(
+                          "{video}",
+                          formatStorageBytes(ws.localVideoBytes + ws.localObjectsBytes),
+                        )
+                        .replace("{cache}", formatStorageBytes(ws.localCacheBytes))
+                        .replace("{index}", formatStorageBytes(ws.segmentsIndexBytes))
+                        .replace("{logs}", formatStorageBytes(ws.logsBytes))}
+                    </span>
+                    <SingleLineTruncate
+                      mono
+                      text={ws.workspacePath}
+                      className="text-[11px] text-muted-foreground/80"
+                    />
+                  </span>
+                }
+                control={
+                  <div className="flex flex-wrap items-center justify-end gap-1.5">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={!ws.available || anyMaintainBusy}
+                      onClick={() =>
+                        void overview.maintainStorage({
+                          action: "prune",
+                          workspaceId: ws.workspaceId,
+                        })
+                      }
+                      data-storage-ws-action="prune"
+                    >
+                      {t(pruneBusy ? "btnPruning" : "btnPrune")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={!ws.available || anyMaintainBusy}
+                      onClick={() =>
+                        void overview.maintainStorage({
+                          action: "sync",
+                          workspaceId: ws.workspaceId,
+                        })
+                      }
+                      data-storage-ws-action="sync"
+                    >
+                      {t(syncBusy ? "btnSyncing" : "btnSync")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="xs"
+                      disabled={!ws.available || anyMaintainBusy}
+                      onClick={() =>
+                        void overview.maintainStorage({
+                          action: "clear_cache",
+                          workspaceId: ws.workspaceId,
+                        })
+                      }
+                      data-storage-ws-action="clear_cache"
+                    >
+                      {t(clearCacheBusy ? "btnClearingCache" : "btnClearCache")}
+                    </Button>
+                  </div>
+                }
+              />
+            );
+          })
         )}
       </SettingsSection>
 
@@ -584,9 +536,14 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
           description={t("defaultProfileHint")}
           control={
             <NativeSelect
+              key={effectiveConfig.profiles.map(p => `${p.id}:${p.name}`).join("|")}
               id={defaultProfileSelectId}
               disabled={overview.loading || overview.saving}
-              value={defaultsDraft.defaultProfileId}
+              value={
+                effectiveConfig.profiles.some(p => p.id === defaultsDraft.defaultProfileId)
+                  ? defaultsDraft.defaultProfileId
+                  : effectiveConfig.defaultProfileId
+              }
               onChange={event => {
                 setDefaultsDraft(prev => ({
                   ...prev,

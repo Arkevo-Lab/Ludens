@@ -130,9 +130,16 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 button,
-input {
+input,
+select {
   font: inherit;
   color: inherit;
+}
+select[data-slot="native-select"] {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-image: none;
 }
 button:not([data-slot]):disabled {
   opacity: 0.38;
