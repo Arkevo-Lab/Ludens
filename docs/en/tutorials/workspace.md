@@ -16,6 +16,7 @@ Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runt
 | `memory/` | Working session notes (such as `memory/current.md`, updated during `ludens consolidate`) |
 | `skills/` | Reusable skill instructions (`skills/<name>/SKILL.md`) and capability/eval Python modules (for example `skills/visual_guard.py`) |
 | `perception.py` | Resident `Perception` state machine (`start`, `sample`, `close`) running continuously up to 30 Hz during **Auto Run** |
+| `loop.py` (optional) | Programmable outer control loop and turn-start context injector (`Loop.step` / `Loop.inject`) with inter-turn hot-reload, zero-token `@capability` dispatch, and safe fault fallback |
 | `baseware.json` | Exported Baseware controller schema snapshot (`ludens controller list` / `baseware export`) |
 | `logs/<run-id>/` | Structured run event streams (`events.jsonl`), `manifest.json`, and `diagnostics.jsonl` (plus `logs/baseware/` device logs) |
 | `.ludens/timeline/` | Single-writer workspace timeline storing `@record` observations, deduplicated assets, and 30 Hz fMP4 video under `video/` |
@@ -153,8 +154,69 @@ ludens eval adapt python/skills/visual_guard.py:act_on_alert \
 
 Inspect the exact sequence around `<record-id>` using `client.replay(around=record_id, before_seconds=2.0, after_seconds=2.0)` (or inspect the video and events in Console **Replay**), extend `WatchdogEnv` so the current capability fails (`passed: false`), then refine `act_on_alert` until `ludens eval run --all` reports `verified` again.
 
-## 5. Capabilities, Config & Consolidation in Console
+## 5. Programmable Outer Loop (`loop.py`) & Lean Perception Input
 
+By default (when `loop.py` is absent), Ludens runs the built-in outer loop: reading the latest lean perception envelope plus vision frames and starting an LLM turn. Routine latest reads use a dehydrated payload contract:
+
+`{ ok: true, records: [{ id, sequence, recordedAt, capability?, text?, data?, space?, effect?, transition? }] }`
+
+Default primary-channel reads omit the redundant `capability` string and strip internal runtime noise (`queryId`, `generation`, `codeSHA`, `sampling`, `sources`, `media[*].id`), while explicit historical or filtered `observe` queries (`id`, `at`, `start`, `end`, `after`, `limit`, or `capability`) retain `{ query, hasMore, nextAfter?, availability? }` pagination and availability bounds.
+
+Whenever routine inter-turn polling, deterministic `@capability` dispatch, or periodic consolidation does not require spending LLM tokens on every tick, you or Shiori can create `loop.py` in the workspace root:
+
+```python
+from ludens_tools import (
+    Client,
+    Consolidate,
+    Loop,
+    Prompt,
+    Stop,
+    TurnContext,
+    TurnInjection,
+    Wait,
+)
+
+
+class Loop(Loop):
+    """Run nominal patrol ticks deterministically in Python; wake the LLM only on plans or alerts."""
+
+    def inject(self, ctx: TurnContext) -> TurnInjection:
+        inj = ctx.default_inject()
+        records = inj.records
+        latest = records[-1].get("data", {}) if records else {}
+        if latest.get("event") == "nominal":
+            inj.attach_images = False
+        inj.extra.append({"turn": ctx.turn, "llm_turns": ctx.llm_turns})
+        return inj
+
+    def step(self, ctx: TurnContext) -> Prompt | Consolidate | Wait | Stop:
+        records = ctx.perception.get("records") or []
+        latest = records[-1].get("data", {}) if records else {}
+        if latest.get("goal_met"):
+            return Stop(reason="goal_met")
+        if latest.get("event") == "anomaly":
+            outcome = Client().call(
+                "python/skills/visual_guard.py:act_on_alert",
+                {"channel": 1, "threshold": 2},
+            )
+            if outcome.get("triggered"):
+                return Prompt(prompt="Alert relay triggered; inspect recent timeline and log follow-up.")
+        if ctx.turn > 0 and ctx.turn % 20 == 0:
+            return Consolidate()
+        if ctx.turn == 0:
+            return Prompt()
+        return Wait(seconds=1.0, reason="nominal_patrol")
+```
+
+Key runtime guarantees when authoring `loop.py`:
+
+- **Dual-layer customization**: `inject(ctx)` can mutate `ctx.default_inject()` (`TurnInjection`, such as setting `inj.attach_images = False` or appending to `inj.extra`) or return a custom `dict`, `str`, or `None` (skipping turn-start observation injection and vision frames for that turn); `step(ctx)` executes under the active `epoch` lease scope so `Client().call(...)` can invoke `@capability` functions directly before returning `Prompt`, `Consolidate`, `Wait`, or `Stop`.
+- **Hot-reload and `loop_fault` fallback**: Edits to `loop.py` or imported workspace `.py` modules hot-reload automatically between turns. Syntax or runtime errors emit `loop_fault`, fall back seamlessly to the built-in default loop, and attach `loopFault` in the next model turn so `loop.py` can be fixed live without dropping the Control Cycle.
+- **Urgent human `Steer` preemption**: Sending `ludens steer` (or **Steer Now** in Console) immediately wakes any in-flight `Wait(seconds)` and bypasses `Loop.step()`, forcing an immediate `Prompt` turn carrying the operator's message (`ctx.steered = True`).
+
+## 6. Capabilities, Config & Consolidation in Console
+
+- **Live (`?view=live`)**: Expand **View model input details** on any model turn card to inspect the post-`Loop.inject` `deliveredPayload` 1:1, and open **Loop steps** to review inter-turn `loop_step` / `loop_fault` events and model-free `@capability` calls (auto-expanded on fault).
 - **Capabilities (`?view=caps`)**: Visualize the **Capability – Eval – Env** triad, filter by verification status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), inspect **Workspace sources** (`baseware.json` vs static Python `@capability`), verify **Core connection check** and **Community driver verification**, and trigger **Run All Evals** with one click.
 - **Config (`?view=perception`)**: Open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
 - **Consolidation (`ludens consolidate` or Live UI)**: Runs a file-only turn (with device actuation disabled) that promotes `verified` capabilities into `skills/` SKILL cards, drops `unverified`/`stale`/`adapting`/`failed` entries from `skills/`, and refreshes `memory/current.md`.

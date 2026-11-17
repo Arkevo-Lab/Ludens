@@ -41,12 +41,20 @@ Ludens 扩展曾在 OMP 的循环上挂了两个自动注入通道：
 2026-10-29 起批次末通道整体删除：
 
 - 自动交付只在 `before_agent_start`（prompt 开始）发生，状态变迁 + 新记录的语义不变；
-- **轮内需要画面，模型自己调 `observe`**——它本来就是一个一等工具，支持按 id / 时刻 / 范围 / 能力查询，显式读取永远返回完整响应；
+- **轮内需要画面，模型自己调 `observe`**——它本来就是一个一等工具，常规最新读取返回去噪后的精简记录，按 id / 时刻 / 范围 / 能力查询时则附带完整的分页与可用范围元数据（`query`、`hasMore`、`nextAfter`、`availability`）；
 - 显式 `observe` 与原生工具图片各自开交付收据（`origin` 为 `explicit` / `tool_result`），trace 归因不丢；`tool_result` 钩子只登记原生工具图片的交付事实，不再改写任何工具结果。
 
 同一个钩子也按同样的预算纪律携带事件池摘要：`before_agent_start` 仅在 `pendingInbound > 0` 时追加紧凑的 `{ eventPool: { pendingInbound, items } }` 摘要，列出每条待处理入站事件的 id、kind、可选 title 与 72 字符单行预览。事件池空闲时不贡献任何字节，前缀 KV 缓存因此在轮次之间保持有效；完整正文通过 `event_pool({ action: "read" })` 按需拉取，并默认标记已读。
 
 “决策前有新画面”的诉求没有消失，只是换了个持有人：以前是宿主在每次边界被动追加，现在是模型按需拉取。轮边界的采样器状态通知仍在——采样器停了模型不会被误导成“没新帧”，显式 `observe` 的错误码（`UNAVAILABLE` 等）就是明确信号。
+
+## 进一步收敛：精简包络、可编程 `Loop.inject` 与 1:1 输入检视
+
+删掉批次末通道管住了注入**频率**，但早期轮首观测消息（`customType: "ludens-observation"`，对应 `observation_context` 回执）的单次 JSON 里仍带着不少内部运行遥测噪声（`queryId`、`generation`、64 字符 `codeSHA`、单调时钟 `sampling`、`sampledAt`、Baseware 原始 `sources` 以及 `media[*].id`）。随后我们把轮首观测载荷契约也做了端到端收敛：
+
+1. **精简感知包络（`perceptionInput`）**：常规最新读取只交付 `{ ok: true, records: [{ id, sequence, recordedAt, capability?, text?, data?, space?, effect?, transition? }] }`（默认主通道 `python/perception.py:Perception.sample` 省去重复的 `capability` 字段），按需附加 `perceptionState`、`eventPool`（`pendingInbound > 0` 时）或 `loopFault`（`loop.py` 异常回退时）。分页与可用性字段仅在显式历史/范围查询或失败读取（`!ok`）时出现。
+2. **工作区 `loop.py` 的 `Loop.inject(ctx)` 定制**：当不同轮次需要差异化的上下文策略时，工作区可在 `loop.py` 中覆写 `inject(self, ctx: TurnContext)`——既可基于 `inj = ctx.default_inject()` 修改可变 `TurnInjection`（如在纯代码修改轮设置 `inj.attach_images = False` 省去视觉帧挂载，或向 `inj.extra` 追加领域摘要，对应 `structured` 模式），也可返回自定义 `dict`（`custom_json`）、`str`（`custom_text`），或返回 `None`（`none` 模式，本轮完全跳过轮首观测消息与图片挂载）。一旦 `loop.py` 抛错，`LoopRuntime` 会发出 `loop_fault`、自动回退到内置精简注入，并把 `loopFault` 带进下一轮载荷以便自愈修复。
+3. **1:1 实时输入检视（`deliveredPayload`）**：`extension.ts` 在 `observation_context` 事件回执上直接记录经 `Loop.inject` 处理后的最终 `deliveredPayload`、`injectionMode` 与 `attachImages`，控制台**运行**页（`?view=live`，「查看传入模型的 Input 详情」）直接按 `deliveredPayload` 1:1 渲染，不再二次拼装或重复展示旧式 `snapshot`，确保面板所见与实际送达模型的观测文本载荷完全一致。
 
 ## 权衡与留档
 
