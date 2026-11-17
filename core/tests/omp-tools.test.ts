@@ -12,7 +12,7 @@ import { Workspace } from "../src/core/storage/workspace.ts";
 // The production extension injects LUDENS_*/BASEWARE_* into process.env for native
 // shells and restores them on session_shutdown; tests that skip shutdown must not
 // leak those keys into later suites (e.g. workspace-launch's spawned CLI).
-const injected = ["LUDENS_SOCKET", "LUDENS_WORKSPACE", "LUDENS_RUN_ID", "LUDENS_LOG_DIAGNOSTICS",
+const injected = ["LUDENS_PYTHON", "PATH", "PYTHONPATH", "LUDENS_SOCKET", "LUDENS_WORKSPACE", "LUDENS_RUN_ID", "LUDENS_LOG_DIAGNOSTICS",
   "LUDENS_ARTIFACT_ROOT", "BASEWARE_SOCKET", "BASEWARE_EPOCH", "BASEWARE_TRACE", "LUDENS_EPOCH", "LUDENS_TRACE"];
 const priorEnvironment = Object.fromEntries(injected.map(key => [key, process.env[key]]));
 afterEach(() => {
@@ -179,7 +179,7 @@ class Perception:
   } finally { await runtime.close(); await rm(directory, { recursive: true }); }
 });
 
-test("model projection keeps each record once with time, data and paging but no duplicate execution envelope", () => {
+test("model projection keeps lean records on latest reads and retains paging/availability on historical or failed reads", () => {
   const records: NonNullable<PerceptionRead["records"]> = [1, 2].map(sequence => ({
     id: `record-${sequence}`, sequence, generation: "generation", capability: "python/sensors.py:sample",
       identity: { id: "python/sensors.py:sample", codeSHA: "source-version" },
@@ -197,24 +197,58 @@ test("model projection keeps each record once with time, data and paging but no 
       latest: { sequence: 10, recordedAt: "2026-10-28T00:00:10Z" }, expired: false } };
   const before = JSON.stringify(read);
   const projected = perceptionInput(read);
-  expect(projected.records).toHaveLength(2);
-  const { identity: _identity, media: _media, ...snapshot } = records[0]!;
-  expect(projected.records![0]).toMatchObject({ ...snapshot,
-    codeSHA: "source-version", text: "sensor-value-1", data: { distance: 1 },
-    space: { frame: "room" }, media: [{ id: "image-1", mediaType: "image/png" }] });
+  expect(projected.ok).toBe(true);
+  if (projected.ok) {
+    expect(projected.records).toHaveLength(2);
+    expect(projected.records[0]).toEqual({
+      id: "record-1",
+      sequence: 1,
+      recordedAt: "2026-10-28T00:00:01Z",
+      capability: "python/sensors.py:sample",
+      text: "sensor-value-1",
+      data: { distance: 1 },
+      space: { frame: "room" },
+    });
+  }
   expect(projected).toMatchObject({ query: read.query, hasMore: true, nextAfter: 2, availability: read.availability });
+  expect(projected).not.toHaveProperty("queryId");
   const serialized = JSON.stringify(projected);
   expect(serialized.match(/sensor-value-1/g)).toHaveLength(1);
   expect(serialized.match(/"record-1"/g)).toHaveLength(1);
   expect(serialized).not.toContain("large-media-bytes");
+  expect(serialized).not.toContain("source-version");
   expect(projected).not.toHaveProperty("result");
   expect(projected).not.toHaveProperty("snapshot");
   expect(JSON.stringify(read)).toBe(before);
+
+  const latestSingle = perceptionInput({
+    queryId: "latest-q",
+    ok: true,
+    query: {},
+    hasMore: false,
+    availability: read.availability,
+    records: [{ ...records[0]!, capability: "python/perception.py:Perception.sample" }],
+  });
+  expect(latestSingle).toEqual({
+    ok: true,
+    records: [{
+      id: "record-1",
+      sequence: 1,
+      recordedAt: "2026-10-28T00:00:01Z",
+      text: "sensor-value-1",
+      data: { distance: 1 },
+      space: { frame: "room" },
+    }],
+  });
+
   const error = perceptionInput({ queryId: "failed", ok: false, query: {}, records: [], hasMore: false,
-    error: { code: "UNAVAILABLE", message: "unavailable" } });
+    error: { code: "UNAVAILABLE", message: "unavailable" }, availability: read.availability });
   expect(JSON.stringify(error).match(/unavailable/g)).toHaveLength(1);
-  expect(error.ok).toBe(false);
-  expect(error).not.toHaveProperty("status");
+  expect(error).toEqual({
+    ok: false,
+    error: { code: "UNAVAILABLE", message: "unavailable" },
+    availability: read.availability,
+  });
 });
 
 test("automatic delivery stays bounded across fast tools, unavailable sampling and context replacement", async () => {

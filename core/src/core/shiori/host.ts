@@ -2,6 +2,7 @@ import { delimiter, resolve } from "node:path";
 import { Runtime, type DeviceSession, type SharedBudget } from "./runtime.ts";
 import { WorkspaceController } from "../subsystems/controller.ts";
 import { PerceptionRuntime } from "../subsystems/perception.ts";
+import { LoopRuntime } from "../subsystems/loop.ts";
 import { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { EventLog, RecordEvent } from "../storage/events.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
@@ -44,6 +45,8 @@ export async function createHostRuntime(options: {
         }
       }
       : undefined }) });
+  runtime.attach({ loop: new LoopRuntime({ workspace, runDir, socketPath: ludensSocket, env, record,
+    diagnostics: log.diagnostics, clock: log.clock }) });
   try {
     if (options.model) {
       const { createOmpAgent } = await import("../agent-omp/session.ts");
