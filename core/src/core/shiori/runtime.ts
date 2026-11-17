@@ -16,13 +16,18 @@ import { isOmpEffort, isOmpServiceTier, type OmpEffort, type OmpServiceTier } fr
 import type { ServiceLaunchOrigin } from "../query/types.ts";
 import type { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
+import type { LoopRuntime } from "../subsystems/loop.ts";
 import type { WorkspaceController } from "../subsystems/controller.ts";
 import { executeProgram, type Program } from "./program.ts";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
+export interface AgentRunOutcome {
+  stopReason?: string;
+}
+
 export interface AgentRunner {
-  run(context: { epoch: string; signal: AbortSignal; message?: string }): Promise<void>;
+  run(context: { epoch: string; signal: AbortSignal; message?: string }): Promise<void | AgentRunOutcome>;
   consolidate(context: { epoch: string; signal: AbortSignal }): Promise<void>;
   /** Live mid-run guidance; optional because not every agent supports it. */
   steer?(message: string): Promise<void>;
@@ -84,12 +89,14 @@ export class Runtime {
   private _agent?: AgentRunner;
   private _controller?: WorkspaceController;
   private _perception?: PerceptionRuntime;
+  private _loop?: LoopRuntime;
   private _eventPool?: WorkspaceEventPool;
   private eventPoolSummary: EventPoolSummary = { ...EMPTY_EVENT_POOL_SUMMARY };
   /** Subsystems are injected through attach(); direct external assignment is not allowed. */
   get agent() { return this._agent; }
   get controller() { return this._controller; }
   get perception() { return this._perception; }
+  get loop() { return this._loop; }
   get eventPool() { return this._eventPool; }
 
   /** Attach workspace subsystems. Later calls replace only the given parts; an explicit undefined clears one. */
@@ -97,12 +104,14 @@ export class Runtime {
     agent?: AgentRunner;
     controller?: WorkspaceController;
     perception?: PerceptionRuntime;
+    loop?: LoopRuntime;
     eventPool?: WorkspaceEventPool;
     eventPoolSummary?: EventPoolSummary;
   }) {
     if ("agent" in subsystems) this._agent = subsystems.agent;
     if ("controller" in subsystems) this._controller = subsystems.controller;
     if ("perception" in subsystems) this._perception = subsystems.perception;
+    if ("loop" in subsystems) this._loop = subsystems.loop;
     if ("eventPool" in subsystems) {
       this._eventPool = subsystems.eventPool;
       if (!subsystems.eventPool) this.eventPoolSummary = { ...EMPTY_EVENT_POOL_SUMMARY };
@@ -141,6 +150,7 @@ export class Runtime {
       queue: this._agent?.queueState?.() ?? { steering: 0 },
       eventPool: { ...this.eventPoolSummary },
       perception: this._perception?.status(),
+      ...(this._loop ? { loop: this._loop.status() } : {}),
       context: { perceptionInjection: this.perceptionInjection },
       logging: { diagnostics: this.diagnostics, basewareDiagnostics: this.devices?.diagnostics ?? "normal" },
     };
@@ -253,10 +263,16 @@ export class Runtime {
     if (control.signal.aborted) return this.status();
     const work = program ?? (this._agent ? (context: { epoch: string; signal: AbortSignal }) => this._agent!.run({ ...context, message }) : undefined);
     if (work) {
-      this.running = Promise.resolve().then(() => work({ epoch, signal: control.signal }))
+      let stopReason = "agent ended";
+      this.running = Promise.resolve().then(async () => {
+        const outcome = await work({ epoch, signal: control.signal });
+        if (outcome && typeof outcome === "object" && typeof outcome.stopReason === "string" && outcome.stopReason.trim()) {
+          stopReason = outcome.stopReason.trim();
+        }
+      })
         .catch((error) => { if (!control.signal.aborted) this.record("error", String(error)); })
         .finally(async () => {
-          await this.stop("agent ended");
+          await this.stop(stopReason);
           await this.aborting;
           this.running = undefined;
         });
@@ -566,6 +582,7 @@ export class Runtime {
     this.reason = "reconnected";
     this.record("control", this.status());
     if (this._perception) await this._perception.reload().catch(error => this.record("error", String(error)));
+    if (this._loop) await this._loop.reload().catch(error => this.record("error", String(error)));
   }
 
   async close() {
@@ -574,7 +591,8 @@ export class Runtime {
       await this.running;
       await this._agent?.close();
     } finally {
-      await this._perception?.stop();
+      try { await this._loop?.stop(); }
+      finally { await this._perception?.stop(); }
     }
   }
 

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { createAgentSession, discoverAuthStorage, SessionManager, Settings, type AgentSession, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
-import type { Model } from "@oh-my-pi/pi-ai";
+import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import {
   isOmpEffort,
   isOmpServiceTier,
@@ -12,11 +12,11 @@ import {
   type OmpEffort,
   type OmpServiceTier,
 } from "@ludens/protocol/ludens";
-import type { AgentRunner } from "../shiori/runtime.ts";
+import type { AgentRunOutcome, AgentRunner } from "../shiori/runtime.ts";
 import { Workspace } from "../storage/workspace.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
 import { openWorkspaceSession, selectWorkspaceSession } from "./workspace-session.ts";
-import { createLudensExtension, type Cycle, type ExtensionHost } from "./extension.ts";
+import { createLudensExtension, type Cycle, type ExtensionHost, type PreparedTurnContext } from "./extension.ts";
 import type { EventLog } from "../storage/events.ts";
 import { installCompactionHttpTrace, ModelTrace } from "./trace.ts";
 import { SHIORI_SOURCE } from "./shiori.ts";
@@ -32,6 +32,8 @@ import {
   type AvailableModelsCatalog,
 } from "./models.ts";
 import { listCapabilityEvals } from "../subsystems/capability-evals.ts";
+import { perceptionInput, type PerceptionRead } from "../subsystems/perception.ts";
+import { buildDefaultStructuredInjection, LoopRuntime, type LoopTurnContextWire } from "../subsystems/loop.ts";
 import continuation from "../../../prompts/continue.md" with { type: "text" };
 import consolidation from "../../../prompts/consolidate.md" with { type: "text" };
 
@@ -39,9 +41,15 @@ export { listAvailableOmpModels, ompSettingsOverrides, resolveOmpImageModel, typ
 
 /** Run one maintenance turn inside the existing session, then restore its tools. */
 export async function consolidateOmpSession(
-  session: Pick<AgentSession, "getActiveToolNames" | "setActiveToolsByName" | "prompt" | "getLastAssistantMessage">,
+  session: {
+    getActiveToolNames(): string[];
+    setActiveToolsByName(names: string[]): Promise<void>;
+    prompt(text: string): Promise<unknown>;
+    getLastAssistantMessage(): AssistantMessage | undefined;
+  },
   signal: AbortSignal,
   workspace: string,
+  customPrompt?: string | null,
 ) {
   const tools = session.getActiveToolNames();
   signal.throwIfAborted();
@@ -49,7 +57,8 @@ export async function consolidateOmpSession(
     await session.setActiveToolsByName(["read", "write", "edit"]);
     signal.throwIfAborted();
     const evaluations = await listCapabilityEvals(workspace, { signal });
-    await session.prompt(`${consolidation}\n\nCurrent capability evaluations (static discovery; no workspace code executed):\n${JSON.stringify(evaluations)}`);
+    const promptHeader = customPrompt?.trim() ? customPrompt.trim() : consolidation;
+    await session.prompt(`${promptHeader}\n\nCurrent capability evaluations (static discovery; no workspace code executed):\n${JSON.stringify(evaluations)}`);
     signal.throwIfAborted();
     const last = session.getLastAssistantMessage();
     if (last?.stopReason === "error") throw new Error(last.errorMessage ?? "Model request failed");
@@ -57,6 +66,318 @@ export async function consolidateOmpSession(
   } finally {
     await session.setActiveToolsByName(tools);
   }
+}
+
+export interface OmpLoopSessionSurface {
+  prompt(text: string): Promise<unknown>;
+  getLastAssistantMessage(): AssistantMessage | undefined;
+  getActiveToolNames(): string[];
+  setActiveToolsByName(names: string[]): Promise<void>;
+  joinActiveTurn?(text: string, images?: undefined, options?: { queue?: "steering" | "followUp" }): Promise<boolean>;
+  steer?(text: string): Promise<void>;
+  getQueuedMessages?(): { steering: readonly unknown[]; liveSteered: number };
+  abort(): Promise<void>;
+}
+
+/** Programmable outer loop + urgent human Steer preemption shared by OmpAgentSession and tests. */
+export function createOmpLoopDriver(options: {
+  runtime: ExtensionHost;
+  workspace: string;
+  loop?: LoopRuntime;
+  session: OmpLoopSessionSurface;
+  prepareTurn(next?: PreparedTurnContext): void;
+  setCycle(next?: Cycle): void;
+}) {
+  const { runtime, workspace, session, prepareTurn, setCycle } = options;
+  const pendingSteers: string[] = [];
+  let steerWakeController: AbortController | undefined;
+  let inPromptTurn = false;
+
+  const getLoopRuntime = () => options.loop ?? runtime.loop;
+
+  async function captureTurnInputs(context: { epoch: string; signal: AbortSignal }) {
+    const hostStatus = runtime.status();
+    const remainingSeconds = hostStatus.remainingSeconds ?? null;
+    const injectionEnabled = runtime.perceptionInjectionEnabled();
+    let read: PerceptionRead | null = null;
+    let perceptionPayload: Record<string, unknown> = { ok: true, records: [] };
+    let perceptionState: Record<string, unknown> | null = null;
+
+    if (injectionEnabled) {
+      const pStatus = hostStatus.perception;
+      if (pStatus?.state === "ready" && runtime.perception) {
+        read = await runtime.perception.observe(context.signal, { epoch: context.epoch });
+        perceptionPayload = perceptionInput(read) as Record<string, unknown>;
+        try {
+          const sm = await runtime.perception.stateMachine(context.signal);
+          if (sm.state !== "python/perception.py:Perception.sample" || Object.keys(sm.arguments ?? {}).length > 0) {
+            perceptionState = {
+              state: sm.state,
+              ...(Object.keys(sm.arguments ?? {}).length > 0 ? { arguments: sm.arguments } : {}),
+            };
+          }
+        } catch {
+          // Optional on stubbed PerceptionRuntime fixtures.
+        }
+      } else if (pStatus && pStatus.state !== "ready" && pStatus.state !== "unimplemented") {
+        perceptionState = {
+          state: pStatus.state,
+          ...(pStatus.error ? { error: pStatus.error } : {}),
+        };
+        if (pStatus.state === "error") {
+          perceptionPayload = {
+            ok: false,
+            ...(pStatus.error ? { error: { code: "UNAVAILABLE", message: pStatus.error } } : {}),
+          };
+        }
+      }
+    }
+
+    let eventPoolPayload: Record<string, unknown> | null = null;
+    if (runtime.eventPoolDigest) {
+      const digest = await runtime.eventPoolDigest();
+      if (digest.pendingInbound > 0) {
+        eventPoolPayload = {
+          ...digest,
+          hint: "Use event_pool({ action: 'read' }) to read full text and acknowledge when ready, or defer if busy.",
+        };
+      }
+    }
+
+    return { read, perceptionPayload, perceptionState, eventPoolPayload, remainingSeconds };
+  }
+
+  function summarizeAssistantTurn(last: AssistantMessage | undefined, steered: boolean): Record<string, unknown> {
+    const text = last?.content
+      .filter((part): part is Extract<AssistantMessage["content"][number], { type: "text" }> => part.type === "text")
+      .map(part => part.text)
+      .join("\n")
+      .trim();
+    const toolCalls = last?.content.filter(part => part.type === "toolCall").length ?? 0;
+    return {
+      action: "prompt",
+      steered,
+      stopReason: last?.stopReason ?? "stop",
+      toolCalls,
+      ...(text ? { text: text.slice(0, 500) } : {}),
+    };
+  }
+
+  async function sleepInterruptible(seconds: number, cycleSignal: AbortSignal): Promise<void> {
+    if (seconds <= 0 || pendingSteers.length > 0 || cycleSignal.aborted) return;
+    const wake = new AbortController();
+    steerWakeController = wake;
+    const combined = AbortSignal.any([cycleSignal, wake.signal]);
+    try {
+      await new Promise<void>(resolve => {
+        if (combined.aborted) {
+          resolve();
+          return;
+        }
+        const onAbort = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const timer = setTimeout(() => {
+          combined.removeEventListener("abort", onAbort);
+          resolve();
+        }, seconds * 1000);
+        combined.addEventListener("abort", onAbort, { once: true });
+      });
+    } finally {
+      if (steerWakeController === wake) steerWakeController = undefined;
+    }
+  }
+
+  return {
+    async run(context: { epoch: string; signal: AbortSignal; message?: string }): Promise<void | AgentRunOutcome> {
+      setCycle(context);
+      let turn = 0;
+      let llmTurns = 0;
+      let lastTurn: Record<string, unknown> | null = null;
+      const initialMessage = context.message?.trim() || null;
+
+      try {
+        while (!context.signal.aborted) {
+          turn++;
+          const loopRuntime = getLoopRuntime();
+
+          if (pendingSteers.length > 0) {
+            const consumed = pendingSteers.splice(0, pendingSteers.length);
+            const steerPrompt = consumed.join("\n\n");
+            const inputs = await captureTurnInputs(context);
+            if (context.signal.aborted) break;
+
+            const wireCtx: LoopTurnContextWire = {
+              turn,
+              llmTurns,
+              initialMessage,
+              defaultPrompt: steerPrompt,
+              steered: true,
+              perception: inputs.perceptionPayload,
+              perceptionState: inputs.perceptionState,
+              eventPool: inputs.eventPoolPayload,
+              lastTurn,
+              remainingSeconds: inputs.remainingSeconds,
+              fault: loopRuntime?.pendingFault() ?? null,
+            };
+
+            const injected = loopRuntime
+              ? await loopRuntime.inject({ epoch: context.epoch, context: wireCtx, signal: context.signal })
+              : { implemented: false, faulted: false, injection: buildDefaultStructuredInjection(wireCtx) };
+            if (context.signal.aborted) break;
+
+            prepareTurn({
+              epoch: context.epoch,
+              read: inputs.read,
+              injection: injected.injection,
+              loopImplemented: injected.implemented,
+              loopFault: loopRuntime?.pendingFault() ?? null,
+            });
+            setCycle(context);
+            inPromptTurn = true;
+            try {
+              await session.prompt(steerPrompt);
+            } finally {
+              inPromptTurn = false;
+              prepareTurn(undefined);
+            }
+            llmTurns++;
+            const last = session.getLastAssistantMessage();
+            if (last?.stopReason === "error") throw new Error(last.errorMessage ?? "Model request failed");
+            if (last?.stopReason === "aborted" && context.signal.aborted) break;
+            lastTurn = summarizeAssistantTurn(last, true);
+            continue;
+          }
+
+          const inputs = await captureTurnInputs(context);
+          if (context.signal.aborted) break;
+          // If an urgent steer arrived while capturing perception, preempt immediately.
+          if (pendingSteers.length > 0) {
+            turn--;
+            continue;
+          }
+
+          const defaultPrompt = llmTurns === 0 && initialMessage ? `${initialMessage}\n\n${continuation}` : continuation;
+          const wireCtx: LoopTurnContextWire = {
+            turn,
+            llmTurns,
+            initialMessage,
+            defaultPrompt,
+            steered: false,
+            perception: inputs.perceptionPayload,
+            perceptionState: inputs.perceptionState,
+            eventPool: inputs.eventPoolPayload,
+            lastTurn,
+            remainingSeconds: inputs.remainingSeconds,
+            fault: loopRuntime?.pendingFault() ?? null,
+          };
+
+          const stepOutcome = loopRuntime
+            ? await loopRuntime.step({ epoch: context.epoch, context: wireCtx, signal: context.signal })
+            : {
+                implemented: false,
+                faulted: false,
+                action: {
+                  kind: "prompt" as const,
+                  prompt: null,
+                  injection: buildDefaultStructuredInjection(wireCtx),
+                },
+              };
+          if (context.signal.aborted) break;
+
+          const { action } = stepOutcome;
+          // Human steer preempts deterministic non-prompt actions (Wait / Stop / Consolidate).
+          if (pendingSteers.length > 0 && action.kind !== "prompt") {
+            continue;
+          }
+
+          if (action.kind === "prompt") {
+            const promptText = action.prompt !== null && action.prompt.length > 0 ? action.prompt : defaultPrompt;
+            prepareTurn({
+              epoch: context.epoch,
+              read: inputs.read,
+              injection: action.injection,
+              loopImplemented: stepOutcome.implemented,
+              loopFault: loopRuntime?.pendingFault() ?? null,
+            });
+            setCycle(context);
+            inPromptTurn = true;
+            try {
+              await session.prompt(promptText);
+            } finally {
+              inPromptTurn = false;
+              prepareTurn(undefined);
+            }
+            llmTurns++;
+            const last = session.getLastAssistantMessage();
+            if (last?.stopReason === "error") throw new Error(last.errorMessage ?? "Model request failed");
+            if (last?.stopReason === "aborted") break;
+            lastTurn = summarizeAssistantTurn(last, false);
+            continue;
+          }
+
+          if (action.kind === "consolidate") {
+            prepareTurn(undefined);
+            setCycle({ ...context, purpose: "consolidate" });
+            inPromptTurn = true;
+            try {
+              await consolidateOmpSession(session, context.signal, workspace, action.prompt);
+            } catch (error) {
+              if (context.signal.aborted) break;
+              throw error;
+            } finally {
+              inPromptTurn = false;
+              setCycle(context);
+            }
+            lastTurn = { action: "consolidate", stopReason: "stop" };
+            continue;
+          }
+
+          if (action.kind === "wait") {
+            await sleepInterruptible(action.seconds, context.signal);
+            lastTurn = {
+              action: "wait",
+              seconds: action.seconds,
+              ...(action.reason ? { reason: action.reason } : {}),
+            };
+            continue;
+          }
+
+          if (action.kind === "stop") {
+            const trimmed = action.reason.trim();
+            return { stopReason: trimmed ? `loop: ${trimmed}` : "loop: completed" };
+          }
+        }
+      } finally {
+        inPromptTurn = false;
+        steerWakeController = undefined;
+        pendingSteers.length = 0;
+        prepareTurn(undefined);
+        setCycle(undefined);
+      }
+    },
+
+    async steer(message: string): Promise<void> {
+      if (inPromptTurn) {
+        if (typeof session.joinActiveTurn === "function") {
+          const joined = await session.joinActiveTurn(message, undefined, { queue: "steering" });
+          if (joined) return;
+        } else if (typeof session.steer === "function") {
+          await session.steer(message);
+          return;
+        }
+      }
+      pendingSteers.push(message);
+      steerWakeController?.abort();
+    },
+
+    queueState(): { steering: number } {
+      const nativeQueued = session.getQueuedMessages?.();
+      const nativeCount = nativeQueued ? nativeQueued.steering.length + nativeQueued.liveSteered : 0;
+      return { steering: pendingSteers.length + nativeCount };
+    },
+  };
 }
 
 // OMP clamps each request to the deployment's image-count budget (catalog
@@ -178,20 +499,26 @@ export async function createOmpAgent(options: {
     const recordSession = options.log.recorder(SHIORI_SOURCE);
     const unsubscribe = trace.attach(session);
     recordSession("session", { file: sessionFile, model: activeModel, serviceTier: activeServiceTier, effort: activeEffort, tools: session.getActiveToolNames() });
+    const ownedLoop = options.runtime.loop
+      ? undefined
+      : new LoopRuntime({
+          workspace: options.workspace,
+          runDir: options.runDir,
+          socketPath: options.ludensSocket,
+          record: options.runtime.record,
+          diagnostics: options.runtime.diagnostics,
+          clock: options.log.clock,
+        });
+    const loopDriver = createOmpLoopDriver({
+      runtime: options.runtime,
+      workspace: options.workspace,
+      loop: options.runtime.loop ?? ownedLoop,
+      session,
+      prepareTurn: extension.prepareTurn,
+      setCycle: next => { cycle = next; },
+    });
     return {
-      async run(context) {
-        cycle = context;
-        try {
-          let nextPrompt = context.message ? `${context.message}\n\n${continuation}` : continuation;
-          while (!context.signal.aborted) {
-            await session.prompt(nextPrompt);
-            nextPrompt = continuation;
-            const last = session.getLastAssistantMessage();
-            if (last?.stopReason === "error") throw new Error(last.errorMessage ?? "Model request failed");
-            if (last?.stopReason === "aborted") break;
-          }
-        } finally { cycle = undefined; }
-      },
+      run: context => loopDriver.run(context),
       async consolidate(context) {
         cycle = { ...context, purpose: "consolidate" };
         try { await consolidateOmpSession(session, context.signal, options.workspace); }
@@ -219,15 +546,13 @@ export async function createOmpAgent(options: {
         recordSession("session", { file: sessionFile, model: activeModel, serviceTier: activeServiceTier, effort: activeEffort, tools: session.getActiveToolNames() });
         return activeModel;
       },
-      steer: async (message: string) => { await session.steer(message); },
-      queueState: () => {
-        const queued = session.getQueuedMessages();
-        return { steering: queued.steering.length + queued.liveSteered };
-      },
+      steer: (message: string) => loopDriver.steer(message),
+      queueState: () => loopDriver.queueState(),
       abort: () => session.abort(),
       async close() {
         try { await session.dispose(); }
         finally {
+          await ownedLoop?.stop();
           removeControlGate(); unsubscribe(); untraceCompaction();
           await trace.shiori.close();
           if (ownsAuthStorage) authStorage.close();

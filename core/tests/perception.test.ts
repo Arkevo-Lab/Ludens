@@ -3,7 +3,7 @@ import { mkdtemp, readFile, realpath, rm, utimes, writeFile } from "node:fs/prom
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { PerceptionRuntime, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/core/subsystems/perception.ts";
+import { PerceptionRuntime, dehydratePerceptionRecord, observationBytes, perceptionInput, perceptionMetadata, type PerceptionRead, type ObservationQuery } from "../src/core/subsystems/perception.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
 async function fixture(options: { startTimeoutMs?: number; stopGraceMs?: number; observeTimeoutMs?: number; env?: NodeJS.ProcessEnv;
@@ -497,17 +497,23 @@ class Perception:
       effect: { id: "python/perception.py:noop", arguments: { value: 1 } },
       transition: { to: "hold", arguments: { mode: "automatic" } },
     });
-    expect(perceptionInput(read).records[0]).toMatchObject({
-      effect: { id: "python/perception.py:noop", arguments: { value: 1 } },
-      transition: { to: "hold", arguments: { mode: "automatic" } },
-    });
+    const projected = perceptionInput(read);
+    expect(projected.ok).toBe(true);
+    if (projected.ok) {
+      expect(projected.records[0]).toMatchObject({
+        effect: { id: "python/perception.py:noop", arguments: { value: 1 } },
+        transition: { to: "hold", arguments: { mode: "automatic" } },
+      });
+    }
   } finally { await f.cleanup(); }
 });
 
 
-test("one record carries payload once; model views preserve semantic sources without internal storage metadata", () => {
+test("lean perceptionInput strips telemetry bloat on latest reads while retaining pagination and availability on historical or failed reads", () => {
   const read: PerceptionRead = {
     queryId: "query-span", ok: true, query: {}, hasMore: false,
+    availability: { persistent: true, hotSeconds: 60, earliest: { sequence: 1, recordedAt: "2026-10-28T00:00:00.000Z" },
+      latest: { sequence: 7, recordedAt: "2026-10-28T00:00:00.000Z" }, expired: false },
     records: [{ id: "record", sequence: 7, generation: "generation", capability: "python/perception.py:Perception.sample",
       identity: { id: "capability", codeSHA: "source-version", origin: { path: "perception.py" } },
       trace: { spanId: "sample-span" }, runId: "run", timeline: { recordId: "record", sequence: 7 },
@@ -521,16 +527,75 @@ test("one record carries payload once; model views preserve semantic sources wit
     }],
   };
   const input = perceptionInput(read);
-  expect(input.records[0]).toMatchObject({ id: "record", codeSHA: "source-version",
-    sources: [{ sensor: "camera", frame: 1 }], data: { velocity: 2 }, space: { unit: "pixels" },
-    sampledAt: "2026-10-27T23:59:59.999Z", sampling: read.records[0]!.sampling,
-    media: [{ id: "record-0", mediaType: "image/png" }] });
-  for (const field of ["identity", "trace", "runId", "timeline"]) expect(input.records[0]).not.toHaveProperty(field);
+  expect(input).toEqual({
+    ok: true,
+    records: [{
+      id: "record",
+      sequence: 7,
+      recordedAt: "2026-10-28T00:00:00.000Z",
+      text: "single semantic payload",
+      data: { velocity: 2 },
+      space: { unit: "pixels" },
+    }],
+  });
+  expect(input).not.toHaveProperty("queryId");
+  expect(input).not.toHaveProperty("query");
+  expect(input).not.toHaveProperty("hasMore");
+  expect(input).not.toHaveProperty("availability");
+  if (input.ok) {
+    for (const field of ["identity", "trace", "runId", "timeline", "generation", "codeSHA", "sampling", "sampledAt", "sources", "media", "capability"]) {
+      expect(input.records[0]).not.toHaveProperty(field);
+    }
+  }
   expect(JSON.stringify(input).split("single semantic payload")).toHaveLength(2);
+
+  // Empty text is omitted; non-default capability is preserved.
+  const dehydratedCustom = dehydratePerceptionRecord({
+    ...read.records[0]!,
+    text: "",
+    capability: "python/sensors.py:lidar",
+  });
+  expect(dehydratedCustom).not.toHaveProperty("text");
+  expect(dehydratedCustom.capability).toBe("python/sensors.py:lidar");
+
+  // Historical / filtered reads keep query, hasMore, nextAfter, availability.
+  const historical = perceptionInput({
+    ...read,
+    query: { after: 0, limit: 8 },
+    hasMore: true,
+    nextAfter: 7,
+  });
+  expect(historical).toEqual({
+    ok: true,
+    query: { after: 0, limit: 8 },
+    records: input.ok ? input.records : [],
+    hasMore: true,
+    nextAfter: 7,
+    availability: read.availability,
+  });
+  expect(historical).not.toHaveProperty("queryId");
+
+  // Failed reads keep error and availability, omitting queryId and empty records noise.
+  const failed = perceptionInput({
+    queryId: "failed-span",
+    ok: false,
+    query: { at: "2026-10-28T00:00:00.000Z" },
+    records: [],
+    hasMore: false,
+    error: { code: "EXPIRED", message: "window expired" },
+    availability: read.availability,
+  });
+  expect(failed).toEqual({
+    ok: false,
+    error: { code: "EXPIRED", message: "window expired" },
+    availability: read.availability,
+  });
+
+  // Event log metadata keeps semantic data/space while stripping inline media bytes.
   const logged = perceptionMetadata(read);
   expect(logged.records[0]).toHaveProperty("trace");
-  expect(logged.records[0]).not.toHaveProperty("data");
-  expect(logged.records[0]).not.toHaveProperty("space");
+  expect(logged.records[0]!.data).toEqual({ velocity: 2 });
+  expect(logged.records[0]!.space).toEqual({ unit: "pixels" });
   expect(logged.records[0]!.media[0]).not.toHaveProperty("data");
   expect(read.records[0]!.media[0]!.data).toBe("bytes");
 });

@@ -604,31 +604,68 @@ export class PerceptionRuntime {
 export function observationMetadata({ data: _data, ...observation }: Observation): Observation { return observation; }
 
 export function perceptionMetadata(read: PerceptionRead): PerceptionRead {
-  return { ...read, records: read.records.map(({ data: _data, space: _space, ...record }) => ({ ...record,
+  return { ...read, records: read.records.map(record => ({ ...record,
     media: record.media.map(observationMetadata) })) };
 }
 
-/** One model/terminal view: workspace sources remain meaningful input; internal trace/storage links stay in query results and logs. */
-export function perceptionInput(read: PerceptionRead) {
-  return { queryId: read.queryId, ok: read.ok, query: read.query, records: read.records.map(record => ({
-    id: record.id, sequence: record.sequence, generation: record.generation,
-    ...(record.capability === undefined ? {} : { capability: record.capability }),
-    ...(record.identity?.codeSHA === undefined ? {} : { codeSHA: record.identity.codeSHA }),
-    ...(record.sources === undefined ? {} : { sources: record.sources }),
+export interface LeanPerceptionRecord {
+  id: string;
+  sequence: number;
+  recordedAt: string;
+  capability?: string;
+  text?: string;
+  data?: unknown;
+  space?: unknown;
+  effect?: unknown;
+  transition?: unknown;
+}
+
+const DEFAULT_SAMPLE_CAPABILITY = "python/perception.py:Perception.sample";
+
+export function dehydratePerceptionRecord(record: PerceptionRecord): LeanPerceptionRecord {
+  return {
+    id: record.id,
+    sequence: record.sequence,
     recordedAt: record.recordedAt,
-    ...(record.sampledAt === undefined ? {} : { sampledAt: record.sampledAt }),
-    sampling: record.sampling, text: record.text,
-    ...(record.data === undefined ? {} : { data: record.data }),
-    ...(record.space === undefined ? {} : { space: record.space }),
-    ...(record.effect === undefined ? {} : { effect: record.effect }),
-    ...(record.transition === undefined ? {} : { transition: record.transition }),
-    media: record.media.map(({ id, mediaType }) => ({ id, mediaType })),
-  })), hasMore: read.hasMore,
-    ...(read.unchanged === undefined ? {} : { unchanged: read.unchanged }),
-    ...(read.sequence === undefined ? {} : { sequence: read.sequence }),
-    ...(read.nextAfter === undefined ? {} : { nextAfter: read.nextAfter }),
-    ...(read.availability === undefined ? {} : { availability: read.availability }),
-    ...(read.error === undefined ? {} : { error: read.error }),
+    ...(record.capability && record.capability !== DEFAULT_SAMPLE_CAPABILITY ? { capability: record.capability } : {}),
+    ...(typeof record.text === "string" && record.text.length > 0 ? { text: record.text } : {}),
+    ...(record.data !== undefined ? { data: record.data } : {}),
+    ...(record.space !== undefined ? { space: record.space } : {}),
+    ...(record.effect !== undefined ? { effect: record.effect } : {}),
+    ...(record.transition !== undefined ? { transition: record.transition } : {}),
+  };
+}
+
+/** Lean model/terminal view: semantic record fields only; pagination/availability only on historical/filtered or failed reads. */
+export function perceptionInput(read: PerceptionRead) {
+  if (!read.ok) {
+    return {
+      ok: false as const,
+      ...(read.error !== undefined ? { error: read.error } : {}),
+      ...(read.availability !== undefined ? { availability: read.availability } : {}),
+    };
+  }
+  const q = read.query ?? {};
+  const isHistoricalOrFiltered = Boolean(
+    q.id ||
+      q.at ||
+      q.start ||
+      q.end ||
+      (q.after !== undefined && q.after !== null) ||
+      (q.limit !== undefined && q.limit !== null) ||
+      (q.capability !== undefined && q.capability !== null),
+  );
+  const records = (read.records ?? []).map(dehydratePerceptionRecord);
+  if (!isHistoricalOrFiltered) {
+    return { ok: true as const, records };
+  }
+  return {
+    ok: true as const,
+    query: read.query,
+    records,
+    hasMore: Boolean(read.hasMore),
+    ...(read.nextAfter !== undefined ? { nextAfter: read.nextAfter } : {}),
+    ...(read.availability !== undefined ? { availability: read.availability } : {}),
   };
 }
 
