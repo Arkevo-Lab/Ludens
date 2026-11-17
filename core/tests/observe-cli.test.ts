@@ -82,7 +82,7 @@ test("observe CLI retains raw JSON and explicitly delivers requested historical 
     expect(rangeView.images).toEqual([...oldView.images, ...latestView.images]);
     const context = JSON.parse(rangeView.text.slice(0, rangeView.text.indexOf("Image 1:")));
     expect(context.records.map((record: any) => record.text)).toEqual(["historical red frame", "latest blue frame"]);
-    expect(context.records[0].media).toEqual([{ id: "image-0", mediaType: "image/png" }]);
+    expect(context.records[0].media).toBeUndefined();
     expect(context).not.toHaveProperty("result");
     expect(context).not.toHaveProperty("snapshot");
     expect(rangeView.text).toContain(`Image 1: image-0 | observation #1 recordedAt=${at}`);

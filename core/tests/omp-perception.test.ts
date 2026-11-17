@@ -119,7 +119,7 @@ class Perception:
     const record = repaired.observation.records[0];
     expect(record.id).toBeString();
     expect(record.recordedAt).toBeString();
-    expect(record.media).toEqual([{ id: `${record.id}-0`, mediaType: "image/png" }]);
+    expect(record.media).toBeUndefined();
     expect(repaired.observation.snapshot).toBeUndefined();
     expect(repaired.observation.result).toBeUndefined();
     expect(repaired.observation.control?.perception).toBeUndefined();
