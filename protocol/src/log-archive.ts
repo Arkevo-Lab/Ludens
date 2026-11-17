@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync
 import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { gzipSync, gunzipSync } from "node:zlib";
-import type { TimelineAssetReference, VideoFrameReference } from "./timeline-types";
+import { hasTimelineArchive, type TimelineAssetReference, type VideoFrameReference } from "./timeline-types";
 import { validateVideoReference } from "./timeline-media";
 
 export interface JsonArchiveRef {
@@ -152,7 +152,8 @@ export class JsonArchive {
           try {
             if (realpathNativeSync(statePath) !== statePath || statSync(statePath).size > 64 * 1024)
               throw new Error("Invalid timeline video status file");
-            replace = JSON.parse(readFileSync(statePath, "utf8")).status === "error";
+            const state = JSON.parse(readFileSync(statePath, "utf8"));
+            replace = state.status === "error" || (state.status === "evicted" && !hasTimelineArchive(state.archive));
           } catch (error) {
             if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
             replace = true;
@@ -194,10 +195,37 @@ export class JsonArchive {
         ...(gap ? { reason: registered.video.reason ?? "recording-gap" } : {}) }];
     }
     const asset = registered?.asset ?? `objects/${sha256}.bin`;
-    const root = join(this.workspace, ".ludens", "timeline"), path = join(root, mediaPath(asset));
+    const rel = mediaPath(asset);
+    const root = join(this.workspace, ".ludens", "timeline"), path = join(root, rel);
     let available = false;
-    try { available = realpathNativeSync(root) === root && realpathNativeSync(path) === path && statSync(path).size === bytes.length; }
-    catch { /* An unrecorded/expired image is metadata, never a second permanent archive. */ }
+    try {
+      if (realpathNativeSync(root) === root) {
+        try {
+          available = realpathNativeSync(path) === path && statSync(path).size === bytes.length;
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        if (!available) {
+          const cachedPath = join(root, "cache", rel);
+          try {
+            available = realpathNativeSync(cachedPath) === cachedPath && statSync(cachedPath).size === bytes.length;
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+        if (!available) {
+          const metaPath = join(root, rel + ".json");
+          try {
+            if (realpathNativeSync(metaPath) === metaPath && statSync(metaPath).size <= 64 * 1024) {
+              const state = JSON.parse(readFileSync(metaPath, "utf8"));
+              available = state.status !== "evicted" && hasTimelineArchive(state.archive) && state.archive.bytes === bytes.length;
+            }
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          }
+        }
+      }
+    } catch { /* An unrecorded/expired image is metadata, never a second permanent archive. */ }
     return ["m", { sha256, bytes: bytes.length, ...(type ? { mediaType: type } : {}),
       ...(available ? { asset, status: "recorded" as const } : { status: "unrecorded" as const, reason: "not-retained" }) }];
   }
@@ -369,8 +397,14 @@ export async function readArtifact(runDir: string, ref: any, options: ReadOption
         if (mode !== "full") return { $media: node[1] };
         if (node[1].video) return missingMedia({ ...node[1], reason: "lossy-video-source; use the timeline frame for a visual reconstruction" });
         if (!node[1].asset) return missingMedia(node[1]);
-        try { return fullMedia(await readUnder(join(workspace, ".ludens", "timeline"), mediaPath(node[1].asset)), node[1]); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return missingMedia(node[1]); throw error; }
+        const timelineRoot = join(workspace, ".ludens", "timeline");
+        const rel = mediaPath(node[1].asset);
+        try { return fullMedia(await readUnder(timelineRoot, rel), node[1]); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          try { return fullMedia(await readUnder(timelineRoot, join("cache", rel)), node[1]); }
+          catch (cacheErr) { if ((cacheErr as NodeJS.ErrnoException).code === "ENOENT") return missingMedia(node[1]); throw cacheErr; }
+        }
       }
       default: throw new Error("Unknown archive node");
     }
@@ -402,8 +436,14 @@ export function readArtifactSync(runDir: string, ref: any, options: ReadOptions 
         if (mode !== "full") return { $media: node[1] };
         if (node[1].video) return missingMedia({ ...node[1], reason: "lossy-video-source; use the timeline frame for a visual reconstruction" });
         if (!node[1].asset) return missingMedia(node[1]);
-        try { return fullMedia(readUnderSync(join(workspace, ".ludens", "timeline"), mediaPath(node[1].asset)), node[1]); }
-        catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return missingMedia(node[1]); throw error; }
+        const timelineRoot = join(workspace, ".ludens", "timeline");
+        const rel = mediaPath(node[1].asset);
+        try { return fullMedia(readUnderSync(timelineRoot, rel), node[1]); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+          try { return fullMedia(readUnderSync(timelineRoot, join("cache", rel)), node[1]); }
+          catch (cacheErr) { if ((cacheErr as NodeJS.ErrnoException).code === "ENOENT") return missingMedia(node[1]); throw cacheErr; }
+        }
       }
       default: throw new Error("Unknown archive node");
     }
