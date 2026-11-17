@@ -228,4 +228,9 @@ function manager(): ArchiveBuildManager { return (globalThis as any)[key] ??= ne
 export const ensureArchiveBuild = (index: LogIndex) => manager().ensure(index);
 export const controlArchiveBuild = (index: LogIndex, options: { action?: "cancel" | "retry"; buildId?: string } = {}) => manager().control(index, options);
 export const archiveBuildState = (index: LogIndex) => manager().state(index);
-export const closeArchiveBuilds = () => manager().close();
+export const closeArchiveBuilds = async () => {
+  const current = (globalThis as any)[key] as ArchiveBuildManager | undefined;
+  if (!current) return;
+  delete (globalThis as any)[key];
+  await current.close();
+};
