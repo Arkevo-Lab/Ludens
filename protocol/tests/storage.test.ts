@@ -31,6 +31,7 @@ import {
   redactGlobalStorageConfig,
   resolveEffectiveWorkspaceStorage,
   updateGlobalStorageConfig,
+  validTimelinePinAsset,
   validateGlobalStorageConfig,
   validateWorkspaceStorageOverride,
   writeGlobalStorageConfig,
@@ -402,6 +403,11 @@ test("resolveEffectiveWorkspaceStorage, validateWorkspaceStorageOverride, and pi
     expect((await resolveEffectiveWorkspaceStorage(wsInit, home)).kind).toBe("ephemeral");
 
     // Timeline pins.json reader/writer deduplicates & blocks traversal
+    expect(validTimelinePinAsset("video/seg-001.mp4")).toBe(true);
+    expect(validTimelinePinAsset(`objects/${"a".repeat(64)}.bin`)).toBe(true);
+    expect(validTimelinePinAsset("foo/bar.txt")).toBe(false);
+    expect(validTimelinePinAsset("../outside.mp4")).toBe(false);
+
     const timelineRoot = join(wsInit, ".ludens", "timeline");
     expect(await readTimelinePins(timelineRoot)).toEqual([]);
     const savedPins = await writeTimelinePins(timelineRoot, [
@@ -663,12 +669,14 @@ test("timeline-media and log-archive handle evicted segments, archived cold segm
     expect(missingErr?.message).toBe("Recorded video is unavailable: segment is missing");
     expect(missingErr?.status).toBe(410);
 
-    // 3) Ready segment with missing local .mp4 WITH archive OR cache passes through to Python _video
+    // 3) Ready segment with missing local .mp4 WITH archive OR cache passes through to Python _video (forwarding options.home as LUDENS_HOME)
     const fakePng = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const envCaptureFile = join(rootDir, "captured-ludens-home.txt");
+    const customLudensHome = join(rootDir, "custom-ludens-home");
     const pythonShim = join(rootDir, "fake-python.sh");
     await writeFile(
       pythonShim,
-      `#!/bin/sh\nprintf '\\211PNG\\r\\n\\032\\n'\n`,
+      `#!/bin/sh\nprintf '%s' "$LUDENS_HOME" > "${envCaptureFile}"\nprintf '\\211PNG\\r\\n\\032\\n'\n`,
       { mode: 0o755 },
     );
     await chmod(pythonShim, 0o755);
@@ -689,11 +697,16 @@ test("timeline-media and log-archive handle evicted segments, archived cold segm
           },
         }),
       );
-      const decodedArchived = await decodeTimelineFrame(timelineRoot, {
-        asset: archivedAsset,
-        video: { pts: 1000, timeBase: [1, 1_000_000], width: 64, height: 64 },
-      });
+      const decodedArchived = await decodeTimelineFrame(
+        timelineRoot,
+        {
+          asset: archivedAsset,
+          video: { pts: 1000, timeBase: [1, 1_000_000], width: 64, height: 64 },
+        },
+        { home: customLudensHome },
+      );
       expect(decodedArchived.equals(fakePng)).toBe(true);
+      expect(await readFile(envCaptureFile, "utf8")).toBe(customLudensHome);
 
       await writeFile(join(timelineRoot, `${cachedAsset}.json`), JSON.stringify({ status: "ready" }));
       await writeFile(join(timelineRoot, "cache", cachedAsset), "cached-mp4-placeholder");

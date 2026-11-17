@@ -117,14 +117,19 @@ async function acquire(signal?: AbortSignal) {
 function release() { const next = waiting.shift(); if (next) next(); else active--; }
 
 /** No decoded history cache: the caller owns the requested frame and releases it. */
-export async function decodeTimelineFrame(root: string, ref: TimelineAssetReference, options: { signal?: AbortSignal } = {}): Promise<Buffer> {
+export async function decodeTimelineFrame(
+  root: string,
+  ref: TimelineAssetReference,
+  options: { signal?: AbortSignal; home?: string } = {},
+): Promise<Buffer> {
   const args = command(root, ref);
   await acquire(options.signal);
   try {
     options.signal?.throwIfAborted();
     return await new Promise<Buffer>((resolve, reject) => {
-      const python = pythonCommand(pythonExecutable(), args);
-      execFile(python.file, python.args, { env: pythonEnvironment(), encoding: "buffer", timeout: 20_000, windowsHide: true,
+      const env = pythonEnvironment(options.home ? { LUDENS_HOME: options.home } : {});
+      const python = pythonCommand(pythonExecutable(env), args);
+      execFile(python.file, python.args, { env, encoding: "buffer", timeout: 20_000, windowsHide: true,
         windowsVerbatimArguments: python.windowsVerbatimArguments, maxBuffer: MAX_BYTES, signal: options.signal }, (error, stdout, stderr) => {
         if (error) {
           const detail = stderr.toString().slice(-2000) || error.message;
