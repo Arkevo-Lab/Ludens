@@ -13,6 +13,7 @@ import {
   redactGlobalStorageConfig,
   resolveEffectiveWorkspaceStorage,
   updateGlobalStorageConfig,
+  validTimelinePinAsset,
   writeTimelinePins,
   type GlobalStorageConfig,
   type GlobalStorageUpdateInput,
@@ -635,12 +636,6 @@ export async function maintainStorage(
   };
 }
 
-function isValidRelativeAsset(asset: string): boolean {
-  if (!asset || asset.startsWith("/") || asset.includes("\\") || asset.includes("\0")) return false;
-  const parts = asset.split("/");
-  return parts.length >= 1 && parts.every(part => /^[a-zA-Z0-9._-]+$/.test(part) && part !== "." && part !== "..");
-}
-
 export async function pinTimelineSegment(
   params: StoragePinParams,
   home = globalHome,
@@ -649,7 +644,7 @@ export async function pinTimelineSegment(
     throw Object.assign(new Error("请选择工作区"), { status: 400 });
   }
   const asset = typeof params.asset === "string" ? params.asset.trim() : "";
-  if (!isValidRelativeAsset(asset)) {
+  if (!validTimelinePinAsset(asset)) {
     throw Object.assign(new Error("无效的时空轴媒体路径"), { status: 400 });
   }
   if (typeof params.pinned !== "boolean") {

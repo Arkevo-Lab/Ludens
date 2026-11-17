@@ -436,7 +436,7 @@ export async function mediaFile(
     const workspace = archiveWorkspace;
     const timeline = join(workspace, ".ludens", "timeline");
     if (reference.video) return {
-      bytes: await decodeTimelineFrame(timeline, { asset: reference.asset, video: reference.video }, { signal }),
+      bytes: await decodeTimelineFrame(timeline, { asset: reference.asset, video: reference.video }, { signal, home: root }),
       mediaType: "image/png", cacheControl: "no-store",
     };
     const resolved = await resolveStoredTimelineAsset({
