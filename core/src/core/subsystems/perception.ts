@@ -267,6 +267,29 @@ export class PerceptionRuntime {
     return observationId ? this.deliveredMedia.get(`${observationId}\0${sha256}`) : undefined;
   }
 
+  async maintainStorage(
+    mode: "sync" | "prune" | "clear_cache",
+    signal?: AbortSignal,
+  ): Promise<{ freedBytes: number; archivedCount: number; evictedCount: number; errors: string[] }> {
+    const worker = this.worker;
+    if (!worker || worker.expectedExit) {
+      throw new Error("Perception worker is unavailable");
+    }
+    const reply = await this.request(worker, { action: "storage_maintain", mode }, 120_000, signal);
+    if (reply.ok === false) {
+      throw new Error(`${reply.error?.type ?? "Error"}: ${reply.error?.message ?? "storage_maintain failed"}`);
+    }
+    const payload = (
+      reply.result && typeof reply.result === "object" ? reply.result : reply
+    ) as Record<string, unknown>;
+    return {
+      freedBytes: typeof payload.freedBytes === "number" && Number.isFinite(payload.freedBytes) ? payload.freedBytes : 0,
+      archivedCount: typeof payload.archivedCount === "number" && Number.isFinite(payload.archivedCount) ? payload.archivedCount : 0,
+      evictedCount: typeof payload.evictedCount === "number" && Number.isFinite(payload.evictedCount) ? payload.evictedCount : 0,
+      errors: Array.isArray(payload.errors) ? payload.errors.map(item => String(item)) : [],
+    };
+  }
+
   private async read(signal: AbortSignal, parent: EventTrace, query: ObservationQuery): Promise<PerceptionRead> {
     const trace = childTrace(parent), started = this.clock.now(), queryId = trace.spanId!;
     let worker: PythonWorker | undefined;

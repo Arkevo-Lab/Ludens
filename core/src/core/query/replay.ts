@@ -8,16 +8,18 @@ import { eventObservations, modelInputEvents } from "./observation-events";
 import { aggregate } from "./aggregate";
 import { readArtifact } from "@ludens/protocol/log-archive";
 import type { Event } from "./types";
-import type { FileMedia, ReplayCoverage, ReplayDetail, ReplayFrame, ReplayItem, ReplayOverview, ReplayOverviewResult, ReplayPreparing, ReplaySearchResult, ReplaySummary, ReplayTrack, ReplayWindow } from "./replay-types";
+import type { FileMedia, RemoteMedia, ReplayCoverage, ReplayDetail, ReplayFrame, ReplayItem, ReplayOverview, ReplayOverviewResult, ReplayPreparing, ReplaySearchResult, ReplaySummary, ReplayTrack, ReplayWindow } from "./replay-types";
 import { decodeTimelineFrame, type VideoFrameReference } from "@ludens/protocol/timeline-media";
+import type { TimelineArchiveLocation } from "@ludens/protocol/storage";
 import { archiveBuildState } from "./cold-build";
+import { resolveStoredTimelineAsset } from "./storage";
 
 const PAGE = 500, MAX_FRAME_WINDOW = 60_000, MAX_EVENT_WINDOW = 15 * 60_000, INDEX_BATCH = 4 * 1024 * 1024;
 const SEARCH_PAGE = 100, SEARCH_SCAN = 500, SEARCH_BYTES = 4 * 1024 * 1024;
 export interface ReplayQuery { mode: "overview" | "frames" | "events" | "search" | "detail" | "media" | "segment"; epoch?: string;
   start?: number; end?: number; cursor?: string; id?: string; record?: string; sequence?: number; media?: number; asset?: string; bytes?: number;
   q?: string; track?: ReplayTrack | "all" }
-type Scope = ReplayOverview & { index: LogIndex; signal?: AbortSignal };
+type Scope = ReplayOverview & { index: LogIndex; home: string; signal?: AbortSignal };
 function fail(message: string, status = 400): never { throw Object.assign(new Error(message), { status }); }
 function expired(): never { return fail("记录已过期、未持久化或已移除", 410); }
 const at = (event: Event) => Date.parse(event.origin?.at ?? event.at);
@@ -29,7 +31,7 @@ const url = (scope: Pick<Scope, "project" | "run" | "epoch">, values: Record<str
 };
 
 /** A short source-index batch makes progress visible without waiting for unrelated projections. */
-async function scopeFor(index: LogIndex, project: string, run: string, epoch: string | undefined, refresh: boolean, signal?: AbortSignal): Promise<Scope | ReplayPreparing> {
+async function scopeFor(index: LogIndex, project: string, run: string, epoch: string | undefined, refresh: boolean, home: string, signal?: AbortSignal): Promise<Scope | ReplayPreparing> {
   const build = archiveBuildState(index);
   const building = build?.state === "queued" || build?.state === "building";
   if (!building && (refresh || !index.eventRevision)) await index.refreshEvents({ maxBytes: INDEX_BATCH, signal });
@@ -74,19 +76,19 @@ async function scopeFor(index: LogIndex, project: string, run: string, epoch: st
     if (coverage.complete) fail("所选运行或周期没有时空轴记录", 404);
     return { project, run, epoch: selected, cycles, startAt: null, endAt: null, capabilities: [], coverage };
   }
-  return { project, run, epoch: selected, cycles, startAt, endAt: Math.max(startAt, endAt), capabilities: [], coverage, index, signal };
+  return { project, run, epoch: selected, cycles, startAt, endAt: Math.max(startAt, endAt), capabilities: [], coverage, index, home, signal };
 }
 function ready(value: Scope | ReplayPreparing): Scope {
   if (value.startAt === null) fail("正在读取运行边界，请稍后重试", 409);
   return value;
 }
 
-interface VideoState { status: "pending" | "ready" | "error"; format?: string; durationSeconds: number; error?: string;
-  readableBytes?: number; lastReadablePts?: number | null }
+interface VideoState { status: "pending" | "ready" | "error" | "evicted"; format?: string; durationSeconds: number; error?: string;
+  readableBytes?: number; lastReadablePts?: number | null; archive?: TimelineArchiveLocation; evictedAt?: string; evictedReason?: string }
 async function videoState(root: string, asset: string, signal?: AbortSignal): Promise<VideoState> {
   try {
     const state = JSON.parse(await readFile(await timelinePath(root, asset + ".json"), { encoding: "utf8", signal }));
-    if (!["pending", "ready", "error"].includes(state.status) || !Number.isFinite(state.durationSeconds) || state.durationSeconds < 0)
+    if (!["pending", "ready", "error", "evicted"].includes(state.status) || !Number.isFinite(state.durationSeconds) || state.durationSeconds < 0)
       throw new Error("无效的视频片段状态");
     if (state.format === "fmp4" && (state.readableBytes !== undefined && (!Number.isSafeInteger(state.readableBytes) || state.readableBytes < 0)
       || state.lastReadablePts !== undefined && state.lastReadablePts !== null && (!Number.isSafeInteger(state.lastReadablePts) || state.lastReadablePts < 0)))
@@ -118,15 +120,22 @@ async function frame(record: StoredTimelineRecord, scope: Scope, states: Map<str
       }
       const originAt = time - video.pts * video.timeBase[0] / video.timeBase[1] * 1000;
       const readableBytes = state.format === "fmp4" ? state.readableBytes ?? 0 : 0;
+      const evictedWithoutArchive = state.status === "evicted" && !state.archive;
+      const projectedStatus: "pending" | "ready" | "error" | "gap" =
+        video.status === "gap" ? "gap"
+          : evictedWithoutArchive ? "error"
+            : state.status === "evicted" ? "ready"
+              : state.status;
+      const reason = evictedWithoutArchive ? (state.error ?? "此视频片段已按存储配额策略自动回收") : state.error;
       return { ...base, video: { assetId: reference.asset,
-        revision: state.status === "pending" ? `pending:${readableBytes}` : state.status,
+        revision: state.status === "pending" ? `pending:${readableBytes}` : evictedWithoutArchive ? "evicted" : "ready",
         url: url(scope, { mode: "segment", ...proof, ...(readableBytes > 0 ? { bytes: readableBytes } : {}) }),
         originAt,
         ...(typeof state.lastReadablePts === "number" ? { readableUntil: originAt + state.lastReadablePts / 1000 } : {}),
         width: video.width, height: video.height, durationSeconds: state.durationSeconds,
-        status: video.status === "gap" ? "gap" as const : state.status,
+        status: projectedStatus,
         streaming: state.status === "pending" && readableFrame(state, video),
-        ...(state.error ? { reason: state.error } : {}) } };
+        ...(reason ? { reason } : {}) } };
     })) };
 }
 interface Cursor { scope: [string, string, string | null, number, number, string]; generation: string;
@@ -354,19 +363,52 @@ async function itemDetail(scope: Scope, id: string | undefined): Promise<ReplayD
       source: projected.source, ...summaryText(start.data.text) },
     data: { item: projected, events: await Promise.all(events.map(event => expandEvent(event, index))) }, ...(observations ? { observations } : {}) };
 }
-async function assetMedia(root: string, asset: string, mediaType: string, video?: VideoFrameReference, signal?: AbortSignal): Promise<FileMedia | { bytes: Buffer; mediaType: string }> {
+async function assetMedia(
+  root: string,
+  workspacePath: string,
+  home: string,
+  asset: string,
+  mediaType: string,
+  video?: VideoFrameReference,
+  signal?: AbortSignal,
+): Promise<FileMedia | RemoteMedia | { bytes: Buffer; mediaType: string }> {
   if (video) return { bytes: await decodeTimelineFrame(root, { asset, video }, { signal }), mediaType: "image/png" };
-  const file = await timelinePath(root, asset).catch(error => { if (error.code === "ENOENT") expired(); throw error; });
-  if (["video/mp4", "video/webm"].includes(mediaType)) return { file, mediaType };
-  const bytes = await readFile(file, { signal }).catch(error => { if (error.code === "ENOENT") expired(); throw error; });
-  return { bytes, mediaType: ["image/png", "image/jpeg", "image/webp", "image/gif", "audio/wav", "audio/mpeg"].includes(mediaType) ? mediaType : "text/plain; charset=utf-8" };
+  const resolved = await resolveStoredTimelineAsset({
+    timelineRoot: root,
+    workspacePath,
+    home,
+    asset,
+    signal,
+  });
+  if (resolved.kind === "missing") expired();
+  const normalizedMediaType = ["video/mp4", "video/webm"].includes(mediaType)
+    ? mediaType
+    : ["image/png", "image/jpeg", "image/webp", "image/gif", "audio/wav", "audio/mpeg"].includes(mediaType)
+      ? mediaType
+      : "text/plain; charset=utf-8";
+  if (resolved.kind === "remote") {
+    return {
+      remoteUrl: resolved.remoteUrl,
+      ...(resolved.size !== undefined ? { size: resolved.size } : {}),
+      mediaType: normalizedMediaType,
+      cacheControl: "private, max-age=31536000, immutable",
+    };
+  }
+  if (["video/mp4", "video/webm"].includes(mediaType)) {
+    return { file: resolved.file, mediaType, cacheControl: "private, max-age=31536000, immutable" };
+  }
+  const bytes = await readFile(resolved.file, { signal }).catch(error => {
+    if (error.code === "ENOENT") expired();
+    throw error;
+  });
+  return { bytes, mediaType: normalizedMediaType };
 }
-async function recordMedia(root: string, record: StoredTimelineRecord, media: number | undefined, signal?: AbortSignal) {
+async function recordMedia(root: string, workspacePath: string, home: string, record: StoredTimelineRecord, media: number | undefined, signal?: AbortSignal) {
   if (!Number.isSafeInteger(media) || media! < 0) fail("无效的媒体序号");
   const selected = record.media?.[media!];
   if (!selected?.timeline?.asset) expired();
   if (selected.timeline.recordId !== record.id || selected.timeline.sequence !== record.sequence) fail("媒体与记录引用不匹配");
-  return assetMedia(root, selected.timeline.asset, selected.mediaType, selected.timeline.video, signal);
+  return assetMedia(root, workspacePath, home, selected.timeline.asset, selected.mediaType, selected.timeline.video, signal);
 }
 async function modelMedia(scope: Scope, id: string) {
   if (!/^model-media:\d+$/.test(id)) fail("无效的模型媒体引用");
@@ -374,9 +416,9 @@ async function modelMedia(scope: Scope, id: string) {
   if (!event || event.type !== "observation_media" || !scope.index.archiveWorkspace || !scoped(event, scope.epoch)) fail("媒体不属于所选运行或周期", 404);
   const media = event.data.modelMedia;
   if (!media?.asset || !media?.mediaType) expired();
-  return assetMedia(join(scope.index.archiveWorkspace, ".ludens/timeline"), media.asset, media.mediaType, media.video, scope.signal);
+  return assetMedia(join(scope.index.archiveWorkspace, ".ludens/timeline"), scope.index.archiveWorkspace, scope.home, media.asset, media.mediaType, media.video, scope.signal);
 }
-async function segmentMedia(scope: Scope, query: ReplayQuery): Promise<FileMedia> {
+async function segmentMedia(scope: Scope, query: ReplayQuery): Promise<FileMedia | RemoteMedia> {
   if (query.asset !== undefined && !/^video\/[a-zA-Z0-9_-]+\.mp4$/.test(query.asset)) fail("无效的视频片段引用");
   if (query.bytes !== undefined && (!Number.isSafeInteger(query.bytes) || query.bytes <= 0)) fail("无效的视频片段字节快照");
   const { root, record } = await storedRecord(scope, query.record, query.sequence);
@@ -388,12 +430,33 @@ async function segmentMedia(scope: Scope, query: ReplayQuery): Promise<FileMedia
   if (reference.video.status === "gap") fail(reference.video.reason ?? "此帧未被录制", 410);
   const state = await videoState(root, asset, scope.signal);
   if (state.status === "error") fail(state.error ?? "视频片段未完成", 410);
+  if (state.status === "evicted" && !state.archive) {
+    fail("此视频片段已按存储配额策略自动回收 (Recorded video was evicted by storage policy)", 410);
+  }
   if (state.status === "pending" && !readableFrame(state, reference.video)) fail("视频片段正在写入，请稍后刷新", 409);
   if (state.format === "fmp4" && !readableFrame(state, reference.video)) fail("此帧没有已完成的视频片段", 410);
   if (query.bytes !== undefined && (state.format !== "fmp4" || query.bytes > (state.readableBytes ?? 0))) fail("视频片段字节快照超出已发布范围");
   const size = state.format === "fmp4" ? query.bytes ?? state.readableBytes : undefined;
-  return { file: await timelinePath(root, asset), mediaType: "video/mp4", ...(size !== undefined ? { size } : {}),
-    cacheControl: state.status === "pending" && query.bytes === undefined ? "no-store" : "private, max-age=31536000, immutable" };
+  const cacheControl = state.status === "pending" && query.bytes === undefined ? "no-store" : "private, max-age=31536000, immutable";
+  const resolved = await resolveStoredTimelineAsset({
+    timelineRoot: root,
+    workspacePath: scope.index.archiveWorkspace!,
+    home: scope.home,
+    asset,
+    status: state.status,
+    archive: state.archive,
+    signal: scope.signal,
+  });
+  if (resolved.kind === "missing") expired();
+  if (resolved.kind === "remote") {
+    return {
+      remoteUrl: resolved.remoteUrl,
+      ...(size !== undefined ? { size } : resolved.size !== undefined ? { size: resolved.size } : {}),
+      mediaType: "video/mp4",
+      cacheControl: "private, max-age=31536000, immutable",
+    };
+  }
+  return { file: resolved.file, mediaType: "video/mp4", ...(size !== undefined ? { size } : {}), cacheControl };
 }
 
 /** Read archived facts only. Video and frame requests never wait for event presentation work. */
@@ -401,10 +464,10 @@ export async function getReplay(project: string, run: string, query: ReplayQuery
   const { index, release } = await openRun(project, run, root);
   try {
     signal?.throwIfAborted();
-    const result = await scopeFor(index, project, run, query.epoch, query.mode === "overview" || query.mode === "events" || query.mode === "detail" || query.mode === "search", signal);
+    const result = await scopeFor(index, project, run, query.epoch, query.mode === "overview" || query.mode === "events" || query.mode === "detail" || query.mode === "search", root, signal);
     if (query.mode === "overview") {
       if (result.startAt === null) return result satisfies ReplayOverviewResult;
-      const { index: _, signal: __, ...overview } = result; return overview;
+      const { index: _, home: __, signal: ___, ...overview } = result; return overview;
     }
     const scope = ready(result);
     if (query.mode === "frames") return await framesWindow(scope, query);
@@ -415,7 +478,7 @@ export async function getReplay(project: string, run: string, query: ReplayQuery
     if (query.mode === "detail" && !query.record) return await itemDetail(scope, query.id);
     if (query.mode === "detail" || query.mode === "media") {
       const { root: timelineRoot, record } = await storedRecord(scope, query.record, query.sequence);
-      return query.mode === "media" ? await recordMedia(timelineRoot, record, query.media, signal) : { title: record.capability, data: record,
+      return query.mode === "media" ? await recordMedia(timelineRoot, scope.index.archiveWorkspace!, scope.home, record, query.media, signal) : { title: record.capability, data: record,
         summary: { kind: "frame", startAt: Date.parse(record.recordedAt), source: { recordId: record.id, sequence: record.sequence }, ...summaryText(record.text) },
         frame: await frame(record, scope, new Map()),
       } satisfies ReplayDetail;

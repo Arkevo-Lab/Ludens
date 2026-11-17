@@ -1,4 +1,4 @@
-import type { FileMedia } from "../core/query/replay-types.ts";
+import type { FileMedia, RemoteMedia } from "../core/query/replay-types.ts";
 import type { ReplayQuery } from "../core/query/replay.ts";
 import { byteRange, fileResponse } from "./file-response.ts";
 import { errorResponse, localRequest, normalizeOrigin } from "./local-request.ts";
@@ -108,6 +108,91 @@ function bufferMediaResponse(
   });
 }
 
+async function remoteMediaResponse(
+  request: Request,
+  media: RemoteMedia,
+  extraHeaders: HeadersInit,
+): Promise<Response> {
+  const method = request.method.toUpperCase();
+  const rangeHeader = request.headers.get("range");
+  let upstream: Response;
+  try {
+    upstream = await fetch(media.remoteUrl, {
+      method,
+      ...(rangeHeader ? { headers: { Range: rangeHeader } } : {}),
+      signal: request.signal,
+    });
+  } catch (error) {
+    if (request.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+      throw error;
+    }
+    throw Object.assign(
+      new Error(`对象存储当前不可用：${error instanceof Error ? error.message : String(error)}`),
+      { status: 503, code: "STORAGE_UNAVAILABLE" },
+    );
+  }
+
+  const headers = new Headers({
+    "Content-Type": media.mediaType,
+    "Accept-Ranges": upstream.headers.get("accept-ranges") || "bytes",
+    "Cache-Control":
+      media.cacheControl ??
+      upstream.headers.get("cache-control") ??
+      "private, max-age=31536000, immutable",
+    "X-Content-Type-Options": "nosniff",
+  });
+  new Headers(extraHeaders).forEach((value, key) => {
+    headers.set(key, value);
+  });
+
+  if (upstream.status === 416) {
+    const contentRange =
+      upstream.headers.get("content-range") ??
+      (media.size !== undefined ? `bytes */${media.size}` : undefined);
+    if (contentRange) headers.set("Content-Range", contentRange);
+    headers.set("Cache-Control", "no-store");
+    await upstream.body?.cancel().catch(() => {});
+    return new Response(null, { status: 416, headers });
+  }
+
+  if (upstream.status === 404) {
+    await upstream.body?.cancel().catch(() => {});
+    return Response.json(
+      { error: "Media not found in object storage", code: "NOT_FOUND" },
+      { status: 404, headers: { ...NO_STORE_HEADERS, ...Object.fromEntries(new Headers(extraHeaders).entries()) } },
+    );
+  }
+
+  if (upstream.status < 200 || upstream.status >= 300) {
+    const detail = await upstream.text().catch(() => "");
+    throw Object.assign(
+      new Error(`对象存储读取失败 (HTTP ${upstream.status})${detail ? `: ${detail.slice(0, 200)}` : ""}`),
+      { status: 503, code: "STORAGE_UNAVAILABLE" },
+    );
+  }
+
+  const upstreamLength = upstream.headers.get("content-length");
+  if (upstreamLength) {
+    headers.set("Content-Length", upstreamLength);
+  } else if (method === "HEAD" && !rangeHeader && media.size !== undefined) {
+    headers.set("Content-Length", String(media.size));
+  }
+  const upstreamRange = upstream.headers.get("content-range");
+  if (upstreamRange) {
+    headers.set("Content-Range", upstreamRange);
+  }
+
+  if (method === "HEAD") {
+    await upstream.body?.cancel().catch(() => {});
+    return new Response(null, { status: upstream.status, headers });
+  }
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers,
+  });
+}
+
 function authorizeMediaRequest(request: Request, url: URL, ctx: HttpRouteContext): Response | null {
   const ticket = url.searchParams.get("mt");
   const corsHeaders = buildMediaCorsHeaders(request, ctx);
@@ -196,14 +281,18 @@ export async function handleHttpRequest(
         const id = url.searchParams.get("id")?.trim();
         if (!id) throw badRequest("Missing asset id parameter");
         const media = await ctx.worker.call("media", [project, run, id], request.signal);
+        if (media && typeof media === "object" && "remoteUrl" in media && typeof (media as { remoteUrl?: unknown }).remoteUrl === "string") {
+          return await remoteMediaResponse(request, media as RemoteMedia, mediaCors);
+        }
         if (media && typeof media === "object" && "file" in media && typeof (media as { file?: unknown }).file === "string") {
           return await fileResponse(request, media as unknown as FileMedia, mediaCors);
         }
+        const bufMedia = media as { bytes: Uint8Array; mediaType: string; cacheControl?: string };
         return bufferMediaResponse(
           request,
-          media.bytes,
-          media.mediaType,
-          media.cacheControl,
+          bufMedia.bytes,
+          bufMedia.mediaType,
+          bufMedia.cacheControl,
           mediaCors,
         );
       }
@@ -231,6 +320,9 @@ export async function handleHttpRequest(
           ...(rawNumber("bytes") !== undefined ? { bytes: rawNumber("bytes") } : {}),
         };
         const result = await ctx.worker.call("replay", [project, run, query], request.signal);
+        if (result && typeof result === "object" && "remoteUrl" in result && typeof (result as { remoteUrl?: unknown }).remoteUrl === "string") {
+          return await remoteMediaResponse(request, result as RemoteMedia, mediaCors);
+        }
         if (result && typeof result === "object" && "file" in result && typeof (result as { file?: unknown }).file === "string") {
           return await fileResponse(request, result as FileMedia, mediaCors);
         }
