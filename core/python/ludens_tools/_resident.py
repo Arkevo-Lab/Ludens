@@ -27,7 +27,7 @@ class WorkspaceSourceLoader(importlib.machinery.SourceFileLoader):
 
     def get_code(self, fullname):
         raw = self.get_data(self.path)
-        self.remember(Path(self.path), raw)
+        self.remember(Path(self.path).resolve(), raw)
         module = sys.modules[fullname]
         module.__ludens_source_sha__ = hashlib.sha256(raw).hexdigest()
         module.__ludens_source_bytes__ = raw
@@ -40,8 +40,9 @@ class WorkspaceImports(importlib.abc.MetaPathFinder):
         self.remember = remember
 
     def remember_workspace_source(self, path, raw):
-        if path.is_relative_to(self.workspace):
-            self.remember(path, raw)
+        resolved = Path(path).resolve()
+        if resolved.is_relative_to(self.workspace):
+            self.remember(resolved, raw)
 
     def find_spec(self, fullname, path=None, target=None):
         spec = importlib.machinery.PathFinder.find_spec(fullname, path)
@@ -49,6 +50,124 @@ class WorkspaceImports(importlib.abc.MetaPathFinder):
                 and Path(spec.origin).resolve().is_relative_to(self.workspace)):
             spec.loader = WorkspaceSourceLoader(fullname, spec.origin, self.remember)
         return spec
+
+
+def write_sources_manifest(manifest_path, manifest):
+    manifest_path = Path(manifest_path)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = manifest_path.with_name(f"{manifest_path.name}.{uuid.uuid4().hex}.tmp")
+    temporary.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(manifest_path)
+
+
+def evict_workspace_modules(workspace, *module_names):
+    """Clear workspace modules and stale WorkspaceImports finders before hot-reloading."""
+    resolved = Path(workspace).resolve()
+    sys.meta_path[:] = [
+        finder for finder in sys.meta_path
+        if not (isinstance(finder, WorkspaceImports) and finder.workspace == resolved)
+    ]
+    for name in list(sys.modules):
+        if name == "ludens_tools" or name.startswith("ludens_tools."):
+            continue
+        if name in module_names:
+            sys.modules.pop(name, None)
+            continue
+        module = sys.modules.get(name)
+        if module is None:
+            continue
+        origin = getattr(module, "__file__", None)
+        if isinstance(origin, str):
+            try:
+                if Path(origin).resolve().is_relative_to(resolved):
+                    sys.modules.pop(name, None)
+                    continue
+            except OSError:
+                pass
+        mod_paths = getattr(module, "__path__", None)
+        if mod_paths is not None:
+            try:
+                if any(Path(entry).resolve().is_relative_to(resolved) for entry in mod_paths):
+                    sys.modules.pop(name, None)
+            except (OSError, TypeError):
+                pass
+
+
+def load_optional_resident(workspace, role, class_name, methods, *, manifest_paths=(), previous_manifest=None):
+    """Load an optional workspace resident class (such as loop.py:Loop) with hot-reload tracking."""
+    resolved = Path(workspace).resolve()
+    entry_path = resolved / f"{role}.py"
+    evict_workspace_modules(resolved, role)
+    manifest = {}
+    manifest_lock = threading.Lock()
+    paths = [Path(item) for item in manifest_paths]
+
+    def remember(path, raw):
+        rel = Path(path).resolve().relative_to(resolved).as_posix()
+        digest = hashlib.sha256(raw).hexdigest() if raw is not None else None
+        with manifest_lock:
+            manifest[rel] = digest
+            snapshot = dict(manifest)
+            for target in paths:
+                write_sources_manifest(target, snapshot)
+
+    try:
+        raw = entry_path.read_bytes()
+    except FileNotFoundError:
+        remember(entry_path, None)
+        return {"implemented": False, "instance": None, "code_sha": None, "manifest": manifest}
+    except OSError as exc:
+        remember(entry_path, None)
+        raise RuntimeError(str(exc)) from exc
+
+    code_sha = hashlib.sha256(raw).hexdigest()
+    remember(entry_path, raw)
+    workspace_str = str(resolved)
+    sys.path[:] = [workspace_str, *(entry for entry in sys.path if entry != workspace_str)]
+    sys.meta_path.insert(0, WorkspaceImports(resolved, remember))
+    module = types.ModuleType(role)
+    module.__file__ = str(entry_path)
+    module.__ludens_source_sha__ = code_sha
+    module.__ludens_source_bytes__ = raw
+    sys.modules[role] = module
+    try:
+        exec(compile(raw, module.__file__, "exec"), module.__dict__)
+        klass = getattr(module, class_name, None)
+        if not isinstance(klass, type):
+            raise TypeError(f"{role}.py must define class {class_name}")
+        instance = klass()
+        found_callable = False
+        for method_name in methods:
+            attr = getattr(instance, method_name, None)
+            if attr is None:
+                continue
+            if not callable(attr):
+                raise TypeError(f"{class_name}.{method_name} must be callable")
+            if inspect.iscoroutinefunction(attr):
+                raise TypeError(f"{class_name}.{method_name} must be synchronous; use def, not async def")
+            found_callable = True
+        if not found_callable:
+            joined = " or ".join(f"{name}()" for name in methods)
+            raise TypeError(f"{class_name} must implement {joined}")
+    except BaseException as exc:
+        if isinstance(exc, ModuleNotFoundError) and isinstance(exc.name, str) and exc.name:
+            parts = exc.name.split(".")
+            if all(part.isidentifier() for part in parts):
+                for candidate in (
+                    (resolved / Path(*parts)).with_suffix(".py"),
+                    resolved / Path(*parts) / "__init__.py",
+                ):
+                    if candidate.resolve().is_relative_to(resolved) and not candidate.exists():
+                        remember(candidate, None)
+        if isinstance(previous_manifest, dict):
+            for rel_path in previous_manifest:
+                candidate = resolved / rel_path
+                if rel_path not in manifest and not candidate.exists():
+                    remember(candidate, None)
+        setattr(exc, "__ludens_code_sha__", code_sha)
+        setattr(exc, "__ludens_manifest__", manifest)
+        raise
+    return {"implemented": True, "instance": instance, "code_sha": code_sha, "manifest": manifest}
 
 
 class _TopLevelEntry:
