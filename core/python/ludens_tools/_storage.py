@@ -373,7 +373,15 @@ def build_s3_object_url(config: dict[str, Any], key: str) -> str:
     encoded_key = _uri_encode(clean_key, encode_slash=False)
     base_path = parsed.path.rstrip("/")
     hostname = parsed.hostname
-    force_path = bool(config.get("forcePathStyle")) or hostname == "localhost" or hostname.endswith(".localhost") or _is_ip_host(hostname)
+    host_lower = hostname.lower()
+    force_path = (
+        bool(config.get("forcePathStyle"))
+        or "." in bucket
+        or "." not in host_lower
+        or host_lower == "localhost"
+        or host_lower.endswith(".localhost")
+        or _is_ip_host(host_lower)
+    )
 
     port_suffix = f":{parsed.port}" if parsed.port and not (
         (parsed.scheme == "http" and parsed.port == 80) or (parsed.scheme == "https" and parsed.port == 443)
@@ -385,7 +393,7 @@ def build_s3_object_url(config: dict[str, Any], key: str) -> str:
         encoded_bucket = _uri_encode(bucket, encode_slash=True)
         full_path = f"{base_path}/{encoded_bucket}/{encoded_key}" if encoded_key else f"{base_path}/{encoded_bucket}"
     else:
-        vhost = host_bracketed if hostname.startswith(f"{bucket}.") else f"{bucket}.{host_bracketed}"
+        vhost = host_bracketed if host_lower.startswith(f"{bucket.lower()}.") else f"{bucket}.{host_bracketed}"
         netloc = f"{vhost}{port_suffix}"
         full_path = f"{base_path}/{encoded_key}" if encoded_key else (base_path or "/")
 
@@ -662,6 +670,7 @@ class TimelineStorageManager:
         self.workspace = Path(workspace).resolve()
         self.timeline_dir = Path(timeline_dir).resolve()
         self.home = Path(home).resolve() if home is not None else None
+        self._state_lock = threading.Lock()
         self._op_lock = threading.RLock()
         self._queue: queue.Queue[tuple[str, str | None]] = queue.Queue()
         self._closed = False
@@ -670,7 +679,7 @@ class TimelineStorageManager:
         self._allow_worker = start_worker
 
     def _enqueue(self, action: str, payload: str | None) -> None:
-        with self._op_lock:
+        with self._state_lock:
             if self._closed or not self._allow_worker:
                 return
             self._queue.put((action, payload))
@@ -695,14 +704,17 @@ class TimelineStorageManager:
         self._enqueue("archive", asset)
 
     def prune_async(self) -> None:
-        with self._op_lock:
+        with self._state_lock:
             if self._closed or not self._allow_worker or self._prune_queued:
                 return
             self._prune_queued = True
-            self._enqueue("prune", None)
+            self._queue.put(("prune", None))
+            if self._worker is None or not self._worker.is_alive():
+                self._worker = threading.Thread(target=self._run_worker, name="ludens-timeline-storage", daemon=True)
+                self._worker.start()
 
     def close(self, timeout: float = 2.0) -> None:
-        with self._op_lock:
+        with self._state_lock:
             if self._closed:
                 return
             self._closed = True
@@ -726,13 +738,13 @@ class TimelineStorageManager:
             try:
                 action, payload = self._queue.get(timeout=0.25)
             except queue.Empty:
-                with self._op_lock:
+                with self._state_lock:
                     if self._queue.empty():
                         self._worker = None
                         return
                 continue
             if action == "stop":
-                with self._op_lock:
+                with self._state_lock:
                     self._worker = None
                 return
             try:
@@ -744,7 +756,7 @@ class TimelineStorageManager:
                     with self._op_lock:
                         self._prune_locked(cfg, network_timeout=5.0)
                 elif action == "prune":
-                    with self._op_lock:
+                    with self._state_lock:
                         self._prune_queued = False
                     cfg = resolve_storage_config(self.workspace, self.home)
                     with self._op_lock:

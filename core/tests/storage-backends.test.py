@@ -296,13 +296,28 @@ class StorageBackendTests(unittest.TestCase):
             ),
             "https://my-bucket.s3.us-east-1.amazonaws.com/prod/ws-1/video/seg.mp4",
         )
-        # Virtual-hosted when endpoint already includes bucket prefix (OSS/COS style)
+        # Virtual-hosted when endpoint already includes bucket prefix (case-insensitive OSS/COS style)
         self.assertEqual(
             build_s3_object_url(
-                {"endpoint": "https://my-bucket.oss-cn-hangzhou.aliyuncs.com", "bucket": "my-bucket"},
+                {"endpoint": "https://My-Bucket.oss-cn-hangzhou.aliyuncs.com", "bucket": "MY-BUCKET"},
                 "ws-1/video/seg.mp4",
             ),
             "https://my-bucket.oss-cn-hangzhou.aliyuncs.com/ws-1/video/seg.mp4",
+        )
+        # Path-style automatically for dotted buckets and single-label Docker/LAN hostnames
+        self.assertEqual(
+            build_s3_object_url(
+                {"endpoint": "https://s3.us-east-1.amazonaws.com", "bucket": "media.archive"},
+                "ws-1/video/seg.mp4",
+            ),
+            "https://s3.us-east-1.amazonaws.com/media.archive/ws-1/video/seg.mp4",
+        )
+        self.assertEqual(
+            build_s3_object_url(
+                {"endpoint": "http://minio:9000", "bucket": "ludens"},
+                "ws-1/video/seg.mp4",
+            ),
+            "http://minio:9000/ludens/ws-1/video/seg.mp4",
         )
         # Path-style automatically for localhost / IP or explicit forcePathStyle
         self.assertEqual(
@@ -494,6 +509,14 @@ class StorageBackendTests(unittest.TestCase):
                 decoded = decode_frame(timeline_dir, vid_ref["asset"], vid_ref["video"])
                 self.assert_picture(decoded, (30, 140, 210))
 
+                # Also allow status == "evicted" when valid archive metadata is retained
+                sidecar_path = timeline_dir / (vid_ref["asset"] + ".json")
+                sidecar_evicted_with_archive = {**sidecar, "status": "evicted"}
+                sidecar_path.write_text(json.dumps(sidecar_evicted_with_archive), encoding="utf-8")
+                self.assertEqual(video_status(timeline_dir, vid_ref["asset"])["status"], "evicted")
+                self.assert_picture(decode_frame(timeline_dir, vid_ref["asset"], vid_ref["video"]), (30, 140, 210))
+                sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
+
                 cli_proc = subprocess.run(
                     [
                         sys.executable, "-m", "ludens_tools._video",
@@ -651,12 +674,15 @@ class StorageBackendTests(unittest.TestCase):
                 blackhole_sock.listen(1)
                 bh_port = blackhole_sock.getsockname()[1]
 
+                accepted_stall = threading.Event()
                 release_stall = threading.Event()
 
                 def stall_peer() -> None:
                     try:
                         conn, _ = blackhole_sock.accept()
-                        release_stall.wait(timeout=3.0)
+                        accepted_stall.set()
+                        # Stall past the 10s _archive_one network_timeout while holding _op_lock
+                        release_stall.wait(timeout=12.0)
                         try:
                             conn.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n")
                         except OSError:
@@ -693,9 +719,12 @@ class StorageBackendTests(unittest.TestCase):
                     with patch.dict(os.environ, {"LUDENS_HOME": str(home)}):
                         hist_stalled = ObservationHistory(ws_offline)
                         hist_stalled.append(sample(png()), "g1", SAMPLING)
+                        hist_stalled.seal()
+                        # Wait until background archiver is actively stalled inside _op_lock
+                        self.assertTrue(accepted_stall.wait(timeout=2.0))
                         t0 = time.monotonic()
                         hist_stalled.close()
-                        self.assertLess(time.monotonic() - t0, 3.5)
+                        self.assertLess(time.monotonic() - t0, 2.8)
                 finally:
                     release_stall.set()
                     blackhole_sock.close()

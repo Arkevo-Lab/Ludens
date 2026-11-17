@@ -98,15 +98,20 @@ def video_status(root: Path, asset: str, *, allow_pending: bool = False) -> dict
         raise ValueError("Recorded video is unavailable: status is missing")
     value: dict[str, Any] = json.loads(_sharing_retry(lambda: status.read_text(encoding="utf-8")))
     state = value.get("status")
-    if state == "evicted" and not isinstance(value.get("archive"), dict):
+    has_archive = isinstance(value.get("archive"), dict)
+    if state == "evicted" and not has_archive:
         raise ValueError("Recorded video was evicted by storage retention policy")
     # Fragmented segments are readable while pending: their fragments and the
     # empty moov are already on disk. Legacy +faststart segments are not.
-    if state != "ready" and not (allow_pending and state == "pending" and value.get("format") == "fmp4"):
+    if (
+        state != "ready"
+        and not (state == "evicted" and has_archive)
+        and not (allow_pending and state == "pending" and value.get("format") == "fmp4")
+    ):
         raise ValueError(f"Recorded video is {state or 'unavailable'}: {value.get('error', 'encoding has not finished')}")
-    if state == "ready" and not path.is_file():
+    if state in {"ready", "evicted"} and not path.is_file():
         cache_path = root / "cache" / asset
-        if not isinstance(value.get("archive"), dict) and not cache_path.is_file():
+        if not has_archive and not cache_path.is_file():
             raise ValueError("Recorded video is unavailable: segment is missing")
     return value
 
