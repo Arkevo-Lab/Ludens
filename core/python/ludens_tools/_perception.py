@@ -178,6 +178,10 @@ def main():
                     if state_machine is None:
                         raise ValueError("The perception resident has not loaded its state machine")
                     result = state_machine.transition_to(message.get("to"), message.get("arguments"))
+                elif action == "storage_maintain":
+                    result = history.storage_maintain(message.get("mode"))
+                    send({**reply, **result, "ok": True, "result": result})
+                    continue
                 elif action == "lease":
                     if state_machine is None:
                         result = {"epoch": message.get("epoch"), "inputGeneration": message.get("inputGeneration")}
