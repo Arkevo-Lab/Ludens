@@ -464,9 +464,28 @@ class Loop(Loop):
     const epoch = started.epoch!;
     await h.runtime.runSettled;
 
-    // Lease-gated controller capability ran under the active cycle epoch during turn 1
+    // Lease-gated controller capability ran under the active cycle epoch during turn 1 with recordingPurpose: "loop"
     expect(h.controllerCalls).toEqual([{ args: { thrust: 42 }, epoch }]);
-    expect(h.events.some(e => e.type === "python_call_end" && e.trace?.epoch === epoch && !e.trace?.modelCallId)).toBe(true);
+    expect(
+      h.events.some(
+        e =>
+          e.type === "python_call_end" &&
+          e.trace?.epoch === epoch &&
+          !e.trace?.modelCallId &&
+          e.trace?.recordingPurpose === "loop",
+      ),
+    ).toBe(true);
+    expect(
+      h.events.some(
+        e =>
+          e.type === "capability_end" &&
+          e.data?.id === "controller/actuator" &&
+          e.trace?.epoch === epoch &&
+          !e.trace?.modelCallId &&
+          e.trace?.recordingPurpose === "loop",
+      ),
+    ).toBe(true);
+    expect(h.events.filter(e => e.type === "loop_step").every(e => e.trace?.recordingPurpose === "loop")).toBe(true);
 
     // Turn 2 ran normal Prompt with full toolset; Turn 3 ran in-cycle Consolidate with file tools only
     expect(h.turns).toHaveLength(2);
@@ -647,3 +666,42 @@ class Loop(Loop):
     await h.close();
   }
 }, 15_000);
+
+test("transient step/inject runtime faults clear automatically on the next clean turn without editing loop.py", async () => {
+  const h = await createLoopHarness();
+  try {
+    await writeFile(
+      join(h.workspace, "loop.py"),
+      `from ludens_tools import Loop, Prompt, Stop
+
+class Loop(Loop):
+    def step(self, ctx):
+        if ctx.turn == 1:
+            raise RuntimeError("transient glitch on turn 1")
+        if ctx.turn == 2:
+            return Prompt(prompt="clean turn 2 without reload")
+        return Stop("transient_recovered")
+`,
+    );
+
+    await h.runtime.start();
+    await h.runtime.runSettled;
+
+    expect(h.turns).toHaveLength(2);
+    expect(h.turns[1]!.prompt).toBe("clean turn 2 without reload");
+    expect(h.events.filter(e => e.type === "loop_fault")).toHaveLength(1);
+
+    const receipts = h.events.filter(e => e.type === "observation_context");
+    expect(receipts).toHaveLength(2);
+    expect(receipts[0]!.data.deliveredPayload.loopFault).toMatchObject({
+      phase: "step",
+      fallback: "default_loop",
+    });
+    expect(receipts[1]!.data.deliveredPayload.loopFault).toBeUndefined();
+    expect(h.loop.pendingFault()).toBeNull();
+    expect(h.runtime.status().reason).toBe("loop: transient_recovered");
+  } finally {
+    await h.close();
+  }
+}, 15_000);
+

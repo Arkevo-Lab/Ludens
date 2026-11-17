@@ -241,7 +241,7 @@ export class LoopRuntime {
     signal?: AbortSignal;
   }): Promise<{ implemented: boolean; faulted: boolean; action: LoopAction }> {
     const { epoch, signal } = params;
-    const stepTrace = childTrace({ epoch, ...params.trace });
+    const stepTrace = childTrace({ epoch, ...params.trace, recordingPurpose: "loop" });
     await this.ensureFresh(stepTrace, signal);
     signal?.throwIfAborted();
 
@@ -278,7 +278,7 @@ export class LoopRuntime {
     const started = this.clock.now();
     const wireContext: LoopTurnContextWire = {
       ...params.context,
-      fault: this.lastFault,
+      fault: null,
     };
     try {
       const rawReply = await this.worker.request(
@@ -331,8 +331,8 @@ export class LoopRuntime {
         };
       }
 
+      this.lastFault = null;
       if (generation !== this.current.generation || codeSHA !== this.current.codeSHA || this.current.state !== "ready") {
-        this.lastFault = null;
         this.setStatus({
           state: "ready",
           generation: generation ?? null,
@@ -400,7 +400,7 @@ export class LoopRuntime {
     signal?: AbortSignal;
   }): Promise<{ implemented: boolean; faulted: boolean; injection: LoopNormalizedInjection }> {
     const { epoch, signal } = params;
-    const injectTrace = childTrace({ epoch, ...params.trace });
+    const injectTrace = childTrace({ epoch, ...params.trace, recordingPurpose: "loop" });
     await this.ensureFresh(injectTrace, signal);
     signal?.throwIfAborted();
 
@@ -428,7 +428,7 @@ export class LoopRuntime {
 
     const wireContext: LoopTurnContextWire = {
       ...params.context,
-      fault: this.lastFault,
+      fault: null,
     };
     try {
       const rawReply = await this.worker.request(
@@ -473,8 +473,8 @@ export class LoopRuntime {
         };
       }
 
+      this.lastFault = null;
       if (generation !== this.current.generation || codeSHA !== this.current.codeSHA || this.current.state !== "ready") {
-        this.lastFault = null;
         this.setStatus({
           state: "ready",
           generation: generation ?? null,
