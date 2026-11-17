@@ -235,7 +235,32 @@ test("formatStorageBytes, GiB conversions, and aggregateStorageFootprint format 
   assert.ok(Number.isNaN(hoursInputToNumber("0")));
 
   assert.equal(slugifyStorageProfileId("Cloudflare R2 Archive!"), "cloudflare-r2-archive");
+  assert.equal(slugifyStorageProfileId("MinIO v2.0"), "minio-v2-0");
+  assert.equal(slugifyStorageProfileId("nas.local"), "nas-local");
   assert.equal(slugifyStorageProfileId("local-default"), "local-default-custom");
+
+  // Profile ID validation matches @ludens/protocol/storage (/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}$/)
+  const dottedIdValidation = validateStorageProfileDraft(
+    {
+      ...createEmptyStorageProfileDraft("local"),
+      id: "minio-v2.0",
+      name: "MinIO v2.0",
+    },
+    { editingProfile: null, existingIds: [] },
+  );
+  assert.equal(dottedIdValidation.valid, false);
+  assert.equal(dottedIdValidation.errors.id, "invalidId");
+
+  const longId = `archive-${"a".repeat(80)}`;
+  const longIdValidation = validateStorageProfileDraft(
+    {
+      ...createEmptyStorageProfileDraft("local"),
+      id: longId,
+      name: "Long Profile ID",
+    },
+    { editingProfile: null, existingIds: [] },
+  );
+  assert.equal(longIdValidation.valid, true);
 
   const totals = aggregateStorageFootprint(makeSampleOverview().usage);
   assert.equal(totals.workspaceCount, 2);
