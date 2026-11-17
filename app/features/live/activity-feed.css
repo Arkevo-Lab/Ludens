@@ -1019,32 +1019,64 @@
 }
 
 .codex-step-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: block;
 }
 .codex-step-group-toggle {
+  list-style: none;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   width: fit-content;
+  max-width: 100%;
   padding: 3px 0;
   border: 0;
   background: transparent;
   font-size: 13px;
   color: var(--muted-foreground);
   cursor: pointer;
+  user-select: none;
   transition: color var(--duration-fast) var(--ease-out-expo);
+}
+.codex-step-group-toggle::-webkit-details-marker {
+  display: none;
 }
 .codex-step-group-toggle:hover {
   color: var(--foreground);
 }
+.codex-step-group[data-variant="system"] > .codex-step-group-toggle {
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, var(--border) 85%, transparent);
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 42%, transparent);
+  font-size: 12px;
+}
+.codex-step-group[data-variant="system"] > .codex-step-group-toggle:hover {
+  border-color: var(--border);
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 72%, transparent);
+}
 
 .codex-disclosure-chevron {
+  flex-shrink: 0;
   transition: transform 150ms var(--ease-out-expo);
 }
-.codex-disclosure-chevron.is-open {
+.codex-disclosure-chevron.is-open,
+details.codex-step-group[open] > summary .codex-disclosure-chevron {
   transform: rotate(90deg);
+}
+
+details.codex-step-group::details-content {
+  interpolate-size: allow-keywords;
+  overflow: clip;
+  contain: layout;
+}
+details.codex-step-group:not([open])::details-content {
+  block-size: 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  details.codex-step-group::details-content {
+    transition: block-size 180ms var(--ease-out-expo), content-visibility 180ms allow-discrete;
+    transition-behavior: allow-discrete;
+  }
 }
 
 .codex-disclosure-grid {
@@ -1075,9 +1107,10 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin-top: 8px;
   padding: 8px 12px;
   border-left: 2px solid var(--border);
-  margin-left: 4px;
+  margin-left: 6px;
 }
 .codex-step-item {
   display: flex;
@@ -2806,22 +2839,9 @@
 /* ── Session Segment & Time-Gap Dividers (`CodexSessionDivider`) ── */
 .codex-session-divider {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 6px;
-  margin: 10px 0 6px;
+  margin: 12px 0 8px;
   scroll-margin-top: 16px;
-}
-.codex-session-gap {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 2px 10px;
-  border-radius: 999px;
-  border: 1px dashed var(--border);
-  background: color-mix(in srgb, var(--muted) 55%, transparent);
-  color: var(--muted-foreground);
-  font: 500 11px/1.35 var(--font-mono);
 }
 .codex-session-divider-bar {
   display: flex;
@@ -2848,6 +2868,10 @@
   color: var(--muted-foreground);
   transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
+.codex-session-divider[data-post-cycle] .codex-session-divider-pill {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 45%, var(--card));
+}
 .codex-session-divider[data-active] .codex-session-divider-pill {
   border-color: color-mix(in srgb, var(--success, #16a34a) 40%, var(--border));
   background: color-mix(in srgb, var(--success, #16a34a) 6%, var(--card));
@@ -2859,6 +2883,7 @@
 .codex-session-divider-dot {
   width: 6px;
   height: 6px;
+  border-radius: 999px;
   background: var(--muted-foreground);
 }
 .codex-session-divider-dot[data-active] {
@@ -2887,6 +2912,11 @@
 .codex-session-divider-reason {
   font-size: 11px;
   color: var(--muted-foreground);
+}
+.codex-session-divider-idle {
+  font: 500 11px/1.3 var(--font-mono);
+  color: var(--muted-foreground);
+  opacity: 0.85;
 }
 
 .codex-stat-cards {
@@ -3355,6 +3385,7 @@
   .codex-step-group-toggle,
   .codex-disclosure-chevron,
   .codex-disclosure-grid,
+  details.codex-step-group::details-content,
   .block-content details::details-content,
   .block-provenance::details-content,
   .codex-provenance-details::details-content {

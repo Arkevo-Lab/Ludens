@@ -49,7 +49,7 @@ import {
   type ModelEffort,
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
-import { useTranslations } from "@/lib/locale";
+import { useLocale, useTranslations, type Locale } from "@/lib/locale";
 import { useMediaResolver } from "@/lib/ludens-rpc";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
@@ -67,8 +67,10 @@ import {
   cleanErrorMessage,
   mergePoolSnapshotSegments,
   summarizeStepBlock,
+  summarizeSystemCategories,
   type BuildSegmentsOptions,
   type StreamSegment,
+  type SystemStepCategory,
 } from "@/features/live/shiori-segments";
 import { useLiveAutoScroll } from "@/features/live/use-live-auto-scroll";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
@@ -96,17 +98,95 @@ export {
   type StreamSegment,
 };
 
-function formatDurationCompact(secondsTotal: number | null | undefined): string {
+type IntlDurationLike = { days?: number; hours?: number; minutes?: number; seconds?: number };
+type IntlDurationFormatter = { format(duration: IntlDurationLike): string };
+const durationFormatters = new Map<string, IntlDurationFormatter | null>();
+
+function getDurationFormatter(locale: Locale): IntlDurationFormatter | null {
+  const tag = locale === "zh" ? "zh-CN" : "en-US";
+  if (durationFormatters.has(tag)) return durationFormatters.get(tag) ?? null;
+  const Ctor = (
+    Intl as unknown as {
+      DurationFormat?: new (locales?: string, options?: { style?: string }) => IntlDurationFormatter;
+    }
+  ).DurationFormat;
+  const instance = Ctor ? new Ctor(tag, { style: "narrow" }) : null;
+  durationFormatters.set(tag, instance);
+  return instance;
+}
+
+function formatDurationCompact(
+  secondsTotal: number | null | undefined,
+  locale?: Locale,
+  options?: { roundMinutesAboveSeconds?: number },
+): string {
   if (secondsTotal == null || !Number.isFinite(secondsTotal)) return "—";
   const clamped = Math.max(0, Math.round(secondsTotal));
-  if (clamped >= 3600) {
-    const h = Math.floor(clamped / 3600);
-    const m = Math.floor((clamped % 3600) / 60);
-    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  if (clamped >= 86400) {
+    const days = Math.floor(clamped / 86400);
+    const hours = days >= 7 ? 0 : Math.round((clamped % 86400) / 3600);
+    const balancedDays = hours === 24 ? days + 1 : days;
+    const balancedHours = hours === 24 ? 0 : hours;
+    if (locale) {
+      const fmt = getDurationFormatter(locale);
+      if (fmt) {
+        return fmt.format({
+          days: balancedDays,
+          ...(balancedHours > 0 ? { hours: balancedHours } : {}),
+        });
+      }
+    }
+    return balancedHours > 0 ? `${balancedDays}d ${balancedHours}h` : `${balancedDays}d`;
   }
-  const m = Math.floor(clamped / 60);
-  const s = clamped % 60;
-  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+
+  const dropSeconds =
+    clamped >= 3600 ||
+    (options?.roundMinutesAboveSeconds != null && clamped >= options.roundMinutesAboveSeconds);
+
+  const hours = Math.floor(clamped / 3600);
+  const minutes = dropSeconds
+    ? Math.max(hours > 0 ? 0 : 1, Math.round((clamped % 3600) / 60))
+    : Math.floor((clamped % 3600) / 60);
+  const seconds = dropSeconds ? 0 : clamped % 60;
+
+  if (locale) {
+    const fmt = getDurationFormatter(locale);
+    if (fmt) {
+      const parts: IntlDurationLike = {};
+      if (hours > 0) parts.hours = hours;
+      if (minutes > 0) parts.minutes = minutes;
+      if (seconds > 0 || (hours === 0 && minutes === 0)) parts.seconds = seconds;
+      return fmt.format(parts);
+    }
+  }
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  if (dropSeconds) {
+    return `${minutes}m`;
+  }
+  return minutes > 0 ? (seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`) : `${seconds}s`;
+}
+
+function formatStepWindow(firstIso: string | undefined, lastIso: string | undefined): string {
+  if (!firstIso) return "";
+  const first = new Date(firstIso);
+  const last = lastIso ? new Date(lastIso) : first;
+  if (!Number.isFinite(first.getTime()) || !Number.isFinite(last.getTime())) return "";
+  const pad = (v: number) => String(v).padStart(2, "0");
+  const hhmm = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const mmdd = (d: Date) => `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const sameDay =
+    first.getFullYear() === last.getFullYear() &&
+    first.getMonth() === last.getMonth() &&
+    first.getDate() === last.getDate();
+  if (sameDay) {
+    const a = hhmm(first);
+    const b = hhmm(last);
+    return a === b ? a : `${a} – ${b}`;
+  }
+  return `${mmdd(first)} ${hhmm(first)} – ${mmdd(last)} ${hhmm(last)}`;
 }
 
 /** Isolated 1Hz clock hook used ONLY inside leaf timer badges so the chat stream never re-renders per second. */
@@ -331,9 +411,21 @@ function formatStopReason(reason: string | null, t: (key: string) => string): st
   if (!reason || reason === "enabled") return null;
   if (reason === "manual") return t("stopReasonManual");
   if (reason === "awaiting human") return t("stopReasonAwaitingHuman");
-  if (reason.toLowerCase().includes("budget exhausted") || reason === "time budget") return t("stopReasonBudget");
+  const lower = reason.toLowerCase();
+  if (lower.includes("budget exhausted") || reason === "time budget") return t("stopReasonBudget");
+  if (lower.includes("device disconnected") || lower.includes("econnreset")) {
+    return t("stopReasonDisconnected");
+  }
   return reason;
 }
+
+const SYSTEM_CATEGORY_KEYS: Record<SystemStepCategory, string> = {
+  device: "sysCatDevice",
+  perception: "sysCatPerception",
+  timer: "sysCatTimer",
+  compaction: "sysCatCompaction",
+  host: "sysCatHost",
+};
 
 const CodexSessionDivider = memo(function CodexSessionDivider({
   segment,
@@ -344,21 +436,29 @@ const CodexSessionDivider = memo(function CodexSessionDivider({
   highlighted?: boolean;
   streamEnter?: boolean;
 }) {
+  const { locale } = useLocale();
   const t = useTranslations("shioriCockpit");
   const isPostCycle = Boolean(segment.epoch?.startsWith("post:"));
+  const isStandbyOnly = Boolean(segment.epoch?.startsWith("post:standby:"));
   const windowInfo = runWindowSummary({
     id: isPostCycle ? segment.id : segment.epoch || segment.id,
     startedAt: segment.startedAt,
     endedAt: segment.endedAt ?? undefined,
   });
-  const timeSummary = windowInfo.summary ?? clockTime(segment.startedAt);
+  const rawSummary = windowInfo.summary ?? clockTime(segment.startedAt);
+  const timeSummary =
+    segment.durationSeconds != null && !segment.isActive
+      ? rawSummary.replace(/\s*·\s*\d+[smhd](?:\s+\d+[smhd])*$/, "")
+      : rawSummary;
   const stopLabel = formatStopReason(segment.stopReason, t);
+  const showIdleGap = !isPostCycle && segment.gapSeconds != null && segment.gapSeconds >= 60;
 
   return (
     <div
       id={segment.id}
       className="codex-session-divider"
       data-session-divider
+      data-post-cycle={isPostCycle || undefined}
       data-run-id={segment.runId}
       data-epoch={isPostCycle ? undefined : (segment.epoch ?? undefined)}
       data-segment-anchor={!isPostCycle && segment.epoch ? `${segment.runId}#${segment.epoch}` : segment.runId}
@@ -366,39 +466,53 @@ const CodexSessionDivider = memo(function CodexSessionDivider({
       data-highlighted={highlighted || undefined}
       data-stream-enter={streamEnter ? "true" : undefined}
     >
-      {segment.gapSeconds != null && segment.gapSeconds >= 5 && (
-        <div className="codex-session-gap" data-session-gap>
-          <span>
-            ⏸ {t("sessionGapLabel").replace("{gap}", formatDurationCompact(segment.gapSeconds))}
-          </span>
-        </div>
-      )}
       <div className="codex-session-divider-bar">
         <span className="codex-session-divider-line" />
         <div className="codex-session-divider-pill">
           <span
             className="codex-session-divider-dot"
             data-active={segment.isActive || undefined}
+            aria-hidden="true"
           />
           <strong className="codex-session-divider-status">
-            {isPostCycle ? t("postCycleMaintenance") : segment.isActive ? t("segmentActive") : t("segmentCompleted")}
+            {isStandbyOnly
+              ? t("postStandbyOnly")
+              : isPostCycle
+                ? t("postCycleMaintenance")
+                : segment.isActive
+                  ? t("segmentActive")
+                  : t("segmentCompleted")}
           </strong>
-          <span className="codex-session-divider-time">{timeSummary}</span>
           {!isPostCycle && <span className="codex-session-divider-tag">#{segment.cycleIndex}</span>}
+          <time className="codex-session-divider-time" dateTime={segment.startedAt}>
+            {timeSummary}
+          </time>
           {segment.durationSeconds != null && !segment.isActive && (
             <span className="codex-session-divider-meta">
-              {t("segmentRanFor").replace("{duration}", formatDurationCompact(segment.durationSeconds))}
+              · {t("segmentRanFor").replace("{duration}", formatDurationCompact(segment.durationSeconds, locale))}
             </span>
           )}
           {segment.isActive && (
             <span className="codex-session-divider-meta">
+              ·{" "}
               {segment.maxSeconds != null
-                ? `${t("segmentLimitLabel")} ${formatDurationCompact(segment.maxSeconds)}`
+                ? `${t("segmentLimitLabel")} ${formatDurationCompact(segment.maxSeconds, locale)}`
                 : `∞ ${t("durationUnbounded")}`}
             </span>
           )}
           {stopLabel && (
-            <span className="codex-session-divider-reason">· {stopLabel}</span>
+            <span className="codex-session-divider-reason" title={segment.stopReason ?? undefined}>
+              · {stopLabel}
+            </span>
+          )}
+          {showIdleGap && (
+            <span className="codex-session-divider-idle" data-session-gap="">
+              ·{" "}
+              {t("sessionGapLabel").replace(
+                "{gap}",
+                formatDurationCompact(segment.gapSeconds, locale, { roundMinutesAboveSeconds: 120 }),
+              )}
+            </span>
           )}
         </div>
         <span className="codex-session-divider-line" />
@@ -425,112 +539,125 @@ function CodexStepGroup({
   steps,
   forceExpanded,
   defaultOpen = false,
+  standby = false,
   selectedBlock,
   onSelect,
 }: {
   steps: ActivityBlock[];
   forceExpanded: boolean;
   defaultOpen?: boolean;
+  standby?: boolean;
   selectedBlock?: string;
   onSelect?: (block: ActivityBlock) => void;
 }) {
   const t = useTranslations("shioriCockpit");
   const [open, setOpen] = useState(() => defaultOpen);
   const [expandedStepId, setExpandedStepId] = useState<string | null>(null);
+  const prevForceRef = useRef(forceExpanded);
+  if (prevForceRef.current !== forceExpanded) {
+    prevForceRef.current = forceExpanded;
+    setOpen(forceExpanded);
+  }
+
   const containsSelected = Boolean(selectedBlock && steps.some(s => s.id === selectedBlock));
-  const isExpanded = forceExpanded || open || containsSelected;
-  const listPresence = useAnimatedPresence(steps.length > 0 && isExpanded, 160);
+  const isExpanded = open || containsSelected;
 
   if (steps.length === 0) return null;
 
+  const isSystemOnly = steps.every(s => s.kind === "system");
   const toolCount = steps.filter(s => s.kind === "tool").length;
   const thinkCount = steps.filter(s => s.kind === "thinking").length;
   const obsCount = steps.filter(
     s => s.kind === "text" || s.title.toLowerCase().includes("observe"),
   ).length;
+  const systemCount = steps.filter(s => s.kind === "system").length;
 
-  const breakdown: string[] = [];
-  if (toolCount > 0) breakdown.push(`${toolCount} ${t("stepTools")}`);
-  if (obsCount > 0) breakdown.push(`${obsCount} ${t("stepObserves")}`);
-  if (thinkCount > 0) breakdown.push(`${thinkCount} ${t("stepThinks")}`);
+  let summaryText: string;
+  if (isSystemOnly) {
+    const prefix = (standby ? t("standbySystemPrefix") : t("inlineSystemPrefix")).replace(
+      "{count}",
+      String(steps.length),
+    );
+    const windowStr = formatStepWindow(steps[0]?.at, steps[steps.length - 1]?.at);
+    const categories = summarizeSystemCategories(steps).map(cat => t(SYSTEM_CATEGORY_KEYS[cat]));
+    const metaParts = [windowStr, categories.join(" / ")].filter(Boolean);
+    summaryText = metaParts.length > 0 ? `${prefix} · ${metaParts.join(" · ")}` : prefix;
+  } else {
+    const breakdown: string[] = [];
+    if (toolCount > 0) breakdown.push(`${toolCount} ${t("stepTools")}`);
+    if (obsCount > 0) breakdown.push(`${obsCount} ${t("stepObserves")}`);
+    if (thinkCount > 0) breakdown.push(`${thinkCount} ${t("stepThinks")}`);
+    if (systemCount > 0) breakdown.push(`${systemCount} ${t("stepSystems")}`);
+    const prefix = t("collapsedStepsPrefix").replace("{count}", String(steps.length));
+    summaryText = breakdown.length > 0 ? `${prefix} · ${breakdown.join(" / ")}` : prefix;
+  }
 
   return (
-    <div className="codex-step-group" data-open={isExpanded || undefined}>
-      <button
-        type="button"
-        className="codex-step-group-toggle"
-        data-step-group-toggle=""
-        aria-expanded={isExpanded}
-        onClick={() => setOpen(prev => !prev)}
-      >
-        <span>
-          {t("collapsedStepsPrefix").replace("{count}", String(steps.length))}
-          {breakdown.length > 0 ? ` · ${breakdown.join(" / ")}` : ""}
-        </span>
-        <ChevronRight
-          className={"size-3.5 codex-disclosure-chevron" + (isExpanded ? " is-open" : "")}
-          aria-hidden="true"
-        />
-      </button>
+    <details
+      className="codex-step-group"
+      data-variant={isSystemOnly ? "system" : undefined}
+      open={isExpanded}
+      onToggle={event => {
+        const nextOpen = event.currentTarget.open;
+        if (nextOpen !== open) setOpen(nextOpen);
+      }}
+    >
+      <summary className="codex-step-group-toggle" data-step-group-toggle="">
+        <ChevronRight className="size-3.5 codex-disclosure-chevron" aria-hidden="true" />
+        <span>{summaryText}</span>
+      </summary>
 
-      {listPresence.mounted && (
-        <div
-          className="codex-disclosure-grid"
-          data-motion-state={listPresence.state}
-          inert={!isExpanded || undefined}
-        >
-          <div className="codex-disclosure-grid-inner">
-            <div className="codex-step-list">
-              {steps.map(step => {
-                const { badge, detail } = summarizeStepBlock(step);
-                const isStepOpen = expandedStepId === step.id || selectedBlock === step.id;
-                const fullText =
-                  step.text ||
-                  (step.tool?.result !== undefined
-                    ? printable(step.tool.result)
-                    : step.data !== undefined
-                      ? printable(step.data)
-                      : "");
-                const view = fullText ? activityContentView(fullText, true) : null;
+      <div className="codex-step-list">
+        {steps.map(step => {
+          const { badge, detail } = summarizeStepBlock(step);
+          const isStepOpen = expandedStepId === step.id || selectedBlock === step.id;
+          const fullText =
+            step.text ||
+            (step.tool?.result !== undefined
+              ? printable(step.tool.result)
+              : step.data !== undefined
+                ? printable(step.data)
+                : "");
+          const view = fullText ? activityContentView(fullText, true) : null;
 
-                return (
-                  <div
-                    key={step.id}
-                    id={step.id}
-                    className="codex-step-item"
-                    data-selected={selectedBlock === step.id || undefined}
-                    data-status={step.status}
+          return (
+            <div
+              key={step.id}
+              id={step.id}
+              className="codex-step-item"
+              data-selected={selectedBlock === step.id || undefined}
+              data-status={step.status}
+            >
+              <div className="codex-step-row">
+                <button
+                  type="button"
+                  className="codex-step-main"
+                  onClick={() => {
+                    setExpandedStepId(prev => (prev === step.id ? null : step.id));
+                    onSelect?.(step);
+                  }}
+                >
+                  <span className="codex-step-badge" data-kind={step.kind}>
+                    {badge}
+                  </span>
+                  <span className="codex-step-detail">{detail}</span>
+                </button>
+                <div className="codex-step-meta">
+                  <time
+                    dateTime={step.at}
+                    className="font-mono text-[11px] text-muted-foreground"
                   >
-                    <div className="codex-step-row">
-                      <button
-                        type="button"
-                        className="codex-step-main"
-                        onClick={() => {
-                          setExpandedStepId(prev => (prev === step.id ? null : step.id));
-                          onSelect?.(step);
-                        }}
-                      >
-                        <span className="codex-step-badge" data-kind={step.kind}>
-                          {badge}
-                        </span>
-                        <span className="codex-step-detail">{detail}</span>
-                      </button>
-                      <div className="codex-step-meta">
-                        <time className="font-mono text-[11px] text-muted-foreground">
-                          {clockTime(step.at)}
-                        </time>
-                      </div>
-                    </div>
+                    {clockTime(step.at)}
+                  </time>
+                </div>
+              </div>
 
-                    {view && <CodexStepPreDisclosure open={isStepOpen} text={view.text} />}
-                  </div>
-                );
-              })}
+              {view && <CodexStepPreDisclosure open={isStepOpen} text={view.text} />}
             </div>
-          </div>
-        </div>
-      )}
-    </div>
+          );
+        })}
+      </div>
+    </details>
   );
 }
 
@@ -808,16 +935,21 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
     : [];
   const ownerRunId = segment.runId || fallbackRunId;
 
+  const isStandalone = paragraphs.length === 0;
+  const isSystemOnly = segment.steps.length > 0 && segment.steps.every(s => s.kind === "system");
+
   return (
     <article
       id={segment.responseBlock?.id}
       className="codex-turn-assistant"
+      data-standalone-system={(isStandalone && isSystemOnly) || undefined}
       data-stream-enter={streamEnter ? "true" : undefined}
     >
       <CodexStepGroup
         steps={segment.steps}
         forceExpanded={showAllSteps}
-        defaultOpen={paragraphs.length === 0 && isLastSegment}
+        standby={Boolean(segment.standby)}
+        defaultOpen={isStandalone && isLastSegment && !isSystemOnly}
         selectedBlock={selectedStepId}
         onSelect={step => onInspectBlock(ownerRunId, step, segment.steps)}
       />
