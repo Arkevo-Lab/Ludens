@@ -8,12 +8,38 @@ Inside a workspace, progress moves through four distinct phases across turns and
 
 | Phase | Owner | What Happens |
 | --- | --- | --- |
-| **1. Observe** | Resident `perception.py` + Shiori | Under an active control lease, `Perception.sample()` samples up to `30 Hz` into `.ludens/timeline/`. At the start of each turn (when auto-injection is `on`), Shiori attaches newly arrived primary-channel records and sampler state changes once per prompt; mid-turn inspection uses explicit `observe` calls. |
-| **2. Reason** | Shiori (`Agent Thread Core`) | The vision-capable model evaluates recent observations alongside `skills/`, `MEMORY.md`, `memory/current.md`, and `baseware.json` to choose between direct controller actions, fast Python `@capability` execution, or code updates. |
-| **3. Act & Eval** | Python `@capability` + Baseware + `ludens eval` | Sub-second closed loops execute inside Python rather than waiting on multi-second LLM turns. New or modified capabilities are verified offline against `@eval_env` surrogates with `ludens eval run` before running on physical or software targets. |
-| **4. Consolidate** | Shiori (`consolidate`) | In a file-only turn (`read`, `write`, `edit` only, with device access disabled), Shiori promotes `verified` capabilities into `skills/`, prunes `unverified`, `stale`, `adapting`, or `failed` entries, and updates `memory/current.md`. |
+| **1. Observe** | Resident `perception.py` + Shiori / `loop.py` | Under an active control lease, `Perception.sample()` samples up to `30 Hz` into `.ludens/timeline/`. At the start of each turn (when auto-injection is `on`), Shiori attaches newly arrived lean primary-channel records and state changes to the turn-start observation context (`observation_context`, customizable via `loop.py:Loop.inject`); mid-turn inspection uses explicit `observe` calls. |
+| **2. Reason** | Shiori (`Agent Thread Core`) | The vision-capable model evaluates recent observations alongside `skills/`, `MEMORY.md`, `memory/current.md`, and `baseware.json` to choose between direct controller actions, fast Python `@capability` execution, or workspace code updates (including `perception.py` and `loop.py`). |
+| **3. Act & Eval** | Python `@capability` + Baseware + `ludens eval` | Sub-second closed loops and routine inter-turn state transitions (`loop.py:Loop.step`) execute inside Python without spending multi-second LLM round-trips or tokens. New or modified capabilities are verified offline against `@eval_env` surrogates with `ludens eval run` before running on physical or software targets. |
+| **4. Consolidate** | Shiori (`consolidate` / `Consolidate()`) | In a file-only turn (`read`, `write`, `edit` only, with device access disabled), Shiori promotes `verified` capabilities into `skills/`, prunes `unverified`, `stale`, `adapting`, or `failed` entries, and updates `memory/current.md`. |
 
 Because Shiori appends automatic observations only once at turn start (`ludens perception inject on`) and never pads tool outputs with extra screenshots, the conversation prefix stays cache-friendly across long multi-turn runs. When the model needs a fresh check mid-turn, it calls `observe` or `ludens observe` explicitly on demand.
+
+## Lean Perception Payload Contract
+
+Across both turn-start auto-injection (`observation_context`) and explicit `observe` tool calls, Ludens dehydrates perception payloads (`perceptionInput`) so model context carries clean domain signals rather than runtime telemetry noise:
+
+- **Routine latest reads (turn-start injection and unfiltered `observe`)**: Return `{ ok: true, records: [{ id, sequence, recordedAt, capability?, text?, data?, space?, effect?, transition? }] }`. `id`, `sequence`, and `recordedAt` are always included; `capability` appears only when it differs from the default primary channel (`python/perception.py:Perception.sample`); non-empty `text` plus defined `data`, `space`, `effect`, and `transition` fields are preserved intact; internal telemetry bloat (`queryId`, `generation`, 64-char `codeSHA`, monotonic `sampling`, `sampledAt`, raw Baseware `sources`, and `media[*].id`) is omitted.
+- **Historical, filtered, or paginated queries (explicit `observe` with `id`, `at`, `start`, `end`, `after`, `limit`, or `capability`)**: Return `{ ok: true, query, records, hasMore, nextAfter?, availability? }`, preserving cursor pagination and timeline availability bounds.
+- **Failed or unavailable reads (`!ok`)**: Return `{ ok: false, error?, availability? }` so sampler errors and availability state remain explicit.
+
+## Programmable Outer Loop (`loop.py`)
+
+When `loop.py` is absent from the workspace root, Shiori runs the built-in default outer loop: reading the latest lean perception payload plus vision frames and issuing `Prompt()` into the next model turn. Whenever routine polling waits, periodic maintenance, or deterministic `@capability` transitions do not need an LLM round-trip, both humans and Shiori can create or edit `loop.py` (`class Loop(ludens_tools.Loop):`, or a standalone `class Loop:` defining `step` and/or `inject`). Each inter-turn boundary supplies a `TurnContext` (`turn`, `llm_turns`, `initial_message`, `default_prompt`, `steered`, `perception`, `perception_state`, `event_pool`, `last_turn`, `remaining_seconds`, `fault`, plus `ctx.default_inject()`):
+
+- **`inject(self, ctx: TurnContext) -> TurnInjection | dict | str | None`**: Customizes the turn-start observation payload (recorded on `observation_context`) before a `Prompt` turn. Calling `inj = ctx.default_inject()` returns a mutable `TurnInjection` (for example, set `inj.attach_images = False` to omit vision frames on code-focused turns, or `inj.extra.append(...)` to attach domain summaries in `structured` mode). You can also return a custom `dict` (`custom_json`), `str` (`custom_text`), or `None` (`none` mode, omitting turn-start observation text and vision frames for that turn).
+- **`step(self, ctx: TurnContext) -> Prompt | Consolidate | Wait | Stop`**: Runs a single scheduling step under the active `epoch` lease and `trace` scope — `Client().call(...)` and `Client().observe(...)` inside `step()` inherit `epoch` automatically, enabling zero-token `@capability` execution before returning one of four control actions:
+
+| Returned Action | Effect |
+| --- | --- |
+| `Prompt(prompt=None, injection=...)` | Starts the next LLM turn (passing `prompt` overrides `ctx.default_prompt`; omitting `injection` calls `self.inject(ctx)` automatically) |
+| `Consolidate(prompt=None)` | Runs an in-cycle file-only consolidation turn (`read`, `write`, `edit` only, no device access), then continues the outer loop |
+| `Wait(seconds=1.0, reason=None)` | Sleeps deterministically without spending LLM tokens or request budget; wakes immediately on **Reclaim Control** or human `steer` |
+| `Stop(reason="completed")` | Ends the active Control Cycle cleanly with stop reason `loop: <reason>`, releasing the `epoch` lease back to **Manual Standby** |
+
+- **Inter-turn hot-reload and fault isolation (`loop_fault`)**: `LoopRuntime` tracks source hashes for `loop.py` and its imported workspace `.py` modules, hot-reloading automatically between turns. Syntax, import, or runtime exceptions in `load`, `step`, or `inject` never crash the worker or deadlock the cycle: the host emits `loop_fault` (`fallback: "default_loop"`), falls back safely to the built-in default `Prompt` turn, and surfaces `loopFault` in the next observation payload (`observation_context`) so Shiori or the operator can fix `loop.py` live. Once a clean reload succeeds, `loopFault` clears automatically.
+- **Urgent human `Steer` preemption**: Human `steer` always outranks `loop.py`. Arrival of a pending `steer` aborts any in-flight `Wait(seconds)` immediately and bypasses `Loop.step()` on the next iteration, forcing an immediate `Prompt` turn (`ctx.steered = True`) so deterministic loops can never block operator intervention.
+- **1:1 Console observability**: In Console **Live** (`?view=live`), each model call's Input Inspector renders `deliveredPayload` 1:1 after `Loop.inject`, while inter-turn `loop_step`, `loop_fault`, `loop_status`, and model-free inter-turn `@capability` calls group into a collapsible **Loop steps** disclosure (auto-expanded whenever a `loop_fault` is present).
 
 ## Auto Run, Manual Standby & Reclaim Control
 
@@ -30,7 +56,7 @@ stateDiagram-v2
     manual --> acquiring : "Start Auto Run (ludens auto on)"
     acquiring --> auto : "Baseware grants epoch lease"
     acquiring --> manual : "Cancelled or failed"
-    auto --> releasing : "Reclaim Control / budget / pause"
+    auto --> releasing : "Reclaim Control / budget / Loop Stop / pause"
     releasing --> manual : "Inputs zeroed & timeline sealed"
 ```
 
@@ -48,8 +74,8 @@ Hardware safety and cost bounds are enforced structurally by Baseware and Shiori
 
 Each time **Auto Run** begins, Shiori mints a unique UUID **`epoch`** and acquires the lease over a persistent connection to Baseware. Shiori injects `BASEWARE_EPOCH` into workspace shells and subprocesses for that cycle:
 
-- **Lease enforcement**: Any Baseware `Controller` marked `requiresControl` — as well as workspace `python/...` CLI invocations — checks the supplied `epoch`. Calls carrying an expired or missing `epoch` are rejected (`STALE_EPOCH`), preventing delayed background scripts from touching hardware after **Reclaim Control** or cycle expiration.
-- **Hot-reload without dropping the cycle**: When `perception.py` or one of its imported modules is edited during **Auto Run** (or on `ludens perception reload`), the host increments `inputGeneration`, immediately cancels and zeros active workspace device inputs, and swaps in the new resident code while preserving the active `epoch`, remaining budgets, and Shiori session.
+- **Lease enforcement**: Any Baseware `Controller` marked `requiresControl` — as well as workspace `python/...` CLI invocations and `Client().call(...)` calls inside `loop.py:Loop.step` — checks the supplied `epoch`. Calls carrying an expired or missing `epoch` are rejected (`STALE_EPOCH`), preventing delayed background scripts from touching hardware after **Reclaim Control** or cycle expiration.
+- **Hot-reload without dropping the cycle**: When `perception.py` or one of its imported modules is edited during **Auto Run** (or on `ludens perception reload`), the host increments `inputGeneration`, immediately cancels and zeros active workspace device inputs, and swaps in the new resident perception code; editing `loop.py` or its imported modules reloads the outer loop automatically between turns — both preserve the active `epoch`, remaining budgets, and Shiori session.
 
 ### Time and Request Budgets
 
@@ -65,7 +91,7 @@ Human operators do not have to stop **Auto Run** just to share context, answer a
 | Channel | Mechanism & Persistence | When to Use | Effect on Active Cycle |
 | --- | --- | --- | --- |
 | **Event Pool** | Duplex queue in `.ludens/event-pool.json` (`ludens event`, `event_pool` tool, Console **Live** dock). Survives across cycles and **Manual Standby**. | Non-urgent guidance, asynchronous operator replies, or agent status updates (`notice`) and non-blocking questions (`help_request`). | Non-blocking by default (`pause: false`). Only `pause: true` pauses **Auto Run** into `awaiting human` and releases device control until resumed. |
-| **Live Steer** | Direct mid-turn injection (`ludens steer <message>`, Console **Steer Now**). Active only during **Auto Run**. | Urgent mid-turn course correction when the agent is heading down the wrong path right now. | Queues straight into the running turn without starting a new `epoch` or entering the Event Pool. |
+| **Live Steer** | Direct mid-turn injection and loop preemption (`ludens steer <message>`, Console **Steer Now**). Active only during **Auto Run**. | Urgent mid-turn course correction or breaking out of a deterministic `loop.py` wait without revoking device control. | Queues straight into the active turn (immediately waking any `loop.py` `Wait` and preempting `step` into a `Prompt` turn) without starting a new `epoch` or entering the Event Pool. |
 
 ### How the Event Pool Works Without Bloating Context
 

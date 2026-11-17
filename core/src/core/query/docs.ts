@@ -186,12 +186,14 @@ export function renderDocument(source: string, currentId: string, ids?: Readonly
     const tableRow = line.match(/^\|.*\|\s*$/);
     if (tableRow && i + 1 < lines.length && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1])) {
       flushList();
+      const rawHead = line.trim().slice(1, -1).split("|").map(cell => plainInline(cell.trim())).filter(Boolean);
       const cells = (row: string) => row.trim().slice(1, -1).split("|").map(cell => renderInline(cell.trim()));
       const head = cells(line);
+      const regionLabel = escape(rawHead.join(" / ") || (lang === "zh" ? "数据表" : "Data table"));
       i += 2;
       const body: string[][] = [];
       while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) { body.push(cells(lines[i])); i++; }
-      html.push("<div class=\"doc-table\"><table><thead><tr>" + head.map(h => `<th>${h}</th>`).join("") +
+      html.push(`<div class="doc-table" tabindex="0" role="region" aria-label="${regionLabel}"><table><thead><tr>` + head.map(h => `<th>${h}</th>`).join("") +
         "</tr></thead><tbody>" + body.map(row => "<tr>" + row.map(c => `<td>${c}</td>`).join("") + "</tr>").join("") + "</tbody></table></div>");
       continue;
     }

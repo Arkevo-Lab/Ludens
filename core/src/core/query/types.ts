@@ -1,6 +1,8 @@
 import type { VideoFrameReference } from "@ludens/protocol/timeline-media";
 import type { OmpEffort, OmpServiceTier } from "@ludens/protocol/ludens";
 
+export type RecordingPurpose = "continuous-perception" | "loop";
+
 export interface Event {
   /** Present on canonical device files; mirrored historical Ludens rows keep their local sequence. */
   serviceId?: string;
@@ -128,17 +130,24 @@ export interface PerceptionRead {
   availability?: Record<string, unknown>;
   durationMs?: number;
   error?: string;
+  deliveredPayload?: unknown;
+  injectionMode?: "structured" | "custom_json" | "custom_text" | "none";
+  attachImages?: boolean;
 }
 export interface PerceptionSnapshot {
   id: string;
   sequence: number;
   timeline?: { recordId: string; sequence: number };
   capability?: string;
-  generation: string | null;
+  generation?: string | null;
   recordedAt: string;
-  sampling: { clock: string; startedAtMs: number; finishedAtMs: number };
+  sampling?: { clock: string; startedAtMs: number; finishedAtMs: number };
   sampledAt?: string;
   sources?: unknown[];
+  data?: unknown;
+  space?: unknown;
+  effect?: unknown;
+  transition?: unknown;
 }
 export interface Tool {
   id: string;

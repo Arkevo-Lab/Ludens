@@ -58,7 +58,8 @@ print(json.dumps(records))`, workspace], {env: {...process.env, PYTHONPATH: join
       const metadata = JSON.parse(result.content.find(part => part.type === "text")!.text);
       expect(metadata.records.map((record: { id: string }) => record.id)).toEqual(records.slice(0, expected).map(record => record.id));
       expect(result.content.filter(part => part.type === "image")).toHaveLength(expected);
-      expect(result.details).toEqual({ queryId: metadata.queryId, ok: true });
+      expect(metadata.queryId).toBeUndefined();
+      expect(result.details).toEqual({ queryId: expect.any(String), ok: true });
       expect(metadata.records[0].recordedAt).toBe("2026-10-22T06:45:50.000Z");
     }
     const handlers: Record<string, (event: any) => any> = {};

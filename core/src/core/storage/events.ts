@@ -12,7 +12,7 @@ export const LUDENS_SOURCE: EventSource = { component: "ludens" };
 
 export interface EventTrace {
   recordingId?: string;
-  recordingPurpose?: "continuous-perception";
+  recordingPurpose?: "continuous-perception" | "loop";
   inputGeneration?: string;
   traceId?: string;
   spanId?: string;

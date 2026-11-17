@@ -6,10 +6,14 @@ import { join } from "node:path";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ActivityBlock } from "../features/live/activity-feed-model";
-import { buildCodexSegments, summarizeStepBlock } from "../features/live/shiori-segments";
+import {
+  buildCodexSegments,
+  formatModelInputPayload,
+  summarizeStepBlock,
+} from "../features/live/shiori-segments";
 import { LocaleProvider } from "../lib/locale";
 import type { ActivityFeedData } from "../features/live/use-activity-feed";
-import type { RunData, SpanStats } from "../lib/types";
+import type { Call, RunData, SpanStats } from "../lib/types";
 
 const nodeRequire = createRequire(import.meta.url);
 const cjsModule = nodeRequire("node:module") as {
@@ -714,4 +718,404 @@ test("multi-cycle transition renders inline idle metadata inside the single cycl
   assert.doesNotMatch(html, /class="codex-session-gap"/, "no separate stacked gap pill");
   assert.match(html, /class="codex-session-divider-idle" data-session-gap=""/, "idle metadata sits inline inside #2 pill");
   assert.match(html, /after 30m idle/, "30m 20s idle gap rounds away sub-minute noise cleanly");
+});
+
+function makeCall(overrides: Partial<Call> & Pick<Call, "id" | "index" | "at" | "atMs">): Call {
+  return {
+    durationMs: 100,
+    headersMs: null,
+    firstStreamMs: null,
+    wireBytes: null,
+    transport: "websocket",
+    transportDetails: null,
+    frameBytes: null,
+    incremental: true,
+    wsFrames: 1,
+    inputTokens: 100,
+    cachedTokens: 80,
+    cacheHit: 0.8,
+    attempts: 1,
+    status: "stop",
+    tools: [],
+    observations: [],
+    inputObservations: [],
+    actions: 0,
+    phases: {},
+    ...overrides,
+  };
+}
+
+test("CodexInputCard renders 1:1 deliveredPayload (structured, custom_json, custom_text, none) and clean lean historical fallback without duplicate snapshot", async () => {
+  const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
+
+  const structuredPayload = {
+    ok: true,
+    records: [
+      {
+        id: "rec-42",
+        sequence: 42,
+        recordedAt: "2026-11-07T13:00:01.000Z",
+        data: { bossHp: 55 },
+        space: { zone: "arena" },
+      },
+    ],
+    extra: ["focus_dodge"],
+  };
+
+  const calls: Call[] = [
+    makeCall({
+      id: "call-structured",
+      index: 1,
+      at: "2026-11-07T13:00:02.000Z",
+      atMs: Date.parse("2026-11-07T13:00:02.000Z"),
+      perception: {
+        at: "2026-11-07T13:00:01.500Z",
+        queryId: "internal-query-id-should-not-leak",
+        ok: true,
+        records: [
+          {
+            snapshot: {
+              id: "rec-42",
+              sequence: 42,
+              recordedAt: "2026-11-07T13:00:01.000Z",
+              data: { bossHp: 55 },
+              space: { zone: "arena" },
+            },
+            text: "",
+            observations: [],
+          },
+        ],
+        deliveredPayload: structuredPayload,
+        injectionMode: "structured",
+        attachImages: false,
+      },
+    }),
+    makeCall({
+      id: "call-custom-text",
+      index: 2,
+      at: "2026-11-07T13:00:05.000Z",
+      atMs: Date.parse("2026-11-07T13:00:05.000Z"),
+      perception: {
+        at: "2026-11-07T13:00:05.000Z",
+        deliveredPayload: "Custom plain-text prompt context from loop.py",
+        injectionMode: "custom_text",
+        attachImages: false,
+      },
+    }),
+    makeCall({
+      id: "call-none",
+      index: 3,
+      at: "2026-11-07T13:00:08.000Z",
+      atMs: Date.parse("2026-11-07T13:00:08.000Z"),
+      perception: {
+        at: "2026-11-07T13:00:08.000Z",
+        deliveredPayload: null,
+        injectionMode: "none",
+        attachImages: false,
+      },
+    }),
+    makeCall({
+      id: "call-legacy-fallback",
+      index: 4,
+      at: "2026-11-07T13:00:12.000Z",
+      atMs: Date.parse("2026-11-07T13:00:12.000Z"),
+      perception: {
+        at: "2026-11-07T13:00:11.000Z",
+        queryId: "legacy-q-1",
+        ok: true,
+        snapshot: {
+          id: "legacy-rec-7",
+          sequence: 7,
+          generation: "old-gen",
+          recordedAt: "2026-11-07T13:00:10.000Z",
+          sampling: { clock: "c", startedAtMs: 10, finishedAtMs: 22.5 },
+          data: { stage: 2 },
+        },
+        records: [
+          {
+            snapshot: {
+              id: "legacy-rec-7",
+              sequence: 7,
+              generation: "old-gen",
+              recordedAt: "2026-11-07T13:00:10.000Z",
+              sampling: { clock: "c", startedAtMs: 10, finishedAtMs: 22.5 },
+              data: { stage: 2 },
+            },
+            text: "Legacy frame",
+            observations: [],
+          },
+        ],
+      },
+    }),
+  ];
+
+  assert.equal(formatModelInputPayload(calls[0]), JSON.stringify(structuredPayload, null, 2));
+  assert.equal(formatModelInputPayload(calls[1]), "Custom plain-text prompt context from loop.py");
+  assert.equal(formatModelInputPayload(calls[2]), "null");
+  const fallbackParsed = JSON.parse(formatModelInputPayload(calls[3])) as Record<string, unknown>;
+  assert.deepEqual(fallbackParsed, {
+    ok: true,
+    records: [
+      {
+        id: "legacy-rec-7",
+        sequence: 7,
+        recordedAt: "2026-11-07T13:00:10.000Z",
+        text: "Legacy frame",
+        data: { stage: 2 },
+      },
+    ],
+  });
+
+  const blocks = [
+    block({
+      id: "ctl-1",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:00:00.000Z",
+      data: { mode: "auto", epoch: "epoch-1" },
+      trace: { epoch: "epoch-1" },
+    }),
+  ];
+
+  const html = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-ws",
+        workspace: "/tmp/demo-ws",
+        workspaceTitle: "Demo Workspace",
+        data: {
+          ...sampleWorkbenchRunData(),
+          cycles: [{ epoch: "epoch-1", startedAt: "2026-11-07T13:00:00.000Z", maxSeconds: 1800 }],
+          calls,
+        },
+        feed: { ...sampleWorkbenchFeed(false), blocks },
+        isLiveRun: true,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", null, "viewport"),
+      }),
+    ),
+  );
+
+  assert.match(html, /View model input details/, "native <details> summary shows updated inspector label");
+  assert.match(html, /Seq #42/, "lean record sequence renders in header chips without requiring sampling");
+  // Call #1 has no sampling -> no Sampled ms chip on call #1; Call #4 has 12.5ms sampling -> renders Sampled 12.5ms
+  assert.equal((html.match(/Sampled /g) ?? []).length, 1, "sampling chip only renders when sampling exists and > 0");
+  assert.match(html, /Sampled 12\.5ms/);
+  assert.match(html, /data-tone="loop">loop\.py custom<\/span>/, "custom_text shows loop.py custom badge");
+  assert.match(html, /data-tone="muted">Context skipped by loop\.py<\/span>/, "none mode indicates skipped injection");
+  assert.doesNotMatch(html, /internal-query-id-should-not-leak/, "internal queryId never leaks into 1:1 payload view");
+  assert.doesNotMatch(html, /"callIndex":/, "legacy callIndex wrapper object is gone");
+  assert.doesNotMatch(html, /"snapshot":/, "duplicate top-level snapshot JSON is never rendered");
+});
+
+test("Loop orchestration blocks and inter-turn python-call items group into collapsible Loop steps (auto-expanded on fault) and formatCycleReason humanizes loop: reasons", async () => {
+  const { ShioriWorkbench, formatCycleReason } = await import("../features/live/shiori-cockpit");
+  const zhMessages = JSON.parse(
+    readFileSync(join(import.meta.dirname, "../messages/zh.json"), "utf8"),
+  ) as { shioriCockpit: Record<string, string> };
+  const enMessages = JSON.parse(
+    readFileSync(join(import.meta.dirname, "../messages/en.json"), "utf8"),
+  ) as { shioriCockpit: Record<string, string> };
+
+  const tEn = (k: string) => enMessages.shioriCockpit[k] ?? k;
+  const tZh = (k: string) => zhMessages.shioriCockpit[k] ?? k;
+
+  assert.equal(formatCycleReason("loop: goal_met", tEn), "Loop stopped: goal_met");
+  assert.equal(formatCycleReason("loop: goal_met", tZh), "Loop 结束：goal_met");
+  assert.equal(formatCycleReason("loop: completed", tEn), "Loop completed");
+  assert.equal(formatCycleReason("loop: completed", tZh), "Loop 正常结束");
+  assert.equal(formatCycleReason("loop:", tEn), "Loop completed");
+
+  const blocks: ActivityBlock[] = [
+    block({
+      id: "ctl-1",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:00:00.000Z",
+      data: { mode: "auto", epoch: "epoch-1" },
+      trace: { epoch: "epoch-1" },
+    }),
+    // Healthy inter-turn loop orchestration group (loop_status + loop_step + inter-turn python-call without modelCallId)
+    block({
+      id: "loop-st-1",
+      kind: "system",
+      title: "loop_status",
+      at: "2026-11-07T13:00:01.000Z",
+      text: "loop.py ready",
+      data: { role: "loop_status", state: "ready" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "loop-step-1",
+      kind: "system",
+      title: "loop_step",
+      at: "2026-11-07T13:00:02.000Z",
+      text: "Turn #1 · wait 2s",
+      data: { role: "loop_step", turn: 1, action: "wait", seconds: 2 },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "py-inter-turn-1",
+      kind: "tool",
+      title: "python-call",
+      at: "2026-11-07T13:00:03.000Z",
+      text: "python/macros.py:advance_dialog (35ms)",
+      data: { capability: "python/macros.py:advance_dialog" },
+      trace: { epoch: "epoch-1", recordingPurpose: "loop" },
+    }),
+    block({
+      id: "loop-step-2",
+      kind: "system",
+      title: "loop_step",
+      at: "2026-11-07T13:00:04.000Z",
+      text: "Turn #2 · prompt",
+      data: { role: "loop_step", turn: 2, action: "prompt" },
+      trace: { epoch: "epoch-1" },
+    }),
+    // Model turn with modelCallId — plus an ordinary !modelCallId python-call from a bash subprocess (no recordingPurpose="loop") that MUST NOT split the LLM turn!
+    block({
+      id: "m1-think",
+      kind: "thinking",
+      title: "Thinking",
+      at: "2026-11-07T13:00:05.000Z",
+      text: "Checking current battle state.",
+      trace: { epoch: "epoch-1", modelCallId: "call-1" },
+    }),
+    block({
+      id: "m1-bash-subproc-py",
+      kind: "tool",
+      title: "python-call",
+      at: "2026-11-07T13:00:05.500Z",
+      text: "python/macros.py:probe_from_bash (18ms)",
+      data: { capability: "python/macros.py:probe_from_bash" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "m1-cap-tool",
+      kind: "tool",
+      title: "python/macros.py:attack",
+      at: "2026-11-07T13:00:06.000Z",
+      tool: { intent: "Attack target", args: { capability: "python/macros.py:attack" } },
+      trace: { epoch: "epoch-1", modelCallId: "call-1" },
+    }),
+    block({
+      id: "m1-reply",
+      kind: "text",
+      title: "Assistant",
+      at: "2026-11-07T13:00:07.000Z",
+      text: "Executed attack macro.",
+      source: { component: "shiori" },
+      trace: { epoch: "epoch-1", modelCallId: "call-1" },
+    }),
+    // Subsequent loop orchestration group WITH a fault
+    block({
+      id: "loop-fault-1",
+      kind: "system",
+      title: "loop_fault",
+      status: "error",
+      at: "2026-11-07T13:00:08.000Z",
+      text: "loop.py step fault: KeyError: 'hp'",
+      data: { role: "loop_fault", phase: "step", error: "KeyError: 'hp'", fallback: "default_loop" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "loop-step-3",
+      kind: "system",
+      title: "loop_step",
+      at: "2026-11-07T13:00:09.000Z",
+      text: "Turn #3 · stop (goal_met)",
+      data: { role: "loop_step", turn: 3, action: "stop", reason: "goal_met" },
+      trace: { epoch: "epoch-1" },
+    }),
+    block({
+      id: "ctl-end",
+      kind: "system",
+      title: "control",
+      at: "2026-11-07T13:00:10.000Z",
+      data: { mode: "manual", epoch: "epoch-1", reason: "loop: goal_met" },
+      trace: { epoch: "epoch-1" },
+    }),
+  ];
+
+  const cycles = [
+    {
+      epoch: "epoch-1",
+      startedAt: "2026-11-07T13:00:00.000Z",
+      endedAt: "2026-11-07T13:00:10.000Z",
+      maxSeconds: 1800,
+      reason: "loop: goal_met",
+    },
+  ];
+
+  const segments = buildCodexSegments(blocks, [], [], {
+    runId: RUN_ID,
+    isLatestRun: false,
+    isAuto: false,
+    cycles,
+  });
+
+  const turns = segments.filter(
+    (seg): seg is Extract<(typeof segments)[number], { kind: "turn" }> => seg.kind === "turn",
+  );
+  assert.equal(turns.length, 3, "healthy loop group + model turn + fault loop group stay cleanly separated");
+  assert.equal(turns[0]?.stepGroupVariant, "loop");
+  assert.equal(turns[0]?.loopFault, undefined);
+  assert.deepEqual(
+    turns[0]?.steps.map(s => s.id),
+    ["loop-st-1", "loop-step-1", "py-inter-turn-1", "loop-step-2"],
+  );
+
+  assert.equal(turns[1]?.stepGroupVariant, undefined);
+  assert.deepEqual(
+    turns[1]?.steps.map(s => s.id),
+    ["m1-think", "m1-bash-subproc-py", "m1-cap-tool"],
+    "!modelCallId python-call without recordingPurpose='loop' stays inside the LLM turn without splitting it",
+  );
+  assert.equal(turns[1]?.responseBlock?.id, "m1-reply");
+
+  assert.equal(turns[2]?.stepGroupVariant, "loop");
+  assert.equal(turns[2]?.loopFault, true);
+  assert.deepEqual(
+    turns[2]?.steps.map(s => s.id),
+    ["loop-fault-1", "loop-step-3"],
+  );
+
+  const html = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-ws",
+        workspace: "/tmp/demo-ws",
+        workspaceTitle: "Demo Workspace",
+        data: { ...sampleWorkbenchRunData(), cycles, live: null },
+        feed: { ...sampleWorkbenchFeed(false), blocks },
+        isLiveRun: false,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", null, "viewport"),
+      }),
+    ),
+  );
+
+  assert.match(
+    html,
+    /<details class="codex-step-group" data-variant="loop"><summary/,
+    "healthy loop group renders as a closed native <details data-variant=\"loop\">",
+  );
+  assert.match(html, /Loop steps · 4 · wait \/ capability \/ prompt/);
+  assert.match(
+    html,
+    /<details class="codex-step-group" data-variant="loop" data-fault="true" open=""><summary/,
+    "faulty loop group renders with data-fault=\"true\" and auto-expanded open attribute",
+  );
+  assert.match(html, /Loop fault · 2 steps · fault \/ stop/);
+  assert.match(html, /Loop stopped: goal_met/, "session divider humanizes loop: goal_met stop reason");
 });

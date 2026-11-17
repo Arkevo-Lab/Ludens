@@ -17,6 +17,7 @@ import type {
 } from "@ludens/protocol/event-pool";
 import type { DiagnosticsMode } from "../storage/events.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
+import type { LoopFault, LoopInjectionMode, LoopNormalizedInjection, LoopRuntime, LoopStatus } from "../subsystems/loop.ts";
 import { Workspace } from "../storage/workspace.ts";
 import { childTrace, type EventTrace, type RecordEvent } from "../storage/events.ts";
 import { pythonEnvironment } from "@ludens/protocol/python";
@@ -27,7 +28,14 @@ export interface ExtensionHost {
   readonly diagnostics: DiagnosticsMode;
   readonly record: RecordEvent;
   readonly perception?: PerceptionRuntime;
-  status(): { runId: string; perception?: PerceptionStatus; eventPool?: EventPoolSummary };
+  readonly loop?: LoopRuntime;
+  status(): {
+    runId: string;
+    remainingSeconds?: number | null;
+    perception?: PerceptionStatus;
+    loop?: LoopStatus;
+    eventPool?: EventPoolSummary;
+  };
   perceptionInjectionEnabled(): boolean;
   stop(reason?: string): Promise<unknown>;
   eventPoolDigest?(): Promise<EventPoolDigest>;
@@ -83,6 +91,21 @@ export async function media(observations: Observation[], record?: RecordEvent, t
 
 export interface Cycle { epoch: string; signal: AbortSignal; purpose?: "consolidate" }
 
+export interface PreparedTurnContext {
+  epoch: string;
+  read?: PerceptionRead | null;
+  injection: LoopNormalizedInjection;
+  loopImplemented: boolean;
+  loopFault?: LoopFault | null;
+}
+
+interface ReceiptMetadata {
+  deliveredPayload?: unknown;
+  injectionMode?: LoopInjectionMode;
+  attachImages?: boolean;
+  deliveryError?: string;
+}
+
 export function createLudensExtension(options: {
   runtime: ExtensionHost;
   workspace: Workspace;
@@ -102,6 +125,7 @@ export function createLudensExtension(options: {
   let lastPerceptionState = "";
   const deliveredBackground = new Set<string>();
   let latestContext: { observations: string[]; deliveryIds: string[] } = { observations: [], deliveryIds: [] };
+  let preparedTurn: PreparedTurnContext | undefined;
   const trace = (toolCallId?: string): EventTrace => ({ epoch: options.cycle().epoch, ...options.trace?.(toolCallId), ...(toolCallId ? { toolCallId } : {}) });
   const observeParameters = z.object({
     capability: z.string().nullable().optional().describe("Perception capability ID, or '*' for all. Default: Perception.sample."),
@@ -137,8 +161,13 @@ export function createLudensExtension(options: {
       const read = await readPerception(signal ? AbortSignal.any([signal, cycle.signal]) : cycle.signal, trace(id), params);
       const rendered = await perceptionContent(read, trace(id));
       // The explicit read is its own delivery; receipt it for trace attribution.
-      receipt(trace(id), "explicit", read.records.flatMap(record => record.media.map(item => item.id)), [read.queryId]);
-      return { ...rendered, details: { queryId: read.queryId, ok: read.ok } };
+      receipt(trace(id), "explicit", rendered.deliveredIds, [read.queryId], {
+        deliveredPayload: rendered.deliveredPayload,
+        injectionMode: "structured",
+        attachImages: !rendered.deliveryError,
+        ...(rendered.deliveryError ? { deliveryError: rendered.deliveryError } : {}),
+      });
+      return { content: rendered.content, isError: rendered.isError, details: { queryId: read.queryId, ok: read.ok } };
     },
   };
 
@@ -247,12 +276,13 @@ export function createLudensExtension(options: {
     return read;
   }
 
-  async function perceptionContent(read: PerceptionRead, parent: EventTrace) {
+  async function perceptionContent(read: PerceptionRead, parent: EventTrace, attachImages = true) {
     const derive: DeriveMedia | undefined = runtime.perception
       ? input => runtime.perception!.deriveMedia(input, options.cycle().signal) : undefined;
+    const payload = perceptionInput(read);
     try {
-      const observations = read.records.flatMap(record => record.media);
-      const images = await media(observations, runtime.record, parent, derive);
+      const observations = attachImages ? read.records.flatMap(record => record.media) : [];
+      const images = observations.length ? await media(observations, runtime.record, parent, derive) : [];
       options.cycle().signal.throwIfAborted();
       for (const record of read.records) {
         if (record.capability !== "python/perception.py:Perception.sample") continue;
@@ -261,14 +291,26 @@ export function createLudensExtension(options: {
           lastMain = { id: record.id, sequence: record.sequence, generation: record.generation };
         }
       }
-      return { content: [{ type: "text" as const, text: JSON.stringify(perceptionInput(read)) }, ...images], isError: !read.ok };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(payload) }, ...images],
+        isError: !read.ok,
+        deliveredIds: observations.map(item => item.id),
+        deliveredPayload: payload,
+        deliveryError: undefined as string | undefined,
+      };
     } catch (error) {
       options.cycle().signal.throwIfAborted();
       const message = error instanceof Error ? error.message : String(error);
       // Encoding is a delivery failure, not a failed query or sampler mutation.
       runtime.record("perception_input_error", { queryId: read.queryId, error: message }, parent);
-      return { content: [{ type: "text" as const, text: JSON.stringify({ ok: false, query: read.query,
-        error: { code: "media_delivery_failed", message } }) }], isError: true };
+      const errorPayload = { ok: false, query: read.query, error: { code: "media_delivery_failed", message } };
+      return {
+        content: [{ type: "text" as const, text: JSON.stringify(errorPayload) }],
+        isError: true,
+        deliveredIds: [] as string[],
+        deliveredPayload: errorPayload,
+        deliveryError: message,
+      };
     }
   }
 
@@ -312,18 +354,223 @@ export function createLudensExtension(options: {
     lastPerceptionState = "";
     deliveredBackground.clear();
     latestContext = { observations: [], deliveryIds: [] };
+    preparedTurn = undefined;
   }
 
-  function receipt(parent: EventTrace, origin: string, observations: string[], queries: string[]) {
+  function receipt(parent: EventTrace, origin: string, observations: string[], queries: string[], meta?: ReceiptMetadata) {
     const delivery = childTrace(parent);
-    runtime.record("observation_context", { id: delivery.spanId!, origin, purpose: options.cycle().purpose,
-      observations, queries }, delivery);
+    runtime.record("observation_context", {
+      id: delivery.spanId!,
+      origin,
+      purpose: options.cycle().purpose,
+      observations,
+      queries,
+      ...(meta?.deliveredPayload !== undefined ? { deliveredPayload: meta.deliveredPayload } : {}),
+      ...(meta?.injectionMode !== undefined ? { injectionMode: meta.injectionMode } : {}),
+      ...(meta?.attachImages !== undefined ? { attachImages: meta.attachImages } : {}),
+      ...(meta?.deliveryError !== undefined ? { deliveryError: meta.deliveryError } : {}),
+    }, delivery);
     latestContext.observations.push(...observations);
     latestContext.deliveryIds.push(delivery.spanId!);
   }
 
+  function mergeDeliveredTextParts(content: (ImageContent | { type: "text"; text: string })[]): unknown {
+    const textParts = content.filter((part): part is { type: "text"; text: string } => part.type === "text");
+    if (textParts.length === 0) return null;
+    if (textParts.length === 1) {
+      try { return JSON.parse(textParts[0]!.text); }
+      catch { return textParts[0]!.text; }
+    }
+    const merged: Record<string, unknown> = {};
+    for (const part of textParts) {
+      try {
+        const parsed = JSON.parse(part.text);
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+          Object.assign(merged, parsed);
+          continue;
+        }
+      } catch {
+        // Fallback if non-object text appears.
+      }
+      return textParts.map(item => item.text).join("\n\n");
+    }
+    return merged;
+  }
+
+  async function capturePreparedContext(parent: EventTrace, prepared: PreparedTurnContext) {
+    const cycle = options.cycle();
+    const status = runtime.status();
+    const perception = status.perception;
+    const state: { state: PerceptionStatus["state"]; codeSHA?: string; error?: string } = perception
+      ? { state: perception.state, codeSHA: perception.codeSHA, ...(perception.error ? { error: perception.error } : {}) }
+      : { state: "unimplemented" };
+    const stateVersion = JSON.stringify(state);
+    const derive: DeriveMedia | undefined = runtime.perception
+      ? input => runtime.perception!.deriveMedia(input, cycle.signal) : undefined;
+
+    latestContext = { observations: [], deliveryIds: [] };
+
+    const { read, injection, loopImplemented, loopFault } = prepared;
+
+    // Default built-in loop (no loop.py and no pending loopFault):
+    // reuse pre-captured read without double-reading perception, and preserve delta silence.
+    if (!loopImplemented && !loopFault) {
+      const payloadObj = injection.payload && typeof injection.payload === "object" && !Array.isArray(injection.payload)
+        ? (injection.payload as Record<string, unknown>)
+        : {};
+      if (!runtime.perceptionInjectionEnabled()) {
+        if (payloadObj.eventPool) {
+          return [{ type: "text" as const, text: JSON.stringify({ eventPool: payloadObj.eventPool }) }];
+        }
+        return [];
+      }
+
+      const content: (ImageContent | { type: "text"; text: string })[] = [];
+      let delivered: string[] = [];
+      let queries: string[] = [];
+      let deliveryError: string | undefined;
+      let attachImagesUsed = false;
+
+      const hasNewRead = Boolean(read && (!read.ok || read.records.some(record => record.id !== lastMain?.id)));
+      const stateChanged = stateVersion !== lastPerceptionState;
+
+      if (hasNewRead && read) {
+        const shouldAttach = injection.attachImages !== false && read.ok && read.records.length > 0;
+        let images: (ImageContent | { type: "text"; text: string })[] = [];
+        if (shouldAttach) {
+          try {
+            const observations = read.records.flatMap(record => record.media);
+            images = await media(observations, runtime.record, parent, derive);
+            cycle.signal.throwIfAborted();
+            delivered = observations.map(item => item.id);
+            attachImagesUsed = true;
+          } catch (error) {
+            cycle.signal.throwIfAborted();
+            deliveryError = error instanceof Error ? error.message : String(error);
+            runtime.record("perception_input_error", { queryId: read.queryId, error: deliveryError }, parent);
+          }
+        }
+        for (const record of read.records) {
+          if (record.capability !== "python/perception.py:Perception.sample") continue;
+          if (!lastMain || record.sequence >= lastMain.sequence) {
+            lastMain = { id: record.id, sequence: record.sequence, generation: record.generation };
+          }
+        }
+        const effectivePayload = deliveryError
+          ? { ok: false, error: { code: "media_delivery_failed", message: deliveryError }, ...(payloadObj.eventPool ? { eventPool: payloadObj.eventPool } : {}) }
+          : payloadObj;
+        content.push({ type: "text", text: JSON.stringify(effectivePayload) }, ...images);
+        queries = [read.queryId];
+        lastPerceptionState = stateVersion;
+        receipt(parent, "prompt_start", delivered, queries, {
+          deliveredPayload: effectivePayload,
+          injectionMode: "structured",
+          attachImages: attachImagesUsed,
+          ...(deliveryError ? { deliveryError } : {}),
+        });
+        return content;
+      }
+
+      if (stateChanged && state.state !== "ready") {
+        const noticePayload: Record<string, unknown> = {
+          perception: { state: state.state, ...(state.codeSHA ? { codeSHA: state.codeSHA } : {}), ...(state.error ? { error: state.error } : {}) },
+          ...(payloadObj.eventPool ? { eventPool: payloadObj.eventPool } : {}),
+        };
+        content.push({ type: "text", text: JSON.stringify(noticePayload) });
+        lastPerceptionState = stateVersion;
+        receipt(parent, "prompt_start", [], [], {
+          deliveredPayload: noticePayload,
+          injectionMode: "structured",
+          attachImages: false,
+        });
+        return content;
+      }
+
+      lastPerceptionState = stateVersion;
+      if (payloadObj.eventPool) {
+        content.push({ type: "text", text: JSON.stringify({ eventPool: payloadObj.eventPool }) });
+      }
+      return content;
+    }
+
+    // Programmable loop.py path (or fallback carrying loopFault):
+    if (injection.mode === "none") {
+      if (runtime.perceptionInjectionEnabled()) lastPerceptionState = stateVersion;
+      receipt(parent, "prompt_start", [], read?.queryId ? [read.queryId] : [], {
+        deliveredPayload: null,
+        injectionMode: "none",
+        attachImages: false,
+      });
+      return [];
+    }
+
+    let effectivePayload = injection.payload;
+    if (
+      injection.mode === "structured" &&
+      loopFault &&
+      effectivePayload &&
+      typeof effectivePayload === "object" &&
+      !Array.isArray(effectivePayload) &&
+      !("loopFault" in effectivePayload)
+    ) {
+      effectivePayload = { ...(effectivePayload as Record<string, unknown>), loopFault };
+    }
+
+    const shouldAttachImages = Boolean(injection.attachImages !== false && runtime.perceptionInjectionEnabled());
+    let attachedImages: (ImageContent | { type: "text"; text: string })[] = [];
+    let attachedImageIds: string[] = [];
+    let deliveryError: string | undefined;
+
+    if (shouldAttachImages && read?.ok && read.records.length > 0) {
+      try {
+        const observations = read.records.flatMap(record => record.media);
+        attachedImages = await media(observations, runtime.record, parent, derive);
+        cycle.signal.throwIfAborted();
+        attachedImageIds = observations.map(item => item.id);
+      } catch (error) {
+        cycle.signal.throwIfAborted();
+        deliveryError = error instanceof Error ? error.message : String(error);
+        runtime.record("perception_input_error", { queryId: read.queryId, error: deliveryError }, parent);
+      }
+    }
+
+    if (read?.ok) {
+      for (const record of read.records) {
+        if (record.capability !== "python/perception.py:Perception.sample") continue;
+        if (!lastMain || record.sequence >= lastMain.sequence) {
+          lastMain = { id: record.id, sequence: record.sequence, generation: record.generation };
+        }
+      }
+    }
+    if (runtime.perceptionInjectionEnabled()) lastPerceptionState = stateVersion;
+
+    const textBody = injection.mode === "custom_text"
+      ? String(effectivePayload ?? "")
+      : JSON.stringify(effectivePayload);
+    const deliveredPayload = injection.mode === "custom_text" ? textBody : effectivePayload;
+    const content: (ImageContent | { type: "text"; text: string })[] = [
+      { type: "text", text: textBody },
+      ...attachedImages,
+    ];
+
+    receipt(parent, "prompt_start", attachedImageIds, read?.queryId ? [read.queryId] : [], {
+      deliveredPayload,
+      injectionMode: injection.mode,
+      attachImages: shouldAttachImages,
+      ...(deliveryError ? { deliveryError } : {}),
+    });
+    return content;
+  }
+
   async function captureContext(parent: EventTrace, origin: "prompt_start") {
     const cycle = options.cycle();
+    if (cycle.purpose !== "consolidate" && preparedTurn && preparedTurn.epoch === cycle.epoch) {
+      const currentPrepared = preparedTurn;
+      preparedTurn = undefined;
+      return capturePreparedContext(parent, currentPrepared);
+    }
+    preparedTurn = undefined;
+
     const status = runtime.status();
     const consolidating = cycle.purpose === "consolidate";
     const content: (ImageContent | { type: "text"; text: string })[] = [];
@@ -339,14 +586,16 @@ export function createLudensExtension(options: {
       ? { state: perception.state, codeSHA: perception.codeSHA, ...(perception.error ? { error: perception.error } : {}) }
       : { state: "unimplemented" };
     const stateVersion = JSON.stringify(state);
-    let delivered: string[] = [], queries: string[] = [];
+    let delivered: string[] = [], queries: string[] = [], deliveryError: string | undefined;
     if (!consolidating && runtime.perceptionInjectionEnabled()) {
       if (stateVersion !== lastPerceptionState) content.push({ type: "text", text: JSON.stringify({ perception: state }) });
       if (state.state === "ready") {
         const read = await readPerception(cycle.signal, parent);
         if (!read.ok || read.records.some(record => record.id !== lastMain?.id)) {
-          content.push(...(await perceptionContent(read, parent)).content);
-          delivered = read.records.flatMap(record => record.media.map(item => item.id));
+          const rendered = await perceptionContent(read, parent);
+          content.push(...rendered.content);
+          delivered = rendered.deliveredIds;
+          deliveryError = rendered.deliveryError;
           queries = [read.queryId];
         }
       }
@@ -369,7 +618,14 @@ export function createLudensExtension(options: {
       }
     }
     latestContext = { observations: [], deliveryIds: [] };
-    if (hasPerceptionContent) receipt(parent, origin, delivered, queries);
+    if (hasPerceptionContent) {
+      receipt(parent, origin, delivered, queries, {
+        deliveredPayload: mergeDeliveredTextParts(content),
+        injectionMode: "structured",
+        attachImages: delivered.length > 0 || (queries.length > 0 && !deliveryError),
+        ...(deliveryError ? { deliveryError } : {}),
+      });
+    }
     return content;
   }
 
@@ -456,5 +712,10 @@ export function createLudensExtension(options: {
       runtime.record("context", { request: ++requests, purpose: cycle.purpose, ...latestContext }, { epoch: cycle.epoch });
     });
   };
-  return { factory, tools: [observe, eventPool], context: () => ({ ...latestContext }) };
+  return {
+    factory,
+    tools: [observe, eventPool],
+    context: () => ({ ...latestContext }),
+    prepareTurn: (next?: PreparedTurnContext) => { preparedTurn = next; },
+  };
 }

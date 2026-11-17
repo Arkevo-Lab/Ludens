@@ -1,9 +1,9 @@
 import type { PoolEvent } from "@ludens/protocol/event-pool";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
-import type { Call, Observation, RunData } from "@/lib/types";
+import type { Call, Observation, PerceptionSnapshot, RunData } from "@/lib/types";
 
 export function cleanErrorMessage(raw: string): string {
-  return raw.replace(/(?:LudensError:\s*|Error:\s*)+/gi, "").trim() || raw;
+  return raw.replace(/(?:\b(?:LudensError|Error):\s*)+/gi, "").trim() || raw;
 }
 
 export function cleanInlinePreview(raw: string | undefined | null): string {
@@ -71,6 +71,180 @@ export function extractReadableText(block: ActivityBlock): string {
     return block.text.trim();
   }
   return block.title;
+}
+
+export function isInterTurnPythonCallBlock(block: ActivityBlock): boolean {
+  const topRecord = asRecord(block);
+  const hasModelCallId = Boolean(
+    block.trace?.modelCallId ||
+      (typeof topRecord?.modelCallId === "string" && topRecord.modelCallId),
+  );
+  if (hasModelCallId) return false;
+  const recordingPurpose =
+    typeof topRecord?.recordingPurpose === "string"
+      ? topRecord.recordingPurpose
+      : block.trace?.recordingPurpose;
+  if (recordingPurpose !== "loop") return false;
+  const data = asRecord(block.data);
+  if (data?.role === "loop_capability") return true;
+  const kindStr = String(block.kind);
+  const titleLower = block.title.toLowerCase();
+  if (kindStr === "python-call" || titleLower === "python-call" || titleLower === "python_call") {
+    return true;
+  }
+  if (block.id.startsWith("python:") || block.title.startsWith("Python 调用")) {
+    return true;
+  }
+  if (
+    block.kind === "tool" &&
+    (titleLower.startsWith("python/") ||
+      titleLower.includes("capability") ||
+      typeof asRecord(block.tool?.args)?.capability === "string" ||
+      typeof data?.capability === "string")
+  ) {
+    return true;
+  }
+  if (block.kind === "system" && block.title === "capability_end" && Boolean(block.trace?.epoch)) {
+    return true;
+  }
+  return false;
+}
+
+export function isLoopOrchestrationBlock(block: ActivityBlock): boolean {
+  const data = asRecord(block.data);
+  const role = data?.role;
+  if (
+    role === "loop_step" ||
+    role === "loop_fault" ||
+    role === "loop_status" ||
+    role === "loop_capability"
+  ) {
+    return true;
+  }
+  if (
+    block.title === "loop_step" ||
+    block.title === "loop_fault" ||
+    block.title === "loop_status"
+  ) {
+    return true;
+  }
+  return isInterTurnPythonCallBlock(block);
+}
+
+export function summarizeLoopActions(steps: ActivityBlock[]): string[] {
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  const add = (label: string) => {
+    if (!label || seen.has(label)) return;
+    seen.add(label);
+    labels.push(label);
+  };
+  for (const step of steps) {
+    const rec = asRecord(step.data);
+    const role = rec?.role;
+    if (step.title === "loop_fault" || role === "loop_fault") {
+      add("fault");
+      continue;
+    }
+    if (step.title === "loop_step" || role === "loop_step") {
+      const action = typeof rec?.action === "string" ? rec.action : "";
+      if (action) add(action);
+      continue;
+    }
+    if (isInterTurnPythonCallBlock(step)) {
+      add("capability");
+      continue;
+    }
+    if (step.status === "error") {
+      add("fault");
+    } else if ((step.title === "loop_status" || role === "loop_status") && steps.length === 1) {
+      const state = typeof rec?.state === "string" ? rec.state : "";
+      if (state) add(state);
+    }
+  }
+  return labels;
+}
+
+function formatLeanRecordFallback(snap: PerceptionSnapshot, text?: string): Record<string, unknown> {
+  return {
+    id: snap.id,
+    sequence: snap.sequence,
+    recordedAt: snap.recordedAt,
+    ...(snap.capability && snap.capability !== "python/perception.py:Perception.sample"
+      ? { capability: snap.capability }
+      : {}),
+    ...(text ? { text } : {}),
+    ...(snap.data !== undefined ? { data: snap.data } : {}),
+    ...(snap.space !== undefined ? { space: snap.space } : {}),
+    ...(snap.effect !== undefined ? { effect: snap.effect } : {}),
+    ...(snap.transition !== undefined ? { transition: snap.transition } : {}),
+  };
+}
+
+/**
+ * Formats the 1:1 model input inspector string for `CodexInputCard`:
+ * - When `perception.deliveredPayload !== undefined`, renders strings directly or `JSON.stringify(deliveredPayload, null, 2)`.
+ * - For older historical runs without `deliveredPayload`, builds a clean lean fallback envelope without `at`, `queryId`, or duplicate `snapshot`.
+ */
+export function formatModelInputPayload(call?: Call, bgBlock?: ActivityBlock): string {
+  if (call?.perception) {
+    const p = call.perception;
+    if (p.deliveredPayload !== undefined) {
+      return typeof p.deliveredPayload === "string"
+        ? p.deliveredPayload
+        : (JSON.stringify(p.deliveredPayload, null, 2) ?? "null");
+    }
+    if (p.ok === false) {
+      return JSON.stringify(
+        {
+          ok: false,
+          ...(p.error ? { error: p.error } : {}),
+          ...(p.availability ? { availability: p.availability } : {}),
+          ...(p.deliveryError ? { deliveryError: p.deliveryError } : {}),
+        },
+        null,
+        2,
+      );
+    }
+    const leanRecords = p.records
+      ? p.records.map(rec => formatLeanRecordFallback(rec.snapshot, rec.text || undefined))
+      : p.snapshot
+        ? [formatLeanRecordFallback(p.snapshot, call.inputText || undefined)]
+        : [];
+    const q = p.query ?? {};
+    const isHistoricalOrFiltered = Boolean(
+      q.id ||
+        q.at ||
+        q.start ||
+        q.end ||
+        q.after !== undefined ||
+        q.limit !== undefined ||
+        q.capability !== undefined,
+    );
+    return JSON.stringify(
+      {
+        ok: p.ok ?? true,
+        ...(isHistoricalOrFiltered && p.query ? { query: p.query } : {}),
+        records: leanRecords,
+        ...(isHistoricalOrFiltered ? { hasMore: Boolean(p.hasMore) } : {}),
+        ...(isHistoricalOrFiltered && p.nextAfter !== undefined ? { nextAfter: p.nextAfter } : {}),
+        ...(isHistoricalOrFiltered && p.availability ? { availability: p.availability } : {}),
+        ...(p.deliveryError ? { deliveryError: p.deliveryError } : {}),
+      },
+      null,
+      2,
+    );
+  }
+  if (call) {
+    if (call.inputText) return call.inputText;
+    return JSON.stringify(
+      call.inputObservations.length > 0 ? { observations: call.inputObservations } : {},
+      null,
+      2,
+    );
+  }
+  const raw = bgBlock?.data ?? bgBlock;
+  return typeof raw === "string" ? raw : (JSON.stringify(raw, null, 2) ?? "");
 }
 
 export function summarizeStepBlock(block: ActivityBlock): { badge: string; detail: string } {
@@ -152,6 +326,30 @@ export function summarizeStepBlock(block: ActivityBlock): { badge: string; detai
 
   if (block.kind === "system") {
     const rec = asRecord(block.data);
+    if (block.title === "loop_step" || rec?.role === "loop_step") {
+      return {
+        badge: "↻ loop",
+        detail: previewText || (typeof rec?.action === "string" ? rec.action : "loop_step"),
+      };
+    }
+    if (block.title === "loop_fault" || rec?.role === "loop_fault") {
+      return {
+        badge: "⚠ loop_fault",
+        detail: cleanErrorMessage(previewText || String(rec?.error ?? "loop.py fault")),
+      };
+    }
+    if (block.title === "loop_status" || rec?.role === "loop_status") {
+      return {
+        badge: "● loop_status",
+        detail: previewText || String(rec?.state ?? "loop_status"),
+      };
+    }
+    if (rec?.role === "loop_capability") {
+      return {
+        badge: "⚡ capability",
+        detail: previewText || String(rec?.capability ?? block.title),
+      };
+    }
     if (block.title === "control_budget") {
       const reqSec = rec?.requestedSeconds;
       const detail =
@@ -182,6 +380,17 @@ export function summarizeStepBlock(block: ActivityBlock): { badge: string; detai
     return {
       badge: `● ${block.title}`,
       detail: sysDetail || tokenSummary || previewText || block.title,
+    };
+  }
+
+  if (isInterTurnPythonCallBlock(block)) {
+    const rec = asRecord(block.data);
+    return {
+      badge: "⚡ capability",
+      detail:
+        previewText ||
+        (typeof rec?.capability === "string" ? rec.capability : "") ||
+        block.title.replace(/^Python 调用 · /, ""),
     };
   }
 
@@ -289,6 +498,8 @@ export type StreamSegment =
       responseBlock: ActivityBlock | null;
       responseText: string | null;
       standby?: boolean;
+      stepGroupVariant?: "loop";
+      loopFault?: boolean;
     };
 
 export function isPoolReceiptBlock(block: ActivityBlock): boolean {
@@ -453,6 +664,7 @@ export function buildCodexSegments(
   const closedEpochs = new Set<string>();
   const segments: StreamSegment[] = [];
   let pendingSteps: ActivityBlock[] = [];
+  let pendingLoopSteps: ActivityBlock[] = [];
   let currentEpoch: string | null = null;
   let lastSegmentEndedAt: string | null = options.prevEndedAt ?? null;
   let emittedPostAfterCycle = false;
@@ -618,7 +830,31 @@ export function buildCodexSegments(
     return null;
   };
 
+  const flushLoopSteps = () => {
+    if (pendingLoopSteps.length === 0) return;
+    const anchorId = pendingLoopSteps[0]!.id;
+    const hasFault = pendingLoopSteps.some(
+      item =>
+        item.status === "error" ||
+        item.title === "loop_fault" ||
+        asRecord(item.data)?.role === "loop_fault" ||
+        (item.title === "loop_status" && asRecord(item.data)?.state === "error"),
+    );
+    segments.push({
+      kind: "turn",
+      id: `loop-steps:${options.runId ?? ""}:${anchorId}`,
+      runId: options.runId,
+      steps: pendingLoopSteps,
+      responseBlock: null,
+      responseText: null,
+      stepGroupVariant: "loop",
+      ...(hasFault ? { loopFault: true } : {}),
+    });
+    pendingLoopSteps = [];
+  };
+
   const flushTurn = (explicitResponse?: ActivityBlock) => {
+    flushLoopSteps();
     const anchorId = pendingSteps[0]?.id ?? explicitResponse?.id ?? "turn";
     const stableId = `turn:${options.runId ?? ""}:${anchorId}`;
     if (explicitResponse) {
@@ -684,13 +920,17 @@ export function buildCodexSegments(
     const resolvedObs = call.inputObservations
       .map(obsId => obsById.get(obsId))
       .filter((item): item is Observation => Boolean(item));
+    const recordRecordedAt =
+      call.perception?.records?.at(-1)?.snapshot?.recordedAt ??
+      call.perception?.records?.[0]?.snapshot?.recordedAt ??
+      call.perception?.snapshot?.recordedAt;
     segments.push({
       kind: "input",
       id: `input-call:${call.id}`,
       runId: options.runId,
       call,
       observations: resolvedObs,
-      at: call.perception?.snapshot?.recordedAt ?? resolvedObs[0]?.at ?? call.at,
+      at: recordRecordedAt ?? resolvedObs[0]?.at ?? call.at,
     });
   };
 
@@ -713,12 +953,14 @@ export function buildCodexSegments(
       if (rec?.mode === "auto") {
         // If only brief startup system steps (< 60s) preceded the first cycle in this run,
         // emit the cycle header first so the run opens cleanly with its divider.
+        const firstBootAt = (pendingSteps[0] ?? pendingLoopSteps[0])?.at;
         const onlyBootSystemSteps =
           segments.length === 0 &&
-          pendingSteps.length > 0 &&
+          (pendingSteps.length > 0 || pendingLoopSteps.length > 0) &&
           pendingSteps.every(step => step.kind === "system") &&
+          pendingLoopSteps.every(step => step.kind === "system") &&
           blockMs > 0 &&
-          blockMs - (Date.parse(pendingSteps[0].at) || blockMs) <= 60_000;
+          blockMs - (Date.parse(firstBootAt ?? "") || blockMs) <= 60_000;
         if (!onlyBootSystemSteps) {
           flushTurn();
         }
@@ -787,7 +1029,7 @@ export function buildCodexSegments(
           emitDividerForEpoch(`post:${block.id}`, block.at);
         }
       }
-    } else if (!blockEpoch && segments.length === 0 && pendingSteps.length === 0 && options.runId) {
+    } else if (!blockEpoch && segments.length === 0 && pendingSteps.length === 0 && pendingLoopSteps.length === 0 && options.runId) {
       const fallbackCycle = options.cycles?.[0];
       const fallbackStartMs = fallbackCycle ? Date.parse(fallbackCycle.startedAt) : NaN;
       const fallbackClosedEnd = fallbackCycle?.endedAt ?? (fallbackCycle ? manualEndByEpoch.get(fallbackCycle.epoch)?.endedAt : null) ?? null;
@@ -899,6 +1141,18 @@ export function buildCodexSegments(
       continue;
     }
 
+    if (isLoopOrchestrationBlock(block)) {
+      if (pendingSteps.length > 0) {
+        flushTurn();
+      }
+      pendingLoopSteps.push(block);
+      continue;
+    }
+
+    if (pendingLoopSteps.length > 0) {
+      flushLoopSteps();
+    }
+
     pendingSteps.push(block);
     // Fallback turn split only when calls don't carry turn-boundary input headers
     if (
@@ -967,6 +1221,8 @@ function sameCallSummary(left: Call | undefined, right: Call | undefined): boole
     left.index === right.index &&
     left.at === right.at &&
     left.inputText === right.inputText &&
+    left.perception?.injectionMode === right.perception?.injectionMode &&
+    left.perception?.deliveredPayload === right.perception?.deliveredPayload &&
     left.inputObservations.length === right.inputObservations.length &&
     left.inputObservations.every((id, idx) => id === right.inputObservations[idx])
   );
@@ -1060,7 +1316,9 @@ export function reconcileSegments(previous: StreamSegment[], next: StreamSegment
         const respUnchanged =
           sameBlockRefOrRev(p.responseBlock, seg.responseBlock) &&
           p.responseText === seg.responseText &&
-          p.standby === seg.standby;
+          p.standby === seg.standby &&
+          p.stepGroupVariant === seg.stepGroupVariant &&
+          p.loopFault === seg.loopFault;
         if (p.runId === seg.runId && stepsUnchanged && respUnchanged) {
           keepPrior = true;
         } else if (stepsUnchanged && p.steps !== seg.steps) {
