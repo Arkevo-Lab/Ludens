@@ -20,6 +20,7 @@ import uuid
 
 from ._sampling import DEFAULT_SAMPLE_HZ, validate_sample_hz
 from ._capabilities import discover
+from ._storage import TimelineStorageManager, resolve_storage_config
 
 if os.name == "nt":
     import msvcrt
@@ -272,10 +273,8 @@ class ObservationHistory:
         self.video_segment_seconds = _configured(settings, "videoSegmentSeconds", "LUDENS_VIDEO_SEGMENT_SECONDS", 300)
         self.video_idle_seconds = _configured(settings, "videoIdleSeconds", "LUDENS_VIDEO_IDLE_SECONDS", 10)
         self.segment_limit = _number("LUDENS_PERCEPTION_SEGMENT_BYTES", 256 * 1024 * 1024, True)
-        persist = os.environ.get("LUDENS_PERCEPTION_PERSIST", "1").strip().lower()
-        if persist not in {"1", "0", "true", "false"}:
-            raise ValueError("LUDENS_PERCEPTION_PERSIST must be 1, 0, true, or false")
-        self.persistent = persist in {"1", "true"}
+        storage_cfg = resolve_storage_config(self.root)
+        self.persistent = storage_cfg["kind"] != "ephemeral"
         self.lock = threading.Lock()
         self._hot = OrderedDict()
         self._hot_media = {}
@@ -283,6 +282,7 @@ class ObservationHistory:
         self._channel_bytes = Counter()
         self.budget_evictions = 0
         self._video = None
+        self._storage = None
         self.hot_bytes = 0
         self._references = Counter()
         self._expired = None  # min/max wall time and greatest evicted sequence, not old records.
@@ -332,6 +332,7 @@ class ObservationHistory:
                     temporary = path.with_suffix(".tmp")
                     temporary.write_text(json.dumps(state) + "\n")
                     _replace_file(temporary, path)
+            self._storage = TimelineStorageManager(self.root, self.directory)
 
     def policy(self):
         return {"persistent": self.persistent, "hotSeconds": self.hot_seconds,
@@ -439,15 +440,24 @@ class ObservationHistory:
                 segment = self._new_segment(at)
             media_dir = self.objects if self.persistent else self._temporary
             reference = {"recordId": str(uuid.uuid4()), "sequence": self.sequence + 1}
-            archived, media_bytes, originals = [], 0, {}
+            archived, media_bytes, originals, sealed_objects = [], 0, {}, []
+            storage = getattr(self, "_storage", None)
             for index, item in enumerate(sample.get("media", [])):
                 if item["mediaType"].startswith("image/"):
                     raw, size = prepared[index]
                     if self._video is None:
                         from ludens_tools._video import VideoRecorder
                         video_dir = (self.directory if self.persistent else self._temporary) / "video"
-                        self._video = VideoRecorder(self.directory, video_dir,
-                            segment_seconds=self.video_segment_seconds, idle_seconds=self.video_idle_seconds)
+                        storage_crf = (storage.effective_policy()["crf"]
+                                       if storage is not None else resolve_storage_config(self.root)["crf"])
+                        self._video = VideoRecorder(
+                            self.directory,
+                            video_dir,
+                            segment_seconds=self.video_segment_seconds,
+                            idle_seconds=self.video_idle_seconds,
+                            crf=storage_crf,
+                            on_sealed=storage.notify_sealed if storage is not None else None,
+                        )
                     channel = json.dumps([identity["id"], identity.get("codeSHA"), index, generation, item["mediaType"]])
                     idle = None if identity["id"] == self.main_capability else min(self.video_idle_seconds, 0.25)
                     location = self._video.submit(raw, channel, at, size, sample_hz=self.sample_hz, idle_seconds=idle)
@@ -458,11 +468,14 @@ class ObservationHistory:
                     media_bytes += len(raw)
                 else:
                     path, added = self._archive(item, media_dir)
+                    rel_asset = path.relative_to(self.directory).as_posix()
                     archived.append({"path": str(path), "mediaType": item["mediaType"],
-                                     "timeline": {**reference, "asset": path.relative_to(self.directory).as_posix()}})
+                                     "timeline": {**reference, "asset": rel_asset}})
                     media_bytes += path.stat().st_size
                     if segment is not None:
                         segment["mediaBytes"] += added
+                    if self.persistent:
+                        sealed_objects.append(rel_asset)
             record = {"id": reference["recordId"], "sequence": reference["sequence"],
                       "timeline": reference, "capability": identity["id"], "identity": identity,
                       "generation": generation, "runId": run_id, "trace": trace or {},
@@ -505,6 +518,9 @@ class ObservationHistory:
             # Continuous background perception skips delivery: metadata only.
             result = self._delivery(record, originals) if deliver_media else observation_result(record)
             self._prune()
+            if storage is not None:
+                for rel_asset in sealed_objects:
+                    storage.notify_sealed(rel_asset)
             return result
 
     def _media_bytes(self, item):
@@ -584,7 +600,14 @@ class ObservationHistory:
             directory = self.objects if self.persistent else self._temporary
             # Only writer-owned immutable media is a source, never an arbitrary
             # file path supplied by the encoder or a symlink outside this axis.
-            if (path.parent != directory or path.resolve() != path or not path.is_file()
+            source_present = path.is_file()
+            if not source_present and self.persistent and (self.directory / (source["asset"] + ".json")).is_file():
+                storage = getattr(self, "_storage", None) or TimelineStorageManager(self.root, self.directory, start_worker=False)
+                try:
+                    source_present = storage.resolve_for_read(source["asset"]).is_file()
+                except ValueError:
+                    source_present = False
+            if (path.parent != directory or (path.exists() and path.resolve() != path) or not source_present
                     or Path(original["path"]) != path):
                 raise ValueError("Derived media source asset is missing or outside the timeline")
             digest = hashlib.sha256(raw).hexdigest()
@@ -592,6 +615,9 @@ class ObservationHistory:
             if destination.exists() and (destination.resolve() != destination or not destination.is_file()):
                 raise ValueError("Derived media destination must be a timeline object")
             destination, _added = self._archive({"data": data}, directory)
+            rel_dest = destination.relative_to(self.directory).as_posix()
+            if self.persistent and getattr(self, "_storage", None) is not None:
+                self._storage.notify_sealed(rel_dest)
             if not self.persistent:
                 entry = self._hot[source["sequence"]]
                 path_text = str(destination)
@@ -677,7 +703,14 @@ class ObservationHistory:
             elif not self.persistent:
                 media.append({**item, "data": base64.b64encode(Path(item["path"]).read_bytes()).decode("ascii")})
             else:
-                media.append(item)
+                asset = item.get("timeline", {}).get("asset")
+                if ("path" in item and not Path(item["path"]).is_file()
+                        and isinstance(asset, str) and (self.directory / (asset + ".json")).is_file()):
+                    storage = getattr(self, "_storage", None) or TimelineStorageManager(self.root, self.directory, start_worker=False)
+                    resolved = storage.resolve_for_read(asset)
+                    media.append({**item, "path": str(resolved)})
+                else:
+                    media.append(item)
         return {**record, "media": media}
 
     def _delete_unused(self, path):
@@ -728,6 +761,9 @@ class ObservationHistory:
     def prune(self):
         with self.lock:
             self._prune()
+        storage = getattr(self, "_storage", None)
+        if storage is not None:
+            storage.prune_async()
 
     def seal(self):
         """Flush and seal active segments at a control-lease boundary.
@@ -741,10 +777,25 @@ class ObservationHistory:
                 self._video.seal()
             if self.persistent and self._active is not None:
                 self._save_meta(self._active)
+        storage = getattr(self, "_storage", None)
+        if storage is not None:
+            storage.prune_async()
+
+    def storage_maintain(self, mode):
+        if mode not in {"sync", "prune", "clear_cache"}:
+            raise ValueError(f"Unsupported storage maintenance mode: {mode!r}")
+        with self.lock:
+            self._prune()
+        storage = getattr(self, "_storage", None)
+        if storage is None:
+            return {"ok": True, "action": mode, "mode": mode, "freedBytes": 0, "archivedCount": 0, "evictedCount": 0, "errors": []}
+        result = storage.maintain(mode)
+        return {"ok": True, "action": mode, "mode": mode, **result}
 
     def close(self):
         if self._writer.closed:
             return
+        storage = getattr(self, "_storage", None)
         try:
             with self.lock:
                 if self._video is not None:
@@ -758,6 +809,8 @@ class ObservationHistory:
                 if self._temporary is not None:
                     shutil.rmtree(self._temporary)
                     self._temporary = None
+            if storage is not None:
+                storage.close(timeout=2.0)
         finally:
             self._unlock()
 
@@ -993,6 +1046,7 @@ def read_timeline(workspace, query=None):
     reader._channel_bytes = Counter()
     reader._expired = None
     reader._segments = []
+    reader._storage = None
     reader._offline_disk_reader = True
     for metadata in (directory / "segments").glob("*.meta.json"):
         if metadata.resolve() != metadata:
