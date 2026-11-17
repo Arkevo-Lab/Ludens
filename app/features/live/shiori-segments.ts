@@ -80,6 +80,11 @@ export function isInterTurnPythonCallBlock(block: ActivityBlock): boolean {
       (typeof topRecord?.modelCallId === "string" && topRecord.modelCallId),
   );
   if (hasModelCallId) return false;
+  const recordingPurpose =
+    typeof topRecord?.recordingPurpose === "string"
+      ? topRecord.recordingPurpose
+      : block.trace?.recordingPurpose;
+  if (recordingPurpose !== "loop") return false;
   const data = asRecord(block.data);
   if (data?.role === "loop_capability") return true;
   const kindStr = String(block.kind);

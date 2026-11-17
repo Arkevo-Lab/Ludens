@@ -1,6 +1,8 @@
 import type { VideoFrameReference } from "@ludens/protocol/timeline-media";
 import type { OmpEffort, OmpServiceTier } from "@ludens/protocol/ludens";
 
+export type RecordingPurpose = "continuous-perception" | "loop";
+
 export interface Event {
   /** Present on canonical device files; mirrored historical Ludens rows keep their local sequence. */
   serviceId?: string;

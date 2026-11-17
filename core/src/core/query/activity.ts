@@ -39,6 +39,7 @@ export interface LogBlock {
   data?: Record<string, unknown>;
   source?: Event["source"];
   trace?: Event["trace"];
+  recordingPurpose?: string;
   eventId?: string;
   seq?: number;
   updatedAt?: string;
@@ -46,8 +47,16 @@ export interface LogBlock {
   revision?: number;
 }
 
-const provenance = (event: Partial<Event>) => ({ source: event.source, trace: event.trace,
-  eventId: event.origin?.eventId, seq: event.seq, updatedAt: event.at });
+const provenance = (event: Partial<Event>) => ({
+  source: event.source,
+  trace: event.trace,
+  ...(typeof event.trace?.recordingPurpose === "string"
+    ? { recordingPurpose: event.trace.recordingPurpose }
+    : {}),
+  eventId: event.origin?.eventId,
+  seq: event.seq,
+  updatedAt: event.at,
+});
 
 type Json = Record<string, any>;
 const callId = (id: string) => id.split("|")[0];
@@ -253,8 +262,7 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
       || (data.outcome !== "cancelled" && !data.aborted
       && (event.type.endsWith("_error") || event.type === "perception_fault" || (event.type === "event_source_gap" && data.phase === "start") || data.isError === true || data.stopReason === "error")));
     const isInterTurnLoopCapability = event.type === "capability_end" && data?.action === "call"
-      && Boolean(event.trace?.epoch) && !event.trace?.modelCallId
-      && event.trace?.recordingPurpose !== "continuous-perception" && data?.outcome !== "cancelled";
+      && event.trace?.recordingPurpose === "loop" && !event.trace?.modelCallId && data?.outcome !== "cancelled";
     const system = failed || event.type === "control" || event.type === "control_budget"
       || ["perception_status", "perception_fault", "perception_fault_end", "loop_step", "loop_fault", "loop_status"].includes(event.type)
       || isInterTurnLoopCapability
@@ -444,8 +452,8 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
       });
       continue;
     }
-    if (event.type === "capability_end" && data?.action === "call" && Boolean(trace?.epoch) && !trace?.modelCallId
-      && trace?.recordingPurpose !== "continuous-perception" && data?.outcome !== "cancelled") {
+    if (event.type === "capability_end" && data?.action === "call" && trace?.recordingPurpose === "loop"
+      && !trace?.modelCallId && data?.outcome !== "cancelled") {
       const capId = typeof data.id === "string" ? data.id : "capability";
       const dur = typeof data.durationMs === "number" && Number.isFinite(data.durationMs) ? ` (${Math.round(data.durationMs)}ms)` : "";
       blocks.set(header.id, {
@@ -925,9 +933,9 @@ export function activityProgress(index: LogIndex) {
 export async function createActivityReducer(index: LogIndex, options: {
   cold?: boolean; signal?: AbortSignal; streamLimits?: ReadonlyMap<string, number>;
 } = {}) {
-  if (index.meta("activitySemantics") !== "12") {
+  if (index.meta("activitySemantics") !== "13") {
     index.resetActivity(); index.resetStores(["activity-model-ends", "activity-deliveries"]);
-    index.setMeta("activitySemantics", "12"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
+    index.setMeta("activitySemantics", "13"); index.setMeta("activitySessionModel", ""); activeParsers.delete(index);
   }
   let position = Number(index.meta("activityPosition") ?? 0);
   const current = new Map<string, CurrentState>();
