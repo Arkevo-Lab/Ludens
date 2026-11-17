@@ -22,8 +22,21 @@ import type { Project } from "@/lib/types";
 import type {
   WorkspaceConfigSummary,
   WorkspaceShioriSnapshot,
+  WorkspaceStudioConfigPatch,
   WorkspaceStudioSnapshot,
 } from "@/lib/workspaces";
+import {
+  BUILTIN_LOCAL_PROFILE_ID,
+  draftToWorkspaceStorageOverride,
+  fallbackGlobalStorageConfig,
+  sameWorkspaceStorageOverride,
+  useStorageOverview,
+  workspaceStorageToDraft,
+  type RedactedGlobalStorageConfig,
+  type VideoQualityPreset,
+  type WorkspaceStorageDraft,
+  type WorkspaceStorageMode,
+} from "@/lib/storage";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -481,6 +494,7 @@ export function WorkspaceStudioView({
               onOpenDevice={() => onTabChange("device")}
               onOpenSimulator={() => onTabChange("simulator")}
               onOpenConnection={() => onTabChange("connection")}
+              onOpenGlobalStorage={() => navigate({ view: "settings", studioTab: null })}
             />
           )
         )}
@@ -715,22 +729,29 @@ export function ModelAndBudgetPanel({
   isZh,
   workspaceRunning,
   activeDeviceSummary,
+  storageConfig,
   onSaved,
   onOpenDevice,
   onOpenSimulator,
   onOpenConnection,
+  onOpenGlobalStorage,
 }: {
   studio: WorkspaceStudioSnapshot;
   isZh: boolean;
   workspaceRunning?: boolean;
   activeDeviceSummary?: ActiveDeviceSummary | null;
+  storageConfig?: RedactedGlobalStorageConfig | null;
   onSaved(snapshot: WorkspaceStudioSnapshot): void;
   onOpenDevice?: () => void;
   onOpenSimulator(): void;
   onOpenConnection(): void;
+  onOpenGlobalStorage?: () => void;
 }) {
   const t = useTranslations("workspaceStudio");
   const rpc = useOptionalLudensRpc();
+  const storageOverview = useStorageOverview({ enabled: !storageConfig });
+  const effectiveStorageConfig =
+    storageConfig ?? storageOverview.config ?? fallbackGlobalStorageConfig();
   const service = useWorkspaceService({
     workspaceId: studio.id,
     fallbackError: t("operationFailed"),
@@ -743,6 +764,10 @@ export function ModelAndBudgetPanel({
   const diagnosticsId = useId();
   const portInputId = useId();
   const gameInputId = useId();
+  const storageModeId = useId();
+  const storageProfileId = useId();
+  const storageMaxGibId = useId();
+  const storageQualityId = useId();
 
   const initial: WorkspaceConfigSummary = studio.config ?? {
     driver: "cua",
@@ -770,6 +795,9 @@ export function ModelAndBudgetPanel({
   const [dashboard, setDashboard] = useState(initial.dashboard);
   const [port, setPort] = useState(initial.port !== undefined ? String(initial.port) : "");
   const [game, setGame] = useState(initial.game ?? "");
+  const [storageDraft, setStorageDraft] = useState<WorkspaceStorageDraft>(() =>
+    workspaceStorageToDraft(initial.storage, effectiveStorageConfig.defaultProfileId),
+  );
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedNotice, setSavedNotice] = useState(false);
@@ -789,12 +817,22 @@ export function ModelAndBudgetPanel({
     setDashboard(cfg.dashboard);
     setPort(cfg.port !== undefined ? String(cfg.port) : "");
     setGame(cfg.game ?? "");
-  }, [studio.config]);
+    setStorageDraft(
+      workspaceStorageToDraft(cfg.storage, effectiveStorageConfig.defaultProfileId),
+    );
+  }, [studio.config, effectiveStorageConfig.defaultProfileId]);
 
   const parsedSeconds = Number(seconds.trim());
   const parsedRequests = Number(requests.trim());
   const parsedCompaction = compaction.trim() === "" ? null : Number(compaction.trim());
   const parsedPort = port.trim() === "" ? null : Number(port.trim());
+  const storageDraftOutcome = useMemo(
+    () => draftToWorkspaceStorageOverride(storageDraft),
+    [storageDraft],
+  );
+  const storageDirty =
+    storageDraftOutcome.errorCode !== null ||
+    !sameWorkspaceStorageOverride(storageDraftOutcome.override, initial.storage);
 
   const dirty =
     model.trim() !== initial.model ||
@@ -807,7 +845,8 @@ export function ModelAndBudgetPanel({
     pet !== initial.pet ||
     dashboard !== initial.dashboard ||
     (port.trim() === "" ? undefined : Number(port.trim())) !== initial.port ||
-    game.trim() !== (initial.game ?? "");
+    game.trim() !== (initial.game ?? "") ||
+    storageDirty;
 
   const resetDraft = () => {
     setModel(initial.model);
@@ -821,12 +860,25 @@ export function ModelAndBudgetPanel({
     setDashboard(initial.dashboard);
     setPort(initial.port !== undefined ? String(initial.port) : "");
     setGame(initial.game ?? "");
+    setStorageDraft(
+      workspaceStorageToDraft(initial.storage, effectiveStorageConfig.defaultProfileId),
+    );
     setSaveError(null);
     setSavedNotice(false);
   };
 
   const saveConfig = async () => {
     if (saving || !dirty) return;
+    if (storageDraftOutcome.errorCode !== null) {
+      setSaveError(
+        t(
+          storageDraftOutcome.errorCode === "missingProfile"
+            ? "storageSection.errMissingProfile"
+            : "storageSection.errInvalidMaxGib",
+        ),
+      );
+      return;
+    }
     if (!rpc) {
       setSaveError("RPC client is unavailable");
       return;
@@ -835,21 +887,23 @@ export function ModelAndBudgetPanel({
     setSaveError(null);
     setSavedNotice(false);
     try {
+      const patch: WorkspaceStudioConfigPatch = {
+        model: model.trim(),
+        serviceTier,
+        effort,
+        seconds: parsedSeconds,
+        requests: parsedRequests,
+        compactionThreshold: parsedCompaction,
+        diagnostics,
+        pet,
+        dashboard,
+        storage: storageDraftOutcome.override,
+        ...(initial.driver !== "cua" ? { port: parsedPort, game: game.trim() || null } : {}),
+      };
       const value = await rpc.call("workspaces/mutate", {
         action: "updateStudioConfig",
         workspaceId: studio.id,
-        patch: {
-          model: model.trim(),
-          serviceTier,
-          effort,
-          seconds: parsedSeconds,
-          requests: parsedRequests,
-          compactionThreshold: parsedCompaction,
-          diagnostics,
-          pet,
-          dashboard,
-          ...(initial.driver !== "cua" ? { port: parsedPort, game: game.trim() || null } : {}),
-        },
+        patch: patch as unknown as Record<string, unknown>,
       });
       onSaved(value as WorkspaceStudioSnapshot);
       setSavedNotice(true);
@@ -1216,6 +1270,182 @@ export function ModelAndBudgetPanel({
                   placeholder={t("modelSection.gamePlaceholder")}
                   className="w-full font-mono sm:w-72"
                 />
+              }
+            />
+          </>
+        )}
+      </SettingsSection>
+
+      <SettingsSection
+        headingLevel={3}
+        title={t("storageSection.title")}
+        description={t("storageSection.description")}
+        actions={
+          onOpenGlobalStorage ? (
+            <Button type="button" variant="outline" size="sm" onClick={onOpenGlobalStorage}>
+              <HardDrive className="size-3.5" aria-hidden="true" />
+              {t("storageSection.openGlobalStorage")}
+            </Button>
+          ) : undefined
+        }
+      >
+        <SettingsRow
+          label={t("storageSection.modeLabel")}
+          htmlFor={storageModeId}
+          description={t("storageSection.modeHint")}
+          control={
+            <NativeSelect
+              id={storageModeId}
+              value={storageDraft.mode}
+              onChange={event => {
+                const raw = event.target.value;
+                const nextMode: WorkspaceStorageMode =
+                  raw === "ephemeral" || raw === "local" || raw === "profile" ? raw : "inherit";
+                setStorageDraft(prev => ({
+                  ...prev,
+                  mode: nextMode,
+                  profileId:
+                    nextMode === "profile"
+                      ? prev.profileId ||
+                        effectiveStorageConfig.defaultProfileId ||
+                        BUILTIN_LOCAL_PROFILE_ID
+                      : prev.profileId,
+                }));
+                setSavedNotice(false);
+              }}
+              wrapperClassName="w-full sm:w-80"
+              className="w-full"
+              data-workspace-storage-mode
+            >
+              <NativeSelectOption value="inherit">{t("storageSection.modeInherit")}</NativeSelectOption>
+              <NativeSelectOption value="ephemeral">{t("storageSection.modeEphemeral")}</NativeSelectOption>
+              <NativeSelectOption value="local">{t("storageSection.modeLocal")}</NativeSelectOption>
+              <NativeSelectOption value="profile">{t("storageSection.modeProfile")}</NativeSelectOption>
+            </NativeSelect>
+          }
+        />
+
+        {storageDraft.mode === "profile" && (
+          <SettingsRow
+            label={t("storageSection.profileLabel")}
+            htmlFor={storageProfileId}
+            description={t("storageSection.profileHint")}
+            control={
+              <NativeSelect
+                id={storageProfileId}
+                value={storageDraft.profileId}
+                onChange={event => {
+                  setStorageDraft(prev => ({ ...prev, profileId: event.target.value }));
+                  setSavedNotice(false);
+                }}
+                wrapperClassName="w-full sm:w-80"
+                className="w-full"
+                data-workspace-storage-profile
+              >
+                {!effectiveStorageConfig.profiles.some(
+                  item => item.id === storageDraft.profileId,
+                ) &&
+                  storageDraft.profileId && (
+                    <NativeSelectOption value={storageDraft.profileId}>
+                      {storageDraft.profileId}
+                    </NativeSelectOption>
+                  )}
+                {effectiveStorageConfig.profiles.map(profile => (
+                  <NativeSelectOption key={profile.id} value={profile.id}>
+                    {`${profile.name} (${profile.kind})`}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            }
+          />
+        )}
+
+        {storageDraft.mode !== "ephemeral" && (
+          <>
+            <SettingsRow
+              className="items-start"
+              label={t("storageSection.maxGibLabel")}
+              htmlFor={storageMaxGibId}
+              description={t("storageSection.maxGibHint")}
+              control={
+                <div className="flex flex-col items-end gap-2">
+                  <Input
+                    id={storageMaxGibId}
+                    type="number"
+                    min="0.1"
+                    step="0.5"
+                    value={storageDraft.maxGib}
+                    onChange={event => {
+                      setStorageDraft(prev => ({ ...prev, maxGib: event.target.value }));
+                      setSavedNotice(false);
+                    }}
+                    placeholder={t("storageSection.maxGibPlaceholder")}
+                    className="w-48 font-mono tabular-nums"
+                    data-workspace-storage-max-gib
+                  />
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant={storageDraft.maxGib.trim() === "" ? "secondary" : "outline"}
+                      onClick={() => {
+                        setStorageDraft(prev => ({ ...prev, maxGib: "" }));
+                        setSavedNotice(false);
+                      }}
+                    >
+                      {t("storageSection.presetInherit")}
+                    </Button>
+                    {[5, 20, 50, 100].map(presetGib => (
+                      <Button
+                        key={presetGib}
+                        type="button"
+                        size="xs"
+                        variant={Number(storageDraft.maxGib) === presetGib ? "secondary" : "outline"}
+                        onClick={() => {
+                          setStorageDraft(prev => ({ ...prev, maxGib: String(presetGib) }));
+                          setSavedNotice(false);
+                        }}
+                      >
+                        {presetGib} GB
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+              }
+            />
+
+            <SettingsRow
+              label={t("storageSection.videoQualityLabel")}
+              htmlFor={storageQualityId}
+              description={t("storageSection.videoQualityHint")}
+              control={
+                <NativeSelect
+                  id={storageQualityId}
+                  value={storageDraft.videoQuality}
+                  onChange={event => {
+                    const val = event.target.value;
+                    const nextQuality: "" | VideoQualityPreset =
+                      val === "high" || val === "balanced" || val === "compact" ? val : "";
+                    setStorageDraft(prev => ({ ...prev, videoQuality: nextQuality }));
+                    setSavedNotice(false);
+                  }}
+                  wrapperClassName="w-full sm:w-72"
+                  className="w-full"
+                  data-workspace-storage-quality
+                >
+                  <NativeSelectOption value="">
+                    {t("storageSection.videoQualityInherit")}
+                  </NativeSelectOption>
+                  <NativeSelectOption value="balanced">
+                    {t("storageSection.videoQualityBalanced")}
+                  </NativeSelectOption>
+                  <NativeSelectOption value="compact">
+                    {t("storageSection.videoQualityCompact")}
+                  </NativeSelectOption>
+                  <NativeSelectOption value="high">
+                    {t("storageSection.videoQualityHigh")}
+                  </NativeSelectOption>
+                </NativeSelect>
               }
             />
           </>

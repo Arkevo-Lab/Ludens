@@ -10,7 +10,7 @@ Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runt
 
 | Path | Purpose |
 | --- | --- |
-| `ludens.json` | Workspace configuration (driver, model, cycle budgets, allowed machines, multimodal connection flags, `dashboard` / `pet` toggles, diagnostics mode) |
+| `ludens.json` | Workspace configuration (driver, model, cycle budgets, allowed machines, multimodal connection flags, `storage` timeline media policy override, `dashboard` / `pet` toggles, diagnostics mode) |
 | `AGENTS.md` | Engineering and verification conventions followed by Shiori inside this workspace |
 | `MEMORY.md` | Long-term workspace memory documenting durable environment invariants and proven strategies (editable directly or in Console **Config**) |
 | `memory/` | Working session notes (such as `memory/current.md`, updated during `ludens consolidate`) |
@@ -19,7 +19,7 @@ Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runt
 | `loop.py` (optional) | Programmable outer control loop and turn-start context injector (`Loop.step` / `Loop.inject`) with inter-turn hot-reload, zero-token `@capability` dispatch, and safe fault fallback |
 | `baseware.json` | Exported Baseware controller schema snapshot (`ludens controller list` / `baseware export`) |
 | `logs/<run-id>/` | Structured run event streams (`events.jsonl`), `manifest.json`, and `diagnostics.jsonl` (plus `logs/baseware/` device logs) |
-| `.ludens/timeline/` | Single-writer workspace timeline storing `@record` observations, deduplicated assets, and 30 Hz fMP4 video under `video/` |
+| `.ludens/timeline/` | Single-writer workspace timeline keeping local indices, hot write spool, `cache/` LRU media cache, and `pins.json`, while retaining or archiving `video/` 30 Hz fMP4 segments and deduplicated objects |
 | `.ludens/evals/` | Offline verification history and `latest.json` status snapshot |
 | `.ludens/settings.json` | Workspace overrides for `hotSeconds`, `videoSegmentSeconds`, and `videoIdleSeconds` |
 
@@ -214,11 +214,44 @@ Key runtime guarantees when authoring `loop.py`:
 - **Hot-reload and `loop_fault` fallback**: Edits to `loop.py` or imported workspace `.py` modules hot-reload automatically between turns. Syntax or runtime errors emit `loop_fault`, fall back seamlessly to the built-in default loop, and attach `loopFault` in the next model turn so `loop.py` can be fixed live without dropping the Control Cycle.
 - **Urgent human `Steer` preemption**: Sending `ludens steer` (or **Steer Now** in Console) immediately wakes any in-flight `Wait(seconds)` and bypasses `Loop.step()`, forcing an immediate `Prompt` turn carrying the operator's message (`ctx.steered = True`).
 
-## 6. Capabilities, Config & Consolidation in Console
+## 6. Pluggable Timeline Media Storage & Retention
+
+Continuous 30 Hz perception recording can produce substantial fMP4 video over multi-hour runs. Ludens decouples **locally resident lightweight indices** from **pluggable media backends** so workspace disks stay bounded and 30 Hz encoding never stalls on external disk spin-up or network jitter:
+
+| Backend (`kind`) | Purpose & Behavior |
+| --- | --- |
+| `ephemeral` | Pure in-memory hot window (`window-<pid>-*`) with zero persistent video segments retained after exit (also forced when `LUDENS_PERCEPTION_PERSIST=0`). |
+| `local` | **Default profile (`local-default`)**. Rolling byte-capped ring buffer inside `.ludens/timeline/` (`maxBytes` defaults to `20 GiB`, optional `maxAgeHours`). |
+| `directory` | External SSD, SMB, or NFS mount (`<directory.path>/<workspaceId>/video/<uuid>.mp4` & `objects/<sha256>.bin`) with direct zero-copy HTTP `206 Range` streaming. |
+| `s3` | Zero-dependency AWS Signature V4 (`HMAC-SHA256`) object storage (AWS S3, Cloudflare R2, MinIO, OSS, COS); proxied with `206 Range` support in both Web Console and Electron Desktop (`ludens-media://local/media`) with zero bucket CORS setup. |
+
+### Global Secret Store (`~/.ludens/storage.json`) vs Per-Workspace Override (`ludens.json`)
+
+- **Global `~/.ludens/storage.json` (`mode 0600`)**: Stores named `profiles` (including S3 credentials and mount paths), `defaultProfileId`, `videoQuality` (`balanced` CRF 23 recommended default, `compact` CRF 28 low-bitrate long horizon, `high` CRF 18 high-fidelity detail), and `protectReferenced` (`true`).
+- **Workspace `<workspace>/ludens.json` (never credentials)**: Optionally sets `storage` (`mode: "inherit" | "ephemeral" | "local" | "profile"`, `profileId?`, `maxBytes?`, `maxAgeHours?`, `localCacheBytes?`, `videoQuality?`):
+
+```json
+{
+  "storage": {
+    "mode": "profile",
+    "profileId": "cloudflare-r2-archive",
+    "maxBytes": 107374182400,
+    "videoQuality": "balanced"
+  }
+}
+```
+
+### Local Hot Spool, Async Cold Archival & Eviction Protection
+
+1. **Local hot spool + bounded LRU cache**: `segments/` indices, `.mp4.json` metadata, and active `status: "pending"` segments always stay on local SSD. Once sealed (`status: "ready"`), a background archiver uploads blobs to `directory` or `s3` and trims local copies + `.ludens/timeline/cache/` to `localCacheBytes` (default `4 GiB`); `Client().replay()` and `@eval_env` hydrate cached segments transparently on demand.
+2. **Pinning & model-input protection**: Assets listed in `.ludens/timeline/pins.json` (`{"version": 1, "assets": ["video/<uuid>.mp4"]}`) are **never** auto-evicted; when `protectReferenced` is enabled, frames delivered to LLM turns (`.ludens/archive/media/*.json`) are evicted last, only after unreferenced segments are reclaimed. Evicted segments update `<uuid>.mp4.json` to `status: "evicted"` and surface HTTP `410 Gone` on playback.
+
+## 7. Capabilities, Storage, Config & Consolidation in Console
 
 - **Live (`?view=live`)**: Expand **View model input details** on any model turn card to inspect the post-`Loop.inject` `deliveredPayload` 1:1, and open **Loop steps** to review inter-turn `loop_step` / `loop_fault` events and model-free `@capability` calls (auto-expanded on fault).
 - **Capabilities (`?view=caps`)**: Visualize the **Capability – Eval – Env** triad, filter by verification status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), inspect **Workspace sources** (`baseware.json` vs static Python `@capability`), verify **Core connection check** and **Community driver verification**, and trigger **Run All Evals** with one click.
-- **Config (`?view=perception`)**: Open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
+- **Config (`?view=perception`)**: Configure per-workspace **Timeline Storage Policy (`ludens.json · storage`)** in **Model & Budget**, and open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
+- **Global Settings → Recording & Storage (`?view=settings`)**: Inspect aggregate and per-workspace video, cache, index, and log footprints, run **Prune All Workspaces**, **Sync Archive**, or per-workspace **Prune / Sync / Clear Cache**, and manage global storage profiles with live directory / S3 connectivity probes.
 - **Consolidation (`ludens consolidate` or Live UI)**: Runs a file-only turn (with device actuation disabled) that promotes `verified` capabilities into `skills/` SKILL cards, drops `unverified`/`stale`/`adapting`/`failed` entries from `skills/`, and refreshes `memory/current.md`.
 
 Continue to [Perception, Action & Performance Tuning](perception-and-action.md) to build your resident `perception.py` state machine and configure 30 Hz multimodal transport.

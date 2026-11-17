@@ -10,7 +10,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 
 | 路径 | 职责 |
 | --- | --- |
-| `ludens.json` | 工作区配置（驱动、模型、控制周期预算、受控节点池、多模态传输开关、`dashboard` / `pet` 开关、日志模式） |
+| `ludens.json` | 工作区配置（驱动、模型、控制周期预算、受控节点池、多模态传输开关、`storage` 录像存储覆盖策略、`dashboard` / `pet` 开关、日志模式） |
 | `AGENTS.md` | Shiori 在该工作区内遵守的工程约束与自验证工作流说明 |
 | `MEMORY.md` | 工作区根目录长期记忆，沉淀环境规律与已验证策略（可直接编辑或在控制台 **配置** 页编辑） |
 | `memory/` | 阶段性运行记忆笔记（例如在 `ludens consolidate` 边界更新的 `memory/current.md`） |
@@ -19,7 +19,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 | `loop.py`（可选） | 可编程外层循环与轮首上下文注入器（`Loop.step` / `Loop.inject`），支持轮间热重载、零 Token `@capability` 调度与故障自动回退 |
 | `baseware.json` | 由 Baseware 导出的实时控制器目录快照（对应 `ludens controller list` / `baseware export`） |
 | `logs/<run-id>/` | 结构化运行事件流（`events.jsonl`）、`manifest.json` 与 `diagnostics.jsonl`（设备事实日志位于 `logs/baseware/`） |
-| `.ludens/timeline/` | 单写入者的工作区时空轴，保存 `@record` 观测、去重多媒体对象与 `video/` 下的 30 Hz fMP4 视频 |
+| `.ludens/timeline/` | 单写入者的工作区时空轴，常驻保留分段索引、热写缓冲、按需回放 `cache/`、`pins.json` 锁定清单，并支持向本机环形盘、外置目录或 S3 归档 `video/` 30 Hz fMP4 视频与去重对象 |
 | `.ludens/evals/` | 离线能力评测历史与 `latest.json` 验证状态快照 |
 | `.ludens/settings.json` | 工作区级感知存储覆盖参数（`hotSeconds`、`videoSegmentSeconds`、`videoIdleSeconds`） |
 
@@ -214,11 +214,44 @@ class Loop(Loop):
 - **热重载与 `loop_fault` 自愈回退**：编辑 `loop.py` 或其导入的工作区 `.py` 模块会在轮间自动热重载。若出现语法或运行时错误，宿主会发出 `loop_fault`、自动回退到内置默认循环，并在下一轮模型输入中附带 `loopFault` 供即时修复，绝不中断当前控制周期。
 - **人工 `Steer` 即时抢占**：发送 `ludens steer`（或点击控制台**即时插话**）会立即唤醒正在执行的 `Wait(seconds)`，并跳过 `Loop.step()` 直接进入携带人工指令的 `Prompt` 轮次（`ctx.steered = True`）。
 
-## 6. 在控制台管理能力、记忆与沉淀
+## 6. 可插拔录像存储与保留策略（Timeline Media Storage）
+
+长时间 30 Hz 连续采样会产生大量 fMP4 视频分段。Ludens 将**轻量时空索引常驻本机 SSD** 与**可插拔多媒体后端**解耦，避免撑爆工作区磁盘，同时确保实时编码永不被外置盘唤醒或网络抖动阻塞：
+
+| 后端类型 (`kind`) | 适用场景与行为 |
+| --- | --- |
+| `ephemeral` | 纯内存热窗模式（`window-<pid>-*`），进程退出后零持久化视频落盘（设置环境变量 `LUDENS_PERCEPTION_PERSIST=0` 时也会强制使用此模式）。 |
+| `local` | **默认配置（`local-default`）**。在 `.ludens/timeline/` 内维护滚动字节配额环形盘（默认 `maxBytes` 为 `20 GiB`，可选 `maxAgeHours`）。 |
+| `directory` | 外置 SSD、SMB 或 NFS 挂载目录（归档至 `<directory.path>/<workspaceId>/video/<uuid>.mp4` 与 `objects/<sha256>.bin`），回放直连零拷贝 HTTP `206 Range` 流。 |
+| `s3` | 零外部依赖的 AWS Signature V4（`HMAC-SHA256`）对象存储客户端，兼容 AWS S3、Cloudflare R2、MinIO、OSS 与 COS；网页控制台与桌面端均由服务端代理解析 `206 Range` 请求，无需配置存储桶 CORS。 |
+
+### 全局密钥池（`~/.ludens/storage.json`）与工作区轻量覆盖（`ludens.json`）
+
+- **全局存储配置 `~/.ludens/storage.json`（权限 `0600`）**：集中保存命名存储后端池（含 S3 密钥与本机挂载路径）、全局默认后端 `defaultProfileId`、H.264 视频编码质量档位 `videoQuality`（`balanced` CRF 23 推荐均衡省空间、`compact` CRF 28 极简长程、`high` CRF 18 原画高码率）以及模型引用保护开关 `protectReferenced`（默认 `true`）。
+- **工作区覆盖 `<workspace>/ludens.json`（不含任何密钥）**：每个工作区仅按需通过 `storage` 字段选择 `inherit`（继承全局默认）、`ephemeral`、`local` 或 `profile`（绑定全局配置 ID），并可覆盖配额与编码画质：
+
+```json
+{
+  "storage": {
+    "mode": "profile",
+    "profileId": "cloudflare-r2-archive",
+    "maxBytes": 107374182400,
+    "videoQuality": "balanced"
+  }
+}
+```
+
+### 本地热写缓冲、异步冷归档与三级保留保护
+
+1. **热写与索引常驻本机**：`segments/` 定长索引、`.mp4.json` 状态元数据以及正在写入的 `status: "pending"` 视频分段始终位于本机 `.ludens/timeline/`。分段收尾（`status: "ready"`）后，后台归档线程异步上传至 `directory` 或 `s3` 并在本地仅保留不超过 `localCacheBytes`（默认 `4 GiB`）的近期热段与 `.ludens/timeline/cache/` 按需回放 LRU 缓存；`Client().replay()` 与 `@eval_env` 离线回放透明按需拉取并缓存。
+2. **锁定与模型输入帧保护**：写入 `.ludens/timeline/pins.json`（`{"version": 1, "assets": ["video/<uuid>.mp4"]}`）的分段（如关键回归测试证据）**永不自动淘汰**；开启 `protectReferenced` 时，曾送入模型上下文的观测帧（`.ludens/archive/media/*.json`）仅在所有普通未引用分段淘汰完毕仍超配额时才最后回收。被回收的分段保留 `.mp4.json` 并将状态标记为 `status: "evicted"`（回放返回清晰的 `410 Gone` 提示）。
+
+## 7. 在控制台管理能力、存储、记忆与沉淀
 
 - **运行（Live，`?view=live`）**：在模型卡片中展开 **查看传入模型的 Input 详情** 即可 1:1 检视 `Loop.inject` 交付的真实 `deliveredPayload`；轮间 `loop_step` / `loop_fault` 事件与不经模型的 `@capability` 调用会折叠在 **Loop 调度步骤** 分组内（异常时自动展开）。
 - **能力（Capabilities，`?view=caps`）**：直观检视 **Capability – Eval – Env** 拓扑关系，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）筛选，查看 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**Core 连接检查** 与 **社区驱动验证** 结果，并可一键点击运行全部或单项评测。
-- **配置（Config，`?view=perception`）**：在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
+- **配置（Config，`?view=perception`）**：在 **模型与预算（Model & Budget）** 页签配置当前工作区的 **录像持久化策略（`ludens.json · storage`）**；在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
+- **全局设置 → 录像与存储（Settings → Recording & Storage，`?view=settings`）**：汇总全部工作区的视频、缓存、索引与日志占用，支持 **一键按配额清理全部工作区**、**立即同步归档** 与单工作区 **清理 / 归档 / 清缓存**，并集中管理全局存储配置池与目录读写 / S3 连接延迟探测。
 - **记忆与技能沉淀（`ludens consolidate` 或运行页按钮）**：开启一次禁用所有设备访问的纯文件整理轮次，自动把 `verified` 能力晋升或保留到 `skills/` 技能卡片中，清除 `unverified`/`stale`/`adapting`/`failed` 条目，并刷新 `memory/current.md`。
 
 继续阅读 [感知、执行与性能调优](perception-and-action.md)，学习编写可热重载的常驻 `perception.py` 状态机并配置 30 Hz 多模态传输链路。

@@ -39,12 +39,27 @@
 跨运行共享的三类底层存储：
 
 1. **Baseware 设备事实源（`logs/baseware/`）**：每个 Baseware 实例独立维护 `source.json`、`events/` 与 `diagnostics/`（按 1 小时或 256 MiB 切段），事件以 `origin.eventId = "<serviceId>:<seq>"` 唯一标识。Ludens 在 `manifest.json` 的 `eventSources` 中记录 `{sourceId, root, format, recordingId, windows}`；读取端通过 [protocol/src/event-sources.ts](../../../protocol/src/event-sources.ts) 按需归并。动作启动时冻结 `recordingId`，即便动作在窗口关闭后晚到结束，仍精确归属原运行。
-2. **工作区时空轴（`.ludens/timeline/`）**：存放跨 run 共享的感知与能力留档——`video/<id>.mp4` 及配套状态文件 `.mp4.json`（区分 `pending / ready / error`）、非视频去重媒体 `objects/<sha256>.bin`、以及分段记录 `segments/`（含 JSONL、定长 `.idx` 索引与 `.meta.json`）。关闭持久化（`LUDENS_PERCEPTION_PERSIST=0`）时仅使用 `window-<pid>-.../` 临时窗口。
+2. **工作区时空轴（`.ludens/timeline/`）**：存放跨 run 共享的感知与能力留档——`video/<id>.mp4` 及配套状态文件 `.mp4.json`（区分 `pending / ready / evicted / error`，并在远端归档后写入 `archive: { backend, profileId, key, bytes, archivedAt }`）、非视频去重媒体 `objects/<sha256>.bin`（及可选 `.bin.json` 归档指针）、按需拉取与近期热拷贝的 LRU 缓存 `cache/`、显式防淘汰锁定清单 `pins.json`，以及常驻本机的分段记录 `segments/`（含 JSONL、定长 `.idx` 索引与 `.meta.json`）。关闭持久化（`LUDENS_PERCEPTION_PERSIST=0` 或后端为 `ephemeral`）时仅使用 `window-<pid>-.../` 临时窗口。
 3. **内容寻址结构化归档（`.ludens/archive/`）**：由 [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts) 统一读写。模型消息、工具定义与大参数/结果存为 `objects/<sha256>.json.gz`（使用 `encoding: "ludens-json-v1"` 与 tagged JSON 区分内部引用与用户 `$ref` 字段）。日志中的图像/音频数据不重复存盘，而是引用 `.ludens/timeline/` 资产，并在 `.ludens/archive/media/<sha256>.json` 维护轻量级哈希到视频帧的映射索引（内存 LRU 上限 4096 项）。
 
 上述 Baseware 路径由工作区编排显式指定。独立 `baseware serve` 省略 `--data-dir` 时使用 `$LUDENS_HOME/logs/baseware/<socket-name>/`；显式目录始终优先。共享桌宠的偏好与后台日志在 `$LUDENS_HOME/pet/`，其针对工作区的消费事件仍写入 `<workspace>/logs/consumers/`。
 
-### 2. 事件通用信封结构
+### 2. 可插拔时空轴媒体后端与回收保护（`storage.json`）
+
+媒体持久化策略由全局 `$LUDENS_HOME/storage.json`（权限 `0600`，由 `storage.json.lock` 互斥）与工作区 `ludens.json` 的可选 `storage` 覆盖共同决定（环境变量 `LUDENS_PERCEPTION_PERSIST=0` 始终最高优先级强制切换为 `ephemeral`）：
+
+| 后端 (`StorageBackendKind`) | 本地驻留内容 | 远端 / 外部归档与回放路径 |
+| --- | --- | --- |
+| `ephemeral` | 仅进程生命周期内的 `window-<pid>-*` 热窗内存缓冲 | 无持久化分段；退出即释放 |
+| `local`（默认 `local-default`） | 索引 + 滚动配额内的 `video/*.mp4` 与 `objects/*.bin`（默认 `maxBytes = 20 GiB`） | 本机直读（`206 Partial Content`） |
+| `directory` | 索引 + `pending` 活跃分段 + 不超过 `localCacheBytes`（默认 `4 GiB`）的热缓冲/`cache/` | 异步复制至 `<directory.path>/<workspaceId>/<asset>`；回放直连外部文件 `206 Range` 流 |
+| `s3` | 索引 + `pending` 活跃分段 + 不超过 `localCacheBytes`（默认 `4 GiB`）的热缓冲/`cache/` | 零依赖 SigV4（`HMAC-SHA256`）上传至 `<prefix>/<workspaceId>/<asset>`；Python 回放按需拉入 `cache/`，Web `/media` 与 Electron `ludens-media://local/media` 通过预签名 URL 服务端流式代理 `GET/HEAD` + `Range`（零存储桶 CORS 配置） |
+
+- **编码画质档位（`videoQuality`）**：`high`（`crf=18`）、`balanced`（默认，`crf=23`）、`compact`（`crf=28`），支持在 `storage.json` 全局设定或在工作区 `ludens.json` 的 `storage.videoQuality` 按工作区覆盖。
+- **三级淘汰保护（`pins.json` + `protectReferenced`）**：当 `local` 超出 `maxBytes / maxAgeHours` 或远端后端自身超出配额时，清理器遵循严格顺序：**(1)** `.ludens/timeline/pins.json`（`{"version": 1, "assets": [...]}`）中的资产永不自动淘汰；**(2)** 优先淘汰未被 `.ludens/archive/media/*.json` 引用的普通采样分段；**(3)** 当 `protectReferenced !== false`（默认开启）时，实际交付给 LLM 回合的观测帧排在最后，仅在普通分段耗尽仍超配额时才淘汰。已淘汰分段删除 `.mp4` 实体并原子更新 `<uuid>.mp4.json` 为 `{ status: "evicted", evictedAt, evictedReason: "quota" | "ttl" | "manual" }`，媒体端点对此返回 HTTP `410`。
+- **App-RPC 管理与实时推送**：`ludens app-server` 暴露 `storage/get`、`storage/update`（编辑已有 S3 配置留空密钥时自动保留原密钥）、`storage/test`（目录读写与 S3 探针写入/读取/删除校验）、`storage/maintain`（`prune`、`sync`、`clear_cache`，离线工作区获取 `writer.lock` 直接执行，在线工作区经活跃感知进程无损转发）与 `storage/pin`，并通过 `"storage"` 事件主题向控制台广播变更。
+
+### 3. 事件通用信封结构
 
 每条 JSONL 事件均包含写入者顶层标识（`runId` 或 `serviceId`、递增 `seq`、墙钟 `at`、单调时钟 `atMs`）以及以下四个核心块（定义见 [core/src/core/storage/events.ts](../../../core/src/core/storage/events.ts)）：
 
@@ -121,7 +136,7 @@
 
 ### 1. 时空轴播放器与帧预读缓冲
 
-控制台回放视图（`replay/get` JSON-RPC 配合双平面 `MediaResolver`：桌面端经 UDS `media/resolve` 解析 `ludens-media://local/media?...`，托管 Web / 远端经 HMAC 签名的 `/media?...&mt=<ticket>` 加载并支持 `206 Partial Content` `Range` 断点续传）将 `.ludens/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
+控制台回放视图（`replay/get` JSON-RPC 配合双平面 `MediaResolver`：桌面端经 UDS `media/resolve` 解析 `ludens-media://local/media?...`，托管 Web / 远端经 HMAC 签名的 `/media?...&mt=<ticket>` 加载并支持 `206 Partial Content` `Range` 断点续传；当分段已归档至 `directory` 时直连零拷贝读取，已归档至 `s3` 时由服务端或桌面自定义协议透明代理预签名 `Range` 流而无需 S3 CORS，`status === "evicted"` 时返回 HTTP `410`）将 `.ludens/timeline/` 的连续采样画面、设备动作区间（`action_start / action_end`）、模型推理与工具调用对齐在同一工作区墙钟时间轴上：
 
 - **时间窗与双帧预读**：事件按最多 60 秒窗口、每页 500 条游标分页；画面使用解码缓冲 Hook——待目标时刻的所有屏幕画面加载完毕后原子切换，同时向后预读最多 2 帧（上限 8 张图 / 32 MiB 预读缓存），切换工作区或离开页面时立即释放图像内存。
 - **时钟与解码器状态**：显式时间轴跳转增加时钟版本并精确对齐解码器；已提交的 URL 位置会被确认，避免属性回写造成第二次 seek。连续播放容忍瞬时偏差和普通解码等待。任何真实 `waiting` 事件都会同时冻结共享时钟与解码器，直到恢复，即使 `readyState` 仍报告数据充足。仅当播放且全局就绪时，超过 1 秒的偏差持续存在 1 秒才触发重同步；稀疏尾部的精确恢复只作用于最后 100ms 的采样区域。
