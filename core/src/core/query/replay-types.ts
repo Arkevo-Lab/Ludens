@@ -1,6 +1,7 @@
 /** Read-only projection of the workspace's existing records onto UTC milliseconds. */
 import type { RunData } from "./types";
 export interface FileMedia { file: string; mediaType: string; cacheControl?: string; size?: number }
+export interface RemoteMedia { remoteUrl: string; size?: number; mediaType: string; cacheControl?: string }
 export type ReplayTrack = "action" | "model" | "tool" | "log";
 
 export interface ReplayOverview {

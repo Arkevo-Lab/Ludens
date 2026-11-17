@@ -124,6 +124,87 @@ function bufferMediaResponse(
   })
 }
 
+async function remoteMediaResponse(
+  request: Request,
+  resolved: { remoteUrl: string; size?: number; mediaType: string; cacheControl?: string },
+): Promise<Response> {
+  const method = request.method.toUpperCase()
+  const rangeHeader = request.headers.get('range')
+  let upstream: Response
+  try {
+    upstream = await fetch(resolved.remoteUrl, {
+      method,
+      ...(rangeHeader ? { headers: { Range: rangeHeader } } : {}),
+      signal: request.signal,
+    })
+  } catch (error) {
+    if (request.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')) {
+      return mediaErrorResponse(499, 'Media request aborted', 'ABORTED')
+    }
+    return mediaErrorResponse(
+      503,
+      `Remote storage unavailable: ${error instanceof Error ? error.message : String(error)}`,
+      'STORAGE_UNAVAILABLE',
+    )
+  }
+
+  const headers = new Headers({
+    'Content-Type': resolved.mediaType,
+    'Accept-Ranges': upstream.headers.get('accept-ranges') || 'bytes',
+    'Cache-Control':
+      resolved.cacheControl ??
+      upstream.headers.get('cache-control') ??
+      'private, max-age=31536000, immutable',
+    'X-Content-Type-Options': 'nosniff',
+    ...MEDIA_CORS_HEADERS,
+  })
+
+  if (upstream.status === 416) {
+    const contentRange =
+      upstream.headers.get('content-range') ??
+      (resolved.size !== undefined ? `bytes */${resolved.size}` : undefined)
+    if (contentRange) headers.set('Content-Range', contentRange)
+    headers.set('Cache-Control', 'no-store')
+    await upstream.body?.cancel().catch(() => {})
+    return new Response(null, { status: 416, headers })
+  }
+
+  if (upstream.status === 404) {
+    await upstream.body?.cancel().catch(() => {})
+    return mediaErrorResponse(404, 'Media not found in object storage', 'NOT_FOUND')
+  }
+
+  if (upstream.status < 200 || upstream.status >= 300) {
+    await upstream.body?.cancel().catch(() => {})
+    return mediaErrorResponse(
+      503,
+      `Remote storage request failed with HTTP ${upstream.status}`,
+      'STORAGE_UNAVAILABLE',
+    )
+  }
+
+  const upstreamLength = upstream.headers.get('content-length')
+  if (upstreamLength) {
+    headers.set('Content-Length', upstreamLength)
+  } else if (method === 'HEAD' && !rangeHeader && resolved.size !== undefined) {
+    headers.set('Content-Length', String(resolved.size))
+  }
+  const upstreamRange = upstream.headers.get('content-range')
+  if (upstreamRange) {
+    headers.set('Content-Range', upstreamRange)
+  }
+
+  if (method === 'HEAD') {
+    await upstream.body?.cancel().catch(() => {})
+    return new Response(null, { status: upstream.status, headers })
+  }
+
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers,
+  })
+}
+
 function parseMediaResolveParams(url: URL): MediaResolveParams {
   const kind = url.searchParams.get('kind')
   const project = url.searchParams.get('project')?.trim()
@@ -333,6 +414,9 @@ export function createMediaProtocolHandler(
     try {
       const params = parseMediaResolveParams(url)
       const resolved = await options.resolveMedia(params, request.signal)
+      if ('remoteUrl' in resolved && typeof resolved.remoteUrl === 'string') {
+        return await remoteMediaResponse(request, resolved)
+      }
       if ('file' in resolved && typeof resolved.file === 'string') {
         return await fileResponse(request, resolved, MEDIA_CORS_HEADERS)
       }

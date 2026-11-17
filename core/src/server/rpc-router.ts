@@ -24,6 +24,12 @@ import {
   isOmpServiceTier,
   readWorkspaceIdentity,
 } from "@ludens/protocol/ludens";
+import type {
+  GlobalStorageUpdateInput,
+  StorageMaintainParams,
+  StoragePinParams,
+  StorageTestParams,
+} from "@ludens/protocol/storage";
 import type { DashboardMethod, DashboardMethods } from "../core/query/dashboard-protocol.ts";
 import { workspaceForProject } from "../core/query/data.ts";
 import type { DiagnosticQuery } from "../core/query/diagnostic-events.ts";
@@ -687,6 +693,72 @@ export class RpcRouter {
         return res;
       }
 
+      case "storage/get":
+        return this.ctx.worker.call("storageGet", [], signal);
+
+      case "storage/update": {
+        const params = asObject(rawParams, "storage/update requires update object") as unknown as GlobalStorageUpdateInput;
+        const res = await this.ctx.worker.call("storageUpdate", [params], signal);
+        this.ctx.eventHub.publish({ topic: "storage", payload: { action: "update" } });
+        return res;
+      }
+
+      case "storage/test": {
+        const params = asObject(rawParams, "storage/test requires { kind }");
+        if (params.kind !== "directory" && params.kind !== "s3") {
+          throw invalidParams("storage/test kind must be 'directory' or 's3'");
+        }
+        return this.ctx.worker.call("storageTest", [params as unknown as StorageTestParams], signal);
+      }
+
+      case "storage/maintain": {
+        const params = asObject(rawParams, "storage/maintain requires { action }");
+        if (params.action !== "prune" && params.action !== "sync" && params.action !== "clear_cache") {
+          throw invalidParams("storage/maintain action must be 'prune', 'sync', or 'clear_cache'");
+        }
+        const workspaceId =
+          params.workspaceId === undefined
+            ? undefined
+            : requireNonEmptyString(params.workspaceId, "workspaceId");
+        const maintainParams: StorageMaintainParams = {
+          action: params.action,
+          ...(workspaceId ? { workspaceId } : {}),
+        };
+        const res = await this.ctx.worker.call("storageMaintain", [maintainParams], signal);
+        this.ctx.eventHub.publish({
+          topic: "storage",
+          ...(workspaceId ? { workspaceId } : {}),
+          payload: {
+            action: maintainParams.action,
+            freedBytes: res.freedBytes,
+            archivedCount: res.archivedCount,
+            evictedCount: res.evictedCount,
+          },
+        });
+        return res;
+      }
+
+      case "storage/pin": {
+        const params = asObject(rawParams, "storage/pin requires { workspaceId, asset, pinned }");
+        const workspaceId = requireNonEmptyString(params.workspaceId, "workspaceId");
+        const asset = requireNonEmptyString(params.asset, "asset");
+        if (typeof params.pinned !== "boolean") {
+          throw invalidParams("pinned must be a boolean");
+        }
+        const pinParams: StoragePinParams = {
+          workspaceId,
+          asset,
+          pinned: params.pinned,
+        };
+        const res = await this.ctx.worker.call("storagePin", [pinParams], signal);
+        this.ctx.eventHub.publish({
+          topic: "storage",
+          workspaceId,
+          payload: { action: "pin", asset, pinned: params.pinned },
+        });
+        return res;
+      }
+
       default:
         throw new RpcError(
           APP_RPC_ERROR_CODES.METHOD_NOT_FOUND,
@@ -747,6 +819,15 @@ export class RpcRouter {
       const run = requireNonEmptyString(params.run, "run");
       const id = requireNonEmptyString(params.id, "id");
       const res = await this.ctx.worker.call("media", [project, run, id], signal);
+      if (res && typeof res === "object" && "remoteUrl" in res && typeof (res as { remoteUrl?: unknown }).remoteUrl === "string") {
+        const rm = res as { remoteUrl: string; size?: number; mediaType: string; cacheControl?: string };
+        return {
+          remoteUrl: rm.remoteUrl,
+          ...(rm.size !== undefined ? { size: rm.size } : {}),
+          mediaType: rm.mediaType,
+          ...(rm.cacheControl ? { cacheControl: rm.cacheControl } : {}),
+        };
+      }
       if (res && typeof res === "object" && "file" in res && typeof (res as { file?: unknown }).file === "string") {
         const fm = res as { file: string; size?: number; mediaType: string; cacheControl?: string };
         return {
@@ -756,10 +837,11 @@ export class RpcRouter {
           ...(fm.cacheControl ? { cacheControl: fm.cacheControl } : {}),
         };
       }
+      const bm = res as { bytes: Uint8Array; mediaType: string; cacheControl?: string };
       return {
-        bytes: Buffer.from(res.bytes as Uint8Array).toString("base64"),
-        mediaType: res.mediaType,
-        ...(res.cacheControl ? { cacheControl: res.cacheControl } : {}),
+        bytes: Buffer.from(bm.bytes).toString("base64"),
+        mediaType: bm.mediaType,
+        ...(bm.cacheControl ? { cacheControl: bm.cacheControl } : {}),
       };
     }
 
@@ -780,6 +862,15 @@ export class RpcRouter {
         ...(typeof params.id === "string" && params.id ? { id: params.id } : {}),
       };
       const res = await this.ctx.worker.call("replay", [project, run, query], signal);
+      if (res && typeof res === "object" && "remoteUrl" in res && typeof (res as { remoteUrl?: unknown }).remoteUrl === "string") {
+        const rm = res as { remoteUrl: string; size?: number; mediaType: string; cacheControl?: string };
+        return {
+          remoteUrl: rm.remoteUrl,
+          ...(rm.size !== undefined ? { size: rm.size } : {}),
+          mediaType: rm.mediaType,
+          ...(rm.cacheControl ? { cacheControl: rm.cacheControl } : {}),
+        };
+      }
       if (res && typeof res === "object" && "file" in res && typeof (res as { file?: unknown }).file === "string") {
         const fm = res as { file: string; size?: number; mediaType: string; cacheControl?: string };
         return {
@@ -959,6 +1050,9 @@ export class RpcRouter {
 
     this.ctx.eventHub.publish({ topic: "workspace", ...(workspaceId ? { workspaceId } : {}), payload: { action } });
     this.ctx.eventHub.publish({ topic: "catalog", ...(workspaceId ? { workspaceId } : {}), payload: { action } });
+    if (action === "open" || action === "create" || action === "remove" || action === "updateStudioConfig") {
+      this.ctx.eventHub.publish({ topic: "storage", ...(workspaceId ? { workspaceId } : {}), payload: { action } });
+    }
     void this.ctx.eventHub.sweepNow();
     return result;
   }

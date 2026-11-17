@@ -13,6 +13,13 @@ import { petState, setPetTarget, recordPetConsumer } from "./pet-state";
 import { closeLogIndexes, indexCacheStats } from "./log-index";
 import { workerFailure, type DashboardMethods, type DashboardMethod, type WorkerRequest, type WorkerResponse } from "./dashboard-protocol";
 import { perceptionSettings, updatePerceptionSettings, perceptionRuntime } from "./perception-config";
+import {
+  getStorageOverview,
+  maintainStorage,
+  pinTimelineSegment,
+  testStorageBackend,
+  updateStorageSettings,
+} from "./storage";
 import { closeArchiveBuilds } from "./cold-build";
 import {
   workspaceSettings,
@@ -86,6 +93,11 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   petState: () => petState(),
   petTarget: ([project, ifUnset]) => setPetTarget(project, ifUnset),
   petConsumer: ([input]) => recordPetConsumer(input),
+  storageGet: () => getStorageOverview(),
+  storageUpdate: ([input]) => updateStorageSettings(input),
+  storageTest: ([params], signal) => testStorageBackend(params, undefined, signal),
+  storageMaintain: ([params], signal) => maintainStorage(params, undefined, undefined, signal),
+  storagePin: ([params]) => pinTimelineSegment(params),
   clearCatalogCache: () => { clearCatalogCache(); return null; },
 };
 const requests = new Map<number, { abort: AbortController; work: Promise<void> }>();

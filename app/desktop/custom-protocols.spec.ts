@@ -1,4 +1,5 @@
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { createServer as createHttpServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -279,6 +280,120 @@ describe('custom-protocols', () => {
 
       const badQuery = await handler(new Request('ludens-media://local/media?kind=replay&project=p&run=r&mode=media&sequence=abc'))
       expect(badQuery.status).toBe(400)
+    })
+
+    it('proxies remoteUrl (presigned S3 GET) with zero-CORS HTTP Range 200 / 206 / 416 / HEAD streaming', async () => {
+      const payload = Buffer.from('S3_SEGMENT_0123456789_ABCDEFGHIJKLMNOP')
+      const seenRanges: Array<string | undefined> = []
+
+      const s3Server = createHttpServer((req, res) => {
+        if (req.url?.startsWith('/missing')) {
+          res.writeHead(404, { 'Content-Type': 'application/xml' })
+          res.end('<Error><Code>NoSuchKey</Code></Error>')
+          return
+        }
+        const range = req.headers.range
+        seenRanges.push(range)
+        if (range) {
+          const match = /^bytes=(\d+)-(\d*)$/.exec(range)
+          if (!match) {
+            res.writeHead(416, { 'Content-Range': `bytes */${payload.length}` })
+            res.end()
+            return
+          }
+          const start = Number(match[1])
+          const end = match[2] ? Math.min(Number(match[2]), payload.length - 1) : payload.length - 1
+          if (start >= payload.length || end < start) {
+            res.writeHead(416, { 'Content-Range': `bytes */${payload.length}` })
+            res.end()
+            return
+          }
+          const slice = payload.subarray(start, end + 1)
+          res.writeHead(206, {
+            'Content-Type': 'binary/octet-stream',
+            'Accept-Ranges': 'bytes',
+            'Content-Range': `bytes ${start}-${end}/${payload.length}`,
+            'Content-Length': String(slice.length),
+          })
+          res.end(req.method === 'HEAD' ? undefined : slice)
+          return
+        }
+        res.writeHead(200, {
+          'Content-Type': 'binary/octet-stream',
+          'Accept-Ranges': 'bytes',
+          'Content-Length': String(payload.length),
+        })
+        res.end(req.method === 'HEAD' ? undefined : payload)
+      })
+
+      await new Promise<void>(resolveListen => s3Server.listen(0, '127.0.0.1', () => resolveListen()))
+      const addr = s3Server.address()
+      const port = typeof addr === 'object' && addr ? addr.port : 0
+
+      try {
+        const handler = createMediaProtocolHandler({
+          resolveMedia: async params => {
+            if (params.kind === 'replay' && params.id === 'missing') {
+              return {
+                remoteUrl: `http://127.0.0.1:${port}/missing?X-Amz-Signature=deadbeef`,
+                size: payload.byteLength,
+                mediaType: 'video/mp4',
+              }
+            }
+            return {
+              remoteUrl: `http://127.0.0.1:${port}/bucket/ws-1/video/seg-1.mp4?X-Amz-Signature=cafebabe`,
+              size: payload.byteLength,
+              mediaType: 'video/mp4',
+              cacheControl: 'private, max-age=31536000, immutable',
+            }
+          },
+        })
+
+        const segUrl =
+          'ludens-media://local/media?kind=replay&project=ws-1&run=run-1&mode=segment&sequence=1&record=rec-1&media=0'
+
+        const fullRes = await handler(new Request(segUrl))
+        expect(fullRes.status).toBe(200)
+        expect(fullRes.headers.get('Content-Type')).toBe('video/mp4')
+        expect(fullRes.headers.get('Accept-Ranges')).toBe('bytes')
+        expect(fullRes.headers.get('Content-Length')).toBe(String(payload.byteLength))
+        expect(fullRes.headers.get('Access-Control-Allow-Origin')).toBe('*')
+        expect(Buffer.from(await fullRes.arrayBuffer())).toEqual(payload)
+        expect(seenRanges[0]).toBeUndefined()
+
+        const partialRes = await handler(
+          new Request(segUrl, { headers: { Range: 'bytes=11-20' } }),
+        )
+        expect(partialRes.status).toBe(206)
+        expect(seenRanges[1]).toBe('bytes=11-20')
+        expect(partialRes.headers.get('Content-Range')).toBe(`bytes 11-20/${payload.byteLength}`)
+        expect(partialRes.headers.get('Content-Length')).toBe('10')
+        expect(partialRes.headers.get('Accept-Ranges')).toBe('bytes')
+        expect(partialRes.headers.get('Content-Type')).toBe('video/mp4')
+        expect(Buffer.from(await partialRes.arrayBuffer()).toString()).toBe('0123456789')
+
+        const badRangeRes = await handler(
+          new Request(segUrl, { headers: { Range: 'bytes=500-600' } }),
+        )
+        expect(badRangeRes.status).toBe(416)
+        expect(badRangeRes.headers.get('Content-Range')).toBe(`bytes */${payload.byteLength}`)
+
+        const headRangeRes = await handler(
+          new Request(segUrl, { method: 'HEAD', headers: { Range: 'bytes=0-9' } }),
+        )
+        expect(headRangeRes.status).toBe(206)
+        expect(headRangeRes.headers.get('Content-Length')).toBe('10')
+        expect(await headRangeRes.text()).toBe('')
+
+        const missingRes = await handler(
+          new Request(
+            'ludens-media://local/media?kind=replay&project=ws-1&run=run-1&mode=segment&id=missing',
+          ),
+        )
+        expect(missingRes.status).toBe(404)
+      } finally {
+        await new Promise<void>(resolveClose => s3Server.close(() => resolveClose()))
+      }
     })
   })
 })
