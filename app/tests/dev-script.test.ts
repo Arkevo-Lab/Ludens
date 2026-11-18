@@ -108,7 +108,8 @@ test("buildManagedAppServerArgs passes --dev --listen ws://127.0.0.1:0 --parent-
 });
 
 test("buildProductionStartArgs passes --dev on tokenless loopback and --auth token when LUDENS_APP_TOKEN is set", () => {
-  assert.deepEqual(buildProductionStartArgs([], {}, "/repo/app"), [
+  const emptyEnv = { NODE_ENV: "test" as const };
+  assert.deepEqual(buildProductionStartArgs([], emptyEnv, "/repo/app"), [
     "--listen",
     "ws://127.0.0.1:3015",
     "--dev",
@@ -117,7 +118,7 @@ test("buildProductionStartArgs passes --dev on tokenless loopback and --auth tok
   ]);
 
   assert.deepEqual(
-    buildProductionStartArgs([], { LUDENS_APP_TOKEN: "secret-123" }, "/repo/app"),
+    buildProductionStartArgs([], { NODE_ENV: "test" as const, LUDENS_APP_TOKEN: "secret-123" }, "/repo/app"),
     [
       "--listen",
       "ws://127.0.0.1:3015",
@@ -131,7 +132,7 @@ test("buildProductionStartArgs passes --dev on tokenless loopback and --auth tok
   );
 
   assert.deepEqual(
-    buildProductionStartArgs(["--listen", "ws://0.0.0.0:3015"], {}, "/repo/app"),
+    buildProductionStartArgs(["--listen", "ws://0.0.0.0:3015"], emptyEnv, "/repo/app"),
     ["--static-dir", resolve("/repo/app", "out"), "--listen", "ws://0.0.0.0:3015"],
   );
 });
