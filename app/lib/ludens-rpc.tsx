@@ -26,6 +26,7 @@ import {
 } from "react";
 import {
   clearStoredConnectionTarget,
+  isLoopbackHost,
   resolveConnectionEndpoints,
   resolveInitialConnectionTarget,
   saveConnectionTarget,
@@ -75,6 +76,7 @@ export interface LudensRpcSnapshot {
   readonly target: ConnectionTarget;
   readonly resolved: ResolvedConnectionEndpoints;
   readonly serverInfo?: InitializeResult;
+  readonly lastKnownServerInfo?: InitializeResult;
   readonly serverSeq: number | null;
   readonly mediaTicket?: string;
   readonly mediaTicketExpiresAt?: number;
@@ -189,6 +191,7 @@ export class LudensRpcClient implements LudensRpcCaller {
   private status: RpcConnectionStatus = "disconnected";
   private errorMessage: string | undefined;
   private serverInfo: InitializeResult | undefined;
+  private lastKnownServerInfo: InitializeResult | undefined;
   private lastSeenSeq: number | null = null;
   private mediaTicket: string | undefined;
   private mediaTicketExpiresAt: number | undefined;
@@ -239,6 +242,7 @@ export class LudensRpcClient implements LudensRpcCaller {
       target: this.target,
       resolved,
       serverInfo: this.serverInfo,
+      lastKnownServerInfo: this.lastKnownServerInfo,
       serverSeq: this.lastSeenSeq,
       mediaTicket: this.mediaTicket,
       mediaTicketExpiresAt: this.mediaTicketExpiresAt,
@@ -289,6 +293,7 @@ export class LudensRpcClient implements LudensRpcCaller {
       this.lastSeenSeq = null;
       this.hadConnectedOnce = false;
       this.serverInfo = undefined;
+      this.lastKnownServerInfo = undefined;
       this.mediaTicket = undefined;
       this.mediaTicketExpiresAt = undefined;
     }
@@ -311,6 +316,7 @@ export class LudensRpcClient implements LudensRpcCaller {
     this.clearTicketRefreshTimer();
     this.teardownTransport("RPC client disposed");
     this.rejectReadyWaiters(new Error("RPC client disposed"));
+    this.serverInfo = undefined;
     this.status = "disconnected";
     this.emitSnapshot();
   }
@@ -408,6 +414,7 @@ export class LudensRpcClient implements LudensRpcCaller {
           handshakeStarted = false;
           this.clearTicketRefreshTimer();
           this.rejectPendingRequests("Desktop RPC bridge disconnected");
+          this.serverInfo = undefined;
           this.status = this.hadConnectedOnce ? "reconnecting" : "disconnected";
           this.errorMessage = ipcStatus.error;
           this.emitSnapshot();
@@ -532,6 +539,7 @@ export class LudensRpcClient implements LudensRpcCaller {
       this.hadConnectedOnce = true;
       this.retryAttempt = 0;
       this.serverInfo = initResult;
+      this.lastKnownServerInfo = initResult;
       this.mediaTicket = initResult.media.ticket;
       this.mediaTicketExpiresAt = initResult.media.ticketExpiresAt;
       this.errorMessage = undefined;
@@ -566,6 +574,7 @@ export class LudensRpcClient implements LudensRpcCaller {
       if (isUnauthorized) {
         this.clearReconnectTimer();
         this.clearTicketRefreshTimer();
+        this.serverInfo = undefined;
         this.status = "auth-required";
         this.errorMessage = error instanceof Error ? error.message : "Authentication required";
         this.teardownTransport(this.errorMessage);
@@ -628,6 +637,7 @@ export class LudensRpcClient implements LudensRpcCaller {
     const delay =
       RECONNECT_DELAYS_MS[Math.min(this.retryAttempt, RECONNECT_DELAYS_MS.length - 1)] ?? 10_000;
     this.retryAttempt += 1;
+    this.serverInfo = undefined;
     this.status = this.hadConnectedOnce ? "reconnecting" : "disconnected";
     this.errorMessage = message;
     this.emitSnapshot();
@@ -975,6 +985,71 @@ export class LudensRpcClient implements LudensRpcCaller {
   }
 }
 
+function translateConnectionKey(t: (key: string) => string, key: string): string {
+  const direct = t(key);
+  if (direct && direct !== key) return direct;
+  const prefixed = t(`connectionTarget.${key}`);
+  if (prefixed && prefixed !== `connectionTarget.${key}`) return prefixed;
+  return direct;
+}
+
+function inferBannerProfile(snapshot: Pick<LudensRpcSnapshot, "target" | "resolved" | "serverInfo" | "lastKnownServerInfo">): "desktop" | "remote" | "web-dev" {
+  const info = (snapshot.serverInfo ?? snapshot.lastKnownServerInfo) as
+    | { readonly runtimeProfile?: unknown }
+    | undefined;
+  if (
+    info?.runtimeProfile === "desktop" ||
+    info?.runtimeProfile === "remote" ||
+    info?.runtimeProfile === "web-dev"
+  ) {
+    return info.runtimeProfile;
+  }
+  if (snapshot.target.kind === "electron-local") {
+    return "desktop";
+  }
+  if (snapshot.target.kind === "same-origin") {
+    const candidateHost =
+      (snapshot.resolved.ok ? snapshot.resolved.httpOrigin : undefined) ??
+      snapshot.resolved.displayTarget;
+    if (isLoopbackHost(candidateHost)) {
+      return "web-dev";
+    }
+  }
+  return "remote";
+}
+
+/**
+ * Translates raw WebSocket/IPC disconnect errors (e.g. `WebSocket closed (1006)`) into
+ * profile-aware human guidance for `web-dev`, `desktop`, and `remote` sessions.
+ */
+export function formatConnectionBannerMessage(
+  snapshot: Pick<
+    LudensRpcSnapshot,
+    "status" | "error" | "needsAuth" | "target" | "resolved" | "serverInfo" | "lastKnownServerInfo"
+  >,
+  t: (key: string) => string,
+): string {
+  if (snapshot.needsAuth || snapshot.status === "auth-required") {
+    return translateConnectionKey(t, "bannerAuthRequired");
+  }
+  if (snapshot.status === "unconfigured") {
+    return translateConnectionKey(t, "bannerUnconfigured");
+  }
+
+  const effectiveProfile = inferBannerProfile(snapshot);
+  const targetLabel =
+    snapshot.resolved.displayTarget ||
+    (snapshot.target.kind === "remote" ? snapshot.target.url.trim() || "Remote" : "localhost");
+
+  if (effectiveProfile === "web-dev") {
+    return translateConnectionKey(t, "bannerWebDevStopped").replace("{target}", targetLabel);
+  }
+  if (effectiveProfile === "desktop") {
+    return translateConnectionKey(t, "bannerDesktopDisconnected");
+  }
+  return translateConnectionKey(t, "bannerRemoteDisconnected").replace("{target}", targetLabel);
+}
+
 /* ─────────────────────────── React Context & Hooks ─────────────────────────── */
 
 export interface ConnectionTargetController {
@@ -1108,6 +1183,7 @@ export function useLudensRpc(): {
   readonly needsAuth: boolean;
   readonly isReady: boolean;
   readonly serverInfo?: InitializeResult;
+  readonly lastKnownServerInfo?: InitializeResult;
   readonly serverSeq: number | null;
   readonly mediaTicket?: string;
   readonly reconnectGeneration: number;
@@ -1136,6 +1212,7 @@ export function useLudensRpc(): {
       needsAuth: ctx.snapshot.needsAuth,
       isReady: ctx.snapshot.isReady,
       serverInfo: ctx.snapshot.serverInfo,
+      lastKnownServerInfo: ctx.snapshot.lastKnownServerInfo,
       serverSeq: ctx.snapshot.serverSeq,
       mediaTicket: ctx.snapshot.mediaTicket,
       reconnectGeneration: ctx.snapshot.reconnectGeneration,

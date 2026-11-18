@@ -124,6 +124,8 @@ test("DesktopQuickSwitcher includes Create New Workspace action and matches Chin
 
   assert.match(html, /data-qs-item="action:create-workspace"/);
   assert.match(html, /Create New Workspace/);
+  assert.match(html, /data-qs-item="action:connection-target"/);
+  assert.match(html, /Switch Connection Target \/ Remote Server/);
 
   const matched = filterQuickSwitcherItems(
     [

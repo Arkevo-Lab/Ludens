@@ -58,10 +58,12 @@ test("empty-state actions have clean destinations", () => {
   assert.match(emptyHtml, /view=workspaces&amp;create=1/);
 });
 
-test("no-run guidance prints the copyable workspace up command for the selected workspace", () => {
+test("no-run guidance renders App-native Start Workspace CTA without legacy terminal CLI command clutter", () => {
   const html = renderToStaticMarkup(createElement(WorkspaceRunEmpty, { state: "no-run", project: "my workspace",
     workspacePath: "/tmp/my-ws", error: "", retrying: false, onRetry() {}, onNavigate() {} }));
-  assert.match(html, /ludens --workspace &#x27;\/tmp\/my-ws&#x27; up/);
+  assert.match(html, /data-empty-start-workspace=""/);
+  assert.doesNotMatch(html, /ludens --workspace/);
+  assert.doesNotMatch(html, /<details\b/);
 });
 
 test("only an unhandled primary click is intercepted for client navigation", () => {
