@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { Bot, Cable, Cpu, Monitor, SlidersHorizontal } from "lucide-react";
+import { Bot, Cable, Cpu, HardDrive, Monitor, SlidersHorizontal } from "lucide-react";
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
+import { StorageSettings } from "@/features/workspaces/storage-settings";
 import {
   ModelEffortBadge,
   ModelPickerDialog,
@@ -30,7 +31,7 @@ import type { GlobalDefaultsResult, WorkspaceSettings } from "@/lib/workspaces";
 import type { WorkspaceDefaults } from "@ludens/protocol/ludens";
 import type { PetFollow } from "@/features/pet/pet-follow";
 
-type SettingsCategoryId = "general" | "defaults" | "transport" | "pet";
+export type SettingsCategoryId = "general" | "defaults" | "storage" | "transport" | "pet";
 
 export function SettingsView({
   follow,
@@ -50,6 +51,7 @@ export function SettingsView({
   const categories: SettingsCategoryItem[] = [
     { id: "general", label: t("categories.general"), icon: <Monitor aria-hidden="true" className="size-4" /> },
     { id: "defaults", label: t("categories.defaults"), icon: <SlidersHorizontal aria-hidden="true" className="size-4" /> },
+    { id: "storage", label: t("categories.storage"), icon: <HardDrive aria-hidden="true" className="size-4" /> },
     { id: "transport", label: t("categories.transport"), icon: <Cable aria-hidden="true" className="size-4" /> },
     { id: "pet", label: t("categories.pet"), icon: <Bot aria-hidden="true" className="size-4" /> },
   ];
@@ -89,6 +91,7 @@ export function SettingsView({
         </SettingsSection>
       )}
       {activeCategory === "defaults" && <GlobalDefaultsCard />}
+      {activeCategory === "storage" && <StorageSettings />}
       {activeCategory === "transport" && <ConnectionSettings projects={projects} />}
       {activeCategory === "pet" && <PetSettings follow={follow} projects={projects} />}
     </SettingsWorkspaceLayout>

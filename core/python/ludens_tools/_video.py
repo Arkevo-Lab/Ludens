@@ -82,6 +82,15 @@ def media_path(root: Path, asset: str) -> Path:
     return path
 
 
+def _infer_workspace(root: Path, workspace: Path | None = None) -> Path:
+    if workspace is not None:
+        return workspace.resolve()
+    resolved = root.resolve()
+    if resolved.name == "timeline":
+        return resolved.parent.parent
+    return resolved
+
+
 def video_status(root: Path, asset: str, *, allow_pending: bool = False) -> dict[str, Any]:
     path = media_path(root, asset)
     status = media_path(root, asset + ".json")
@@ -89,16 +98,25 @@ def video_status(root: Path, asset: str, *, allow_pending: bool = False) -> dict
         raise ValueError("Recorded video is unavailable: status is missing")
     value: dict[str, Any] = json.loads(_sharing_retry(lambda: status.read_text(encoding="utf-8")))
     state = value.get("status")
+    has_archive = isinstance(value.get("archive"), dict)
+    if state == "evicted" and not has_archive:
+        raise ValueError("Recorded video was evicted by storage retention policy")
     # Fragmented segments are readable while pending: their fragments and the
     # empty moov are already on disk. Legacy +faststart segments are not.
-    if state != "ready" and not (allow_pending and state == "pending" and value.get("format") == "fmp4"):
+    if (
+        state != "ready"
+        and not (state == "evicted" and has_archive)
+        and not (allow_pending and state == "pending" and value.get("format") == "fmp4")
+    ):
         raise ValueError(f"Recorded video is {state or 'unavailable'}: {value.get('error', 'encoding has not finished')}")
-    if state == "ready" and not path.is_file():
-        raise ValueError("Recorded video is unavailable: segment is missing")
+    if state in {"ready", "evicted"} and not path.is_file():
+        cache_path = root / "cache" / asset
+        if not has_archive and not cache_path.is_file():
+            raise ValueError("Recorded video is unavailable: segment is missing")
     return value
 
 
-def decode_frame(root: Path, asset: str, video: dict[str, Any]) -> bytes:
+def decode_frame(root: Path, asset: str, video: dict[str, Any], *, workspace: Path | None = None) -> bytes:
     if video.get("status") == "gap":
         raise ValueError("Recorded image is unavailable: " + str(video.get("reason", "recording gap")))
     pts = video.get("pts")
@@ -113,11 +131,18 @@ def decode_frame(root: Path, asset: str, video: dict[str, Any]) -> bytes:
         if (not info.get("readableBytes") or last_pts is None
                 or Fraction(pts) * Fraction(*time_base) > Fraction(last_pts) * Fraction(*TIME_BASE)):
             raise ValueError("Recorded image is unavailable: exact frame is not yet readable")
-    path = media_path(root, asset)
+    local_path = media_path(root, asset)
+    if local_path.is_file():
+        resolved_path = local_path
+    else:
+        from ._storage import TimelineStorageManager
+        resolved_path = TimelineStorageManager(
+            _infer_workspace(root, workspace), root, start_worker=False
+        ).resolve_for_read(asset)
     import av
 
     wanted = Fraction(pts) * Fraction(*time_base)
-    with av.open(str(path), mode="r") as container:
+    with av.open(str(resolved_path), mode="r") as container:
         stream = container.streams.video[0]
         width, height = int(info["width"]), int(info["height"])
         if (width <= 0 or height <= 0 or stream.width != width + width % 2 or stream.height != height + height % 2
@@ -170,11 +195,28 @@ class _Segment:
 class VideoRecorder:
     """A bounded producer queue and one encoding thread inside the writer."""
 
-    def __init__(self, root: Path, directory: Path, *, segment_seconds: int | None = None, idle_seconds: int | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        directory: Path,
+        *,
+        segment_seconds: int | None = None,
+        idle_seconds: int | None = None,
+        crf: int | None = None,
+        on_sealed: Callable[[str], None] | None = None,
+    ) -> None:
         self.root, self.directory = root, directory
         self.directory.mkdir(parents=True, exist_ok=True)
         if self.root.resolve() != self.root or self.directory.resolve() != self.directory:
             raise ValueError("Timeline video directory must not follow symlinks")
+        if crf is None:
+            from ._storage import _resolve_crf
+            self.crf = _resolve_crf("balanced")
+        else:
+            if isinstance(crf, bool) or not isinstance(crf, int) or not 0 <= crf <= 51:
+                raise ValueError("crf must be an integer between 0 and 51")
+            self.crf = crf
+        self.on_sealed = on_sealed
         self.queue_limit = _positive("LUDENS_VIDEO_QUEUE_BYTES", 32 * 1024 * 1024)
         self.queue_count = _positive("LUDENS_VIDEO_QUEUE_FRAMES", 64)
         self.segment_seconds = segment_seconds if segment_seconds is not None else _positive("LUDENS_VIDEO_SEGMENT_SECONDS", 300)
@@ -298,7 +340,7 @@ class VideoRecorder:
             stream.pix_fmt = "yuv420p"
             stream.codec_context.time_base = Fraction(*TIME_BASE)
             stream.time_base = Fraction(*TIME_BASE)
-            stream.options = {"crf": "18", "preset": "veryfast", "tune": "zerolatency", "bf": "0",
+            stream.options = {"crf": str(self.crf), "preset": "veryfast", "tune": "zerolatency", "bf": "0",
                 "g": str(keyint), "keyint_min": str(keyint), "sc_threshold": "0"}
             segment.stream = stream
         with Image.open(BytesIO(raw)) as source:
@@ -341,15 +383,24 @@ class VideoRecorder:
                 except Exception as error:
                     segment.error = segment.error or f"{type(error).__name__}: {error}"
             segment.container = segment.stream = None
+        notify_asset: str | None = None
         with self.condition:
             if segment.error:
                 _state(segment.path.with_suffix(".mp4.json"), self._metadata(segment, "error"))
             else:
                 self._publish(segment, "ready")
+                if not segment.discard:
+                    notify_asset = segment.asset
             if segment.discard:
                 segment.path.unlink(missing_ok=True)
                 segment.path.with_suffix(".mp4.json").unlink(missing_ok=True)
             self.segments.pop(segment.asset, None)
+            self.condition.notify_all()
+        if notify_asset is not None and self.on_sealed is not None:
+            try:
+                self.on_sealed(notify_asset)
+            except Exception as error:
+                print(f"Video archival notification failed: {type(error).__name__}: {error}", file=sys.stderr)
 
     def _run(self) -> None:
         try:
@@ -438,11 +489,14 @@ def main() -> int:
     parser.add_argument("--asset", required=True)
     parser.add_argument("--pts", type=int, required=True)
     parser.add_argument("--time-base", default="1/1000000")
+    parser.add_argument("--workspace", default=None)
     arguments = parser.parse_args()
     try:
         numerator, denominator = (int(part) for part in arguments.time_base.split("/"))
+        ws = Path(arguments.workspace) if arguments.workspace else None
         value = decode_frame(Path(arguments.root), arguments.asset,
-                             {"pts": arguments.pts, "timeBase": [numerator, denominator]})
+                             {"pts": arguments.pts, "timeBase": [numerator, denominator]},
+                             workspace=ws)
         sys.stdout.buffer.write(value)
         return 0
     except Exception as error:

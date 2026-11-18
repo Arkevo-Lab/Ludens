@@ -43,6 +43,10 @@ import {
   type WorkspaceDefaults,
   type WorkspaceRegistration,
 } from "@ludens/protocol/ludens";
+import {
+  validateWorkspaceStorageOverride,
+  type WorkspaceStorageOverride,
+} from "@ludens/protocol/storage";
 import { globalHome, clearCatalogCache } from "./data";
 import { BasewareClient } from "@ludens/baseware/client";
 import { defaultSocket } from "@ludens/baseware/address";
@@ -70,6 +74,7 @@ export interface WorkspaceConfigSummary {
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
   machines?: WorkspaceMachinesBinding;
+  storage?: WorkspaceStorageOverride;
   dashboard: boolean;
   pet: boolean;
   diagnostics: "normal" | "full";
@@ -214,6 +219,14 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
         // Ignore malformed machine bindings in summary reads; the editor can repair them.
       }
     }
+    let storage: WorkspaceStorageOverride | undefined;
+    if (raw.storage !== undefined) {
+      try {
+        storage = validateWorkspaceStorageOverride(raw.storage, "storage");
+      } catch {
+        // Ignore malformed storage override in summary reads; the editor can repair it.
+      }
+    }
     return {
       driver: typeof raw.driver === "string" && raw.driver.trim() ? raw.driver.trim() : "cua",
       ...(typeof raw.driverPackage === "string" && raw.driverPackage.trim() ? { driverPackage: raw.driverPackage.trim() } : {}),
@@ -230,6 +243,7 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
         : {}),
       ...(connection ? { connection } : {}),
       ...(machines ? { machines } : {}),
+      ...(storage ? { storage } : {}),
       dashboard: typeof raw.dashboard === "boolean" ? raw.dashboard : true,
       pet: typeof raw.pet === "boolean" ? raw.pet : false,
       diagnostics,
@@ -1635,6 +1649,7 @@ export async function updateWorkspaceStudioConfig(
     "cuaCommand",
     "connection",
     "machines",
+    "storage",
   ];
   for (const key of Object.keys(patch)) {
     if (!allowed.includes(key)) throw new Error(`不支持的工作区配置字段：${key}`);
@@ -1728,6 +1743,10 @@ export async function updateWorkspaceStudioConfig(
     if ("machines" in patch) {
       if (patch.machines === null || patch.machines === undefined) delete next.machines;
       else next.machines = validateWorkspaceMachinesBinding(patch.machines, "machines");
+    }
+    if ("storage" in patch) {
+      if (patch.storage === null || patch.storage === undefined) delete next.storage;
+      else next.storage = validateWorkspaceStorageOverride(patch.storage, "storage");
     }
 
     const temporary = `${configPath}.${randomUUID()}.tmp`;

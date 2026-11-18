@@ -20,6 +20,19 @@ import type { diagnosticEvents, DiagnosticQuery } from "./diagnostic-events";
 import type { indexCacheStats } from "./log-index";
 import type { PerceptionSettings, PerceptionSettingsPatch, PerceptionRuntimeSnapshot } from "./perception-config";
 import type {
+  GlobalStorageUpdateInput,
+  StorageMaintainParams,
+  StoragePinParams,
+  StorageTestParams,
+} from "@ludens/protocol/storage";
+import type {
+  getStorageOverview,
+  maintainStorage,
+  pinTimelineSegment,
+  testStorageBackend,
+  updateStorageSettings,
+} from "./storage";
+import type {
   workspaceSettings,
   updateWorkspaceRoot,
   updateGlobalConnection,
@@ -92,6 +105,11 @@ export interface DashboardMethods {
   petState: { args: []; result: Awaited<ReturnType<typeof petState>> };
   petTarget: { args: [project: unknown, ifUnset: boolean]; result: Awaited<ReturnType<typeof setPetTarget>> };
   petConsumer: { args: [input: unknown]; result: Awaited<ReturnType<typeof recordPetConsumer>> };
+  storageGet: { args: []; result: Awaited<ReturnType<typeof getStorageOverview>> };
+  storageUpdate: { args: [input: GlobalStorageUpdateInput]; result: Awaited<ReturnType<typeof updateStorageSettings>> };
+  storageTest: { args: [params: StorageTestParams]; result: Awaited<ReturnType<typeof testStorageBackend>> };
+  storageMaintain: { args: [params: StorageMaintainParams]; result: Awaited<ReturnType<typeof maintainStorage>> };
+  storagePin: { args: [params: StoragePinParams]; result: Awaited<ReturnType<typeof pinTimelineSegment>> };
   clearCatalogCache: { args: []; result: null };
 }
 export type DashboardMethod = keyof DashboardMethods;

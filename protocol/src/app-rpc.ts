@@ -12,6 +12,55 @@ import type {
   BasewareMachineSpec,
   WorkspaceMachinesBinding,
 } from "./machines.ts";
+import type {
+  DirectoryBackendConfig,
+  EffectiveWorkspaceStorage,
+  GlobalStorageConfig,
+  GlobalStorageUpdateInput,
+  RedactedGlobalStorageConfig,
+  RedactedS3BackendConfig,
+  RedactedStorageProfile,
+  S3BackendConfig,
+  StorageBackendKind,
+  StorageMaintainParams,
+  StorageMaintainResult,
+  StoragePinParams,
+  StoragePinResult,
+  StorageProfile,
+  StorageProfileInput,
+  StorageTestParams,
+  StorageTestResult,
+  TimelineArchiveLocation,
+  VideoQualityPreset,
+  WorkspaceStorageMode,
+  WorkspaceStorageOverride,
+  WorkspaceStorageUsageSummary,
+} from "./storage.ts";
+
+export type {
+  DirectoryBackendConfig,
+  EffectiveWorkspaceStorage,
+  GlobalStorageConfig,
+  GlobalStorageUpdateInput,
+  RedactedGlobalStorageConfig,
+  RedactedS3BackendConfig,
+  RedactedStorageProfile,
+  S3BackendConfig,
+  StorageBackendKind,
+  StorageMaintainParams,
+  StorageMaintainResult,
+  StoragePinParams,
+  StoragePinResult,
+  StorageProfile,
+  StorageProfileInput,
+  StorageTestParams,
+  StorageTestResult,
+  TimelineArchiveLocation,
+  VideoQualityPreset,
+  WorkspaceStorageMode,
+  WorkspaceStorageOverride,
+  WorkspaceStorageUsageSummary,
+};
 
 /** JSON-RPC 2.0 protocol identifier. */
 export const JSON_RPC_VERSION = "2.0" as const;
@@ -190,6 +239,12 @@ export type MediaResolveResult =
       bytes: string;
       mediaType: string;
       cacheControl?: string;
+    }
+  | {
+      remoteUrl: string;
+      size?: number;
+      mediaType: string;
+      cacheControl?: string;
     };
 
 export const LUDENS_EVENT_TOPICS = [
@@ -201,6 +256,7 @@ export const LUDENS_EVENT_TOPICS = [
   "eventPool",
   "pet",
   "baseware",
+  "storage",
 ] as const;
 
 export type LudensEventTopic = (typeof LUDENS_EVENT_TOPICS)[number];
@@ -663,6 +719,32 @@ export interface AppRpcMethods {
   "pet/recordConsumer": {
     params: PetConsumerInputDto;
     result: Record<string, unknown>;
+  };
+  "storage/get": {
+    params: undefined | Record<string, never>;
+    result: {
+      config: RedactedGlobalStorageConfig;
+      usage: WorkspaceStorageUsageSummary[];
+    };
+  };
+  "storage/update": {
+    params: GlobalStorageUpdateInput;
+    result: {
+      config: RedactedGlobalStorageConfig;
+      usage: WorkspaceStorageUsageSummary[];
+    };
+  };
+  "storage/test": {
+    params: StorageTestParams;
+    result: StorageTestResult;
+  };
+  "storage/maintain": {
+    params: StorageMaintainParams;
+    result: StorageMaintainResult;
+  };
+  "storage/pin": {
+    params: StoragePinParams;
+    result: StoragePinResult;
   };
 }
 

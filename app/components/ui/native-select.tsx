@@ -6,6 +6,7 @@ function NativeSelect({
   className,
   wrapperClassName,
   size = "default",
+  style,
   ...props
 }: Omit<React.ComponentProps<"select">, "size"> & { size?: "sm" | "default"; wrapperClassName?: string }) {
   return (
@@ -16,6 +17,7 @@ function NativeSelect({
       <select
         data-slot="native-select"
         data-size={size}
+        style={{ WebkitAppearance: "none", MozAppearance: "none", appearance: "none", ...style }}
         className={cn(
           "h-9 w-full min-w-0 appearance-none rounded-md border border-input bg-transparent px-3 py-2 pr-9 text-sm shadow-xs transition-[color,background-color,border-color,box-shadow] duration-[var(--duration-fast)] ease-[cubic-bezier(0.16,1,0.3,1)] outline-none selection:bg-primary selection:text-primary-foreground placeholder:text-muted-foreground disabled:pointer-events-none disabled:cursor-not-allowed data-[size=sm]:h-8 data-[size=sm]:py-1 dark:bg-input/30 dark:hover:bg-input/50",
           "focus-visible:border-ring focus-visible:ring-1 focus-visible:ring-ring/60",

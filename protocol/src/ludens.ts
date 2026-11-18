@@ -1,7 +1,7 @@
 /** Application configuration and a rebuildable index; workspace data stays local. */
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rmdir, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rename, rmdir, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 
@@ -145,10 +145,16 @@ export async function readGlobalConfig(home = ludensHome()): Promise<LudensConfi
     return { version: 1, workspaceRoot: resolve(home, "workspaces"), defaults: {} };
   }
 }
-async function atomicJson(path: string, value: unknown) {
+export async function atomicJson(path: string, value: unknown) {
+  await mkdir(dirname(path), { recursive: true });
   const temporary = `${path}.${randomUUID()}.tmp`;
-  try { await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 }); await rename(temporary, path); }
-  finally { await unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; }); }
+  try {
+    await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
+    await chmod(temporary, 0o600).catch(() => {});
+    await rename(temporary, path);
+  } finally {
+    await unlink(temporary).catch(error => { if (error.code !== "ENOENT") throw error; });
+  }
 }
 export async function writeGlobalConfig(config: LudensConfig, home = ludensHome()): Promise<LudensConfig> {
   const validated = validateGlobalConfig(config);
@@ -227,7 +233,7 @@ async function recoverStateLock(path: string) {
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") return; }
   await releaseStateLock(path, owner);
 }
-async function withStateLock<T>(path: string, work: () => Promise<T>): Promise<T> {
+export async function withStateLock<T>(path: string, work: () => Promise<T>): Promise<T> {
   await mkdir(dirname(path), { recursive: true });
   const pending = await mkdtemp(`${path}.pending-`), owner = `owner-${process.pid}-${randomUUID()}`;
   let acquired = false;

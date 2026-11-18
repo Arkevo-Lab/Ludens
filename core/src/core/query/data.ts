@@ -8,7 +8,8 @@ import { refreshRunProjection, selectIndexedCycle, readRunProjection, indexedObs
 import { prepareArchive } from "./prepare-run";
 import { controlArchiveBuild } from "./cold-build";
 import { latestGameRun } from "./initial-selection";
-import { readTimelineRecord, timelinePath, type TimelineRecordDetail } from "./timeline-record";
+import { readTimelineRecord, type TimelineRecordDetail } from "./timeline-record";
+import { resolveStoredTimelineAsset } from "./storage";
 import type {
   Event,
   Manifest,
@@ -402,7 +403,13 @@ export async function stopRun(
     expectedEpoch,
   });
 }
-export async function mediaFile(project: string, run: string, id: string, root = globalHome, signal?: AbortSignal) {
+export async function mediaFile(
+  project: string,
+  run: string,
+  id: string,
+  root = globalHome,
+  signal?: AbortSignal,
+): Promise<{ bytes: Buffer; mediaType: string; cacheControl: string }> {
   const { path, manifest, archiveWorkspace, index, release } = await openRun(project, run, root);
   try {
   await prepareRun(index, signal);
@@ -415,8 +422,11 @@ export async function mediaFile(project: string, run: string, id: string, root =
     ))
   )
     throw new Error("未找到可展示的观测");
+  const outMediaType = textMedia ? "text/plain; charset=utf-8" : observation.mediaType;
   let file: string;
   const reference = observation.timeline;
+  const outCacheControl = !reference || reference.asset.startsWith("objects/")
+    ? "private, max-age=31536000, immutable" : "no-store";
   if (reference) {
     if ((reference.recordId !== undefined && (typeof reference.recordId !== "string" || !reference.recordId))
       || (reference.sequence !== undefined && (!Number.isSafeInteger(reference.sequence) || reference.sequence < 1))
@@ -426,16 +436,48 @@ export async function mediaFile(project: string, run: string, id: string, root =
     const workspace = archiveWorkspace;
     const timeline = join(workspace, ".ludens", "timeline");
     if (reference.video) return {
-      bytes: await decodeTimelineFrame(timeline, { asset: reference.asset, video: reference.video }, { signal }),
+      bytes: await decodeTimelineFrame(timeline, { asset: reference.asset, video: reference.video }, { signal, home: root }),
       mediaType: "image/png", cacheControl: "no-store",
     };
-    try {
-      file = await timelinePath(timeline, reference.asset);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT")
-        throw Object.assign(new Error("观测已过期或已移除"), { status: 410, code: "OBSERVATION_EXPIRED" });
-      throw error;
+    const resolved = await resolveStoredTimelineAsset({
+      timelineRoot: timeline,
+      workspacePath: workspace,
+      home: root,
+      asset: reference.asset,
+      signal,
+    });
+    if (resolved.kind === "missing") {
+      throw Object.assign(new Error("观测已过期或已移除"), { status: 410, code: "OBSERVATION_EXPIRED" });
     }
+    if (resolved.kind === "remote") {
+      let upstream: Response;
+      try {
+        upstream = await fetch(resolved.remoteUrl, { method: "GET", signal });
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason ?? error;
+        throw Object.assign(
+          new Error(`对象存储当前不可用：${error instanceof Error ? error.message : String(error)}`),
+          { status: 503, code: "STORAGE_UNAVAILABLE" },
+        );
+      }
+      if (upstream.status === 404) {
+        await upstream.body?.cancel().catch(() => {});
+        throw Object.assign(new Error("观测已过期或已移除"), { status: 410, code: "OBSERVATION_EXPIRED" });
+      }
+      if (!upstream.ok) {
+        await upstream.body?.cancel().catch(() => {});
+        throw Object.assign(new Error(`对象存储读取失败 (HTTP ${upstream.status})`), {
+          status: 503,
+          code: "STORAGE_UNAVAILABLE",
+        });
+      }
+      return {
+        bytes: Buffer.from(await upstream.arrayBuffer()),
+        mediaType: outMediaType,
+        cacheControl: outCacheControl,
+      };
+    }
+    file = resolved.file;
   } else {
     if (typeof observation.path !== "string")
       throw Object.assign(new Error("此观测未录制，仅保留交付记录"), { status: 404, code: "OBSERVATION_UNRECORDED" });
@@ -455,9 +497,8 @@ export async function mediaFile(project: string, run: string, id: string, root =
   return {
     bytes,
     // Text media (including HTML source) is model input, never executable page content.
-    mediaType: textMedia ? "text/plain; charset=utf-8" : observation.mediaType,
-    cacheControl: !reference || reference.asset.startsWith("objects/")
-      ? "private, max-age=31536000, immutable" : "no-store",
+    mediaType: outMediaType,
+    cacheControl: outCacheControl,
   };
   } finally { release(); }
 }
