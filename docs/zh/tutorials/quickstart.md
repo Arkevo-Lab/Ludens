@@ -1,6 +1,6 @@
 # 快速开始
 
-本教程带你完成环境安装与构建，掌握零端口桌面应用、托管 Web / 远端 SPA、统一 CLI（本地 UDS 与 `--remote`）以及移动端多目标切换四种运行与接入方式，学习开启**自主运行**、通过**事件池**与 **Steer Now** 协同干预，以及随时**收回控制权**的完整流程。
+本教程带你完成环境安装与构建，掌握 Ludens 的三大运行平面——**零端口桌面端应用（`desktop`）**、**托管云端 / 远端节点与移动端受管沙箱（`remote`）**、**默认隔离的前端与 AI Harness 开发预览（`web-dev`）**——以及统一 `ludens` CLI（本地 UDS 与 `--remote`），学习开启**自主运行**、通过**事件池**与 **Steer Now** 协同干预，以及随时**收回控制权**的完整流程。
 
 ## 1. 环境前置条件
 
@@ -25,11 +25,11 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/app/bin:$PATH"
 
 执行完 `export PATH` 后即可在当前终端直接调用 `baseware`、`ludens` 与 `ludens-app`。如需长期生效，可将带有仓库绝对路径的 `export PATH=...` 写入 `~/.zshrc` 或 `~/.bashrc`。
 
-## 3. 四种运行与接入方式
+## 3. 三种运行平面与统一 CLI 接入
 
-四种工况底层共享同一份 **Vite 静态 SPA（`app/out`）**、统一的 `@ludens/protocol/app-rpc` **JSON-RPC 2.0** 协议与 **App Daemon**（`ludens app-server`，可通过 `ludens daemon` 管理，按 **1 Workspace = 1 Core** 并发监管各个工作区 **Core**），并共用同一个 `~/.ludens/` 全局注册表。
+所有接入平面底层共享同一份 **Vite 静态 SPA（`app/out`）**、统一的 `@ludens/protocol/app-rpc` **JSON-RPC 2.0** 协议与 **App Daemon**（`ludens app-server`，别名 `ludens serve`，可通过 `ludens daemon` 管理，按 **1 Workspace = 1 Core** 并发监管各个工作区 **Core**），并通过会话握手显式协商运行平面（`runtimeProfile`）与宿主机能力边界（`capabilities`）。
 
-### 方式 A：桌面端应用（零监听 TCP 端口）
+### 1. 桌面端应用（`ludens-app` —— 日常本地主力入口，`desktop`）
 
 先构建一次桌面端外壳，再启动原生应用窗口：
 
@@ -41,29 +41,49 @@ ludens-app --show-window
 `ludens-app` 常用启动参数：
 
 - `--workspace <path>`：直接打开指定工作区目录
-- `--server <url>`（别名 `--dashboard <url>`）：覆盖 `ludens-app://console/`，连接外部 Vite 开发服务或托管地址
-- `--profile <path>`：自定义 Electron 用户数据目录
+- `--server <url>`：覆盖 `ludens-app://console/`，加载显式指定的本机 Vite 开发服务器地址
+- `--profile <path>`：自定义 Electron 用户数据目录（默认 `~/.ludens/desktop/profile`）
 - `--background`：以后台托盘模式启动，暂不弹出主窗口
 - `--show-window`：启动时立即显示并聚焦控制台窗口
 
-桌面应用通过纯 Node `ensureLocalAppDaemon` 按 `LUDENS_HOME` 经 Unix Domain Socket（`app-server.sock`）拉起或复用单例 `ludens app-server`（**0 个监听 TCP 端口**），通过 `ludens-app://console/` 加载打包静态资源、通过 `ludens-media://local/media?...` 经 UDS `media/resolve` 返回本地媒体（含 `206` `Range`）、并通过 `window.ludens.rpc` 与 `window.ludens.dialog.pickPath` 桥接渲染进程、原生目录/ROM 选择器与托盘桌宠。通过侧边栏工作区切换器底部 **新建工作区**、`⌘K / Ctrl+K` 快速跳转面板或 **工作区（Workspaces）**（`?view=workspaces&create=1`）即可打开一站式创建向导：支持一键绑定 `~/.ludens/machines.json` 中的**已有设备节点**、从**已安装驱动**指定 ROM 与端口，或验证并收录**新驱动包**，同时内联选择推理模型并点击 **创建并进入运行台** 一步完成初始化、服务拉起与进入 **运行（Live）**（`?view=live`，即使 0 条历史运行记录也能直接进入）：输入任务目标并发送或点击 **启动自主运行**，App Daemon 会自动按需拉起该工作区的 **Core + Baseware**（标记为 `launchedBy: "app"`），无需先开终端执行 `ludens up`（仍可在 **配置（Config）** `?view=perception` 点击 **启动工作区 / 热重载 Core / 停止**）。侧边栏「**活跃 Core**」列表实时汇总全部运行中的 Core，展示 `App` / `CLI` 启动来源徽章与单点停止按钮（`■`）。关闭主窗口（`×`）时收起至系统托盘并保持活跃 Core 继续工作（可选**桌宠**默认开启 `!auto` 多 Core 自动追踪，按待处理 `🆘` `pendingOutbound > 0` → 当前聚焦工作区 Core → 后台**自主运行** Core 的优先级跟随；可在 **设置** 中开关或通过 `LUDENS_DISABLE_COMPANION=1` 禁用）；完全退出（`⌘Q` / `before-quit` / 托盘 **Quit**）时会触发 `ActiveCoreQuitGuard`：若当前无活跃 Core，应用直接退出并保留后台守护进程；若存在活跃 Core，则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。如需打包原生 `.dmg` 或 `.exe` 安装包，运行 `npm --prefix app run desktop:dist`。
+桌面应用是日常本地使用的主力入口：通过纯 Node `ensureLocalAppDaemon` 按 `LUDENS_HOME`（默认 `~/.ludens`）经 Unix Domain Socket（`app-server.sock`）拉起或复用单例 `ludens app-server`（**0 个监听 TCP 端口**），具备完整本机宿主能力（自由选择本机目录、`file:` 驱动包、自定义 `cuaCommand` 与本地存储路径）。应用通过 `ludens-app://console/` 加载打包静态资源、通过 `ludens-media://local/media?...` 经 UDS `media/resolve` 返回本地媒体（含 `206` `Range`）、并通过 `window.ludens.rpc` 与 `window.ludens.dialog.pickPath` 桥接渲染进程、原生目录/ROM 选择器与托盘桌宠。在本地 UDS 连接健康时，侧边栏自动隐藏连接状态胶囊以保持清爽原生观感，同时随时可通过 `⌘K / Ctrl+K` 快速跳转面板切换连接目标 / 远端服务器。
 
-### 方式 B：托管 Web / 远端控制台（`ludens daemon start` / `ludens app-server` / `npm run dev`）
+通过侧边栏工作区切换器底部 **新建工作区**、`⌘K / Ctrl+K` 快速跳转面板或 **工作区（Workspaces）**（`?view=workspaces&create=1`）即可打开一站式创建向导：支持一键绑定 `~/.ludens/machines.json` 中的**已有设备节点**、从**已安装驱动**指定 ROM 与端口，或验证并收录**新驱动包**，同时内联选择推理模型并点击 **创建并进入运行台** 一步完成初始化、服务拉起与进入 **运行（Live）**（`?view=live`，即使 0 条历史运行记录也能直接进入）：输入任务目标并发送或点击 **启动自主运行**，App Daemon 会自动按需拉起该工作区的 **Core + Baseware**（标记为 `launchedBy: "app"`），无需先开终端执行 `ludens up`（仍可在 **配置（Config）** `?view=perception` 点击 **启动工作区 / 热重载 Core / 停止**）。侧边栏「**活跃 Core**」列表实时汇总全部运行中的 Core，展示 `App` / `CLI` 启动来源徽章与单点停止按钮（`■`）。关闭主窗口（`×`）时收起至系统托盘并保持活跃 Core 继续工作（可选**桌宠**默认开启 `!auto` 多 Core 自动追踪，按待处理 `🆘` `pendingOutbound > 0` → 当前聚焦工作区 Core → 后台**自主运行** Core 的优先级跟随；可在 **设置** 中开关或通过 `LUDENS_DISABLE_COMPANION=1` 禁用）；完全退出（`⌘Q` / `before-quit` / 托盘 **Quit**）时会触发 `ActiveCoreQuitGuard`：若当前无活跃 Core，应用直接退出并保留后台守护进程；若存在活跃 Core，则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。如需打包原生 `.dmg` 或 `.exe` 安装包，运行 `npm --prefix app run desktop:dist`。
 
-启动托管 Web / 远端 **App Daemon**（`ludens app-server`，别名 `ludens serve`），单进程对外提供静态 Vite SPA（`app/out`）、WebSocket JSON-RPC `/rpc`、HMAC capability ticket 鉴权的 `/media` 与 `/health`（无 `/api/*` REST 路由）：
+### 2. 托管云端 / 远端节点与移动端（`ludens serve` —— 受管沙箱，`remote`）
+
+面向云端 SaaS、远端算力节点及手机/平板浏览器访问，启动托管 Web / 远端 **App Daemon**（`ludens serve`，等价于 `ludens app-server` 或后台 `ludens daemon start`），单进程对外提供静态 Vite SPA（`app/out`）、WebSocket JSON-RPC `/rpc`、HMAC capability ticket 鉴权的 `/media` 与 `/health`：
 
 ```sh
-# 本机回环浏览器访问
-ludens app-server --listen ws://127.0.0.1:3015 --auth none --static-dir app/out
+# 托管云端或远端节点（非 --dev 的 ws:// 监听强制要求 --auth token）
+LUDENS_APP_TOKEN="your-secret-token" \
+  ludens serve --listen ws://0.0.0.0:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir app/out
 
-# 托管或远端微服务（非回环地址强制要求 --auth token）
+# 或作为后台守护进程启动
 LUDENS_APP_TOKEN="your-secret-token" \
   ludens daemon start --listen ws://0.0.0.0:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir app/out
 ```
 
-不传入 `--listen` 时，`ludens app-server` 默认以 **纯 UDS 模式启动（`app-server.sock`，0 个监听 TCP 端口）**。浏览器打开带凭据的链接（`http(s)://host:port/#token=...`）后，SPA 会第一时间捕获凭据并通过 `history.replaceState` 擦除 URL hash 中的 token。进入 **工作区（Workspaces）** 与 **运行（Live）** 即可直接按需启动任务。若你在开发前端界面并需要 Vite 热更新，可执行 `(cd app && npm run dev)`（默认在 `127.0.0.1:3015` 启动 Vite 开发服务器，并代理 `/rpc`、`/media` 与 `/health` 至自动拉起的 `ludens app-server`）。
+在 `remote` 平面下，服务端强制启用 **Token 鉴权**与 **`managed-sandbox` 受管沙箱能力边界**（禁止越界挂载任意宿主机路径、`file:` 本地驱动包、自定义宿主可执行命令与本机自定义存储目录；服务端 `RpcRouter` 对越权变更返回 `403 CAPABILITY_RESTRICTED`，前端表单同步收敛为受管工作区视图）。不传入 `--listen` 时，`ludens serve` 默认以**纯 UDS 模式启动（`app-server.sock`，0 个监听 TCP 端口）**。在手机、平板或桌面浏览器打开带凭据的链接（`http(s)://host:port/#token=...`）后，响应式 SPA 会第一时间捕获凭据并通过 `history.replaceState` 擦除 URL hash 中的 token，也可随时通过 `<ConnectionTargetDialog>` 在 `electron-local`、`same-origin` 与 `remote`（`ws://` / `wss://` + Token）目标之间无缝切换。
 
-### 方式 C：统一 CLI 模式（`ludens` —— 本地 UDS 与 `--remote`）
+### 3. 前端与 AI Harness 开发预览（`npm run dev` / `--dev` —— 默认隔离，`web-dev`）
+
+在浏览器中调试前端界面或使用自动化 AI Harness 巡检验收时，运行开发预览脚本：
+
+```sh
+# 默认隔离开发预览（LUDENS_HOME 自动指向 ~/.ludens-dev，绝不干扰正在运行的桌面端 ~/.ludens 守护进程）
+(cd app && npm run dev)
+
+# 显式挂载本机真实 ~/.ludens 注册表进行浏览器联调
+(cd app && npm run dev:real)
+
+# 构建 Electron 外壳并以 Vite HMR 热更新模式联调桌面端（连接真实 ~/.ludens）
+(cd app && npm run desktop:dev)
+```
+
+`npm run dev`（`app/scripts/dev.mjs`）会自动拉起本机回环 `ludens app-server --dev --listen ws://127.0.0.1:0 --parent-watchdog` 与 Vite 开发服务器（默认 `127.0.0.1:3015`），并将 `LUDENS_HOME` 默认隔离至 `~/.ludens-dev`（也可传入 `-- --home /custom/dir` 指定独立目录），避免起停开发预览时误杀日常桌面端 `~/.ludens` 守护进程。`--dev` 仅允许绑定本机回环地址（`127.0.0.1`、`localhost`、`::1`），授予完整本地调试能力，在侧边栏展示语义化的 **`DEV PREVIEW`** 标识，并在 `<ConnectionTargetDialog>` 中提供**开发预览视角模拟**开关（一键切换「完整桌面视图」与「云端 SaaS / 手机端受管视图」）。如需直接预览构建产物 `app/out`，可执行 `(cd app && npm start)`（未设置 `LUDENS_APP_TOKEN` 时自动以 `--dev` 绑定回环端口）。
+
+### 统一 CLI 操控（`ludens` —— 本地 UDS 与 `--remote`）
 
 可通过 `ludens daemon status|start|stop|restart` 直接管理后台单例守护进程（`stop` 默认同时停止 Core，除非传入 `--keep-cores`），也可在终端通过本地 `app-server.sock` 初始化并拉起工作区：
 
@@ -78,13 +98,9 @@ ludens up
 `ludens init` 与 `ludens up` 常用参数：
 
 - `ludens init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]`
-- `ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--dashboard | --no-dashboard] [--pet | --no-pet]`（`--dry-run` 仅打印启动计划不实际拉起进程；`--preempt` 抢占同一设备上的冲突 Core；`--no-dashboard` 跳过确保本地 App-Server 守护进程）
+- `ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--pet | --no-pet]`（`--dry-run` 仅打印启动计划不实际拉起进程；`--preempt` 抢占同一设备上的冲突 Core）
 
 如果需要在磁盘上纳管已有目录或迁移旧版工作区，可执行 `ludens workspace open <dir> [--new-id]` 或 `ludens workspace import <dir> [--legacy-state <dir>] [--previous-workspace <dir>]`。
-
-### 方式 D：移动端与多目标切换
-
-在手机、平板或任意电脑浏览器打开同一份响应式 Vite SPA，即可通过控制台 `<ConnectionTargetDialog>` 在 `electron-local`（桌面端 IPC UDS）、`same-origin`（托管同源 WS `/rpc`）与 `remote`（`ws://` / `wss://` + Token）目标之间无缝切换。
 
 ## 4. 启动自主运行、事件池协作与收回控制权
 
@@ -121,7 +137,7 @@ ludens consolidate
 - `ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]`：查看或动态切换当前工作区的模型与推理档位
 - `ludens services [--remote <url>]`：查看当前工作区受管后台服务的运行状态
 - `ludens stop [--remote <url>]`：干净停止当前工作区 Core 守护进程
-- `ludens down [--services <emulator,baseware,core>] [--keep-emulator] [--dashboard] [--pet] [--remote <url>]`：停止当前工作区（`--keep-emulator` 保留已启动的目标进程；`--dashboard` / `--pet` 一并关闭共享的 App-Server 或可选桌宠进程）
+- `ludens down [--services <emulator,baseware,core>] [--keep-emulator] [--pet] [--remote <url>]`：停止当前工作区（`--keep-emulator` 保留已启动的目标进程；`--pet` 一并关闭可选桌宠进程）
 - `ludens daemon status | start | stop [--keep-cores|--stop-cores] | restart`：直接管理单例 `ludens app-server` 守护进程
 
 ## 5. 工作区配置（`ludens.json`）与全局默认参数
@@ -138,7 +154,6 @@ ludens consolidate
 | `compactionThreshold` | 未设置 | 触发后台上下文压缩的 Token 阈值 |
 | `connection` | 继承全局 | 多模态传输参数（`openaiWebsockets`、`cacheRetention`、`appendOnlyContext`、`imageUrls`） |
 | `machines` | 未设置 | 多节点白名单与当前活跃节点（`{ active?, allowed }`） |
-| `dashboard` | `true` | `ludens up` 时是否自动确保本地 `ludens app-server`（`app-server.sock`）就绪 |
 | `pet` | `false` | 当前工作区是否启用可选桌宠开关 |
 | `logging` | `{ "diagnostics": "normal" }` | 运行归档日志详略等级（`"normal"` 或 `"full"`） |
 
