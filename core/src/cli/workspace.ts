@@ -1,12 +1,10 @@
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
-import type { ManagedServiceTarget } from "@ludens/protocol/app-rpc";
+import type { CreateWorkspaceInputDto, ManagedServiceTarget } from "@ludens/protocol/app-rpc";
 import { defaultDriverCacheRoot, resolveDriver } from "@ludens/baseware/drivers/loader.ts";
 import {
-  ensureWorkspaceIdentity,
   ludensHome,
-  readGlobalConfig,
   readMachinesConfig,
   readWorkspaceIdentity,
   registeredWorkspace,
@@ -14,8 +12,7 @@ import {
   validateWorkspaceRegistration,
 } from "@ludens/protocol/ludens";
 import type { BasewareMachineSpec } from "@ludens/protocol/machines";
-import workspaceGuide from "../../templates/AGENTS.md" with { type: "text" };
-import perceptionTemplate from "../../templates/perception.py" with { type: "text" };
+import { initializeWorkspace } from "../core/query/workspace-init.ts";
 import { launchPlan, parseConfig, WorkspaceLauncher } from "../daemon/launcher.ts";
 import {
   resolveWorkspaceTargetViaRpc,
@@ -24,7 +21,7 @@ import {
 } from "./operator-rpc.ts";
 
 export const WORKSPACE_HELP = `Workspace startup:
-ludens init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]
+ludens init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]
 ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--dashboard | --no-dashboard] [--pet | --no-pet] [--remote <url> --token <secret>]
 ludens services [--remote <url> --token <secret>]
 ludens down [--keep-emulator] [--services <emulator,baseware,core>] [--dashboard] [--pet] [--remote <url> --token <secret>]
@@ -80,15 +77,20 @@ export async function workspaceCommand(
     options:
       command === "init"
         ? {
+            machine: { type: "string" },
             driver: { type: "string" },
             "driver-package": { type: "string" },
             game: { type: "string" },
+            port: { type: "string" },
             "cua-command": { type: "string" },
             seconds: { type: "string" },
             requests: { type: "string" },
             model: { type: "string" },
+            effort: { type: "string" },
+            "service-tier": { type: "string" },
             name: { type: "string" },
             workspace: { type: "string" },
+            "register-driver": { type: "boolean" },
             pet: { type: "boolean" },
             "no-pet": { type: "boolean" },
           }
@@ -124,74 +126,58 @@ export async function workspaceCommand(
     if (typeof values.workspace === "string" && explicitWorkspace && resolve(values.workspace) !== resolve(selectedWorkspace)) {
       throw new Error("Choose one --workspace directory");
     }
-    if (typeof values.driver !== "string" || !values.driver.trim()) {
-      throw new Error("init requires --driver <id>");
+    const machineArg = typeof values.machine === "string" ? values.machine.trim() : "";
+    const driverArg = typeof values.driver === "string" ? values.driver.trim() : "";
+    if (!driverArg && !machineArg) {
+      throw new Error("init requires --driver <id> or --machine <id>");
     }
+
+    const createPayload = {
+      ...(typeof values.name === "string" ? { name: values.name.trim() } : {}),
+      driver: driverArg,
+      ...(machineArg ? { machineId: machineArg } : {}),
+      ...(typeof values.workspace === "string" ? { workspace: resolve(values.workspace) } : {}),
+      ...(typeof values["driver-package"] === "string" ? { driverPackage: values["driver-package"] } : {}),
+      ...(typeof values.game === "string" ? { game: values.game } : {}),
+      ...(typeof values.port === "string" ? { port: Number(values.port) } : {}),
+      ...(typeof values["cua-command"] === "string" ? { cuaCommand: values["cua-command"] } : {}),
+      ...(typeof values.seconds === "string" ? { seconds: Number(values.seconds) } : {}),
+      ...(typeof values.requests === "string" ? { requests: Number(values.requests) } : {}),
+      ...(typeof values.model === "string" ? { model: values.model } : {}),
+      ...(typeof values.effort === "string" ? { effort: values.effort } : {}),
+      ...(typeof values["service-tier"] === "string" ? { serviceTier: values["service-tier"] } : {}),
+      ...(values["register-driver"] ? { registerDriver: true } : {}),
+      ...(values.pet || values["no-pet"] ? { pet: Boolean(values.pet) } : {}),
+    };
 
     if (remote?.url) {
       if (typeof values.name !== "string" || !values.name.trim()) {
         throw new Error("Remote init requires --name <name>");
       }
       const remoteName = values.name.trim();
-      const driverName = values.driver.trim();
       const created = await withOperatorRpc({ home, remote }, client =>
         client.call("workspaces/mutate", {
           action: "create",
-          input: {
-            name: remoteName,
-            driver: driverName,
-            ...(typeof values.workspace === "string" ? { workspace: values.workspace } : {}),
-            ...(typeof values["driver-package"] === "string" ? { driverPackage: values["driver-package"] } : {}),
-            ...(typeof values.game === "string" ? { game: values.game } : {}),
-            ...(typeof values["cua-command"] === "string" ? { cuaCommand: values["cua-command"] } : {}),
-          },
+          input: { ...createPayload, name: remoteName } as CreateWorkspaceInputDto,
         }),
       );
       console.log(JSON.stringify(created, null, 2));
       return;
     }
 
-    const global = await readGlobalConfig(home);
-    const directory =
-      typeof values.workspace === "string"
-        ? resolve(values.workspace)
-        : explicitWorkspace
-          ? resolve(selectedWorkspace)
-          : typeof values.name === "string"
-            ? join(global.workspaceRoot, values.name)
-            : undefined;
-    if (!directory) {
-      throw new Error("Use --name to create under the default workspaceRoot, or --workspace <path> to select a directory");
-    }
-    await mkdir(directory, { recursive: true });
-    const workspace = await realpath(directory);
-    const packageSpec = typeof values["driver-package"] === "string" ? values["driver-package"] : undefined;
-    const raw = {
-      ...global.defaults,
-      driver: values.driver,
-      ...(packageSpec ? { driverPackage: packageSpec } : {}),
-      ...(values.game ? { game: values.game } : {}),
-      ...(values["cua-command"] ? { cuaCommand: values["cua-command"] } : {}),
-      ...(values.seconds ? { seconds: Number(values.seconds) } : {}),
-      ...(values.requests ? { requests: Number(values.requests) } : {}),
-      ...(values.model ? { model: values.model } : {}),
-      ...(values.pet || values["no-pet"] ? { pet: Boolean(values.pet) } : {}),
-    };
-    const resolvedPackage = packageSpec?.startsWith("file:")
-      ? `file:${resolve(workspace, packageSpec.slice(5))}`
-      : packageSpec;
-    const manifest = await resolveDriver(raw.driver as string, resolvedPackage, defaultDriverCacheRoot());
-    const config = parseConfig(raw, manifest);
-    await writeFile(join(workspace, "ludens.json"), `${JSON.stringify(config, null, 2)}\n`, { flag: "wx" });
-    await writeFile(join(workspace, "AGENTS.md"), workspaceGuide, { flag: "wx" }).catch(error => {
-      if (error.code !== "EEXIST") throw error;
+    const initialized = await initializeWorkspace(createPayload, {
+      home,
+      explicitDirectory:
+        typeof values.workspace === "string"
+          ? undefined
+          : explicitWorkspace
+            ? resolve(selectedWorkspace)
+            : undefined,
+      allowUnnamedDirectory: true,
+      requireAbsoluteWorkspace: false,
+      resolveDriverManifest: (driver, pkg) => resolveDriver(driver, pkg, defaultDriverCacheRoot()),
     });
-    await writeFile(join(workspace, "perception.py"), perceptionTemplate, { flag: "wx" }).catch(error => {
-      if (error.code !== "EEXIST") throw error;
-    });
-    await ensureWorkspaceIdentity(workspace);
-    const entry = await registerWorkspace(workspace, home);
-    console.log(JSON.stringify({ ...entry, configPath: join(workspace, "ludens.json") }, null, 2));
+    console.log(JSON.stringify({ ...initialized.entry, configPath: initialized.configPath }, null, 2));
     return;
   }
 

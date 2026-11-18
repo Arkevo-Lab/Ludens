@@ -594,7 +594,7 @@ export function useActivityFeed(options: {
   const valid = currentRevision && scope && acceptsScope(scope, project, run, epoch);
   return {
     ...state,
-    loading: !currentRevision || state.loading || (!valid && !state.error),
+    loading: !run ? false : !currentRevision || state.loading || (!valid && !state.error),
     error: currentRevision ? state.error : "",
     blocks: valid ? state.blocks : [],
     selected: valid ? state.selected : undefined,

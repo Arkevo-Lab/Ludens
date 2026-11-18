@@ -46,7 +46,7 @@ ludens-app --show-window
 - `--background`：以后台托盘模式启动，暂不弹出主窗口
 - `--show-window`：启动时立即显示并聚焦控制台窗口
 
-桌面应用通过纯 Node `ensureLocalAppDaemon` 按 `LUDENS_HOME` 经 Unix Domain Socket（`app-server.sock`）拉起或复用单例 `ludens app-server`（**0 个监听 TCP 端口**），通过 `ludens-app://console/` 加载打包静态资源、通过 `ludens-media://local/media?...` 经 UDS `media/resolve` 返回本地媒体（含 `206` `Range`）、并通过 `window.ludens.rpc` 桥接渲染进程与托盘桌宠。打开 **工作区（Workspaces）**（`?view=workspaces`）切换或新建工作区后，即可零门槛直接进入 **运行（Live）**（`?view=live`，即使 0 条历史运行记录也能直接进入）：输入任务目标并发送或点击 **启动自主运行**，App Daemon 会自动按需拉起该工作区的 **Core + Baseware**（标记为 `launchedBy: "app"`），无需先开终端执行 `ludens up`（仍可在 **配置（Config）** `?view=perception` 点击 **启动工作区 / 热重载 Core / 停止**）。侧边栏「**活跃 Core**」列表实时汇总全部运行中的 Core，展示 `App` / `CLI` 启动来源徽章与单点停止按钮（`■`）。关闭主窗口（`×`）时收起至系统托盘并保持活跃 Core 继续工作（可选**桌宠**默认开启 `!auto` 多 Core 自动追踪，按待处理 `🆘` `pendingOutbound > 0` → 当前聚焦工作区 Core → 后台**自主运行** Core 的优先级跟随；可在 **设置** 中开关或通过 `LUDENS_DISABLE_COMPANION=1` 禁用）；完全退出（`⌘Q` / `before-quit` / 托盘 **Quit**）时会触发 `ActiveCoreQuitGuard`：若当前无活跃 Core，应用直接退出并保留后台守护进程；若存在活跃 Core，则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。如需打包原生 `.dmg` 或 `.exe` 安装包，运行 `npm --prefix app run desktop:dist`。
+桌面应用通过纯 Node `ensureLocalAppDaemon` 按 `LUDENS_HOME` 经 Unix Domain Socket（`app-server.sock`）拉起或复用单例 `ludens app-server`（**0 个监听 TCP 端口**），通过 `ludens-app://console/` 加载打包静态资源、通过 `ludens-media://local/media?...` 经 UDS `media/resolve` 返回本地媒体（含 `206` `Range`）、并通过 `window.ludens.rpc` 与 `window.ludens.dialog.pickPath` 桥接渲染进程、原生目录/ROM 选择器与托盘桌宠。通过侧边栏工作区切换器底部 **新建工作区**、`⌘K / Ctrl+K` 快速跳转面板或 **工作区（Workspaces）**（`?view=workspaces&create=1`）即可打开一站式创建向导：支持一键绑定 `~/.ludens/machines.json` 中的**已有设备节点**、从**已安装驱动**指定 ROM 与端口，或验证并收录**新驱动包**，同时内联选择推理模型并点击 **创建并进入运行台** 一步完成初始化、服务拉起与进入 **运行（Live）**（`?view=live`，即使 0 条历史运行记录也能直接进入）：输入任务目标并发送或点击 **启动自主运行**，App Daemon 会自动按需拉起该工作区的 **Core + Baseware**（标记为 `launchedBy: "app"`），无需先开终端执行 `ludens up`（仍可在 **配置（Config）** `?view=perception` 点击 **启动工作区 / 热重载 Core / 停止**）。侧边栏「**活跃 Core**」列表实时汇总全部运行中的 Core，展示 `App` / `CLI` 启动来源徽章与单点停止按钮（`■`）。关闭主窗口（`×`）时收起至系统托盘并保持活跃 Core 继续工作（可选**桌宠**默认开启 `!auto` 多 Core 自动追踪，按待处理 `🆘` `pendingOutbound > 0` → 当前聚焦工作区 Core → 后台**自主运行** Core 的优先级跟随；可在 **设置** 中开关或通过 `LUDENS_DISABLE_COMPANION=1` 禁用）；完全退出（`⌘Q` / `before-quit` / 托盘 **Quit**）时会触发 `ActiveCoreQuitGuard`：若当前无活跃 Core，应用直接退出并保留后台守护进程；若存在活跃 Core，则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。如需打包原生 `.dmg` 或 `.exe` 安装包，运行 `npm --prefix app run desktop:dist`。
 
 ### 方式 B：托管 Web / 远端控制台（`ludens daemon start` / `ludens app-server` / `npm run dev`）
 
@@ -77,7 +77,7 @@ ludens up
 
 `ludens init` 与 `ludens up` 常用参数：
 
-- `ludens init --name <name> [--workspace <path>] --driver <id> [--driver-package <spec>] [--game <path>] [--cua-command <path>] [--model <id>] [--seconds <n>] [--requests <n>] [--pet | --no-pet]`
+- `ludens init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]`
 - `ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--dashboard | --no-dashboard] [--pet | --no-pet]`（`--dry-run` 仅打印启动计划不实际拉起进程；`--preempt` 抢占同一设备上的冲突 Core；`--no-dashboard` 跳过确保本地 App-Server 守护进程）
 
 如果需要在磁盘上纳管已有目录或迁移旧版工作区，可执行 `ludens workspace open <dir> [--new-id]` 或 `ludens workspace import <dir> [--legacy-state <dir>] [--previous-workspace <dir>]`。

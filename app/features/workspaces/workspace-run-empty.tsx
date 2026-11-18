@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef } from "react";
-import { ChevronRight, Folder, HardDrive, Play, RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { ChevronRight, Folder, HardDrive, Play, Plus, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -202,6 +202,16 @@ export function WorkspaceRunEmpty({
                 </>
               ) : isNoRun && links.capabilities ? (
                 action(links.capabilities, t("capabilities"), true)
+              ) : state === "no-workspaces" ? (
+                <>
+                  {action(
+                    links.createWorkspace,
+                    t("createFirstWorkspace"),
+                    true,
+                    <Plus className="size-3.5" aria-hidden="true" />,
+                  )}
+                  {action(links.workspaces, t("workspaces"))}
+                </>
               ) : (
                 action(links.workspaces, t("workspaces"), true)
               )}

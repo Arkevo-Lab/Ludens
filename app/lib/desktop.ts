@@ -109,12 +109,25 @@ export interface DesktopRpcBridge {
   reconnect?(): Promise<void>;
 }
 
+export interface DesktopPickPathOptions {
+  mode: "directory" | "file";
+  title?: string;
+  defaultPath?: string;
+  extensions?: string[];
+  filterName?: string;
+}
+
+export interface DesktopDialogBridge {
+  pickPath(options: DesktopPickPathOptions): Promise<string | null>;
+}
+
 declare global {
   interface Window {
     readonly ludens?: {
       readonly companion?: DesktopCompanion;
       readonly window?: DesktopWindowBridge;
       readonly rpc?: DesktopRpcBridge;
+      readonly dialog?: DesktopDialogBridge;
     };
     readonly ludensPet?: {
       getSnapshot(): Promise<DesktopSnapshot>;
@@ -122,6 +135,15 @@ declare global {
       openDashboard(): Promise<void>;
     };
   }
+}
+
+export function canPickNativePath(): boolean {
+  return typeof window !== "undefined" && typeof window.ludens?.dialog?.pickPath === "function";
+}
+
+export async function pickNativePath(options: DesktopPickPathOptions): Promise<string | null> {
+  if (!canPickNativePath()) return null;
+  return window.ludens!.dialog!.pickPath(options);
 }
 
 /** Keep native deep links inside the configured application, including in Web previews. */

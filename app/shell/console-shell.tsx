@@ -158,6 +158,14 @@ export default function ConsoleShell() {
           ...replayEvidencePatch(null),
         });
       }}
+      onCreateWorkspace={() => {
+        setMobileNavOpen(false);
+        navigateUrl("/?view=workspaces&create=1");
+      }}
+      onManageWorkspaces={() => {
+        setMobileNavOpen(false);
+        navigateUrl("/?view=workspaces");
+      }}
     />
   );
   const contextualRunPicker = runControls ? (
@@ -480,6 +488,7 @@ export default function ConsoleShell() {
               onConfigure={id => navigateUrl("/?" + new URLSearchParams({ view: "perception", project: id }))}
               catalogError={catalogError} catalogLoading={catalogLoading} onRetryCatalog={refreshCatalog}
               createIntent={query.get("create") === "1" ? { driverPackage: query.get("driverPackage") ?? "",
+                machineId: query.get("machine") ?? undefined,
                 driver: verifiedCreationDriver?.spec === query.get("driverPackage") ? verifiedCreationDriver : undefined } : null}
               onCloseCreateIntent={closeCreateIntent} />
           ) : view === "settings" ? (
@@ -555,6 +564,8 @@ export default function ConsoleShell() {
                   onSwitchWorkspace={openCoreWorkspace}
                   onOpenPerf={() => navigate({ view: "perf" })}
                   onOpenCaps={() => navigate({ view: "caps" })}
+                  onOpenStudio={() => navigate({ view: "perception" })}
+                  onOpenBaseware={() => navigate({ view: "baseware" })}
                   onOpenReplay={() => navigate({ view: "replay" })}
                   onOpenReplayAt={openReplayAtFrame}
                   onReturnLatest={returnToLatest}

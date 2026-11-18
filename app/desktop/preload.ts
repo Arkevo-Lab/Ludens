@@ -9,6 +9,7 @@ import {
   normalizeDesktopPlatform,
   resolveCaptionStyle,
 } from './window-chrome.js'
+import { LUDENS_DIALOG_PICK_PATH_CHANNEL } from './dialog-picker.js'
 
 function on(channel: string, callback: (value: any) => void) {
   const listener = (_event: Electron.IpcRendererEvent, value: unknown) => callback(value)
@@ -75,6 +76,9 @@ const rpcBridge: DesktopRpcBridge = {
 // Narrow UDS RPC relay, Pet settings, activity, and window-chrome IPC bridge; no node:net or fs exposure.
 contextBridge.exposeInMainWorld('ludens', {
   rpc: rpcBridge,
+  dialog: {
+    pickPath: (options: unknown) => ipcRenderer.invoke(LUDENS_DIALOG_PICK_PATH_CHANNEL, options),
+  },
   companion: {
     getSound: () => ipcRenderer.invoke('ludens:companion:sound:get'),
     updateSound: (value: unknown) => ipcRenderer.invoke('ludens:companion:sound:update', value),

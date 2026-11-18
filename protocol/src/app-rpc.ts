@@ -363,8 +363,17 @@ export interface CreateWorkspaceInputDto {
   workspace?: string;
   driver: string;
   driverPackage?: string;
+  machineId?: string;
   game?: string;
+  port?: number;
   cuaCommand?: string;
+  model?: string;
+  serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
+  seconds?: number;
+  requests?: number;
+  pet?: boolean;
+  registerDriver?: boolean;
 }
 
 export type WorkspacesMutateParams =

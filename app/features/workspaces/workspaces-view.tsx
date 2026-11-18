@@ -16,6 +16,7 @@ import type { WorkspaceRegistration } from "@ludens/protocol/ludens";
 import type { CreateWorkspaceInputDto } from "@ludens/protocol/app-rpc";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { useNativePathPicker } from "@/lib/use-native-path-picker";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { useRetryFocus } from "@/components/use-retry-focus";
 
@@ -119,6 +120,9 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
   const createTrigger = useRef<HTMLButtonElement>(null);
   const [actionError, setActionError] = useState("");
   const [pending, setPending] = useState("");
+  const [createStep, setCreateStep] = useState<"creating" | "launching" | null>(null);
+  const [launchRecovery, setLaunchRecovery] = useState<{ entry: WorkspaceRegistration; error: string } | null>(null);
+  const nativePicker = useNativePathPicker();
   const [filter, setFilter] = useState("");
   const searchInput = useRef<HTMLInputElement>(null);
   const [existingPath, setExistingPath] = useState("");
@@ -192,14 +196,18 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
     if (!settings || handledIntent.current === requestedPackage) return;
     handledIntent.current = requestedPackage;
     trigger.current = createTrigger.current;
-    setInitialIntent({ driverPackage: requestedPackage, driver: verifiedDriver });
+    setInitialIntent({ driverPackage: requestedPackage, driver: verifiedDriver, machineId: createIntent?.machineId });
     setLastDialog("create");
     setActionError("");
+    setLaunchRecovery(null);
+    setCreateStep(null);
     setDialog("create");
-  }, [requestedPackage, verifiedDriver, settings]);
+  }, [requestedPackage, verifiedDriver, createIntent?.machineId, settings]);
 
   const closeDialog = () => {
     setDialog(null);
+    setLaunchRecovery(null);
+    setCreateStep(null);
     if (createIntent) onCloseCreateIntent?.();
   };
 
@@ -208,6 +216,8 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
     setLastDialog(kind);
     focusCompletion.current = false;
     setActionError("");
+    setLaunchRecovery(null);
+    setCreateStep(null);
     setInitialIntent(null);
     setExistingPath(path);
     setWorkspaceRoot(settings?.config.workspaceRoot ?? "");
@@ -266,12 +276,115 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
     return caller.call("workspaces/mutate", params as never) as Promise<T>;
   };
 
-  const createWorkspace = (input: CreateWorkspaceInput) => {
-    void mutate(
-      "create",
-      () => callWorkspaceMutate<WorkspaceRegistration>({ action: "create", input: input as unknown as CreateWorkspaceInputDto }),
-      entry => acceptEntry(entry, "created"),
+  const launchWorkspaceEntry = async (entry: WorkspaceRegistration) => {
+    const caller = rpcRef.current;
+    if (!caller) throw new Error("RPC client is unavailable");
+    const res = (await caller.call("workspaces/serviceControl", {
+      workspaceId: entry.id,
+      action: "up",
+    })) as { ok?: boolean; stderr?: string; stdout?: string };
+    if (res && res.ok === false) {
+      throw new Error(res.stderr?.trim() || t("operationFailed"));
+    }
+  };
+
+  const recordCreatedWorkspaceInState = (entry: WorkspaceRegistration) => {
+    setSettings(previous =>
+      previous && {
+        ...previous,
+        workspaces: [
+          { ...entry, available: true },
+          ...previous.workspaces.filter(item => item.id !== entry.id),
+        ],
+      },
     );
+    setFilter("");
+    setRemoved(null);
+    setAlreadyRemoved(false);
+    setSavedRoot(null);
+    setCopied("idle");
+  };
+
+  const createWorkspace = (input: CreateWorkspaceInput, launchAfterCreate = true) => {
+    if (busy.current) return;
+    busy.current = true;
+    readVersion.current++;
+    readController.current?.abort();
+    setLoading(false);
+    setPending("create");
+    setCreateStep("creating");
+    setActionError("");
+    setPageError("");
+    setLaunchRecovery(null);
+
+    void (async () => {
+      let createdEntry: WorkspaceRegistration | null = null;
+      try {
+        createdEntry = await callWorkspaceMutate<WorkspaceRegistration>({
+          action: "create",
+          input: input as unknown as CreateWorkspaceInputDto,
+        });
+        if (!mounted.current) return;
+        readVersion.current++;
+        readController.current?.abort();
+        recordCreatedWorkspaceInState(createdEntry);
+        onChanged();
+
+        if (!launchAfterCreate) {
+          closeDialog();
+          onOpen(createdEntry.id);
+          return;
+        }
+
+        setCreateStep("launching");
+        await launchWorkspaceEntry(createdEntry);
+        if (!mounted.current) return;
+        onChanged();
+        closeDialog();
+        onOpen(createdEntry.id);
+      } catch (error) {
+        if (!mounted.current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        if (createdEntry) {
+          setLaunchRecovery({ entry: createdEntry, error: message });
+        } else {
+          setActionError(message);
+        }
+      } finally {
+        busy.current = false;
+        if (mounted.current) {
+          setPending("");
+          setCreateStep(null);
+        }
+      }
+    })();
+  };
+
+  const retryLaunchCreatedWorkspace = (entry: WorkspaceRegistration) => {
+    if (busy.current) return;
+    busy.current = true;
+    setPending("create");
+    setCreateStep("launching");
+    setActionError("");
+    void (async () => {
+      try {
+        await launchWorkspaceEntry(entry);
+        if (!mounted.current) return;
+        onChanged();
+        closeDialog();
+        onOpen(entry.id);
+      } catch (error) {
+        if (!mounted.current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setLaunchRecovery({ entry, error: message });
+      } finally {
+        busy.current = false;
+        if (mounted.current) {
+          setPending("");
+          setCreateStep(null);
+        }
+      }
+    })();
   };
   const command = completion ? `ludens --workspace '${completion.entry.workspace.replace(/'/g, "'\\''")}' up` : "";
   const copyCommand = async () => {
@@ -467,7 +580,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
           </CardContent></Card>
         </>}
       </section>
-      <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-md bg-card sm:max-w-xl" showCloseButton={false}
+      <DialogContent className={`max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-md bg-card ${activeDialog === "create" ? "sm:max-w-2xl" : "sm:max-w-xl"}`} showCloseButton={false}
         onEscapeKeyDown={event => { if (busy.current) event.preventDefault(); }}
         onInteractOutside={event => { if (busy.current) event.preventDefault(); }}
         onCloseAutoFocus={event => {
@@ -477,12 +590,48 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
           focusCompletion.current = false;
         }}>
         <DialogHeader className="pr-6 text-left"><DialogTitle className="text-xl">{dialogTitle}</DialogTitle><DialogDescription className="leading-relaxed">{activeDialog === "create" ? t("createDescription") : activeDialog === "register" ? t("addDescription") : t("locationDescription")}</DialogDescription></DialogHeader>
-        {activeDialog === "create" && settings && <WorkspaceCreateForm key={initialIntent?.driverPackage ?? "default"} defaultRoot={settings.config.workspaceRoot} initialIntent={initialIntent} pending={pending === "create"} error={actionError} onSubmit={createWorkspace} onCancel={closeDialog} />}
+        {activeDialog === "create" && settings && <WorkspaceCreateForm
+          key={`${initialIntent?.driverPackage ?? "default"}:${initialIntent?.machineId ?? ""}`}
+          defaultRoot={settings.config.workspaceRoot}
+          globalDefaults={settings.config.defaults}
+          existingWorkspaces={settings.workspaces}
+          initialIntent={initialIntent}
+          pending={pending === "create"}
+          pendingStep={createStep}
+          error={actionError}
+          launchRecovery={launchRecovery}
+          onSubmit={createWorkspace}
+          onRetryLaunch={retryLaunchCreatedWorkspace}
+          onEnterExistingWorkspace={id => {
+            closeDialog();
+            onOpen(id);
+          }}
+          onConfigureWorkspace={onConfigure ? id => {
+            closeDialog();
+            onConfigure(id);
+          } : undefined}
+          onCancel={closeDialog}
+        />}
         {activeDialog === "register" && <form className="grid gap-5" onSubmit={event => {
           event.preventDefault();
-          void mutate("register", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: existingPath.trim() }), entry => acceptEntry(entry, "registered"));
+          void mutate("register", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: existingPath.trim() }), entry => {
+            acceptEntry(entry, "registered");
+            onOpen(entry.id);
+          });
         }}>
-          <div className="space-y-2"><Label htmlFor="workspace-existing">{t("pathLabel")}</Label><Input id="workspace-existing" required value={existingPath} disabled={!!pending} onChange={event => setExistingPath(event.target.value)} aria-describedby="workspace-register-hint" placeholder="/Users/you/Ludens/my-workspace" autoComplete="off" spellCheck={false} /><p id="workspace-register-hint" className="text-xs leading-relaxed text-muted-foreground">{t("addHint")}</p></div>
+          <div className="space-y-2">
+            <Label htmlFor="workspace-existing">{t("pathLabel")}</Label>
+            <div className="flex gap-2">
+              <Input id="workspace-existing" required value={existingPath} disabled={!!pending} onChange={event => setExistingPath(event.target.value)} aria-describedby="workspace-register-hint" placeholder="/Users/you/Ludens/my-workspace" autoComplete="off" spellCheck={false} />
+              {nativePicker.supported && (
+                <Button type="button" variant="outline" disabled={!!pending || nativePicker.picking} onClick={async () => {
+                  const picked = await nativePicker.pickPath({ mode: "directory", title: t("addTitle"), defaultPath: existingPath.trim() || settings?.config.workspaceRoot });
+                  if (picked) setExistingPath(picked);
+                }}><FolderOpen className="size-4" aria-hidden="true" />{t(nativePicker.picking ? "browsingFolder" : "browseFolder")}</Button>
+              )}
+            </div>
+            <p id="workspace-register-hint" className="text-xs leading-relaxed text-muted-foreground">{t("addHint")}</p>
+          </div>
           {actionError && <Alert variant="destructive"><AlertDescription>{actionError}</AlertDescription></Alert>}
           <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={!!pending} onClick={() => setDialog(null)}>{t("cancel")}</Button><Button type="submit" disabled={!!pending || !existingPath.trim()}>{pending === "register" ? t("adding") : t("addExisting")}</Button></div>
         </form>}
@@ -492,7 +641,19 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
             setSettings(previous => previous && ({ ...previous, config: value.config })); setSavedRoot(value.config.workspaceRoot); setDialog(null);
           });
         }}>
-          <div className="space-y-2"><Label htmlFor="workspace-root">{t("locationInput")}</Label><Input id="workspace-root" required value={workspaceRoot} disabled={!!pending} onChange={event => setWorkspaceRoot(event.target.value)} aria-describedby="workspace-root-hint" placeholder="/Users/you/Ludens" autoComplete="off" spellCheck={false} /><p id="workspace-root-hint" className="text-xs leading-relaxed text-muted-foreground">{t("locationHint")}</p></div>
+          <div className="space-y-2">
+            <Label htmlFor="workspace-root">{t("locationInput")}</Label>
+            <div className="flex gap-2">
+              <Input id="workspace-root" required value={workspaceRoot} disabled={!!pending} onChange={event => setWorkspaceRoot(event.target.value)} aria-describedby="workspace-root-hint" placeholder="/Users/you/Ludens" autoComplete="off" spellCheck={false} />
+              {nativePicker.supported && (
+                <Button type="button" variant="outline" disabled={!!pending || nativePicker.picking} onClick={async () => {
+                  const picked = await nativePicker.pickPath({ mode: "directory", title: t("locationTitle"), defaultPath: workspaceRoot.trim() || settings?.config.workspaceRoot });
+                  if (picked) setWorkspaceRoot(picked);
+                }}><FolderOpen className="size-4" aria-hidden="true" />{t(nativePicker.picking ? "browsingFolder" : "browseFolder")}</Button>
+              )}
+            </div>
+            <p id="workspace-root-hint" className="text-xs leading-relaxed text-muted-foreground">{t("locationHint")}</p>
+          </div>
           {actionError && <Alert variant="destructive"><AlertDescription>{actionError}</AlertDescription></Alert>}
           <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={!!pending} onClick={() => setDialog(null)}>{t("cancel")}</Button><Button type="submit" disabled={!!pending || !workspaceRoot.trim() || workspaceRoot.trim() === settings?.config.workspaceRoot}>{pending === "root" ? t("saving") : t("save")}</Button></div>
         </form>}
