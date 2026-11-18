@@ -38,6 +38,8 @@ export interface StartAppServerOptions {
   /** Optional HTTP + WebSocket listener (`GET /health`, `GET /rpc`, `GET|HEAD /media`, static files). Omit for UDS-only (0 TCP ports). */
   wsListen?: WsListenOptions | null;
   auth?: AppServerAuthOptions;
+  /** Enable local loopback `web-dev` runtime profile on WS sessions (`127.0.0.1` / `localhost` / `::1` only). */
+  devMode?: boolean;
   staticDir?: string;
   trustedOrigins?: string[];
   parentWatchdog?: boolean;
@@ -57,6 +59,7 @@ export interface AppServerHandle {
   host: string | null;
   port: number | null;
   authMode: "none" | "token";
+  devMode?: boolean;
   runtimeFilePath: string;
   startedAt: string;
   staticDir?: string;
@@ -133,6 +136,7 @@ export async function startAppServer(
   const home = resolve(options.home ?? ludensHome());
   const authMode: "none" | "token" = options.auth?.mode ?? "none";
   const token = options.auth?.token;
+  const devMode = Boolean(options.devMode);
 
   if (authMode === "token" && (typeof token !== "string" || token.length === 0)) {
     throw new Error("App server auth mode 'token' requires a non-empty token");
@@ -142,6 +146,11 @@ export async function startAppServer(
   if (wsListen) {
     if (!Number.isInteger(wsListen.port) || wsListen.port < 0 || wsListen.port > 65535) {
       throw new Error(`Invalid wsListen port: ${wsListen.port}`);
+    }
+    if (devMode && !isLoopbackHost(wsListen.host)) {
+      throw new Error(
+        `Refusing to enable --dev mode on non-loopback host "${wsListen.host}" (loopback 127.0.0.1 / ::1 / localhost only)`,
+      );
     }
     if (!isLoopbackHost(wsListen.host) && (authMode !== "token" || !token)) {
       throw new Error(
@@ -206,6 +215,7 @@ export async function startAppServer(
     pid: process.pid,
     authMode,
     token,
+    devMode,
     mediaSecret,
     eventHub,
     worker,
@@ -451,6 +461,7 @@ export async function startAppServer(
     host: displayHost,
     port: boundPort,
     authMode,
+    devMode,
     runtimeFilePath,
     startedAt,
     ...(staticDir ? { staticDir } : {}),

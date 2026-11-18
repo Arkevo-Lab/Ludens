@@ -141,6 +141,15 @@ export interface LiveStreamDescriptor {
   mimeType?: string;
 }
 
+export type LudensRuntimeProfile = "desktop" | "remote" | "web-dev";
+
+export interface HostSessionCapabilities {
+  localFsPaths: boolean;
+  localFileDrivers: boolean;
+  hostProcessOverrides: boolean;
+  hostStorageConfig: boolean;
+}
+
 export interface RpcClientInfo {
   name: string;
   version: string;
@@ -159,6 +168,8 @@ export interface InitializeResult {
   home: string;
   transport: "uds" | "ws";
   authenticated: boolean;
+  runtimeProfile: LudensRuntimeProfile;
+  capabilities: HostSessionCapabilities;
   serverSeq: number;
   activeCoreCount: number;
   managedWorkspaces: string[];
@@ -177,6 +188,7 @@ export interface DaemonStatusResult {
   socketPath: string;
   wsUrl: string | null;
   authMode: "none" | "token";
+  devMode?: boolean;
   serverSeq: number;
   activeCores: string[];
   managedWorkspaces: string[];

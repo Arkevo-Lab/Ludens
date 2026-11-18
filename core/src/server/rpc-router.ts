@@ -1,5 +1,6 @@
 import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
 import { realpath } from "node:fs/promises";
+import { isAbsolute } from "node:path";
 import {
   APP_RPC_ERROR_CODES,
   APP_RPC_EVENT_NOTIFICATION,
@@ -7,12 +8,14 @@ import {
   type BasewareMutateParams,
   type EventsSubscribeParams,
   type EventsUnsubscribeParams,
+  type HostSessionCapabilities,
   type InitializeParams,
   type InitializeResult,
   type JsonRpcError,
   type JsonRpcId,
   type JsonRpcNotification,
   type JsonRpcSuccess,
+  type LudensRuntimeProfile,
   type LudensServerEvent,
   type MediaResolveParams,
   type MediaResolveResult,
@@ -65,6 +68,7 @@ export interface RpcRouterContext {
   pid: number;
   authMode: "none" | "token";
   token?: string;
+  devMode?: boolean;
   mediaSecret: Buffer;
   eventHub: EventHub;
   worker: RpcWorkerClient;
@@ -97,6 +101,76 @@ function invalidParams(message: string, data?: Record<string, unknown>): RpcErro
 
 function unauthorized(message = "Unauthorized"): RpcError {
   return new RpcError(APP_RPC_ERROR_CODES.UNAUTHORIZED, message);
+}
+
+function capabilityRestricted(message: string): RpcError {
+  return new RpcError(APP_RPC_ERROR_CODES.UNAUTHORIZED, message, {
+    code: "CAPABILITY_RESTRICTED",
+    status: 403,
+  });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function hasNonEmptyStringField(value: unknown): boolean {
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+function isFileDriverSpec(value: unknown): boolean {
+  return typeof value === "string" && /^file:/i.test(value.trim());
+}
+
+function isUnsafeWorkspaceRelativePath(rawPath: string): boolean {
+  const trimmed = rawPath.trim();
+  if (!trimmed) return false;
+  if (
+    isAbsolute(trimmed) ||
+    trimmed.startsWith("/") ||
+    trimmed.startsWith("\\") ||
+    /^[A-Za-z]:[\\/]/.test(trimmed)
+  ) {
+    return true;
+  }
+  return trimmed.split(/[\\/]+/).includes("..");
+}
+
+export function resolveSessionRuntimeProfile(
+  transport: RpcTransportKind,
+  devMode = false,
+): { runtimeProfile: LudensRuntimeProfile; capabilities: HostSessionCapabilities } {
+  if (transport === "uds") {
+    return {
+      runtimeProfile: "desktop",
+      capabilities: {
+        localFsPaths: true,
+        localFileDrivers: true,
+        hostProcessOverrides: true,
+        hostStorageConfig: true,
+      },
+    };
+  }
+  if (devMode) {
+    return {
+      runtimeProfile: "web-dev",
+      capabilities: {
+        localFsPaths: true,
+        localFileDrivers: true,
+        hostProcessOverrides: true,
+        hostStorageConfig: true,
+      },
+    };
+  }
+  return {
+    runtimeProfile: "remote",
+    capabilities: {
+      localFsPaths: false,
+      localFileDrivers: false,
+      hostProcessOverrides: false,
+      hostStorageConfig: false,
+    },
+  };
 }
 
 function notFound(message: string, data?: Record<string, unknown>): RpcError {
@@ -367,7 +441,7 @@ export class RpcRouter {
       throw unauthorized("WebSocket session must authenticate via initialize first");
     }
 
-    switch (method as AppRpcMethod) {
+    switch (method as AppRpcMethod | "storage/mutate") {
       case "initialize":
         return this.handleInitialize(rawParams, session);
 
@@ -381,6 +455,7 @@ export class RpcRouter {
           socketPath: info.socketPath,
           wsUrl: info.wsUrl,
           authMode: this.ctx.authMode,
+          devMode: Boolean(this.ctx.devMode),
           serverSeq: this.ctx.eventHub.currentSeq,
           activeCores,
           managedWorkspaces,
@@ -564,7 +639,7 @@ export class RpcRouter {
       }
 
       case "workspaces/mutate":
-        return this.handleWorkspacesMutate(rawParams, signal);
+        return this.handleWorkspacesMutate(rawParams, session, signal);
 
       case "workspaces/serviceControl":
         return this.handleWorkspacesServiceControl(rawParams, signal);
@@ -581,11 +656,15 @@ export class RpcRouter {
       }
 
       case "baseware/mutate":
-        return this.handleBasewareMutate(rawParams, signal);
+        return this.handleBasewareMutate(rawParams, session, signal);
 
       case "drivers/discover": {
         const params = asObject(rawParams, "drivers/discover requires { spec }");
         const spec = requireNonEmptyString(params.spec, "spec");
+        const { capabilities: caps } = this.getSessionCapabilities(session);
+        if (!caps.localFileDrivers && isFileDriverSpec(spec)) {
+          throw capabilityRestricted("Local file: driver packages are restricted in remote sessions");
+        }
         return this.ctx.worker.call("discoverDriver", [spec], signal);
       }
 
@@ -697,16 +776,38 @@ export class RpcRouter {
         return this.ctx.worker.call("storageGet", [], signal);
 
       case "storage/update": {
-        const params = asObject(rawParams, "storage/update requires update object") as unknown as GlobalStorageUpdateInput;
+        const rawObj = asObject(rawParams, "storage/update requires update object");
+        const { capabilities: caps } = this.getSessionCapabilities(session);
+        this.enforceGlobalStorageCapabilities(rawObj, caps);
+        const params = rawObj as unknown as GlobalStorageUpdateInput;
         const res = await this.ctx.worker.call("storageUpdate", [params], signal);
         this.ctx.eventHub.publish({ topic: "storage", payload: { action: "update" } });
         return res;
+      }
+
+      case "storage/mutate": {
+        const params = asObject(rawParams, "storage/mutate requires { action }");
+        const { capabilities: caps } = this.getSessionCapabilities(session);
+        if (params.action === "updateGlobal") {
+          this.enforceGlobalStorageCapabilities(params, caps);
+          const updatePayload = (
+            isPlainObject(params.config) ? params.config : params
+          ) as unknown as GlobalStorageUpdateInput;
+          const res = await this.ctx.worker.call("storageUpdate", [updatePayload], signal);
+          this.ctx.eventHub.publish({ topic: "storage", payload: { action: "update" } });
+          return res;
+        }
+        throw invalidParams(`Unsupported storage/mutate action: ${String(params.action)}`);
       }
 
       case "storage/test": {
         const params = asObject(rawParams, "storage/test requires { kind }");
         if (params.kind !== "directory" && params.kind !== "s3") {
           throw invalidParams("storage/test kind must be 'directory' or 's3'");
+        }
+        const { capabilities: caps } = this.getSessionCapabilities(session);
+        if (!caps.hostStorageConfig && params.kind === "directory") {
+          throw capabilityRestricted("Host directory storage probing is restricted in remote sessions");
         }
         return this.ctx.worker.call("storageTest", [params as unknown as StorageTestParams], signal);
       }
@@ -767,6 +868,69 @@ export class RpcRouter {
     }
   }
 
+  private getSessionCapabilities(session: RpcSession): {
+    runtimeProfile: LudensRuntimeProfile;
+    capabilities: HostSessionCapabilities;
+  } {
+    return resolveSessionRuntimeProfile(session.transport, Boolean(this.ctx.devMode));
+  }
+
+  private enforceGlobalStorageCapabilities(
+    rawObj: Record<string, unknown>,
+    caps: HostSessionCapabilities,
+  ): void {
+    if (caps.hostStorageConfig) return;
+    const hasDirectoryEntry = (candidate: Record<string, unknown>): boolean => {
+      if (
+        candidate.mode === "directory" ||
+        candidate.kind === "directory" ||
+        candidate.directory !== undefined
+      ) {
+        return true;
+      }
+      if (
+        Array.isArray(candidate.profiles) &&
+        candidate.profiles.some(
+          item =>
+            isPlainObject(item) &&
+            (item.kind === "directory" || item.mode === "directory" || item.directory !== undefined),
+        )
+      ) {
+        return true;
+      }
+      return false;
+    };
+    if (
+      hasDirectoryEntry(rawObj) ||
+      (isPlainObject(rawObj.config) && hasDirectoryEntry(rawObj.config))
+    ) {
+      throw capabilityRestricted("Host directory storage configuration is restricted in remote sessions");
+    }
+  }
+
+  private enforceMachineCapabilities(rawMachine: unknown, caps: HostSessionCapabilities): void {
+    if (!isPlainObject(rawMachine)) return;
+    if (!caps.localFileDrivers && isFileDriverSpec(rawMachine.driverPackage)) {
+      throw capabilityRestricted("Local file: driver packages are restricted in remote sessions");
+    }
+    if (isPlainObject(rawMachine.transport)) {
+      const transport = rawMachine.transport;
+      if (!caps.hostProcessOverrides && hasNonEmptyStringField(transport.command)) {
+        throw capabilityRestricted(
+          "Host process command overrides (transport.command) are restricted in remote sessions",
+        );
+      }
+      if (!caps.localFsPaths && hasNonEmptyStringField(transport.identityFile)) {
+        throw capabilityRestricted(
+          "Host SSH identity file paths (transport.identityFile) are restricted in remote sessions",
+        );
+      }
+      if (!caps.localFsPaths && typeof transport.game === "string" && isUnsafeWorkspaceRelativePath(transport.game)) {
+        throw capabilityRestricted("Machine game path must stay within the managed workspace in remote sessions");
+      }
+    }
+  }
+
   private handleInitialize(rawParams: unknown, session: RpcSession): InitializeResult {
     const params = asObject(rawParams, "initialize requires { clientInfo, protocolVersion }") as unknown as InitializeParams;
     if (!params.clientInfo || typeof params.clientInfo !== "object" || typeof params.clientInfo.name !== "string") {
@@ -783,6 +947,7 @@ export class RpcRouter {
     }
 
     session.markAuthenticated();
+    const { runtimeProfile, capabilities } = this.getSessionCapabilities(session);
     const { ticket, expiresAt } = mintMediaTicket(this.ctx.mediaSecret, DEFAULT_MEDIA_TICKET_TTL_MS);
     const activeCores = this.ctx.supervisor.activeCoreWorkspaceIds();
     const managedWorkspaces = this.ctx.supervisor.managedWorkspaceIds();
@@ -793,6 +958,8 @@ export class RpcRouter {
       home: this.ctx.home,
       transport: session.transport,
       authenticated: session.isAuthenticated,
+      runtimeProfile,
+      capabilities,
       serverSeq: this.ctx.eventHub.currentSeq,
       activeCoreCount: activeCores.length,
       managedWorkspaces,
@@ -980,15 +1147,23 @@ export class RpcRouter {
     }
   }
 
-  private async handleWorkspacesMutate(rawParams: unknown, signal: AbortSignal): Promise<unknown> {
+  private async handleWorkspacesMutate(
+    rawParams: unknown,
+    session: RpcSession,
+    signal: AbortSignal,
+  ): Promise<unknown> {
     const params = asObject(rawParams, "workspaces/mutate requires { action }") as WorkspacesMutateParams & Record<string, unknown>;
     const action = params.action;
+    const { capabilities: caps } = this.getSessionCapabilities(session);
 
     let result: unknown;
     let workspaceId: string | undefined;
 
     switch (action) {
       case "open": {
+        if (!caps.localFsPaths) {
+          throw capabilityRestricted("Opening arbitrary host directories is restricted in remote sessions");
+        }
         const target = typeof params.workspace === "string"
           ? params.workspace
           : typeof params.path === "string"
@@ -1001,6 +1176,30 @@ export class RpcRouter {
       }
       case "create": {
         const input = params.input ?? params.workspace ?? params;
+        const inputObj = isPlainObject(params.input)
+          ? params.input
+          : isPlainObject(params.workspace)
+            ? params.workspace
+            : params;
+        if (!caps.localFsPaths) {
+          const hasCustomWorkspacePath =
+            (params.input !== undefined && hasNonEmptyStringField(inputObj.workspace)) ||
+            (params.input === undefined && typeof params.workspace === "string" && params.workspace.trim() !== "");
+          if (hasCustomWorkspacePath) {
+            throw capabilityRestricted("Custom local workspace paths are restricted in remote sessions");
+          }
+          if (typeof inputObj.game === "string" && isUnsafeWorkspaceRelativePath(inputObj.game)) {
+            throw capabilityRestricted("Game path must stay within the managed workspace in remote sessions");
+          }
+        }
+        if (!caps.localFileDrivers && isFileDriverSpec(inputObj.driverPackage)) {
+          throw capabilityRestricted("Local file: driver packages are restricted in remote sessions");
+        }
+        if (!caps.hostProcessOverrides && hasNonEmptyStringField(inputObj.cuaCommand)) {
+          throw capabilityRestricted(
+            "Host process executable overrides (cuaCommand) are restricted in remote sessions",
+          );
+        }
         result = await this.ctx.worker.call("createWorkspace", [input], signal);
         workspaceId = (result as { id?: string } | null)?.id;
         break;
@@ -1012,6 +1211,9 @@ export class RpcRouter {
         break;
       }
       case "updateRoot": {
+        if (!caps.localFsPaths) {
+          throw capabilityRestricted("Updating host workspaceRoot is restricted in remote sessions");
+        }
         const workspaceRoot = requireNonEmptyString(params.workspaceRoot, "workspaceRoot");
         result = await this.ctx.worker.call("updateWorkspaceRoot", [workspaceRoot], signal);
         break;
@@ -1034,6 +1236,28 @@ export class RpcRouter {
         const id = requireNonEmptyString(params.workspaceId ?? params.id, "workspaceId");
         workspaceId = id;
         const patch = params.patch ?? params.config;
+        if (isPlainObject(patch)) {
+          if (!caps.hostProcessOverrides && patch.cuaCommand !== undefined) {
+            throw capabilityRestricted(
+              "Host process executable overrides (cuaCommand) are restricted in remote sessions",
+            );
+          }
+          if (!caps.localFileDrivers && isFileDriverSpec(patch.driverPackage)) {
+            throw capabilityRestricted("Local file: driver packages are restricted in remote sessions");
+          }
+          if (!caps.localFsPaths && typeof patch.game === "string" && isUnsafeWorkspaceRelativePath(patch.game)) {
+            throw capabilityRestricted("Game path must stay within the managed workspace in remote sessions");
+          }
+          if (
+            !caps.hostStorageConfig &&
+            isPlainObject(patch.storage) &&
+            (patch.storage.mode === "directory" ||
+              patch.storage.kind === "directory" ||
+              patch.storage.directory !== undefined)
+          ) {
+            throw capabilityRestricted("Host directory storage configuration is restricted in remote sessions");
+          }
+        }
         result = await this.ctx.worker.call("updateWorkspaceStudioConfig", [id, patch], signal);
         break;
       }
@@ -1115,14 +1339,20 @@ export class RpcRouter {
     return result;
   }
 
-  private async handleBasewareMutate(rawParams: unknown, signal: AbortSignal): Promise<unknown> {
+  private async handleBasewareMutate(
+    rawParams: unknown,
+    session: RpcSession,
+    signal: AbortSignal,
+  ): Promise<unknown> {
     const params = asObject(rawParams, "baseware/mutate requires { action }") as BasewareMutateParams & Record<string, unknown>;
     const action = params.action;
+    const { capabilities: caps } = this.getSessionCapabilities(session);
     let result: unknown;
     let workspaceId = typeof params.workspaceId === "string" ? params.workspaceId : undefined;
 
     switch (action) {
       case "upsertMachine":
+        this.enforceMachineCapabilities(params.machine, caps);
         result = await this.ctx.worker.call(
           "upsertBasewareMachine",
           [params.machine, { workspaceId: params.workspaceId, bindMode: params.bindMode }],
@@ -1132,13 +1362,23 @@ export class RpcRouter {
       case "removeMachine":
         result = await this.ctx.worker.call("removeBasewareMachine", [params.id], signal);
         break;
-      case "registerDriver":
+      case "registerDriver": {
+        const rawDriverSpec =
+          typeof params.spec === "string"
+            ? params.spec
+            : isPlainObject(params.spec)
+              ? params.spec.spec
+              : undefined;
+        if (!caps.localFileDrivers && isFileDriverSpec(rawDriverSpec)) {
+          throw capabilityRestricted("Local file: driver packages are restricted in remote sessions");
+        }
         result = await this.ctx.worker.call(
           "registerBasewareDriver",
           [{ spec: params.spec, workspaceId: params.workspaceId }],
           signal,
         );
         break;
+      }
       case "unregisterDriver":
         result = await this.ctx.worker.call(
           "removeBasewareDriver",
@@ -1147,6 +1387,7 @@ export class RpcRouter {
         );
         break;
       case "probeMachine":
+        this.enforceMachineCapabilities(params.machine, caps);
         result = await this.ctx.worker.call(
           "probeBasewareMachine",
           [params.machine ?? { id: params.id }],

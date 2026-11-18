@@ -55,8 +55,6 @@ class FakeServices implements LaunchIO {
   preparedBridgePid: number | null = null;
   bridgeClientPids: number[] = [];
   bridgePort: number | undefined;
-  dashboard = false;
-  dashboardBuild = true;
   mode = "manual";
   cleanupReads = 0;
   clock = 0;
@@ -70,13 +68,12 @@ class FakeServices implements LaunchIO {
     return join(name === "pet" ? this.plan.sharedPet.background : this.plan.background, `${name}.job.json`);
   }
   targetForStateFile(path: string) {
-    for (const name of ["emulator", "baseware", "host", "dashboard", "pet"] as const) {
+    for (const name of ["emulator", "baseware", "host", "pet"] as const) {
       if (this.stateFile(name) === path) return this.target(name);
     }
     return path;
   }
   seed(name: string) { this.jobs.set(this.target(name), 100 + this.jobs.size); }
-  dashboardReady = async () => this.dashboard;
   petReady = async () => this.externalPet || (this.jobs.has(this.target("pet")) && this.clock >= this.petReadyAfter);
   sleep = async () => { this.clock += 500; };
   now = () => this.clock;
@@ -86,7 +83,6 @@ class FakeServices implements LaunchIO {
     expect(cwd).toBe(sharedPetLaunch ? this.plan.sharedPet.cwd : this.plan.workspace);
     this.calls.push([...argv]);
     const result = (stdout = "", code = 0, stderr = "") => ({ code, stdout, stderr });
-    if (argv.join("\0") === this.plan.dashboardCheck.join("\0")) return this.dashboardBuild ? result() : result("", 1, "Dashboard production build is stale; run build");
     if (argv[0] === "env" && argv.slice(2).join("\0") === [...cliCommand(this.plan.baseware), "status"].join("\0")) {
       expect(argv[1]).toBe(`BASEWARE_SOCKET=${this.plan.basewareSocket}`);
       if (!this.jobs.has(this.target("baseware")) && !this.externalBaseware) return result("", 1);
@@ -129,7 +125,6 @@ class FakeServices implements LaunchIO {
       if (name === this.failStart) return result("", 1, `${name} unavailable`);
       if (name === "host") expect(this.events).toContain("baseware:manual:true");
       this.seed(name);
-      if (name === "dashboard") this.dashboard = true;
       return result();
     }
     if (argv[0] === "netstat") {
@@ -205,16 +200,17 @@ test("up rejects unidentified and conflicting workspaces before loading drivers,
   }
 });
 
-test("default web startup starts the Dashboard without launching or waiting for Electron", async () => {
+test("default workspace startup starts Baseware and host without launching or waiting for Electron", async () => {
   const config = parseConfig({ driver: "cua" }, manifestFor("cua"));
-  expect(config).toMatchObject({ dashboard: true, pet: false });
+  expect(config).toMatchObject({ pet: false });
+  expect("dashboard" in config).toBe(false);
   const value = await launchPlan(config, "/tmp/Web workspace", "/tmp/Source", "/tmp/web-baseware.sock", manifestFor("cua"));
   expect(value.commands.pet).toBeUndefined();
   const io = new FakeServices(value);
   io.petReadyAfter = Infinity;
   const launcher = new WorkspaceLauncher(value, io);
   await launcher.up();
-  expect(io.starts).toEqual(["baseware", "host", "dashboard"]);
+  expect(io.starts).toEqual(["baseware", "host"]);
   expect(io.clock).toBe(0);
   // Disabling startup must also leave a Pet opened by another workspace alone.
   io.seed("pet");
@@ -223,7 +219,7 @@ test("default web startup starts the Dashboard without launching or waiting for 
   expect(io.calls.some(argv => argv[2] === "--stop")).toBe(false);
 });
 
-test("system Pet readiness uses the Dashboard pet/getState RPC method", async () => {
+test("system Pet readiness uses the pet/getState RPC method", async () => {
   const methods: string[] = [];
   let connected = true;
   let failGetState = false;
@@ -249,6 +245,13 @@ test("system Pet readiness uses the Dashboard pet/getState RPC method", async ()
               home: ludensHome(),
               transport: "ws",
               authenticated: true,
+              runtimeProfile: "remote",
+              capabilities: {
+                localFsPaths: false,
+                localFileDrivers: false,
+                hostProcessOverrides: false,
+                hostStorageConfig: false,
+              },
               serverSeq: 0,
               activeCoreCount: 0,
               managedWorkspaces: [],
@@ -281,85 +284,13 @@ test("system Pet readiness uses the Dashboard pet/getState RPC method", async ()
   }
 });
 
-test("Dashboard reuse requires the same global home and rejects unready registered services before startup", async () => {
-  let home = ludensHome();
-  const server = Bun.serve({
-    port: 0,
-    fetch(request, bunServer) {
-      if (new URL(request.url).pathname === "/rpc" && bunServer.upgrade(request)) {
-        return;
-      }
-      return new Response("missing", { status: 404 });
-    },
-    websocket: {
-      message(ws, raw) {
-        const msg = JSON.parse(String(raw)) as { id: number; method: string };
-        if (msg.method === "initialize") {
-          ws.send(JSON.stringify({
-            jsonrpc: "2.0",
-            id: msg.id,
-            result: {
-              serverVersion: "test",
-              pid: process.pid,
-              home,
-              transport: "ws",
-              authenticated: true,
-              serverSeq: 0,
-              activeCoreCount: 0,
-              managedWorkspaces: [],
-              media: { basePath: "/media", liveStreamCapabilities: ["none"] },
-            },
-          }));
-          return;
-        }
-        if (msg.method === "daemon/status") {
-          ws.send(JSON.stringify({
-            jsonrpc: "2.0",
-            id: msg.id,
-            result: {
-              pid: process.pid,
-              home,
-              socketPath: "",
-              wsUrl: null,
-              authMode: "none",
-              serverSeq: 0,
-              activeCores: [],
-              managedWorkspaces: [],
-            },
-          }));
-        }
-      },
-    },
-  });
-  try {
-    const value = await plan();
-    const io = new WorkspaceLauncher(value)["io"];
-    expect(await io.dashboardReady(server.url.origin)).toBe(true);
-    home = "/tmp/different-ludens-home";
-    expect(await io.dashboardReady(server.url.origin)).toBe(false);
-    const occupied = new FakeServices(value);
-    occupied.seed("dashboard");
-    await expect(new WorkspaceLauncher(value, occupied).up()).rejects.toThrow("different Ludens home");
-    expect(occupied.starts).toEqual([]);
-    expect(occupied.calls.some(argv => argv[2] === "--stop")).toBe(false);
-  } finally {
-    server.stop(true);
-  }
-});
-
-test("managed Dashboard uses a current production build and fails before starting devices when stale", async () => {
-  const value = await plan();
-  expect(value.commands.dashboard).toEqual([
-    ...ludensCommand("/tmp/Source with spaces"),
-    "app-server",
-    "--static-dir",
-    join("/tmp/Source with spaces", "app", "out"),
-  ]);
-  const io = new FakeServices(value);
-  io.dashboardBuild = false;
-  await expect(new WorkspaceLauncher(value, io).up()).rejects.toThrow("production build is stale");
-  expect(io.starts).toEqual([]);
-  expect(io.calls).toEqual([value.dashboardCheck]);
+test("legacy dashboard field in ludens.json is silently stripped without exposing a dashboard service", async () => {
+  const legacyTrue = parseConfig({ driver: "cua", dashboard: true }, manifestFor("cua"));
+  const legacyFalse = parseConfig({ driver: "cua", dashboard: false }, manifestFor("cua"));
+  expect("dashboard" in legacyTrue).toBe(false);
+  expect("dashboard" in legacyFalse).toBe(false);
+  const value = await launchPlan(legacyTrue, "/tmp/Workspace with spaces", "/tmp/Source with spaces", "/tmp/baseware-test.sock", manifestFor("cua"));
+  expect(Object.keys(value.commands)).toEqual(["baseware", "host"]);
 });
 
 test("launch config keeps limits explicit and paths as literal argv entries", async () => {
@@ -416,7 +347,7 @@ test("an explicit bridge port overrides plugin launch environment for both backe
 });
 
 test("Cua launch config uses its native service without choosing a workspace observation", async () => {
-  const config = parseConfig({ driver: "cua", cuaCommand: "/Applications/Cua Driver/cua-driver", dashboard: false, pet: false }, manifestFor("cua"));
+  const config = parseConfig({ driver: "cua", cuaCommand: "/Applications/Cua Driver/cua-driver", pet: false }, manifestFor("cua"));
   const value = await launchPlan(config, "/tmp/Desktop workspace", "/tmp/Source", "/tmp/cua-baseware.sock", manifestFor("cua"));
   expect(config.port).toBeUndefined();
   expect(value.commands.emulator).toBeUndefined();
@@ -433,7 +364,7 @@ test("Cua launch config uses its native service without choosing a workspace obs
 });
 
 test("Cua startup and shutdown only manage its services, without emulator bridge probes", async () => {
-  const value = await launchPlan(parseConfig({ driver: "cua", dashboard: false, pet: false }, manifestFor("cua")), "/tmp/Desktop workspace", "/tmp/Source", "/tmp/cua-baseware.sock", manifestFor("cua"));
+  const value = await launchPlan(parseConfig({ driver: "cua", pet: false }, manifestFor("cua")), "/tmp/Desktop workspace", "/tmp/Source", "/tmp/cua-baseware.sock", manifestFor("cua"));
   const io = new FakeServices(value);
   const launcher = new WorkspaceLauncher(value, io);
   const status = await launcher.up();
@@ -441,7 +372,7 @@ test("Cua startup and shutdown only manage its services, without emulator bridge
   expect(io.starts).toEqual(["baseware", "host"]);
   await launcher.up();
   expect(io.starts).toEqual(["baseware", "host"]);
-  await launcher.down(false);
+  await launcher.down();
   expect(io.calls.filter(argv => argv[2] === "--stop").map(argv => io.targetForStateFile(argv[3]!))).toEqual(
     ["host", "baseware"].map(name => io.target(name)));
   expect(io.calls.some(argv => ["lsof", "netstat", "ss"].includes(argv[0]!))).toBe(false);
@@ -567,7 +498,7 @@ test("external packages resolve workspace-relative file specs and check only exe
     const config = JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8"));
     expect(config.driverPackage).toBe("file:./driver");
     // Hand-edited relative specs must receive the same workspace interpretation on up.
-    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ ...config, driverPackage: "file:./driver", dashboard: false, pet: false }));
+    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ ...config, driverPackage: "file:./driver", pet: false }));
     const preview = await run("up", "--dry-run");
     expect(preview.code).toBe(0);
     const plan = JSON.parse(preview.stdout);
@@ -593,45 +524,43 @@ test("failed startup preserves ready services and repeated up resumes without du
   const value = await plan();
   const io = new FakeServices(value);
   const launcher = new WorkspaceLauncher(value, io);
-  io.failStart = "dashboard";
-  await expect(launcher.up()).rejects.toThrow("dashboard unavailable");
+  io.failStart = "pet";
+  await expect(launcher.up()).rejects.toThrow("pet unavailable");
   expect(io.jobs.has(io.target("host"))).toBe(true);
   expect(io.jobs.has(io.target("emulator"))).toBe(true);
   io.failStart = null;
   const recovered = await launcher.up();
   expect(recovered.host?.mode).toBe("manual");
   await launcher.up();
-  expect(io.starts).toEqual(["emulator", "baseware", "host", "dashboard", "dashboard", "pet"]);
+  expect(io.starts).toEqual(["emulator", "baseware", "host", "pet", "pet"]);
   expect(recovered.baseware).toMatchObject({ connected: true, serviceId: "device-session" });
   expect(io.calls.some(argv => argv[1] === "auto")).toBe(false);
   expect(io.calls.some(argv => argv[2] === "--stop")).toBe(false);
 });
 
-test("down waits for takeover cleanup, stops only owned jobs, and keeps the shared Dashboard and Pet", async () => {
+test("down waits for takeover cleanup, stops only owned jobs, and keeps the shared Pet", async () => {
   const value = await plan();
   const io = new FakeServices(value);
-  for (const name of ["host", "baseware", "emulator", "pet", "dashboard"]) io.seed(name);
+  for (const name of ["host", "baseware", "emulator", "pet"]) io.seed(name);
   const foreign = "dev.ludens.core.another-workspace.host";
   io.jobs.set(foreign, 999);
-  io.dashboard = true;
   io.mode = "auto";
   io.basewareMode = "auto";
-  await new WorkspaceLauncher(value, io).down(false);
+  await new WorkspaceLauncher(value, io).down();
   const stopHost = io.events.indexOf(`stop:${io.target("host")}`);
   expect(io.events.indexOf("auto off")).toBeLessThan(stopHost);
   expect(io.events.indexOf("host:manual:false")).toBeGreaterThan(io.events.indexOf("auto off"));
   expect(io.events.indexOf("host:manual:false")).toBeLessThan(stopHost);
   expect(io.calls.filter(argv => argv[2] === "--stop").map(argv => io.targetForStateFile(argv[3]!))).toEqual(
     ["host", "baseware", "emulator"].map(name => io.target(name)));
-  expect([...io.jobs.keys()]).toEqual([io.target("pet"), io.target("dashboard"), foreign]);
+  expect([...io.jobs.keys()]).toEqual([io.target("pet"), foreign]);
 
   const keep = new FakeServices(value);
-  for (const name of ["host", "baseware", "emulator", "pet", "dashboard"]) keep.seed(name);
-  keep.dashboard = true;
-  await new WorkspaceLauncher(value, keep).down(false, true);
+  for (const name of ["host", "baseware", "emulator", "pet"]) keep.seed(name);
+  await new WorkspaceLauncher(value, keep).down(true);
   expect(keep.calls.filter(argv => argv[2] === "--stop").map(argv => keep.targetForStateFile(argv[3]!))).toEqual(
     ["host", "baseware"].map(name => keep.target(name)));
-  expect([...keep.jobs.keys()]).toEqual([keep.target("emulator"), keep.target("pet"), keep.target("dashboard")]);
+  expect([...keep.jobs.keys()]).toEqual([keep.target("emulator"), keep.target("pet")]);
 });
 
 test("two workspaces reuse one Ludens Pet process and either workspace can explicitly stop it", async () => {
@@ -644,16 +573,15 @@ test("two workspaces reuse one Ludens Pet process and either workspace can expli
 
   const secondIO = new FakeServices(second);
   secondIO.jobs = firstIO.jobs;
-  secondIO.dashboard = true;
   const secondLauncher = new WorkspaceLauncher(second, secondIO);
   const secondStatus = await secondLauncher.up();
   expect(secondIO.starts).toEqual(["baseware", "host"]);
   expect(secondStatus.jobs.find(job => job.name === "pet")).toEqual(firstPet);
   expect(secondIO.calls.some(argv => argv.includes("--workspace"))).toBe(false);
 
-  await secondLauncher.down(false);
+  await secondLauncher.down();
   expect(secondIO.jobs.get(secondIO.target("pet"))).toBe(firstPet.pid!);
-  await secondLauncher.down(false, true, true);
+  await secondLauncher.down(true, true);
   expect(secondIO.jobs.has(secondIO.target("pet"))).toBe(false);
   expect(secondIO.jobs.has(firstIO.target("host"))).toBe(true);
 });
@@ -667,7 +595,7 @@ test("up reuses an independently opened Ludens Pet and down never closes that ap
   expect(status.pet.connected).toBe(true);
   expect(status.jobs.find(job => job.name === "pet")).toMatchObject({ registered: false, pid: null });
   expect(io.starts).not.toContain("pet");
-  await launcher.down(false, true, true);
+  await launcher.down(true, true);
   expect(io.calls.some(argv => argv[2] === "--stop" && io.targetForStateFile(argv[3]!) === io.target("pet"))).toBe(false);
   expect((await launcher.status()).pet.connected).toBe(true);
 });
@@ -831,7 +759,7 @@ test("a bridge used by another workspace neither receives a second host nor gets
   // down must discover the actual port even if ludens.json has since changed.
   owner.bridgePort = 47999;
   owner.bridgeClientPids = [701];
-  await expect(new WorkspaceLauncher(value, owner).down(false)).rejects.toThrow("bridge client from another Baseware service");
+  await expect(new WorkspaceLauncher(value, owner).down()).rejects.toThrow("bridge client from another Baseware service");
   expect(owner.jobs.has(owner.target("emulator"))).toBe(true);
   expect(owner.calls.some(argv => argv[2] === "--stop")).toBe(false);
 });
@@ -844,7 +772,7 @@ test("a connected Baseware service is reused without probing its occupied emulat
   io.bridgeClientPids = [701];
   const status = await new WorkspaceLauncher(value, io).up();
   expect(status.baseware?.connected).toBe(true);
-  expect(io.starts).toEqual(["host", "dashboard", "pet"]);
+  expect(io.starts).toEqual(["host", "pet"]);
   expect(io.calls.some(argv => ["lsof", "netstat", "ss"].includes(argv[0]!))).toBe(false);
 });
 
@@ -871,7 +799,7 @@ test("down preserves Baseware and its emulator while an unmanaged host or lease 
     io.seed("emulator");
     io.externalHost = owner === "host";
     io.basewareMode = owner === "lease" ? "auto" : "manual";
-    await expect(new WorkspaceLauncher(value, io).down(false)).rejects.toThrow(owner === "host" ? "unmanaged host" : "active owner");
+    await expect(new WorkspaceLauncher(value, io).down()).rejects.toThrow(owner === "host" ? "unmanaged host" : "active owner");
     expect(io.calls.some(argv => argv[2] === "--stop")).toBe(false);
   }
 });

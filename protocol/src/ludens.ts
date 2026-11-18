@@ -83,7 +83,6 @@ export interface WorkspaceDefaults {
   seconds?: number;
   requests?: number;
   compactionThreshold?: number;
-  dashboard?: boolean;
   pet?: boolean;
   connection?: ModelConnectionConfig;
 }
@@ -119,9 +118,12 @@ export function validateGlobalConfig(value: unknown): LudensConfig {
       if (typeof setting !== "number" || !Number.isSafeInteger(setting) || setting <= 0) throw new Error(`defaults.${key} must be a positive integer`);
       if (key === "seconds" && setting * 1000 > 2_147_483_647) throw new Error("defaults.seconds exceeds the control timer range");
       defaults[key as "seconds" | "requests" | "compactionThreshold"] = setting;
-    } else if (["pet", "dashboard"].includes(key)) {
-      if (typeof setting !== "boolean") throw new Error(`defaults.${key} must be boolean`);
-      defaults[key as "pet" | "dashboard"] = setting;
+    } else if (key === "dashboard") {
+      // Silently ignore legacy `defaults.dashboard` so existing ~/.ludens/config.json files remain readable.
+      continue;
+    } else if (key === "pet") {
+      if (typeof setting !== "boolean") throw new Error("defaults.pet must be boolean");
+      defaults.pet = setting;
     } else if (key === "model") {
       if (typeof setting !== "string" || !setting.trim()) throw new Error("defaults.model must be non-empty");
       defaults.model = setting;

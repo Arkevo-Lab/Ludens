@@ -23,6 +23,10 @@ import {
   type WorkspaceMachinesBinding,
   type WorkspaceRegistration,
 } from "@ludens/protocol/ludens";
+import {
+  validateWorkspaceStorageOverride,
+  type WorkspaceStorageOverride,
+} from "@ludens/protocol/storage";
 import { discoverDriver } from "./drivers";
 import { repoRoot } from "./repo";
 
@@ -51,7 +55,7 @@ export interface LaunchConfig {
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
   machines?: WorkspaceMachinesBinding;
-  dashboard: boolean;
+  storage?: WorkspaceStorageOverride;
   pet: boolean;
   logging: { diagnostics: "normal" | "full" };
 }
@@ -73,6 +77,7 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
     "compactionThreshold",
     "connection",
     "machines",
+    "storage",
     "dashboard",
     "pet",
     "logging",
@@ -102,15 +107,15 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
   if (config.cuaCommand !== undefined && (bridge || typeof config.cuaCommand !== "string" || !config.cuaCommand.trim())) {
     throw new Error("cuaCommand must be a non-empty executable path for a stdio driver");
   }
+  const { dashboard: _legacyDashboard, ...cleanConfig } = config;
   const result = {
     ...(bridge && manifest?.defaultPort !== undefined ? { port: manifest.defaultPort } : {}),
     model: "openai-codex/gpt-6.1-sol",
     seconds: 1800,
     requests: 1000,
-    dashboard: true,
     pet: false,
     logging: { diagnostics: "normal" },
-    ...config,
+    ...cleanConfig,
   } as LaunchConfig;
   if (
     !result.logging
@@ -137,6 +142,11 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
   } else {
     delete result.machines;
   }
+  if (config.storage !== undefined) {
+    result.storage = validateWorkspaceStorageOverride(config.storage, "storage");
+  } else {
+    delete result.storage;
+  }
   if (bridge && result.port === undefined) {
     throw new Error(`${config.driver} requires a bridge port; set port in ludens.json or defaultPort in its driver manifest`);
   }
@@ -150,9 +160,7 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
   if (result.effort !== undefined && !isOmpEffort(result.effort)) {
     throw new Error("effort must be minimal, low, medium, high, xhigh, or max");
   }
-  for (const key of ["dashboard", "pet"] as const) {
-    if (typeof result[key] !== "boolean") throw new Error(`${key} must be boolean`);
-  }
+  if (typeof result.pet !== "boolean") throw new Error("pet must be boolean");
   return result;
 }
 

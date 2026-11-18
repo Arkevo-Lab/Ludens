@@ -93,7 +93,7 @@ async function main() {
     console.log(`${GLOBAL_HELP}\n\n${DAEMON_HELP}\n\n${WORKSPACE_HELP}\n\n${APP_SERVER_HELP}\n\n${RUN_HELP}\n${HELP}\nludens eval <list|run|history> — workspace capability evaluations; ludens eval --help\n${LOG_HELP}`);
     return;
   }
-  if (args[0] === "app-server" || args[0] === "serve") return appServerCommand(args.slice(1), globalHome);
+  if (args[0] === "app-server" || args[0] === "serve") return appServerCommand(args.slice(1), globalHome, args[0]);
   if (args[0] === "daemon") return daemonCommand(args.slice(1), globalHome);
 
   const remoteSeed: RemoteConnectionConfig | undefined = remoteUrl

@@ -22,9 +22,9 @@ import {
 
 export const WORKSPACE_HELP = `Workspace startup:
 ludens init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]
-ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--dashboard | --no-dashboard] [--pet | --no-pet] [--remote <url> --token <secret>]
+ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--pet | --no-pet] [--remote <url> --token <secret>]
 ludens services [--remote <url> --token <secret>]
-ludens down [--keep-emulator] [--services <emulator,baseware,core>] [--dashboard] [--pet] [--remote <url> --token <secret>]
+ludens down [--keep-emulator] [--services <emulator,baseware,core>] [--pet] [--remote <url> --token <secret>]
 
 These commands use <workspace>/ludens.json locally or route through the shared app-server daemon.
 init uses the configured workspaceRoot unless --workspace selects a directory.
@@ -36,7 +36,6 @@ up --pet or --no-pet overrides that setting for this launch without changing lud
 Repeated up reuses running services; down then up applies configuration changes.
 down stops this workspace's managed host, Baseware and target emulator/process (persist unsaved target state first).
 Use down --keep-emulator before changing host settings to keep the current target process running.
-The shared Console stays up unless --dashboard is given by its owning workspace.
 Desktop Pet is shared across workspaces; down --pet stops its managed background job.
 A Desktop Pet opened separately is reused and stays open after down.
 Choose which workspace Desktop Pet follows in the Console; up preserves that selection.
@@ -99,14 +98,11 @@ export async function workspaceCommand(
               "dry-run": { type: "boolean" },
               preempt: { type: "boolean" },
               services: { type: "string" },
-              dashboard: { type: "boolean" },
-              "no-dashboard": { type: "boolean" },
               pet: { type: "boolean" },
               "no-pet": { type: "boolean" },
             }
           : command === "down"
             ? {
-                dashboard: { type: "boolean" },
                 pet: { type: "boolean" },
                 "keep-emulator": { type: "boolean" },
                 services: { type: "string" },
@@ -115,9 +111,6 @@ export async function workspaceCommand(
   });
 
   if (values.pet && values["no-pet"]) throw new Error("Choose either --pet or --no-pet");
-  if (values.dashboard && values["no-dashboard"]) {
-    throw new Error("Choose either --dashboard or --no-dashboard");
-  }
 
   if (command === "init") {
     if (values.name !== undefined && (typeof values.name !== "string" || !values.name.trim() || /[\\/\x00]/.test(values.name) || [".", ".."].includes(values.name))) {
@@ -235,7 +228,6 @@ export async function workspaceCommand(
     let manifest = await resolveDriver(String(raw.driver ?? "cua"), raw.driverPackage as string | undefined, defaultDriverCacheRoot());
     const config = parseConfig(raw, manifest);
     if (values.pet || values["no-pet"]) config.pet = Boolean(values.pet);
-    if (values.dashboard || values["no-dashboard"]) config.dashboard = Boolean(values.dashboard);
     let activeMachine: BasewareMachineSpec | undefined;
     if (config.machines?.active && config.machines.active !== "workspace-default") {
       const registry = await readMachinesConfig(home);
@@ -294,7 +286,7 @@ export async function workspaceCommand(
   const launcher = new WorkspaceLauncher(plan);
   const result =
     command === "down"
-      ? await launcher.down(Boolean(values.dashboard), Boolean(values["keep-emulator"]), Boolean(values.pet))
+      ? await launcher.down(Boolean(values["keep-emulator"]), Boolean(values.pet))
       : await launcher.status();
   console.log(JSON.stringify(result, null, 2));
 }

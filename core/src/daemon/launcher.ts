@@ -19,7 +19,7 @@ import {
 } from "@ludens/protocol/machines";
 import type { ServiceLaunchOrigin } from "../core/query/types.ts";
 import { NodeUdsRpcClient, WsAppRpcClient } from "../cli/app-rpc-client.ts";
-import { probeAppDaemon, readAppDaemonRuntime } from "./app-daemon.ts";
+import { readAppDaemonRuntime } from "./app-daemon.ts";
 import { resolveAppServerSocketPath } from "./app-server-paths.ts";
 import { cliCommand, jobStateFilePath, jobTargetLabel } from "./background-jobs.ts";
 import {
@@ -41,14 +41,12 @@ export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchCo
   return parseWorkspaceLaunchConfig(value, manifest);
 }
 
-export type ServiceName = "emulator" | "baseware" | "host" | "dashboard" | "pet";
+export type ServiceName = "emulator" | "baseware" | "host" | "pet";
 export interface LaunchPlan {
   workspace: string;
   config: LaunchConfig;
   manifest?: DriverManifest;
   activeMachine?: BasewareMachineSpec;
-  dashboardUrl: string;
-  dashboardCheck: string[];
   background: string;
   sharedPet: { cwd: string; background: string };
   launcher: string;
@@ -142,8 +140,7 @@ export async function launchPlan(
   }
 
   return {
-    workspace, config, manifest, ...(activeMachine ? { activeMachine } : {}), dashboardUrl: resolveAppServerSocketPath(ludensHome()), background, sharedPet,
-    dashboardCheck: ["npm", "--prefix", join(repo, "app"), "run", "build:check"],
+    workspace, config, manifest, ...(activeMachine ? { activeMachine } : {}), background, sharedPet,
     launcher: join(repo, "core/src/daemon/process-manager.ts"), ludens, baseware, basewareSocket,
     commands: {
       ...(emulatorCmd ? { emulator: emulatorCmd } : {}),
@@ -158,7 +155,6 @@ export async function launchPlan(
           ? ["--compaction-threshold", String(config.compactionThreshold)] : []),
         "--diagnostics", config.logging.diagnostics,
       ],
-      ...(config.dashboard ? { dashboard: [...cliCommand(ludens), "app-server", "--static-dir", join(repo, "app/out")] } : {}),
       ...(config.pet ? { pet: petLaunchCommand(repo, workspace) } : {}),
     },
   };
@@ -184,8 +180,7 @@ type Job = { target: string; registered: boolean; pid: number | null; state: str
 
 export interface LaunchIO {
   run(argv: string[], cwd: string): Promise<CommandResult>;
-  dashboardReady(url: string): Promise<boolean>;
-  petReady(url: string): Promise<boolean>;
+  petReady(url?: string): Promise<boolean>;
   sleep(): Promise<void>;
   now(): number;
   note(message: string): void;
@@ -229,25 +224,6 @@ export function createSystemLaunchIO(options: { env?: NodeJS.ProcessEnv; note?: 
         ]);
         return { code, stdout, stderr };
       } finally { clearTimeout(timer); }
-    },
-    async dashboardReady(target) {
-      if (target && /^(https?|wss?):\/\//i.test(target)) {
-        const client = new WsAppRpcClient({ url: target, connectTimeoutMs: 2000 });
-        try {
-          await client.connect();
-          const status = await client.call("daemon/status", undefined, { timeoutMs: 2000 });
-          return resolve(status.home) === effectiveHome;
-        } catch {
-          return false;
-        } finally {
-          await client.close().catch(() => {});
-        }
-      }
-      const status = await probeAppDaemon(effectiveHome, {
-        timeoutMs: 2000,
-        ...(target ? { socketPath: target } : {}),
-      });
-      return status !== null && resolve(status.home) === effectiveHome;
     },
     async petReady(target) {
       if (target && /^(https?|wss?):\/\//i.test(target)) {
@@ -321,7 +297,6 @@ function parseNetstatPids(stdout: string, port: number, state: "LISTENING" | "ES
 }
 
 export interface UpOptions {
-  includeDashboard?: boolean;
   includePet?: boolean;
   launchedBy?: ServiceLaunchOrigin;
   appInstanceId?: string;
@@ -364,11 +339,11 @@ export class WorkspaceLauncher {
     return result.code === 0 ? JSON.parse(result.stdout) : null;
   }
   async status() {
-    const [host, baseware, dashboard, pet, ...jobs] = await Promise.all([this.host(), this.baseware(), this.io.dashboardReady(this.plan.dashboardUrl), this.io.petReady(this.plan.dashboardUrl),
-      ...(["emulator", "baseware", "host", "dashboard", "pet"] as const).map(async name => ({
+    const [host, baseware, pet, ...jobs] = await Promise.all([this.host(), this.baseware(), this.io.petReady(),
+      ...(["emulator", "baseware", "host", "pet"] as const).map(async name => ({
         name, scope: name === "pet" ? "shared" : "workspace", ...await this.job(name), log: this.log(name),
       }))]);
-    return { workspace: this.plan.workspace, host, baseware, dashboard: { url: this.plan.dashboardUrl, ready: dashboard }, pet: { connected: pet }, jobs };
+    return { workspace: this.plan.workspace, host, baseware, pet: { connected: pet }, jobs };
   }
   private log(name: ServiceName) {
     return join(name === "pet" ? this.plan.sharedPet.background : this.plan.background, `${name}.log`);
@@ -485,7 +460,6 @@ export class WorkspaceLauncher {
     return ports;
   }
   async up(options?: UpOptions) {
-    const wantDashboard = options?.includeDashboard ?? this.plan.config.dashboard;
     const wantPet = options?.includePet ?? this.plan.config.pet;
     const serviceSet = options?.services ? new Set(options.services) : null;
     const wantBaseware = !serviceSet || serviceSet.has("baseware") || serviceSet.has("host");
@@ -497,15 +471,6 @@ export class WorkspaceLauncher {
           ...(options.appInstanceId ? { appInstanceId: options.appInstanceId } : {}),
         }
       : undefined;
-    // Fail before launching the device when the permanent Console would run stale code.
-    let dashboard = (wantDashboard || wantPet) ? await this.io.dashboardReady(this.plan.dashboardUrl) : false;
-    if (wantDashboard && !dashboard) {
-      const build = await this.run(this.plan.dashboardCheck);
-      if (build.code !== 0) throw new Error(build.stderr || build.stdout || "Build the Console before starting it.");
-      if ((await this.job("dashboard")).pid) {
-        throw new Error("A Console daemon job is registered for a different Ludens home or unready service. Stop that Console before switching global homes.");
-      }
-    }
     if (wantEmulatorOnly && this.plan.commands.emulator) {
       const emulator = await this.job("emulator");
       const port = this.plan.activeMachine?.transport.kind === "bridge"
@@ -587,24 +552,12 @@ export class WorkspaceLauncher {
       if (!host.connected) throw new Error("Host is alive but its device is disconnected. Inspect ludens services before stopping and starting it again.");
     }
 
-    if (wantDashboard || wantPet) {
-      dashboard = await this.io.dashboardReady(this.plan.dashboardUrl);
-    }
-    if (wantDashboard && !dashboard) {
-      await this.ensure("dashboard", provenance);
-      dashboard = await this.waitFor("Console API", async () => {
-        if (await this.io.dashboardReady(this.plan.dashboardUrl)) return true;
-        await this.alive("dashboard");
-        return false;
-      });
-    }
     if (wantPet) {
-      if (!dashboard) throw new Error("Desktop Pet requires the Console. Enable dashboard in ludens.json or start it separately.");
-      if (await this.io.petReady(this.plan.dashboardUrl)) this.io.note("Reusing connected Desktop Pet instance.");
+      if (await this.io.petReady()) this.io.note("Reusing connected Desktop Pet instance.");
       else {
         await this.ensure("pet", provenance);
         await this.waitFor(`Desktop Pet activity connection (${this.log("pet")})`, async () => {
-          if (await this.io.petReady(this.plan.dashboardUrl)) return true;
+          if (await this.io.petReady()) return true;
           const job = await this.job("pet");
           // Electron's single-instance lock can exit successfully while an existing app connects.
           if (!job.registered || (!job.pid && job.lastExitCode !== null && job.lastExitCode !== 0))
@@ -618,7 +571,7 @@ export class WorkspaceLauncher {
     }
     return this.status();
   }
-  async down(includeDashboard: boolean, keepEmulator = false, includePet = false) {
+  async down(keepEmulator = false, includePet = false) {
     const managedHost = await this.job("host");
     if (managedHost.pid) {
       const host = await this.host();
@@ -628,7 +581,7 @@ export class WorkspaceLauncher {
         return !status || (!status.thinking && !status.consolidating);
       });
     }
-    for (const name of ["host", "baseware", ...(!keepEmulator ? ["emulator"] : []), ...(includePet ? ["pet"] : []), ...(includeDashboard ? ["dashboard"] : [])] as ServiceName[]) {
+    for (const name of ["host", "baseware", ...(!keepEmulator ? ["emulator"] : []), ...(includePet ? ["pet"] : [])] as ServiceName[]) {
       const job = await this.job(name);
       if (!job.registered) continue;
       // A manually launched host or another lease holder may still own the device.

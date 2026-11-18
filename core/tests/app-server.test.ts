@@ -202,6 +202,13 @@ test("app-server serves unified UDS/WS RPC, HTTP /media Range 206, zero /api/* r
     const udsInit = await udsClient.initialize({ clientInfo: { name: "test-uds", version: "1.0.0" } });
     expect(udsInit.transport).toBe("uds");
     expect(udsInit.authenticated).toBe(true);
+    expect(udsInit.runtimeProfile).toBe("desktop");
+    expect(udsInit.capabilities).toEqual({
+      localFsPaths: true,
+      localFileDrivers: true,
+      hostProcessOverrides: true,
+      hostStorageConfig: true,
+    });
     expect(udsInit.home).toBe(home);
     expect(udsInit.media.basePath).toBe("/media");
     expect(udsInit.media.liveStreamCapabilities).toEqual(["none"]);
@@ -209,6 +216,13 @@ test("app-server serves unified UDS/WS RPC, HTTP /media Range 206, zero /api/* r
     const wsInit = await wsClient.initialize({ clientInfo: { name: "test-ws", version: "1.0.0" } });
     expect(wsInit.transport).toBe("ws");
     expect(wsInit.authenticated).toBe(true);
+    expect(wsInit.runtimeProfile).toBe("remote");
+    expect(wsInit.capabilities).toEqual({
+      localFsPaths: false,
+      localFileDrivers: false,
+      hostProcessOverrides: false,
+      hostStorageConfig: false,
+    });
 
     // catalog/get via WS RPC
     const catalog = (await wsClient.call("catalog/get", { includeEmpty: true })) as Array<{
@@ -603,6 +617,7 @@ test("CLI ludens app-server --listen ws://127.0.0.1:0 --parent-watchdog emits JS
       pid: number;
       home: string;
       authMode: string;
+      devMode: boolean;
     };
     expect(handshake).toEqual({
       ready: true,
@@ -614,6 +629,7 @@ test("CLI ludens app-server --listen ws://127.0.0.1:0 --parent-watchdog emits JS
       pid: child.pid!,
       home,
       authMode: "none",
+      devMode: false,
     });
     expect(handshake.port).toBeGreaterThan(0);
     expect(handshake.port).not.toBe(3015);

@@ -12,9 +12,9 @@ import { parseListenSpecs, resolveAuthOptions } from "./app-server-cli.ts";
 
 export const DAEMON_HELP = `Daemon control:
 ludens daemon status
-ludens daemon start [--listen <unix://PATH | ws://HOST:PORT>] [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>]
+ludens daemon start [--dev] [--listen <unix://PATH | ws://HOST:PORT>] [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>]
 ludens daemon stop [--keep-cores | --stop-cores]
-ludens daemon restart [--listen <unix://PATH | ws://HOST:PORT>] [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>] [--keep-cores]
+ludens daemon restart [--dev] [--listen <unix://PATH | ws://HOST:PORT>] [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>] [--keep-cores]
 
 Manages the shared local app-server UDS daemon for LUDENS_HOME (default ~/.ludens).`;
 
@@ -71,6 +71,7 @@ export async function daemonCommand(args: string[], defaultHome = ludensHome()):
     const { values } = parseArgs({
       args: rest,
       options: {
+        dev: { type: "boolean", default: false },
         listen: { type: "string", multiple: true },
         auth: { type: "string" },
         token: { type: "string" },
@@ -96,6 +97,7 @@ export async function daemonCommand(args: string[], defaultHome = ludensHome()):
       home,
       ...(wsListen ? { wsListen } : {}),
       auth,
+      ...(values.dev ? { devMode: true } : {}),
       ...(values["static-dir"] ? { staticDir: values["static-dir"] } : {}),
       ...(values["trusted-origin"]?.length ? { trustedOrigins: values["trusted-origin"] } : {}),
     });

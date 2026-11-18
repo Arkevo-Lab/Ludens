@@ -85,13 +85,12 @@ export interface WorkspaceConfigSummary {
   connection?: ModelConnectionConfig;
   machines?: WorkspaceMachinesBinding;
   storage?: WorkspaceStorageOverride;
-  dashboard: boolean;
   pet: boolean;
   diagnostics: "normal" | "full";
 }
 
 export interface WorkspaceServiceJobSnapshot {
-  name: "emulator" | "baseware" | "host" | "dashboard" | "pet";
+  name: "emulator" | "baseware" | "host" | "pet";
   scope: "workspace" | "shared";
   target: string;
   registered: boolean;
@@ -254,7 +253,6 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
       ...(connection ? { connection } : {}),
       ...(machines ? { machines } : {}),
       ...(storage ? { storage } : {}),
-      dashboard: typeof raw.dashboard === "boolean" ? raw.dashboard : true,
       pet: typeof raw.pet === "boolean" ? raw.pet : false,
       diagnostics,
     };
@@ -307,7 +305,7 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
     throw new Error("全局默认配置必须是对象");
   }
   const patch = input as Record<string, unknown>;
-  const allowed = ["model", "serviceTier", "effort", "seconds", "requests", "compactionThreshold", "dashboard", "pet", "connection"];
+  const allowed = ["model", "serviceTier", "effort", "seconds", "requests", "compactionThreshold", "pet", "connection"];
   for (const key of Object.keys(patch)) {
     if (!allowed.includes(key)) throw new Error(`未知的全局默认配置字段：${key}`);
   }
@@ -339,12 +337,10 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
         }
       }
     }
-    for (const key of ["dashboard", "pet"] as const) {
-      if (key in patch) {
-        if (patch[key] === null || patch[key] === undefined) delete defaults[key];
-        else if (typeof patch[key] === "boolean") defaults[key] = patch[key] as boolean;
-        else throw new Error(`defaults.${key} 必须是布尔值或 null`);
-      }
+    if ("pet" in patch) {
+      if (patch.pet === null || patch.pet === undefined) delete defaults.pet;
+      else if (typeof patch.pet === "boolean") defaults.pet = patch.pet;
+      else throw new Error("defaults.pet 必须是布尔值或 null");
     }
     if ("connection" in patch) {
       if (patch.connection === null || patch.connection === undefined) {
@@ -476,7 +472,7 @@ async function inspectWorkspaceServices(workspacePath: string, home: string): Pr
   const hash = createHash("sha256").update(canonical).digest("hex").slice(0, 16);
   const hostSocket = ludensSocketPath("core", hash);
   const hostSocketExists = await localSocketExists(hostSocket);
-  const names = ["emulator", "baseware", "host", "dashboard", "pet"] as const;
+  const names = ["emulator", "baseware", "host", "pet"] as const;
   const jobs = await Promise.all(
     names.map(async (name): Promise<WorkspaceServiceJobSnapshot> => {
       const target = jobTargetLabel(hash, name);
@@ -1658,7 +1654,6 @@ export async function updateWorkspaceStudioConfig(
     "compactionThreshold",
     "diagnostics",
     "pet",
-    "dashboard",
     "port",
     "game",
     "cuaCommand",
@@ -1675,6 +1670,7 @@ export async function updateWorkspaceStudioConfig(
     const raw = JSON.parse(await readFile(configPath, "utf8")) as Record<string, unknown>;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("ludens.json 必须是 JSON 对象");
     const next: Record<string, unknown> = { ...raw };
+    delete next.dashboard;
 
     if ("model" in patch) {
       const nextModel = typeof patch.model === "string" ? patch.model.trim() : "";
@@ -1721,11 +1717,9 @@ export async function updateWorkspaceStudioConfig(
       }
       next.logging = { diagnostics: patch.diagnostics };
     }
-    for (const key of ["pet", "dashboard"] as const) {
-      if (key in patch) {
-        if (typeof patch[key] !== "boolean") throw new Error(`${key} 必须是布尔值`);
-        next[key] = patch[key];
-      }
+    if ("pet" in patch) {
+      if (typeof patch.pet !== "boolean") throw new Error("pet 必须是布尔值");
+      next.pet = patch.pet;
     }
     if ("port" in patch) {
       if (patch.port === null || patch.port === undefined || patch.port === "") {
