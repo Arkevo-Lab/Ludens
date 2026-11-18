@@ -92,7 +92,7 @@ ludens init --driver <id> \
   [--pet | --no-pet]
 ```
 
-当 `ludens.json` 缺省相关字段时，启动器使用的默认值：`model` = `openai-codex/gpt-6.1-sol`、`seconds` = `1800`、`requests` = `1000`、`dashboard` = `true`、`pet` = `false`、`logging.diagnostics` = `"normal"`。
+当 `ludens.json` 缺省相关字段时，启动器使用的默认值：`model` = `openai-codex/gpt-6.2-sol`、`seconds` = `1800`、`requests` = `1000`、`dashboard` = `true`、`pet` = `false`、`logging.diagnostics` = `"normal"`。
 
 ### `ludens up` / `ludens services` / `ludens down`
 
@@ -145,7 +145,7 @@ ludens [--workspace <path>] run \
   [--launched-by app|cli]
 ```
 
-[`core/src/cli/main.ts`](../../../core/src/cli/main.ts) 中的直调默认值：`--seconds 300`、`--requests 50`、`--diagnostics normal`，`--launched-by`（回退读取 `LUDENS_LAUNCHED_BY` 环境变量）默认为 `cli`（`app` 由 **App Daemon** 传入，用于限定桌面端 Quit 仅回收 App 拉起的 Core）；`--model` 优先读取 `ludens.json`，缺省时为 `openai-codex/gpt-6.1-sol`。
+[`core/src/cli/main.ts`](../../../core/src/cli/main.ts) 中的直调默认值：`--seconds 300`、`--requests 50`、`--diagnostics normal`，`--launched-by`（回退读取 `LUDENS_LAUNCHED_BY` 环境变量）默认为 `cli`（`app` 由 **App Daemon** 传入，用于限定桌面端 Quit 仅回收 App 拉起的 Core）；`--model` 优先读取 `ludens.json`，缺省时为 `openai-codex/gpt-6.2-sol`。
 
 ---
 
