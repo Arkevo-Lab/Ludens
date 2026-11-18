@@ -1,8 +1,27 @@
 diff --git a/dist/types/providers/openai-codex-responses.d.ts b/dist/types/providers/openai-codex-responses.d.ts
-index 5ff1d3a992da32f9b3076ded882ae897a86f2194..3130e4cfa521648f2c1978df8c2fc90c06467b0f 100644
+index 5ff1d3a992da32f9b3076ded882ae897a86f2194..9fed1f282171b600aef2fb8484282a344ebf0bab 100644
 --- a/dist/types/providers/openai-codex-responses.d.ts
 +++ b/dist/types/providers/openai-codex-responses.d.ts
-@@ -274,7 +274,8 @@ type CodexToolPayload = {
+@@ -137,6 +137,10 @@ export interface OpenAICodexWebSocketDebugStats {
+ export type CodexWebSocketSessionState = {
+     sessionId: string;
+     disableWebsocket: boolean;
++    /** A request frame is too large; retry WS only after native compaction changes history. */
++    sizeBlockedUntilCompaction?: boolean;
++    /** A transient failure or connection expiry pauses WS briefly before a fresh connection. */
++    retryWebsocketAt?: number;
+     lastRequest?: RequestBody;
+     /** Last completed response; an in-progress response cannot replace the retry baseline. */
+     lastResponseId?: string;
+@@ -158,6 +162,7 @@ export type CodexWebSocketSessionState = {
+     lastTransport?: CodexTransport;
+     fallbackCount: number;
+     lastFallbackAt?: number;
++    lastFallbackError?: string;
+     prewarmed: boolean;
+     stats: OpenAICodexWebSocketDebugStats;
+ };
+@@ -274,7 +279,8 @@ type CodexToolPayload = {
  /** @internal Exported for tests. */
  export declare function convertOpenAICodexResponsesTools(tools: Tool[], model: Model<"openai-codex-responses">): CodexToolPayload[];
  export declare class CodexWebSocketTransportError extends Error {

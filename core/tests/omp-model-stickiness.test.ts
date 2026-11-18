@@ -7,8 +7,12 @@ import type { AssistantMessage, SimpleStreamOptions } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import * as codingAgent from "@oh-my-pi/pi-coding-agent";
-import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
-import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
+import { AuthStorage, ModelRegistry, SessionManager, Settings, type ProviderDiscoveryState } from "@oh-my-pi/pi-coding-agent";
+import {
+  listAvailableOmpModels,
+  resolveOmpImageModel,
+  shouldSynthesizeOfflineCodexModels,
+} from "../src/core/agent-omp/models.ts";
 import { createOmpSession, ompSessionOptions } from "../src/core/agent-omp/session.ts";
 
 test("ompSessionOptions locks out model fallback, server-side fallback, auto-prewalk, and finite image budgets by default", async () => {
@@ -188,6 +192,163 @@ test("createOmpSession enforces sticky multimodal model invariants across stream
   } finally {
     streamSpy.mockRestore();
     createSessionSpy.mockRestore();
+    auth.close();
+    network.mockRestore();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("OFFLINE_CODEX_MODELS synthesis respects authoritative openai-codex discovery state", async () => {
+  const auth = await AuthStorage.create(":memory:");
+  auth.keys.setRuntime("openai-codex", "offline-codex-key");
+  try {
+    const registry = new ModelRegistry(auth, "/tmp/nonexistent-ludens-models.yml", {
+      settings: Settings.isolated({}),
+    });
+
+    // Cold / idle / bundled / stale / unavailable / unauthenticated states allow offline 6.2 fallback.
+    expect(shouldSynthesizeOfflineCodexModels(registry)).toBe(true);
+    expect(resolveOmpImageModel(registry, "openai-codex/gpt-6.2-sol").id).toBe("gpt-6.2-sol");
+    expect(resolveOmpImageModel(registry, "openai-codex/gpt-6.2-astra").id).toBe("gpt-6.2-astra");
+
+    const discoverySpy = spyOn(registry, "getProviderDiscoveryState");
+    for (const nonAuthoritative of [
+      { provider: "openai-codex", status: "idle", optional: false, stale: false, models: [] },
+      { provider: "openai-codex", status: "ok", optional: false, stale: false, source: "bundled", models: [] },
+      { provider: "openai-codex", status: "cached", optional: false, stale: true, source: "cache", models: [] },
+      { provider: "openai-codex", status: "unavailable", optional: false, stale: false, models: [] },
+      { provider: "openai-codex", status: "unauthenticated", optional: false, stale: false, models: [] },
+    ] satisfies ProviderDiscoveryState[]) {
+      discoverySpy.mockReturnValue(nonAuthoritative);
+      expect(shouldSynthesizeOfflineCodexModels(registry)).toBe(true);
+      expect(resolveOmpImageModel(registry, "openai-codex/gpt-6.2-astra").id).toBe("gpt-6.2-astra");
+    }
+
+    // Authoritative fresh `ok` or `cached` discovery suppresses synthesizing unentitled rows.
+    for (const authoritative of [
+      { provider: "openai-codex", status: "ok", optional: false, stale: false, source: "provider", models: ["gpt-6-sol"] },
+      { provider: "openai-codex", status: "cached", optional: false, stale: false, source: "cache", models: ["gpt-6-sol"] },
+    ] satisfies ProviderDiscoveryState[]) {
+      discoverySpy.mockReturnValue(authoritative);
+      expect(shouldSynthesizeOfflineCodexModels(registry)).toBe(false);
+      expect(() => resolveOmpImageModel(registry, "openai-codex/gpt-6.2-astra")).toThrow(
+        "An image-capable model is required: openai-codex/gpt-6.2-astra",
+      );
+      const catalog = await listAvailableOmpModels({ modelRegistry: registry });
+      expect(catalog.models.some(item => item.fullId === "openai-codex/gpt-6.2-astra")).toBe(false);
+      expect(catalog.models.some(item => item.fullId === "openai-codex/gpt-6.2-sol")).toBe(false);
+    }
+
+    discoverySpy.mockRestore();
+  } finally {
+    auth.close();
+  }
+});
+
+test("createOmpSession guards agent.setModel and session.setModel against non-image models and finite imageCountBudget resets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ludens-model-guard-"));
+  const workspace = join(directory, "workspace");
+  await mkdir(workspace, { recursive: true });
+  const network = spyOn(globalThis, "fetch").mockRejectedValue(
+    new Error("Unexpected network request in offline model guard test"),
+  );
+
+  const settings = Settings.isolated({ "retry.modelFallback": false, "title.refreshOnReplan": false });
+  const auth = await AuthStorage.create(join(directory, "auth.db"));
+  auth.keys.setRuntime("openai-codex", "offline-codex-key");
+  auth.keys.setRuntime("openai", "offline-openai-key");
+  const registry = new ModelRegistry(auth, "/tmp/nonexistent-ludens-models.yml", { settings });
+  const codexModel = resolveOmpImageModel(registry, "openai-codex/gpt-6.2-sol");
+  const openaiModel = registry.find("openai", "gpt-6.2-sol")!;
+  const textOnlyModel = { ...openaiModel, id: "gpt-text-only", input: ["text" as const] };
+
+  try {
+    // 1) Startup with a non-image model rejects and disposes cleanly.
+    await expect(
+      createOmpSession({
+        cwd: workspace,
+        agentDir: join(directory, "omp-bad"),
+        model: textOnlyModel,
+        authStorage: auth,
+        modelRegistry: registry,
+        settings,
+        sessionManager: SessionManager.inMemory(),
+        cacheWarming: false,
+        skills: [],
+        rules: [],
+        contextFiles: [],
+        promptTemplates: [],
+        slashCommands: [],
+        enableMCP: false,
+        enableLsp: false,
+        enableIrc: false,
+        skipPythonPreflight: true,
+        disableExtensionDiscovery: true,
+        restrictToolNames: true,
+        toolNames: ["read"],
+      }),
+    ).rejects.toThrow("An image-capable model is required: openai/gpt-text-only");
+
+    // 2) Live session preserves `imageCountBudget: Infinity` across metadata refresh (`agent.setModel`)
+    //    and `session.setModel`, while rejecting non-image models upfront without mutating state or transcript.
+    const manager = SessionManager.create(workspace, join(directory, "session"));
+    const { session } = await createOmpSession({
+      cwd: workspace,
+      agentDir: join(directory, "omp"),
+      model: { ...codexModel, imageCountBudget: 5 },
+      authStorage: auth,
+      modelRegistry: registry,
+      settings,
+      sessionManager: manager,
+      cacheWarming: false,
+      skills: [],
+      rules: [],
+      contextFiles: [],
+      promptTemplates: [],
+      slashCommands: [],
+      enableMCP: false,
+      enableLsp: false,
+      enableIrc: false,
+      skipPythonPreflight: true,
+      disableExtensionDiscovery: true,
+      restrictToolNames: true,
+      toolNames: ["read"],
+    });
+
+    try {
+      expect(session.model?.imageCountBudget).toBe(Infinity);
+
+      // Simulate `refreshSelectedModelMetadata` calling `agent.setModel` with a catalog row whose budget is finite.
+      session.agent.setModel({ ...codexModel, imageCountBudget: 3 });
+      expect(`${session.model?.provider}/${session.model?.id}`).toBe("openai-codex/gpt-6.2-sol");
+      expect(session.model?.imageCountBudget).toBe(Infinity);
+
+      // Simulate `session.setModel` with a catalog row whose budget is undefined/finite.
+      await session.setModel({ ...openaiModel, imageCountBudget: 5 }, "default", { persist: false });
+      expect(`${session.model?.provider}/${session.model?.id}`).toBe("openai/gpt-6.2-sol");
+      expect(session.model?.imageCountBudget).toBe(Infinity);
+
+      const entriesBeforeReject = manager.getEntries().length;
+
+      // Direct `agent.setModel` with text-only model throws before mutating `session.model`.
+      expect(() => session.agent.setModel(textOnlyModel)).toThrow(
+        "An image-capable model is required: openai/gpt-text-only",
+      );
+      expect(`${session.model?.provider}/${session.model?.id}`).toBe("openai/gpt-6.2-sol");
+      expect(session.model?.imageCountBudget).toBe(Infinity);
+
+      // `session.setModel` with text-only model rejects upfront without appending a model_change entry.
+      await expect(session.setModel(textOnlyModel, "default", { persist: false })).rejects.toThrow(
+        "An image-capable model is required: openai/gpt-text-only",
+      );
+      expect(`${session.model?.provider}/${session.model?.id}`).toBe("openai/gpt-6.2-sol");
+      expect(session.model?.imageCountBudget).toBe(Infinity);
+      expect(manager.getEntries().length).toBe(entriesBeforeReject);
+      expect(network).not.toHaveBeenCalled();
+    } finally {
+      await session.dispose();
+    }
+  } finally {
     auth.close();
     network.mockRestore();
     await rm(directory, { recursive: true, force: true });
