@@ -5,6 +5,8 @@
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
+    "dev:real": "node scripts/dev.mjs --real-home",
+    "desktop:dev": "npm run desktop:build && node scripts/dev.mjs --real-home --desktop",
     "build": "node scripts/production.mjs build && node scripts/build-electron.mjs",
     "build:check": "node scripts/production.mjs check",
     "typecheck": "tsc --noEmit && npm run desktop:typecheck",

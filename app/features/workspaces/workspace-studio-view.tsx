@@ -62,6 +62,7 @@ import {
 } from "@/components/model-picker-dialog";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { PerceptionSettingsPanel } from "@/features/capabilities/perception-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
@@ -576,6 +577,7 @@ function WorkspaceTargetDevicePanel({
   onOpenModel(): void;
 }) {
   const t = useTranslations("workspaceStudio");
+  const { capabilities: hostCapabilities } = useRuntimeCapabilities();
   const activeMachine = snapshot?.activeMachine ?? null;
   const activeDriver = activeMachine?.driver ?? studio?.config?.driver ?? null;
   const showDriverLaunch = Boolean(activeDriver && activeDriver !== "cua");
@@ -712,7 +714,7 @@ function WorkspaceTargetDevicePanel({
               </span>
             }
           />
-          {launchGame && (
+          {hostCapabilities.localFsPaths && launchGame && (
             <SettingsRow
               label={t("modelSection.gameLabel")}
               control={<SingleLineTruncate mono text={launchGame} className="max-w-sm text-xs text-muted-foreground" />}
@@ -749,6 +751,9 @@ export function ModelAndBudgetPanel({
 }) {
   const t = useTranslations("workspaceStudio");
   const rpc = useOptionalLudensRpc();
+  const { capabilities: hostCapabilities } = useRuntimeCapabilities();
+  const allowDirectoryStorage =
+    hostCapabilities.hostStorageConfig && hostCapabilities.localFsPaths;
   const storageOverview = useStorageOverview({ enabled: !storageConfig });
   const effectiveStorageConfig =
     storageConfig ?? storageOverview.config ?? fallbackGlobalStorageConfig();
@@ -769,7 +774,7 @@ export function ModelAndBudgetPanel({
   const storageMaxGibId = useId();
   const storageQualityId = useId();
 
-  const initial: WorkspaceConfigSummary = studio.config ?? {
+  const initial: Omit<WorkspaceConfigSummary, "dashboard"> = studio.config ?? {
     driver: "cua",
     model: studio.defaults.model ?? "openai-codex/gpt-6.1-sol",
     serviceTier: studio.defaults.serviceTier,
@@ -777,7 +782,6 @@ export function ModelAndBudgetPanel({
     seconds: studio.defaults.seconds ?? 1800,
     requests: studio.defaults.requests ?? 1000,
     compactionThreshold: studio.defaults.compactionThreshold,
-    dashboard: studio.defaults.dashboard ?? true,
     pet: studio.defaults.pet ?? false,
     diagnostics: "normal",
   };
@@ -792,7 +796,6 @@ export function ModelAndBudgetPanel({
   );
   const [diagnostics, setDiagnostics] = useState<"normal" | "full">(initial.diagnostics);
   const [pet, setPet] = useState(initial.pet);
-  const [dashboard, setDashboard] = useState(initial.dashboard);
   const [port, setPort] = useState(initial.port !== undefined ? String(initial.port) : "");
   const [game, setGame] = useState(initial.game ?? "");
   const [storageDraft, setStorageDraft] = useState<WorkspaceStorageDraft>(() =>
@@ -814,7 +817,6 @@ export function ModelAndBudgetPanel({
     setCompaction(cfg.compactionThreshold !== undefined ? String(cfg.compactionThreshold) : "");
     setDiagnostics(cfg.diagnostics);
     setPet(cfg.pet);
-    setDashboard(cfg.dashboard);
     setPort(cfg.port !== undefined ? String(cfg.port) : "");
     setGame(cfg.game ?? "");
     setStorageDraft(
@@ -843,7 +845,6 @@ export function ModelAndBudgetPanel({
     (compaction.trim() === "" ? undefined : Number(compaction.trim())) !== initial.compactionThreshold ||
     diagnostics !== initial.diagnostics ||
     pet !== initial.pet ||
-    dashboard !== initial.dashboard ||
     (port.trim() === "" ? undefined : Number(port.trim())) !== initial.port ||
     game.trim() !== (initial.game ?? "") ||
     storageDirty;
@@ -857,7 +858,6 @@ export function ModelAndBudgetPanel({
     setCompaction(initial.compactionThreshold !== undefined ? String(initial.compactionThreshold) : "");
     setDiagnostics(initial.diagnostics);
     setPet(initial.pet);
-    setDashboard(initial.dashboard);
     setPort(initial.port !== undefined ? String(initial.port) : "");
     setGame(initial.game ?? "");
     setStorageDraft(
@@ -887,7 +887,7 @@ export function ModelAndBudgetPanel({
     setSaveError(null);
     setSavedNotice(false);
     try {
-      const patch: WorkspaceStudioConfigPatch = {
+      const patch: Omit<WorkspaceStudioConfigPatch, "dashboard"> = {
         model: model.trim(),
         serviceTier,
         effort,
@@ -896,9 +896,13 @@ export function ModelAndBudgetPanel({
         compactionThreshold: parsedCompaction,
         diagnostics,
         pet,
-        dashboard,
         storage: storageDraftOutcome.override,
-        ...(initial.driver !== "cua" ? { port: parsedPort, game: game.trim() || null } : {}),
+        ...(initial.driver !== "cua"
+          ? {
+              port: parsedPort,
+              ...(hostCapabilities.localFsPaths ? { game: game.trim() || null } : {}),
+            }
+          : {}),
       };
       const value = await rpc.call("workspaces/mutate", {
         action: "updateStudioConfig",
@@ -1205,22 +1209,6 @@ export function ModelAndBudgetPanel({
         />
 
         <SettingsRow
-          label={t("modelSection.dashboardSwitch")}
-          htmlFor="studio-dashboard-switch"
-          description={t("modelSection.dashboardHint")}
-          control={
-            <Switch
-              id="studio-dashboard-switch"
-              checked={dashboard}
-              onCheckedChange={checked => {
-                setDashboard(checked);
-                setSavedNotice(false);
-              }}
-            />
-          }
-        />
-
-        <SettingsRow
           label={t("modelSection.petSwitch")}
           htmlFor="studio-pet-switch"
           description={t("modelSection.petHint")}
@@ -1256,22 +1244,24 @@ export function ModelAndBudgetPanel({
                 />
               }
             />
-            <SettingsRow
-              label={t("modelSection.gameLabel")}
-              htmlFor={gameInputId}
-              control={
-                <Input
-                  id={gameInputId}
-                  value={game}
-                  onChange={event => {
-                    setGame(event.target.value);
-                    setSavedNotice(false);
-                  }}
-                  placeholder={t("modelSection.gamePlaceholder")}
-                  className="w-full font-mono sm:w-72"
-                />
-              }
-            />
+            {hostCapabilities.localFsPaths && (
+              <SettingsRow
+                label={t("modelSection.gameLabel")}
+                htmlFor={gameInputId}
+                control={
+                  <Input
+                    id={gameInputId}
+                    value={game}
+                    onChange={event => {
+                      setGame(event.target.value);
+                      setSavedNotice(false);
+                    }}
+                    placeholder={t("modelSection.gamePlaceholder")}
+                    className="w-full font-mono sm:w-72"
+                  />
+                }
+              />
+            )}
           </>
         )}
       </SettingsSection>
@@ -1350,11 +1340,13 @@ export function ModelAndBudgetPanel({
                       {storageDraft.profileId}
                     </NativeSelectOption>
                   )}
-                {effectiveStorageConfig.profiles.map(profile => (
-                  <NativeSelectOption key={profile.id} value={profile.id}>
-                    {`${profile.name} (${profile.kind})`}
-                  </NativeSelectOption>
-                ))}
+                {effectiveStorageConfig.profiles
+                  .filter(profile => allowDirectoryStorage || profile.kind !== "directory")
+                  .map(profile => (
+                    <NativeSelectOption key={profile.id} value={profile.id}>
+                      {`${profile.name} (${profile.kind})`}
+                    </NativeSelectOption>
+                  ))}
               </NativeSelect>
             }
           />
@@ -1494,21 +1486,23 @@ export function ModelAndBudgetPanel({
         }
       />
 
-      <AdvancedDiagnosticsDisclosure summary={t("servicesSection.advancedDiagnostics")}>
-        <div className="space-y-2 text-xs text-muted-foreground">
-          <p>{t("reloadHostTitle")}</p>
-          <div className="flex items-center gap-2 rounded-md border border-border/70 bg-[var(--surface-inset)] px-3 py-2">
-            <code className="min-w-0 flex-1 select-all break-all font-mono text-[11px] text-foreground">
-              {reloadCmd}
-            </code>
-            <InlineCopyButton
-              text={reloadCmd}
-              ariaLabel={t("copyReload")}
-              copiedText={t("copied")}
-            />
+      {hostCapabilities.localFsPaths && (
+        <AdvancedDiagnosticsDisclosure summary={t("servicesSection.advancedDiagnostics")}>
+          <div className="space-y-2 text-xs text-muted-foreground">
+            <p>{t("reloadHostTitle")}</p>
+            <div className="flex items-center gap-2 rounded-md border border-border/70 bg-[var(--surface-inset)] px-3 py-2">
+              <code className="min-w-0 flex-1 select-all break-all font-mono text-[11px] text-foreground">
+                {reloadCmd}
+              </code>
+              <InlineCopyButton
+                text={reloadCmd}
+                ariaLabel={t("copyReload")}
+                copiedText={t("copied")}
+              />
+            </div>
           </div>
-        </div>
-      </AdvancedDiagnosticsDisclosure>
+        </AdvancedDiagnosticsDisclosure>
+      )}
     </div>
   );
 }
@@ -1538,6 +1532,7 @@ export function ServicesAndShioriPanel({
 }) {
   const t = useTranslations("workspaceStudio");
   const rpc = useOptionalLudensRpc();
+  const { capabilities: hostCapabilities } = useRuntimeCapabilities();
   const [memoryDraft, setMemoryDraft] = useState(studio.shiori.memory.content);
   const [busyAction, setBusyAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -1840,57 +1835,59 @@ export function ServicesAndShioriPanel({
         />
       </SettingsSection>
 
-      <AdvancedDiagnosticsDisclosure summary={t("servicesSection.advancedDiagnostics")}>
-        <div className="space-y-4 text-xs">
-          <div className="space-y-2">
-            {serviceOps.map(item => (
-              <div key={item.key} className="space-y-1">
-                <p className="text-muted-foreground">{item.label}</p>
-                <div className="flex items-center gap-2 rounded-md border border-border/70 bg-[var(--surface-inset)] px-2.5 py-1.5">
-                  <code className="min-w-0 flex-1 select-all break-all font-mono text-[11px] text-foreground">
-                    {item.cmd}
-                  </code>
-                  <InlineCopyButton
-                    text={item.cmd}
-                    ariaLabel={item.label}
-                    copiedText={t("copied")}
-                  />
+      {(hostCapabilities.localFsPaths || hostCapabilities.hostProcessOverrides) && (
+        <AdvancedDiagnosticsDisclosure summary={t("servicesSection.advancedDiagnostics")}>
+          <div className="space-y-4 text-xs">
+            <div className="space-y-2">
+              {serviceOps.map(item => (
+                <div key={item.key} className="space-y-1">
+                  <p className="text-muted-foreground">{item.label}</p>
+                  <div className="flex items-center gap-2 rounded-md border border-border/70 bg-[var(--surface-inset)] px-2.5 py-1.5">
+                    <code className="min-w-0 flex-1 select-all break-all font-mono text-[11px] text-foreground">
+                      {item.cmd}
+                    </code>
+                    <InlineCopyButton
+                      text={item.cmd}
+                      ariaLabel={item.label}
+                      copiedText={t("copied")}
+                    />
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
 
-          <div className="space-y-1.5 border-t border-border/50 pt-3 font-mono text-[11px] text-muted-foreground">
-            <p className="break-all">
-              hostSocket: {studio.services.hostSocket} ({studio.services.hostSocketExists ? "exists" : "missing"})
-            </p>
-            <p className="break-all">memory: {studio.shiori.memory.path}</p>
-          </div>
+            <div className="space-y-1.5 border-t border-border/50 pt-3 font-mono text-[11px] text-muted-foreground">
+              <p className="break-all">
+                hostSocket: {studio.services.hostSocket} ({studio.services.hostSocketExists ? "exists" : "missing"})
+              </p>
+              <p className="break-all">memory: {studio.shiori.memory.path}</p>
+            </div>
 
-          <div className="space-y-3 border-t border-border/50 pt-3">
-            {studio.services.jobs.map(job => (
-              <div key={job.name} className="space-y-1.5">
-                <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
-                  <span className="font-semibold text-foreground">{job.name}</span>
-                  <span className="text-muted-foreground">
-                    {job.pid ? `PID ${job.pid}` : t("stopped")} · {job.state ?? (job.registered ? "registered" : "unregistered")}
-                    {job.lastExitCode !== null ? ` · exit ${job.lastExitCode}` : ""}
-                  </span>
+            <div className="space-y-3 border-t border-border/50 pt-3">
+              {studio.services.jobs.map(job => (
+                <div key={job.name} className="space-y-1.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[11px]">
+                    <span className="font-semibold text-foreground">{job.name}</span>
+                    <span className="text-muted-foreground">
+                      {job.pid ? `PID ${job.pid}` : t("stopped")} · {job.state ?? (job.registered ? "registered" : "unregistered")}
+                      {job.lastExitCode !== null ? ` · exit ${job.lastExitCode}` : ""}
+                    </span>
+                  </div>
+                  <p className="break-all font-mono text-[11px] text-muted-foreground">{job.target}</p>
+                  {job.logPath && (
+                    <p className="break-all font-mono text-[11px] text-muted-foreground">{job.logPath}</p>
+                  )}
+                  {job.logTail.length > 0 && (
+                    <pre className="max-h-36 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
+                      {job.logTail.join("\n")}
+                    </pre>
+                  )}
                 </div>
-                <p className="break-all font-mono text-[11px] text-muted-foreground">{job.target}</p>
-                {job.logPath && (
-                  <p className="break-all font-mono text-[11px] text-muted-foreground">{job.logPath}</p>
-                )}
-                {job.logTail.length > 0 && (
-                  <pre className="max-h-36 overflow-auto rounded bg-background p-2 font-mono text-[10px] leading-relaxed text-muted-foreground">
-                    {job.logTail.join("\n")}
-                  </pre>
-                )}
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      </AdvancedDiagnosticsDisclosure>
+        </AdvancedDiagnosticsDisclosure>
+      )}
     </div>
   );
 }

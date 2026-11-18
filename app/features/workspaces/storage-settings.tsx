@@ -35,6 +35,7 @@ import {
 } from "@/components/ui/settings-primitives";
 import { Switch } from "@/components/ui/switch";
 import { useTranslations } from "@/lib/locale";
+import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 import {
   BUILTIN_LOCAL_PROFILE_ID,
   DEFAULT_LOCAL_CACHE_BYTES,
@@ -102,6 +103,9 @@ export interface StorageSettingsProps {
 
 export function StorageSettings({ initialData }: StorageSettingsProps) {
   const t = useTranslations("storageSettings");
+  const { capabilities: hostCapabilities } = useRuntimeCapabilities();
+  const allowDirectoryBackend =
+    hostCapabilities.hostStorageConfig && hostCapabilities.localFsPaths;
   const overview = useStorageOverview({ initialData });
   const effectiveConfig = overview.config ?? fallbackGlobalStorageConfig();
 
@@ -466,11 +470,13 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
                         .replace("{index}", formatStorageBytes(ws.segmentsIndexBytes))
                         .replace("{logs}", formatStorageBytes(ws.logsBytes))}
                     </span>
-                    <SingleLineTruncate
-                      mono
-                      text={ws.workspacePath}
-                      className="text-[11px] text-muted-foreground/80"
-                    />
+                    {hostCapabilities.localFsPaths && (
+                      <SingleLineTruncate
+                        mono
+                        text={ws.workspacePath}
+                        className="text-[11px] text-muted-foreground/80"
+                      />
+                    )}
                   </span>
                 }
                 control={
@@ -555,11 +561,18 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
               className="w-full"
               data-storage-default-profile
             >
-              {effectiveConfig.profiles.map(profile => (
-                <NativeSelectOption key={profile.id} value={profile.id}>
-                  {`${profile.name} (${profile.kind})`}
-                </NativeSelectOption>
-              ))}
+              {effectiveConfig.profiles
+                .filter(
+                  profile =>
+                    allowDirectoryBackend ||
+                    profile.kind !== "directory" ||
+                    profile.id === defaultsDraft.defaultProfileId,
+                )
+                .map(profile => (
+                  <NativeSelectOption key={profile.id} value={profile.id}>
+                    {`${profile.name} (${profile.kind})`}
+                  </NativeSelectOption>
+                ))}
             </NativeSelect>
           }
         />
@@ -706,13 +719,15 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
               description={
                 <span className="flex flex-col gap-0.5">
                   <span>{formatProfileSummary(profile)}</span>
-                  {profile.kind === "directory" && profile.directory?.path && (
-                    <SingleLineTruncate
-                      mono
-                      text={profile.directory.path}
-                      className="text-[11px] text-muted-foreground"
-                    />
-                  )}
+                  {hostCapabilities.localFsPaths &&
+                    profile.kind === "directory" &&
+                    profile.directory?.path && (
+                      <SingleLineTruncate
+                        mono
+                        text={profile.directory.path}
+                        className="text-[11px] text-muted-foreground"
+                      />
+                    )}
                   {profile.kind === "s3" && profile.s3 && (
                     <SingleLineTruncate
                       mono
@@ -880,6 +895,16 @@ export function StorageProfileForm({
   onTest,
 }: StorageProfileFormProps) {
   const t = useTranslations("storageSettings");
+  const { capabilities: hostCapabilities } = useRuntimeCapabilities();
+  const allowDirectoryBackend =
+    hostCapabilities.hostStorageConfig && hostCapabilities.localFsPaths;
+  const availableBackendKinds = useMemo(
+    () =>
+      allowDirectoryBackend || editingProfile?.kind === "directory"
+        ? BACKEND_KINDS
+        : BACKEND_KINDS.filter(kind => kind !== "directory"),
+    [allowDirectoryBackend, editingProfile?.kind],
+  );
   const formHeadingId = useId();
   const baseId = useId();
 
@@ -888,7 +913,9 @@ export function StorageProfileForm({
   const hasSavedSecret = Boolean(editingProfile?.s3?.hasSecretAccessKey);
 
   const [draft, setDraft] = useState<StorageProfileDraft>(() =>
-    editingProfile ? storageProfileToDraft(editingProfile) : createEmptyStorageProfileDraft("directory"),
+    editingProfile
+      ? storageProfileToDraft(editingProfile)
+      : createEmptyStorageProfileDraft(allowDirectoryBackend ? "directory" : "s3"),
   );
   const [idManuallyEdited, setIdManuallyEdited] = useState<boolean>(isEditing);
   const [touched, setTouched] = useState<Partial<Record<StorageProfileErrorField, boolean>>>({});
@@ -1101,7 +1128,7 @@ export function StorageProfileForm({
       <fieldset className="grid gap-2" disabled={isBuiltin}>
         <legend className="text-xs font-medium text-foreground">{t("fieldKindLegend")}</legend>
         <div className="grid gap-2 sm:grid-cols-2">
-          {BACKEND_KINDS.map(kind => {
+          {availableBackendKinds.map(kind => {
             const selected = draft.kind === kind;
             const radioId = `${baseId}-kind-${kind}`;
             return (

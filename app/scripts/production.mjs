@@ -141,20 +141,75 @@ async function viteBuild(args) {
   );
 }
 
-function hasListenArg(args) {
-  return args.some(
-    arg =>
-      arg === "--listen" ||
-      arg.startsWith("--listen=") ||
-      arg === "--port" ||
-      arg === "-p" ||
-      arg.startsWith("--port=") ||
-      arg.startsWith("-p="),
-  );
+const LOOPBACK_LISTEN_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+
+function extractListenSpecs(args) {
+  const specs = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === "--listen" && i + 1 < args.length) {
+      specs.push(args[++i]);
+    } else if (arg.startsWith("--listen=")) {
+      specs.push(arg.slice("--listen=".length));
+    }
+  }
+  return specs;
 }
 
 function hasStaticDirArg(args) {
   return args.some(arg => arg === "--static-dir" || arg.startsWith("--static-dir="));
+}
+
+function hasExplicitAuthOrDevArg(args) {
+  return args.some(
+    arg =>
+      arg === "--dev" ||
+      arg === "--auth" ||
+      arg.startsWith("--auth=") ||
+      arg === "--token" ||
+      arg.startsWith("--token=") ||
+      arg === "--token-env" ||
+      arg.startsWith("--token-env="),
+  );
+}
+
+function isLoopbackWsSpec(spec) {
+  if (typeof spec !== "string" || !spec.trim().toLowerCase().startsWith("ws://")) {
+    return false;
+  }
+  try {
+    const parsed = new URL(spec.trim());
+    return LOOPBACK_LISTEN_HOSTS.has(parsed.hostname.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+export function buildProductionStartArgs(args = [], env = process.env, appRoot = directory) {
+  const explicitListenSpecs = extractListenSpecs(args);
+  const defaultListenSpec = "ws://127.0.0.1:3015";
+  const effectiveListenSpecs =
+    explicitListenSpecs.length > 0 ? explicitListenSpecs : [defaultListenSpec];
+  const wsSpecs = effectiveListenSpecs.filter(spec =>
+    spec.trim().toLowerCase().startsWith("ws://"),
+  );
+  const allWsLoopback = wsSpecs.length > 0 && wsSpecs.every(isLoopbackWsSpec);
+
+  let modeFlags = [];
+  if (!hasExplicitAuthOrDevArg(args) && wsSpecs.length > 0) {
+    if (env?.LUDENS_APP_TOKEN?.trim()) {
+      modeFlags = ["--auth", "token", "--token-env", "LUDENS_APP_TOKEN"];
+    } else if (allWsLoopback) {
+      modeFlags = ["--dev"];
+    }
+  }
+
+  return [
+    ...(explicitListenSpecs.length > 0 ? [] : ["--listen", defaultListenSpec]),
+    ...modeFlags,
+    ...(hasStaticDirArg(args) ? [] : ["--static-dir", join(appRoot, "out")]),
+    ...args,
+  ];
 }
 
 async function startAppServer(args) {
@@ -163,9 +218,7 @@ async function startAppServer(args) {
   const serverArgs = [
     cliEntry,
     "app-server",
-    ...(hasListenArg(args) ? [] : ["--listen", "ws://127.0.0.1:3015"]),
-    ...(hasStaticDirArg(args) ? [] : ["--static-dir", join(directory, "out")]),
-    ...args,
+    ...buildProductionStartArgs(args, process.env, directory),
   ];
   await runProcess(bun, serverArgs, {
     cwd: resolve(directory, ".."),

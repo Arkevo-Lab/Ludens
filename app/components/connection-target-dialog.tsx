@@ -13,10 +13,13 @@ import {
 } from "@/lib/connection-target";
 import { useTranslations } from "@/lib/locale";
 import {
+  formatConnectionBannerMessage,
   useConnectionTarget,
   useLudensRpc,
+  useOptionalLudensRpc,
   type RpcConnectionStatus,
 } from "@/lib/ludens-rpc";
+import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 
 export interface ConnectionTargetDialogProps {
   readonly open: boolean;
@@ -78,6 +81,8 @@ export function ConnectionTargetDialog({ open, onOpenChange }: ConnectionTargetD
     switchToElectronLocal,
   } = useConnectionTarget();
   const { status, error: rpcError, needsAuth, reconnect } = useLudensRpc();
+  const rpcCtx = useOptionalLudensRpc();
+  const runtimeCaps = useRuntimeCapabilities();
 
   const sameOriginAvailable = isSameOriginAvailable();
 
@@ -225,13 +230,70 @@ export function ConnectionTargetDialog({ open, onOpenChange }: ConnectionTargetD
           </span>
         </div>
 
-        {(validationError || (needsAuth && t("bannerAuthRequired")) || rpcError) && (
-          <Alert variant="destructive" className="my-3">
-            <AlertDescription>
-              {validationError ?? (needsAuth ? t("bannerAuthRequired") : rpcError)}
-            </AlertDescription>
-          </Alert>
+        {runtimeCaps.actualProfile === "web-dev" && (
+          <section
+            className="mt-3 rounded-md border border-amber-500/35 bg-amber-500/10 p-3 text-xs"
+            data-dev-ui-simulation=""
+            aria-label={t("devSimTitle")}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-semibold text-foreground">{t("devSimTitle")}</span>
+              <code className="rounded border border-amber-500/30 bg-background/60 px-1.5 py-0.5 font-mono text-[10px] text-amber-300">
+                {runtimeCaps.serverHome ?? "~/.ludens-dev"}
+              </code>
+            </div>
+            <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+              {t("devSimHint")}
+            </p>
+            <div className="mt-2.5 grid gap-1.5" role="group" aria-label={t("devSimTitle")}>
+              <button
+                type="button"
+                data-simulate-profile="auto"
+                aria-pressed={runtimeCaps.devSimulatedProfile !== "remote"}
+                onClick={() => runtimeCaps.setDevSimulatedProfile("auto")}
+                className={`flex w-full items-center justify-between rounded border px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  runtimeCaps.devSimulatedProfile !== "remote"
+                    ? "border-[var(--gold)] bg-[var(--surface-inset)] font-medium text-foreground"
+                    : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>{t("devSimOptionAuto")}</span>
+              </button>
+              <button
+                type="button"
+                data-simulate-profile="remote"
+                aria-pressed={runtimeCaps.devSimulatedProfile === "remote"}
+                onClick={() => runtimeCaps.setDevSimulatedProfile("remote")}
+                className={`flex w-full items-center justify-between rounded border px-2.5 py-1.5 text-left text-xs transition-colors ${
+                  runtimeCaps.devSimulatedProfile === "remote"
+                    ? "border-[var(--gold)] bg-[var(--surface-inset)] font-medium text-foreground"
+                    : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <span>{t("devSimOptionRemote")}</span>
+              </button>
+            </div>
+          </section>
         )}
+
+        {(() => {
+          const disconnectBanner =
+            !validationError &&
+            rpcCtx &&
+            !rpcCtx.snapshot.isReady &&
+            rpcCtx.snapshot.status !== "connecting" &&
+            rpcCtx.snapshot.status !== "unconfigured" &&
+            (needsAuth || Boolean(rpcError))
+              ? formatConnectionBannerMessage(rpcCtx.snapshot, t)
+              : null;
+          const alertMessage = validationError ?? disconnectBanner;
+          if (!alertMessage) return null;
+          return (
+            <Alert variant="destructive" className="my-3">
+              <AlertDescription>{alertMessage}</AlertDescription>
+            </Alert>
+          );
+        })()}
 
         <form className="connection-target-form" onSubmit={handleSubmit}>
           <fieldset className="connection-target-modes">

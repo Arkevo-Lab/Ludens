@@ -1,4 +1,6 @@
 import { spawn } from "node:child_process";
+import { existsSync, mkdirSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { resolveBunBinary, resolveViteBin, withBunNodePath } from "./production.mjs";
@@ -23,9 +25,73 @@ export function buildLoopbackTrustedOrigins(port, hostname) {
   return [...set];
 }
 
-export function parseDevArgs(argv) {
-  let port = process.env.PORT || "3015";
+/**
+ * @typedef {object} ParsedDevArgs
+ * @property {string} port
+ * @property {string} hostname
+ * @property {string[]} rest
+ * @property {string} ludensHome
+ * @property {boolean} realHome
+ * @property {string | undefined} home
+ * @property {boolean} desktop
+ */
+
+/**
+ * @param {{ home?: string, realHome?: boolean }} [options]
+ * @param {Record<string, string | undefined>} [env]
+ * @param {string} [homeDir]
+ * @returns {string}
+ */
+export function resolveDevHome(options = {}, env = process.env, homeDir = homedir()) {
+  const explicitHome = typeof options?.home === "string" ? options.home.trim() : "";
+  if (explicitHome) {
+    return resolve(explicitHome);
+  }
+  if (options?.realHome) {
+    return resolve(homeDir, ".ludens");
+  }
+  const envHome = typeof env?.LUDENS_HOME === "string" ? env.LUDENS_HOME.trim() : "";
+  if (envHome) {
+    return resolve(envHome);
+  }
+  return resolve(homeDir, ".ludens-dev");
+}
+
+/**
+ * @param {string} cliEntry
+ * @param {string | string[]} trustedOrigins
+ * @returns {string[]}
+ */
+export function buildManagedAppServerArgs(cliEntry, trustedOrigins) {
+  const originFlags = (Array.isArray(trustedOrigins) ? trustedOrigins : [trustedOrigins]).flatMap(
+    origin => ["--trusted-origin", origin],
+  );
+  return [
+    cliEntry,
+    "app-server",
+    "--dev",
+    "--listen",
+    "ws://127.0.0.1:0",
+    "--parent-watchdog",
+    ...originFlags,
+  ];
+}
+
+/**
+ * @param {string[]} argv
+ * @param {Record<string, string | undefined>} [env]
+ * @param {string} [homeDir]
+ * @returns {ParsedDevArgs}
+ */
+export function parseDevArgs(argv, env = process.env, homeDir = homedir()) {
+  const hasExplicitEnvOrHomeArgs = arguments.length > 1;
+  let port = env?.PORT || "3015";
   let hostname = "127.0.0.1";
+  let realHome = false;
+  /** @type {string | undefined} */
+  let home = undefined;
+  let desktop = false;
+  /** @type {string[]} */
   const rest = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -44,6 +110,21 @@ export function parseDevArgs(argv) {
       hostname = arg.slice("--hostname=".length);
     } else if (arg.startsWith("-H=")) {
       hostname = arg.slice("-H=".length);
+    } else if (arg === "--real-home") {
+      realHome = true;
+    } else if (arg === "--home") {
+      if (i + 1 >= argv.length || !argv[i + 1]?.trim()) {
+        throw new Error("Missing value for --home");
+      }
+      home = argv[++i];
+    } else if (arg.startsWith("--home=")) {
+      const value = arg.slice("--home=".length);
+      if (!value.trim()) {
+        throw new Error("Missing value for --home");
+      }
+      home = value;
+    } else if (arg === "--desktop") {
+      desktop = true;
     } else {
       rest.push(arg);
     }
@@ -60,7 +141,28 @@ export function parseDevArgs(argv) {
     );
   }
   const normalizedHostname = normalizedHost === "[::1]" ? "::1" : normalizedHost;
-  return { port: String(numericPort), hostname: normalizedHostname, rest };
+  const ludensHome = resolveDevHome({ home, realHome }, env, homeDir);
+
+  if (!hasExplicitEnvOrHomeArgs && !realHome && home === undefined && !desktop) {
+    const base = { port: String(numericPort), hostname: normalizedHostname, rest };
+    Object.defineProperties(base, {
+      ludensHome: { value: ludensHome, configurable: true },
+      realHome: { value: false, configurable: true },
+      home: { value: undefined, configurable: true },
+      desktop: { value: false, configurable: true },
+    });
+    return /** @type {ParsedDevArgs} */ (base);
+  }
+
+  return {
+    port: String(numericPort),
+    hostname: normalizedHostname,
+    rest,
+    ludensHome,
+    realHome,
+    home,
+    desktop,
+  };
 }
 
 function forceKillProcessTree(child) {
@@ -113,28 +215,18 @@ async function terminateAppServerChild(child, timeoutMs = 6_500) {
   await waitForExit(child, timeoutMs);
 }
 
-async function spawnManagedAppServer(trustedOrigins) {
+async function spawnManagedAppServer(trustedOrigins, effectiveHome) {
+  mkdirSync(effectiveHome, { recursive: true });
   const bun = resolveBunBinary();
   const cliEntry = join(directory, "../core/src/cli/main.ts");
-  const originFlags = (Array.isArray(trustedOrigins) ? trustedOrigins : [trustedOrigins]).flatMap(
-    origin => ["--trusted-origin", origin],
-  );
-  const child = spawn(
-    bun,
-    [
-      cliEntry,
-      "app-server",
-      "--port",
-      "0",
-      "--parent-watchdog",
-      ...originFlags,
-    ],
-    {
-      cwd: resolve(directory, ".."),
-      env: process.env,
-      stdio: ["pipe", "pipe", "inherit"],
+  const child = spawn(bun, buildManagedAppServerArgs(cliEntry, trustedOrigins), {
+    cwd: resolve(directory, ".."),
+    env: {
+      ...process.env,
+      LUDENS_HOME: effectiveHome,
     },
-  );
+    stdio: ["pipe", "pipe", "inherit"],
+  });
   child.stdin?.on("error", () => {});
 
   try {
@@ -159,7 +251,9 @@ async function spawnManagedAppServer(trustedOrigins) {
         settled = true;
         clearTimeout(timer);
         rejectPromise(
-          new Error(`ludens app-server exited before ready handshake (code=${code ?? "null"}, signal=${signal ?? "null"})`),
+          new Error(
+            `ludens app-server exited before ready handshake (code=${code ?? "null"}, signal=${signal ?? "null"})`,
+          ),
         );
       };
 
@@ -208,13 +302,74 @@ async function spawnManagedAppServer(trustedOrigins) {
   }
 }
 
+function resolveDesktopCommand(devOrigin, appRoot = directory, platform = process.platform) {
+  const mainEntry = join(appRoot, "dist/electron/main.js");
+  if (!existsSync(mainEntry)) {
+    throw new Error(
+      "Desktop bundle dist/electron/main.js is missing. Run `npm run desktop:build` first (or `npm run desktop:dev`).",
+    );
+  }
+  const desktopArgs = ["--server", devOrigin, "--show-window"];
+  if (platform === "win32") {
+    const exeCandidates = [
+      join(appRoot, "node_modules/electron/dist/electron.exe"),
+      resolve(appRoot, "../node_modules/electron/dist/electron.exe"),
+    ];
+    for (const candidate of exeCandidates) {
+      if (existsSync(candidate)) {
+        return { command: candidate, args: [mainEntry, ...desktopArgs] };
+      }
+    }
+    return {
+      command: process.env.ComSpec || "cmd.exe",
+      args: ["/c", join(appRoot, "bin/ludens-app.cmd"), ...desktopArgs],
+    };
+  }
+  return {
+    command: join(appRoot, "bin/ludens-app"),
+    args: desktopArgs,
+  };
+}
+
+async function waitForDevOrigin(devOrigin, viteChild, isShuttingDown, timeoutMs = 15_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (isShuttingDown() || viteChild.exitCode !== null || viteChild.signalCode !== null) {
+      return false;
+    }
+    try {
+      const response = await fetch(devOrigin, {
+        method: "GET",
+        signal: AbortSignal.timeout(1_000),
+      });
+      await response.body?.cancel().catch(() => {});
+      return true;
+    } catch {
+      await new Promise(r => setTimeout(r, 120));
+    }
+  }
+  throw new Error(`Timed out waiting for Vite dev server at ${devOrigin} (${timeoutMs}ms)`);
+}
+
 async function main() {
-  const { port, hostname, rest } = parseDevArgs(process.argv.slice(2));
+  const {
+    port,
+    hostname,
+    rest,
+    ludensHome: effectiveHome,
+    desktop,
+  } = parseDevArgs(process.argv.slice(2));
   const trustedOrigins = buildLoopbackTrustedOrigins(port, hostname);
   const devOrigin = `http://${formatOriginHost(hostname)}:${port}`;
 
+  if (desktop) {
+    resolveDesktopCommand(devOrigin, directory, process.platform);
+  }
+  mkdirSync(effectiveHome, { recursive: true });
+
   let serverChild = null;
   let viteChild = null;
+  let desktopChild = null;
   let appServerUrl = process.env.LUDENS_APP_SERVER_URL?.trim().replace(/\/+$/, "");
   let shuttingDown = false;
   let cleanupPromise = null;
@@ -222,12 +377,18 @@ async function main() {
   const cleanup = () => {
     shuttingDown = true;
     cleanupPromise ??= (async () => {
+      if (desktopChild && desktopChild.exitCode === null && desktopChild.signalCode === null) {
+        try {
+          desktopChild.kill("SIGTERM");
+        } catch {}
+      }
       if (viteChild && viteChild.exitCode === null && viteChild.signalCode === null) {
         try {
           viteChild.kill("SIGTERM");
         } catch {}
       }
       await Promise.all([
+        waitForExit(desktopChild, 4_000),
         waitForExit(viteChild, 4_000),
         terminateAppServerChild(serverChild, 6_500),
       ]);
@@ -245,22 +406,27 @@ async function main() {
 
   try {
     if (!appServerUrl) {
-      const started = await spawnManagedAppServer(trustedOrigins);
+      const started = await spawnManagedAppServer(trustedOrigins, effectiveHome);
       serverChild = started.child;
       appServerUrl = started.url;
-      console.log(`[ludens-dev] app-server=${appServerUrl} -> vite ${devOrigin}`);
       serverChild.once("exit", (code, signal) => {
         if (!shuttingDown) {
-          console.error(`[ludens-dev] app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}); stopping vite`);
+          console.error(
+            `[ludens-dev] app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}); stopping vite`,
+          );
           void cleanup().finally(() => {
             process.exit(code ?? 1);
           });
         }
       });
     }
+    console.log(
+      `[ludens-dev] mode=web-dev home=${effectiveHome} app-server=${appServerUrl} -> vite ${devOrigin}`,
+    );
 
     const env = {
       ...withBunNodePath(process.env, directory),
+      LUDENS_HOME: effectiveHome,
       LUDENS_APP_SERVER_URL: appServerUrl,
     };
 
@@ -282,10 +448,41 @@ async function main() {
       },
     );
 
-    const exitCode = await new Promise((resolvePromise, rejectPromise) => {
+    const viteExitPromise = new Promise((resolvePromise, rejectPromise) => {
       viteChild.once("error", rejectPromise);
       viteChild.once("exit", (code, signal) => resolvePromise(code ?? (signal ? 1 : 0)));
     });
+
+    if (desktop) {
+      const ready = await waitForDevOrigin(devOrigin, viteChild, () => shuttingDown);
+      if (ready && !shuttingDown) {
+        const { command, args: desktopArgs } = resolveDesktopCommand(devOrigin, directory);
+        const desktopEnv = { ...env };
+        delete desktopEnv.ELECTRON_RUN_AS_NODE;
+        desktopChild = spawn(command, desktopArgs, {
+          cwd: directory,
+          env: desktopEnv,
+          stdio: "inherit",
+        });
+        desktopChild.once("error", error => {
+          if (!shuttingDown) {
+            console.error(`[ludens-dev] desktop shell failed: ${error.message}`);
+            void cleanup().finally(() => {
+              process.exit(1);
+            });
+          }
+        });
+        desktopChild.once("exit", code => {
+          if (!shuttingDown) {
+            void cleanup().finally(() => {
+              process.exit(code ?? 0);
+            });
+          }
+        });
+      }
+    }
+
+    const exitCode = await viteExitPromise;
     await cleanup();
     process.exitCode = exitCode;
   } catch (error) {
