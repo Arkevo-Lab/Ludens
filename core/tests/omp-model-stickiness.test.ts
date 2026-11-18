@@ -344,6 +344,36 @@ test("createOmpSession guards agent.setModel and session.setModel against non-im
       expect(`${session.model?.provider}/${session.model?.id}`).toBe("openai/gpt-6.2-sol");
       expect(session.model?.imageCountBudget).toBe(Infinity);
       expect(manager.getEntries().length).toBe(entriesBeforeReject);
+
+      // Even if a candidate enters `session.setModel` with `input: ["text", "image"]` and
+      // `modelRegistry.refreshSelectedModelMetadata` later strips `"image"` to `["text"]`,
+      // the refresh guard rejects at `model-controls.ts:329` BEFORE `:333` closes the active
+      // provider session (`#closeProviderSessionsForModelSwitch`) or mutates `session.model`.
+      let providerSessionClosed = 0;
+      session.providerSessionState.set("openai-responses:openai", {
+        close() {
+          providerSessionClosed += 1;
+        },
+      });
+      const refreshSpy = spyOn(registry, "refreshSelectedModelMetadata").mockResolvedValueOnce({
+        ...codexModel,
+        id: "gpt-runtime-text-only",
+        input: ["text"],
+      });
+      try {
+        await expect(
+          session.setModel({ ...codexModel, id: "gpt-runtime-text-only", input: ["text", "image"] }, "default", {
+            persist: false,
+          }),
+        ).rejects.toThrow("An image-capable model is required: openai-codex/gpt-runtime-text-only");
+      } finally {
+        refreshSpy.mockRestore();
+      }
+      expect(providerSessionClosed).toBe(0);
+      expect(session.providerSessionState.has("openai-responses:openai")).toBe(true);
+      expect(`${session.model?.provider}/${session.model?.id}`).toBe("openai/gpt-6.2-sol");
+      expect(session.model?.imageCountBudget).toBe(Infinity);
+      expect(manager.getEntries().length).toBe(entriesBeforeReject);
       expect(network).not.toHaveBeenCalled();
     } finally {
       await session.dispose();
