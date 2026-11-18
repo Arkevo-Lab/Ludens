@@ -412,15 +412,55 @@ export function ompSessionOptions(
 
 export async function createOmpSession(options: Parameters<typeof createAgentSession>[0] & { model: Model }) {
   const result = await createAgentSession(ompSessionOptions(options));
-  if (result.session.model && result.session.model.imageCountBudget !== Infinity) {
-    result.session.agent.setModel({ ...result.session.model, imageCountBudget: Infinity });
+  try {
+    const assertImageModel = (candidate: Model | undefined, fallbackLabel = "unknown"): Model => {
+      if (!candidate || !Array.isArray(candidate.input) || !candidate.input.includes("image")) {
+        const label = candidate ? `${candidate.provider}/${candidate.id}` : fallbackLabel;
+        throw new Error(`An image-capable model is required: ${label}`);
+      }
+      return candidate;
+    };
+    const initialModel = assertImageModel(
+      result.session.model,
+      `${options.model.provider}/${options.model.id}`,
+    );
+    const rawAgentSetModel = result.session.agent.setModel.bind(result.session.agent);
+    result.session.agent.setModel = (nextModel: Model) => {
+      const checked = assertImageModel(nextModel);
+      rawAgentSetModel(
+        checked.imageCountBudget === Infinity
+          ? checked
+          : { ...checked, imageCountBudget: Infinity },
+      );
+      if (result.session.agent.state.model && result.session.agent.state.model.imageCountBudget !== Infinity) {
+        result.session.agent.state.model = {
+          ...result.session.agent.state.model,
+          imageCountBudget: Infinity,
+        };
+      }
+    };
+    const rawSessionSetModel = result.session.setModel.bind(result.session);
+    result.session.setModel = async (nextModel, role, setModelOptions) => {
+      const checked = assertImageModel(nextModel);
+      return rawSessionSetModel(
+        checked.imageCountBudget === Infinity
+          ? checked
+          : { ...checked, imageCountBudget: Infinity },
+        role,
+        setModelOptions,
+      );
+    };
+    result.session.agent.setModel(initialModel);
+    // The CustomTool adapter does not expose concurrency. Set it on the actual
+    // AgentTools: an observation must wait for preceding environment actions.
+    for (const tool of result.session.agent.state.tools) {
+      if (tool.name === "observe" || tool.name === "event_pool") tool.concurrency = "exclusive";
+    }
+    return result;
+  } catch (error) {
+    await result.session.dispose();
+    throw error;
   }
-  // The CustomTool adapter does not expose concurrency. Set it on the actual
-  // AgentTools: an observation must wait for preceding environment actions.
-  for (const tool of result.session.agent.state.tools) {
-    if (tool.name === "observe" || tool.name === "event_pool") tool.concurrency = "exclusive";
-  }
-  return result;
 }
 
 export async function createOmpAgent(options: {

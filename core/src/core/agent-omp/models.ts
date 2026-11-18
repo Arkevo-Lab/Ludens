@@ -145,11 +145,25 @@ const OFFLINE_CODEX_MODELS: ReadonlyArray<Model> = [
   }),
 ];
 
+export function shouldSynthesizeOfflineCodexModels(modelRegistry: ModelRegistry): boolean {
+  if (!modelRegistry.getAll().some(model => model.provider === "openai-codex")) return false;
+  const state = modelRegistry.getProviderDiscoveryState?.("openai-codex");
+  if (
+    state !== undefined &&
+    !state.stale &&
+    state.source !== "bundled" &&
+    (state.status === "ok" || state.status === "cached")
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function findOmpModelWithCodexFallback(modelRegistry: ModelRegistry, provider: string, id: string): Model | undefined {
   const direct = modelRegistry.find(provider, id);
   if (direct) return direct;
   if (provider !== "openai-codex") return undefined;
-  if (!modelRegistry.getAll().some(model => model.provider === "openai-codex")) return undefined;
+  if (!shouldSynthesizeOfflineCodexModels(modelRegistry)) return undefined;
   return OFFLINE_CODEX_MODELS.find(model => model.id === id);
 }
 
@@ -216,8 +230,8 @@ export async function listAvailableOmpModels(options?: {
     const providerStats = new Map<string, { count: number; authenticated: boolean }>();
 
     const registryModels = registry.getAll();
-    const hasCodexProvider = registryModels.some(model => model.provider === "openai-codex");
-    const catalogCandidates = hasCodexProvider
+    const synthesizeOfflineCodex = shouldSynthesizeOfflineCodexModels(registry);
+    const catalogCandidates = synthesizeOfflineCodex
       ? [
           ...registryModels,
           ...OFFLINE_CODEX_MODELS.filter(
