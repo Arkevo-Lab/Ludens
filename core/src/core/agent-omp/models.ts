@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { discoverAuthStorage, ModelRegistry, Settings, type AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import { serviceTierFamily, shouldSendServiceTier, type Model } from "@oh-my-pi/pi-ai";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import {
   OMP_EFFORTS,
   isOmpEffort,
@@ -105,6 +106,53 @@ export async function createOmpModelRegistry(authStorage: AuthStorage, settings:
   return registry;
 }
 
+// OMP 18.22.2 ships compat rules for Codex GPT-6.2 Sol/Astra and bundles them
+// under `openai`, while `openai-codex` materializes them from `/models` live
+// discovery. Synthesize offline fallback rows only when live discovery has not
+// populated them yet (e.g. cold cache, offline tests, or pre-auth picker).
+const OFFLINE_CODEX_MODELS: ReadonlyArray<Model> = [
+  buildModel({
+    id: "gpt-6.2-sol",
+    name: "GPT-6.2 Sol",
+    api: "openai-codex-responses",
+    provider: "openai-codex",
+    baseUrl: "https://chatgpt.com/backend-api",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 },
+    contextWindow: 500_000,
+    maxTokens: 128_000,
+    preferWebsockets: true,
+    useResponsesLite: true,
+    serviceTiers: ["priority"],
+    remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
+  }),
+  buildModel({
+    id: "gpt-6.2-astra",
+    name: "GPT-6.2 Astra",
+    api: "openai-codex-responses",
+    provider: "openai-codex",
+    baseUrl: "https://chatgpt.com/backend-api",
+    reasoning: true,
+    input: ["text", "image"],
+    cost: { input: 10, output: 50, cacheRead: 1, cacheWrite: 0 },
+    contextWindow: 272_000,
+    maxTokens: 128_000,
+    preferWebsockets: true,
+    useResponsesLite: true,
+    serviceTiers: ["priority"],
+    remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
+  }),
+];
+
+function findOmpModelWithCodexFallback(modelRegistry: ModelRegistry, provider: string, id: string): Model | undefined {
+  const direct = modelRegistry.find(provider, id);
+  if (direct) return direct;
+  if (provider !== "openai-codex") return undefined;
+  if (!modelRegistry.getAll().some(model => model.provider === "openai-codex")) return undefined;
+  return OFFLINE_CODEX_MODELS.find(model => model.id === id);
+}
+
 /** Resolve a `<provider>/<id>` selector to an image-capable OMP model carrying `imageCountBudget: Infinity`. */
 export function resolveOmpImageModel(modelRegistry: ModelRegistry, selector: string): Model {
   const trimmed = selector.trim();
@@ -114,7 +162,7 @@ export function resolveOmpImageModel(modelRegistry: ModelRegistry, selector: str
   }
   const provider = trimmed.slice(0, slash);
   const id = trimmed.slice(slash + 1);
-  const found = modelRegistry.find(provider, id);
+  const found = findOmpModelWithCodexFallback(modelRegistry, provider, id);
   if (!found || !found.input.includes("image")) {
     throw new Error(`An image-capable model is required: ${selector}`);
   }
@@ -167,7 +215,18 @@ export async function listAvailableOmpModels(options?: {
     const models: AvailableModelItem[] = [];
     const providerStats = new Map<string, { count: number; authenticated: boolean }>();
 
-    for (const model of registry.getAll()) {
+    const registryModels = registry.getAll();
+    const hasCodexProvider = registryModels.some(model => model.provider === "openai-codex");
+    const catalogCandidates = hasCodexProvider
+      ? [
+          ...registryModels,
+          ...OFFLINE_CODEX_MODELS.filter(
+            fallback => !registryModels.some(m => m.provider === fallback.provider && m.id === fallback.id),
+          ),
+        ]
+      : registryModels;
+
+    for (const model of catalogCandidates) {
       if (!Array.isArray(model.input) || !model.input.includes("image")) continue;
       const fullId = `${model.provider}/${model.id}`;
       if (seen.has(fullId)) continue;
@@ -210,7 +269,7 @@ export async function listAvailableOmpModels(options?: {
       ? options.currentModel
       : typeof workspaceConfig?.model === "string" && workspaceConfig.model.trim()
         ? workspaceConfig.model.trim()
-        : globalConfig?.defaults.model ?? "openai-codex/gpt-6.1-sol";
+        : globalConfig?.defaults.model ?? "openai-codex/gpt-6.2-sol";
 
     const configuredServiceTier = options && "currentServiceTier" in options
       ? options.currentServiceTier

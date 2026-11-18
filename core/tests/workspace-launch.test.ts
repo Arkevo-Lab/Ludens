@@ -913,7 +913,7 @@ test("Baseware machine bindings validate and persist across registry and workspa
   const workspace = join(directory, "workspace");
   try {
     await mkdir(workspace, { recursive: true });
-    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.1-sol" }, null, 2));
+    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.2-sol" }, null, 2));
     await ensureWorkspaceIdentity(workspace);
     const entry = await registerWorkspace(workspace, home);
 
@@ -1024,7 +1024,7 @@ test("model connection config validates, merges, maps to OMP isolated settings, 
     });
 
     await mkdir(wsDir, { recursive: true });
-    await writeFile(join(wsDir, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.1-sol" }, null, 2));
+    await writeFile(join(wsDir, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.2-sol" }, null, 2));
     await ensureWorkspaceIdentity(wsDir);
     const entry = await registerWorkspace(wsDir, home);
 

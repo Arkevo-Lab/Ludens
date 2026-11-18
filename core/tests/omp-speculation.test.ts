@@ -5,14 +5,20 @@ import { logger } from "@oh-my-pi/pi-utils";
 import { Agent } from "@oh-my-pi/pi-agent-core";
 import * as compaction from "@oh-my-pi/pi-agent-core/compaction";
 import type { AssistantMessage, UserMessage } from "@oh-my-pi/pi-ai";
-import { getBundledModel } from "@oh-my-pi/pi-catalog/models";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { convertToLlm } from "@oh-my-pi/pi-coding-agent/session/messages";
 import { SessionMaintenance, type SessionMaintenanceHost } from "@oh-my-pi/pi-coding-agent/session/session-maintenance";
 
 const threshold = 256_000;
 const contextWindow = 512_000;
-const model = {...getBundledModel("openai-codex", "gpt-6.1-sol"), contextWindow};
+const model = {...buildModel({
+  id: "gpt-6.2-sol", name: "GPT-6.2 Sol", api: "openai-codex-responses", provider: "openai-codex",
+  baseUrl: "https://chatgpt.com/backend-api", reasoning: true, input: ["text", "image"],
+  cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 }, contextWindow: 500_000, maxTokens: 128_000,
+  preferWebsockets: true, useResponsesLite: true, serviceTiers: ["priority"],
+  remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
+}), contextWindow};
 const user = (text: string): UserMessage => ({role: "user", content: [{type: "text", text}], timestamp: Date.now()});
 const assistant = (text: string): AssistantMessage => ({
   role: "assistant", content: [{type: "text", text}], api: model.api, provider: model.provider, model: model.id,

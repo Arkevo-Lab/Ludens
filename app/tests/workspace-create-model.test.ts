@@ -200,9 +200,9 @@ test("detects duplicate workspace path conflicts and resolves authenticated mode
     models: [
       {
         provider: "openai-codex",
-        id: "gpt-6.1-sol",
-        fullId: "openai-codex/gpt-6.1-sol",
-        name: "GPT 6.1",
+        id: "gpt-6.2-sol",
+        fullId: "openai-codex/gpt-6.2-sol",
+        name: "GPT 6.2",
         reasoning: true,
         contextWindow: 200000,
         maxTokens: 16000,
@@ -235,6 +235,6 @@ test("detects duplicate workspace path conflicts and resolves authenticated mode
   const resolvedAuto = resolveCreationModelDefaults({}, catalog);
   assert.equal(resolvedAuto.model, "anthropic/claude-sonnet-4-5");
   assert.equal(resolvedAuto.authenticated, true);
-  assert.equal(isSelectedModelAuthenticated("openai-codex/gpt-6.1-sol", catalog), false);
+  assert.equal(isSelectedModelAuthenticated("openai-codex/gpt-6.2-sol", catalog), false);
   assert.equal(isSelectedModelAuthenticated("anthropic/claude-sonnet-4-5", catalog), true);
 });

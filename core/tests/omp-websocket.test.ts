@@ -24,7 +24,7 @@ import type { Context, FetchImpl, ProviderSessionState } from "@oh-my-pi/pi-ai/t
 
 const frameLimit = 15 * 1024 * 1024;
 const model = buildModel({
-  id: "gpt-6.1-sol", name: "Offline Codex fixture", api: "openai-codex-responses",
+  id: "gpt-6.2-sol", name: "Offline Codex fixture", api: "openai-codex-responses",
   provider: "openai-codex", baseUrl: "http://127.0.0.1:9", reasoning: true,
   preferWebsockets: true, input: ["text"], contextWindow: 256000, maxTokens: 4096,
   cost: {input: 0, output: 0, cacheRead: 0, cacheWrite: 0},

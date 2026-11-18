@@ -25,7 +25,7 @@ function makeStudioSnapshot(id = "ws-demo"): WorkspaceStudioSnapshot {
     workspace: `/tmp/${id}`,
     config: {
       driver: "cua",
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       seconds: 1800,
       requests: 1000,
       dashboard: true,
@@ -336,7 +336,7 @@ test("Live ShioriWorkbench and WorkspaceRunEmpty render first-class Start Worksp
       runId: "20260101-000000",
       workspace: "/tmp/demo-ws",
       socket: "/tmp/demo-ws/host.sock",
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       seconds: 1800,
       maxRequests: 1000,
       compactionThreshold: null,

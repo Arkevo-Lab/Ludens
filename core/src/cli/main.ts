@@ -202,7 +202,7 @@ async function main() {
     const configuredModel = values.model ?? await Bun.file(join(workspace, "ludens.json")).json()
       .then((cfg: Record<string, unknown>) => typeof cfg?.model === "string" && cfg.model.trim() ? cfg.model.trim() : undefined)
       .catch(() => undefined);
-    const model = configuredModel ?? "openai-codex/gpt-6.1-sol";
+    const model = configuredModel ?? "openai-codex/gpt-6.2-sol";
     if (!values["device-only"]) {
       // Device-only mode can run without importing OMP or opening credential storage.
       const postmortem = await import("@oh-my-pi/pi-utils/postmortem");
@@ -217,9 +217,9 @@ async function main() {
     devices.onHandback(reason => { void runtime!.stop(reason); });
     devices.onDisconnect(error => { void runtime!.disconnected(error); });
     await writeFile(join(runDir, "manifest.json"), JSON.stringify({ runId, workspace, workspaceId: state.id, stateDir: state.dir, socket,
-      drivers: devices.catalog.drivers, basewareSocket, omp: "18.18.8", eventSchemaVersion: EVENT_SCHEMA_VERSION,
+      drivers: devices.catalog.drivers, basewareSocket, omp: "18.22.2", eventSchemaVersion: EVENT_SCHEMA_VERSION,
       logging: { diagnostics, basewareDiagnostics: devices.diagnostics }, eventSources: devices.eventSources,
-      shiori: values["device-only"] ? null : { implementation: "omp", implementationVersion: "18.18.8" },
+      shiori: values["device-only"] ? null : { implementation: "omp", implementationVersion: "18.22.2" },
       provenance: await runProvenance(workspace), model: values["device-only"] ? null : model,
       seconds, maxRequests, resume, perception: { entry: "perception.py:Perception" }, compactionThreshold: compactionThreshold ?? null }, null, 2));
     ready = true;

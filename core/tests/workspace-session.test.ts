@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/pi-coding-agent";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { importLegacyWorkspaceState, openWorkspaceSession, selectWorkspaceSession, validateSessionWorkspace } from "../src/core/agent-omp/workspace-session.ts";
 import { readCurrentSession, initializeWorkspaceState } from "../src/core/storage/workspace-state.ts";
@@ -98,7 +99,7 @@ test("a new workspace session survives idle shutdown, resumes, and can start fre
   const authStorage = await AuthStorage.create(join(directory, "auth.db"));
   authStorage.keys.setRuntime("openai-codex", "offline-test-only");
   const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-  const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
+  const model = resolveOmpImageModel(modelRegistry, "openai-codex/gpt-6.2-sol");
   let manager = await openWorkspaceSession(state);
   const create = async () => createOmpSession({
     cwd: state.workspace, agentDir: join(directory, "omp"), model, authStorage, modelRegistry, settings,

@@ -6,6 +6,7 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings } from "@oh-my-pi/
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { consolidateOmpSession, createOmpSession } from "../src/core/agent-omp/session.ts";
 import { captureResult, readTestController, createTestRuntime, installTestPerception } from "./runtime-fixture.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
@@ -40,7 +41,7 @@ test("consolidation uses the same session with file tools, records memory reads,
   const authStorage = await AuthStorage.create(join(directory, "auth.db"));
   authStorage.keys.setRuntime("openai-codex", "offline-test-only");
   const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-  const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
+  const model = resolveOmpImageModel(modelRegistry, "openai-codex/gpt-6.2-sol");
   const manager = SessionManager.create(workspace, join(directory, "session"));
   const { session } = await createOmpSession({
     cwd: workspace, agentDir: join(directory, "omp"), model, authStorage, modelRegistry, settings,

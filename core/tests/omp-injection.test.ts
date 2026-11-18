@@ -8,6 +8,7 @@ import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream"
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { encodeRawPng } from "@oh-my-pi/pi-coding-agent/utils/png-encode";
 import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { listen } from "../src/daemon/transport.ts";
@@ -43,7 +44,7 @@ class Perception:
   const authStorage = await AuthStorage.create(join(directory, "auth.db"));
   authStorage.keys.setRuntime("openai-codex", "offline-test-only");
   const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-  const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
+  const model = resolveOmpImageModel(modelRegistry, "openai-codex/gpt-6.2-sol");
   let session: AgentSession | undefined;
   const snapshots: { messages: any[]; images: any[]; json: any[]; text: string }[] = [];
   const timeline = join(workspace, ".ludens", "timeline");

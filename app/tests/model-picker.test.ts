@@ -55,10 +55,10 @@ const CATALOG_MODELS: AvailableModelItem[] = [
     defaultEffort: "high",
   },
   {
-    fullId: "openai-codex/gpt-6.1-sol",
+    fullId: "openai-codex/gpt-6.2-sol",
     provider: "openai-codex",
-    id: "gpt-6.1-sol",
-    name: "GPT 6.1 Sol",
+    id: "gpt-6.2-sol",
+    name: "GPT 6.2 Sol",
     reasoning: true,
     contextWindow: 1_000_000,
     maxTokens: 64_000,
@@ -102,7 +102,7 @@ const SAMPLE_CATALOG: AvailableModelsCatalog = {
     { id: "openai-codex", count: 2, authenticated: true },
     { id: "google", count: 1, authenticated: false },
   ],
-  currentModel: "openai-codex/gpt-6.1-sol",
+  currentModel: "openai-codex/gpt-6.2-sol",
 };
 
 function emptySpanStats(): SpanStats {
@@ -255,7 +255,7 @@ test("en.json and zh.json maintain strict 1:1 key and placeholder parity with pe
 });
 
 test("ModelPickerDialog helpers format context windows, filter catalog models, group providers, and step keyboard selection", () => {
-  assert.equal(shortModelLabel("openai-codex/gpt-6.1-sol", "Device-only"), "gpt-6.1-sol");
+  assert.equal(shortModelLabel("openai-codex/gpt-6.2-sol", "Device-only"), "gpt-6.2-sol");
   assert.equal(shortModelLabel("gpt-local", "Device-only"), "gpt-local");
   assert.equal(shortModelLabel("  ", "Device-only"), "Device-only");
 
@@ -270,7 +270,7 @@ test("ModelPickerDialog helpers format context windows, filter catalog models, g
     authOnly.map(m => m.fullId),
     [
       "anthropic/claude-opus-4-6",
-      "openai-codex/gpt-6.1-sol",
+      "openai-codex/gpt-6.2-sol",
       "openai-codex/gpt-5.4-mini",
     ],
   );
@@ -288,7 +288,7 @@ test("ModelPickerDialog helpers format context windows, filter catalog models, g
     provider: "openai-codex",
     query: "codex sol",
   });
-  assert.deepEqual(filteredCodex.map(m => m.fullId), ["openai-codex/gpt-6.1-sol"]);
+  assert.deepEqual(filteredCodex.map(m => m.fullId), ["openai-codex/gpt-6.2-sol"]);
 
   // Provider tabs sort authenticated providers before unauthenticated ones
   const tabs = buildProviderTabs(CATALOG_MODELS, { includeUnauthenticated: true });
@@ -342,7 +342,7 @@ test("ModelPickerDialog renders inline Effort + Speed drawer inside selected mod
         open: true,
         inline: true,
         onOpenChange() {},
-        value: "openai-codex/gpt-6.1-sol",
+        value: "openai-codex/gpt-6.2-sol",
         serviceTier: "priority",
         effort: "xhigh",
         catalogOverride: SAMPLE_CATALOG,
@@ -356,9 +356,9 @@ test("ModelPickerDialog renders inline Effort + Speed drawer inside selected mod
   assert.match(html, /data-provider-tab="all"/);
   assert.match(html, /data-provider-tab="anthropic"/);
   assert.match(html, /data-provider-tab="openai-codex"/);
-  assert.match(html, /data-model-card="openai-codex\/gpt-6\.1-sol"[^>]*data-expanded="true"/);
-  assert.match(html, /data-model-option="openai-codex\/gpt-6\.1-sol"/);
-  assert.match(html, /data-model-inline-options="openai-codex\/gpt-6\.1-sol"/);
+  assert.match(html, /data-model-card="openai-codex\/gpt-6\.2-sol"[^>]*data-expanded="true"/);
+  assert.match(html, /data-model-option="openai-codex\/gpt-6\.2-sol"/);
+  assert.match(html, /data-model-inline-options="openai-codex\/gpt-6\.2-sol"/);
   assert.match(html, /data-inline-row="effort"/);
   assert.match(html, /data-inline-row="speed"/);
   assert.match(html, /data-effort-option="xhigh"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-effort-option="xhigh"/);
@@ -396,7 +396,7 @@ test("ModelPickerDialog renders inline Effort + Speed drawer inside selected mod
         open: true,
         inline: true,
         onOpenChange() {},
-        value: "openai-codex/gpt-6.1-sol",
+        value: "openai-codex/gpt-6.2-sol",
         disabled: true,
         disabledReason: "Pause auto loop before switching models",
         catalogOverride: SAMPLE_CATALOG,
@@ -476,7 +476,7 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
             reason: "paused",
             agent: true,
             thinking: false,
-            model: "openai-codex/gpt-6.1-sol",
+            model: "openai-codex/gpt-6.2-sol",
             serviceTier: "ultrafast",
             effort: "xhigh",
           } as NonNullable<RunData["live"]>,
@@ -486,7 +486,7 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
       }),
     ),
   );
-  assert.match(ultraWithEffortHtml, /gpt-6\.1-sol/);
+  assert.match(ultraWithEffortHtml, /gpt-6\.2-sol/);
   assert.match(ultraWithEffortHtml, /data-service-tier="ultrafast"/);
   assert.match(ultraWithEffortHtml, /data-model-effort="xhigh"/);
 
@@ -558,11 +558,11 @@ test("ShioriWorkbench prefers live model in both Composer pill and Right Dock pr
   );
   assert.equal(
     resolveShioriActiveModel({
-      localModelOverride: "openai-codex/gpt-6.1-sol",
+      localModelOverride: "openai-codex/gpt-6.2-sol",
       liveModel: "anthropic/claude-opus-4-6",
       manifestModel: "openai-codex/gpt-5.4-mini",
     }),
-    "openai-codex/gpt-6.1-sol",
+    "openai-codex/gpt-6.2-sol",
   );
 
   const liveSwitchedData = sampleRunData({
@@ -627,7 +627,7 @@ test("Workspace Studio and Global Settings both reuse ModelPickerDialog via Brow
     workspace: "/tmp/demo-ws",
     config: {
       driver: "cua",
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       seconds: 1800,
       requests: 1000,
       diagnostics: "normal",

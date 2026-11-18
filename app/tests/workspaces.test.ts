@@ -235,7 +235,7 @@ test("worker reads and updates global and workspace model connection transport c
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-worker-conn-")));
   const home = join(root, "home"), workspace = join(root, "workspace");
   const entry = await registerFixture(home, "conn-ws", workspace);
-  await writeFile(join(workspace, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.1-sol" }, null, 2));
+  await writeFile(join(workspace, "ludens.json"), JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.2-sol" }, null, 2));
   const worker = new DashboardWorker({ env: { ...process.env, LUDENS_HOME: home } });
   try {
     const globalResult = await worker.call("updateGlobalConnection", [{
@@ -304,14 +304,14 @@ test("worker reads and updates global and workspace model connection transport c
     assert.equal(studioInitial.shiori.sessions.length, 1);
 
     const studioUpdated = await worker.call("updateWorkspaceStudioConfig", [entry.id, {
-      model: "anthropic/claude-sonnet-4-6",
+      model: "anthropic/claude-sonnet-5-5",
       seconds: 300,
       requests: 25,
       compactionThreshold: 24000,
       diagnostics: "full",
       pet: true,
     }]);
-    assert.equal(studioUpdated.config?.model, "anthropic/claude-sonnet-4-6");
+    assert.equal(studioUpdated.config?.model, "anthropic/claude-sonnet-5-5");
     assert.equal(studioUpdated.config?.seconds, 300);
     assert.equal(studioUpdated.config?.requests, 25);
     assert.equal(studioUpdated.config?.compactionThreshold, 24000);

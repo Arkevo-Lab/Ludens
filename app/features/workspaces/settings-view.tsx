@@ -262,7 +262,7 @@ export function GlobalDefaultsCard() {
                   }));
                   setSavedNotice(false);
                 }}
-                placeholder="openai-codex/gpt-6.1-sol"
+                placeholder="openai-codex/gpt-6.2-sol"
                 className="font-mono text-sm sm:flex-1"
                 spellCheck={false}
               />

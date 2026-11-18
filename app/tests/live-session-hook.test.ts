@@ -1263,12 +1263,12 @@ test("switchModel persists offline when sendRuntimeControl rejects with CORE_OFF
     baseUpdatedAt: "1970-01-01T00:00:00.000Z",
     baseServerModel: null,
     hostOnline: true,
-    model: "openai-codex/gpt-6.1-sol",
+    model: "openai-codex/gpt-6.2-sol",
     serviceTier: null,
     effort: "medium",
   });
   assert.equal(switched.persistedOffline, true);
-  assert.equal(workspaceModelSaved, "openai-codex/gpt-6.1-sol");
+  assert.equal(workspaceModelSaved, "openai-codex/gpt-6.2-sol");
 
   await engine.runRuntimeCommand({
     workspace: "/ws/demo-core",

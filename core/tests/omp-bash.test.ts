@@ -14,6 +14,7 @@ import { connectBaseware } from "../src/core/subsystems/baseware.ts";
 import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { EventLog } from "../src/core/storage/events.ts";
 import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { ModelTrace } from "../src/core/agent-omp/trace.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
@@ -91,7 +92,7 @@ async function fixture() {
   const authStorage = await AuthStorage.create(join(directory, "auth.db"));
   authStorage.keys.setRuntime("openai-codex", "offline-test-only");
   const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-  const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
+  const model = resolveOmpImageModel(modelRegistry, "openai-codex/gpt-6.2-sol");
   const baseTools = ["read", "write", "edit", "observe", "bash", "wait"];
   const { session } = await createOmpSession({ cwd: workspace, agentDir: join(directory, "omp"), model,
     authStorage, modelRegistry, settings, sessionManager: SessionManager.create(workspace, join(directory, "session")),
@@ -275,7 +276,7 @@ test("native service survives OMP turns while human handback revokes its origina
       { args: {label: "first"}, epoch: firstEpoch }, { args: {label: "hold"}, epoch: firstEpoch },
       { args: {label: "fresh"}, epoch: f.epoch() },
     ]);
-    await f.prompt(tool("stop-service", "write", { path: "proc://offline-controller/kill" }));
+    await f.prompt(tool("stop-service", "write", { path: "proc://offline-controller/kill", content: "" }));
     await until(() => !alive(pid!));
     for (const names of f.toolsSeen) expect(names).toEqual(f.baseTools.toSorted());
 
@@ -326,7 +327,7 @@ test("native async bash job remains readable across prompts and proc kill cancel
     await f.prompt(tool("read-job", "read", { path: `proc://${job.id}` }));
     expect(f.results.get("read-job")?.content[0].text).toContain("running");
     expect(alive(pid)).toBe(true);
-    await f.prompt(tool("cancel-job", "write", { path: `proc://${job.id}/kill` }));
+    await f.prompt(tool("cancel-job", "write", { path: `proc://${job.id}/kill`, content: "" }));
     await until(() => !alive(pid!));
     expect(f.session.asyncJobManager!.getJob(job.id)?.status).toBe("cancelled");
     for (const names of f.toolsSeen) expect(names).toEqual(f.baseTools.toSorted());
@@ -351,7 +352,8 @@ test("a native background completion after handback cannot start an extra model 
     f.clearCycle();
     await writeFile(join(f.workspace, "finish"), "");
     await job.promise;
-    await f.session.settleAsyncWork();
+    await f.session.asyncJobManager!.drainDeliveries();
+    await f.session.waitForIdle();
     expect(job.status).toBe("completed");
     expect(f.toolsSeen).toHaveLength(requests);
     expect(f.runtime.status().mode).toBe("manual");
@@ -442,7 +444,8 @@ class Perception:
     await f.prompt(tool("background-history", "bash", { command: `sleep 0.1; ${command}`, async: true, timeout: 0 }));
     const job = f.session.asyncJobManager!.getAllJobs().at(-1)!;
     await job.promise;
-    await f.session.settleAsyncWork();
+    await f.session.asyncJobManager!.drainDeliveries();
+    await f.session.waitForIdle();
     const backgroundInputs = (await f.events()).filter(event => event.type === "observation" && event.data.controllerId === "background_result");
     expect(backgroundInputs).toHaveLength(1);
     expect(backgroundInputs[0].data.path).toBeUndefined();

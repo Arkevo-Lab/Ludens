@@ -104,7 +104,7 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
   }
   const result = {
     ...(bridge && manifest?.defaultPort !== undefined ? { port: manifest.defaultPort } : {}),
-    model: "openai-codex/gpt-6.1-sol",
+    model: "openai-codex/gpt-6.2-sol",
     seconds: 1800,
     requests: 1000,
     dashboard: true,

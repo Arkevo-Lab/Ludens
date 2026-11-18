@@ -220,7 +220,7 @@ async function createLoopHarness(options: {
         role: "assistant",
         api: "openai-codex-responses",
         provider: "openai-codex",
-        model: "gpt-6.1-sol",
+        model: "gpt-6.2-sol",
         timestamp: Date.now(),
         content: [{ type: "text", text: `ack-${turns.length}` }],
         stopReason: aborted || currentCycle?.signal.aborted ? "aborted" : "stop",

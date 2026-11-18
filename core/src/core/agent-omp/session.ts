@@ -388,8 +388,33 @@ export function createOmpLoopDriver(options: {
 // `imageCountBudget` to Infinity (applied where the model is selected below)
 // and retain images until compaction. Token/body budgets and server limits
 // remain; no dependency patch.
+export function ompSessionOptions(
+  options: Parameters<typeof createAgentSession>[0] & { model: Model },
+): Parameters<typeof createAgentSession>[0] & {
+  model: Model;
+  disableModelFallback: boolean;
+  disableServerSideFallback: boolean;
+  suppressAutoPrewalk: boolean;
+} {
+  return {
+    ...options,
+    model: options.model.imageCountBudget === Infinity
+      ? options.model
+      : { ...options.model, imageCountBudget: Infinity },
+    // Host invariant: the selected multimodal model must remain sticky across
+    // turns. Lock out context promotion / retry / usage-aware fallback,
+    // provider server-side fallback chains, and automatic prewalk handoffs.
+    disableModelFallback: options.disableModelFallback ?? true,
+    disableServerSideFallback: options.disableServerSideFallback ?? true,
+    suppressAutoPrewalk: options.suppressAutoPrewalk ?? true,
+  };
+}
+
 export async function createOmpSession(options: Parameters<typeof createAgentSession>[0] & { model: Model }) {
-  const result = await createAgentSession(options);
+  const result = await createAgentSession(ompSessionOptions(options));
+  if (result.session.model && result.session.model.imageCountBudget !== Infinity) {
+    result.session.agent.setModel({ ...result.session.model, imageCountBudget: Infinity });
+  }
   // The CustomTool adapter does not expose concurrency. Set it on the actual
   // AgentTools: an observation must wait for preceding environment actions.
   for (const tool of result.session.agent.state.tools) {
@@ -531,12 +556,14 @@ export async function createOmpAgent(options: {
         if (cycle) throw new Error("Cannot switch model while Shiori is running; pause auto loop first");
         const candidate = resolveOmpImageModel(modelRegistry, nextSelector);
         await session.setModel(candidate, "default", { persist: false });
-        const selected = session.model ?? candidate;
+        let selected = session.model ?? candidate;
         if (!selected.input.includes("image")) {
           throw new Error(`An image-capable model is required: ${nextSelector}`);
         }
         if (selected.imageCountBudget !== Infinity) {
-          session.agent.setModel({ ...selected, imageCountBudget: Infinity });
+          selected = { ...selected, imageCountBudget: Infinity };
+          session.agent.setModel(selected);
+          selected = session.model ?? selected;
         }
         activeServiceTier = effectiveOmpServiceTier(selected, nextServiceTier === undefined ? activeServiceTier : nextServiceTier);
         session.setServiceTierFamily("openai", activeServiceTier ?? undefined);

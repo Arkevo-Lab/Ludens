@@ -5,7 +5,7 @@ import type { FetchImpl, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 import { syntheticKey } from "../../src/perf/evidence.ts";
 
 export const fixtureModel = buildModel({
-  id: "gpt-6.1-sol", name: "Offline Codex benchmark", api: "openai-codex-responses", provider: "openai-codex",
+  id: "gpt-6.2-sol", name: "Offline Codex benchmark", api: "openai-codex-responses", provider: "openai-codex",
   baseUrl: "http://127.0.0.1:9", reasoning: true, preferWebsockets: true, input: ["text"],
   contextWindow: 256_000, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 });
