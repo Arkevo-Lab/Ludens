@@ -15,6 +15,7 @@ import {
   Compass,
   FolderIcon,
   PanelLeft,
+  Plus,
   RotateCw,
   Search,
   Sparkles,
@@ -50,6 +51,7 @@ export interface QuickSwitcherItem {
   shortcut?: string;
   icon:
     | "workspace"
+    | "plus"
     | "view"
     | "sidebar"
     | "back"
@@ -103,6 +105,8 @@ function ItemIcon({ kind }: { kind: QuickSwitcherItem["icon"] }) {
   switch (kind) {
     case "workspace":
       return <FolderIcon className={cls} aria-hidden="true" />;
+    case "plus":
+      return <Plus className={cls} aria-hidden="true" />;
     case "sidebar":
       return <PanelLeft className={cls} aria-hidden="true" />;
     case "back":
@@ -219,6 +223,16 @@ export function DesktopQuickSwitcher({
         onSelect: () => onNavigate(viewLink(id)),
       });
     }
+
+    items.push({
+      id: "action:create-workspace",
+      group: "actions",
+      title: t("actionCreateWorkspace"),
+      subtitle: t("actionCreateWorkspaceSubtitle"),
+      keywords: "new create workspace project init 新建 工作区 项目",
+      icon: "plus",
+      onSelect: () => onNavigate("/?view=workspaces&create=1"),
+    });
 
     items.push({
       id: "action:toggle-sidebar",

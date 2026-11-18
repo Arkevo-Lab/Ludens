@@ -30,6 +30,7 @@ export function ContextPicker({
   statusTone,
   trigger,
   copy,
+  footer,
 }: {
   kind: "workspace" | "run";
   options: ContextOption[];
@@ -42,6 +43,7 @@ export function ContextPicker({
   statusTone?: "active" | "muted" | "danger";
   trigger: { text: string; hint: string; title: string };
   copy: { title: string; description: string; close: string; current: string; empty: string; emptyHint?: string };
+  footer?: (close: () => void) => ReactNode;
 }) {
   const id = useId();
   const [open, setOpen] = useState(false);
@@ -50,6 +52,7 @@ export function ContextPicker({
   const content = useRef<HTMLDivElement>(null);
   const focusedChoice = useRef<HTMLButtonElement | null>(null);
   const empty = !options.length;
+  const triggerDisabled = empty && !footer;
   const srOnlyLabel = hideLabel || variant !== "default";
   useLayoutEffect(() => {
     // A catalog refresh may remove the focused row; do not select another item or refocus on ordinary polls.
@@ -67,7 +70,7 @@ export function ContextPicker({
         : `topbar-${kind}-picker context-picker flex min-w-0 max-w-full items-center gap-2`;
   return <div className={wrapperClass} data-variant={variant} data-muted={muted ? "true" : undefined}>
     <Label id={`${id}-label`} htmlFor={id} className={srOnlyLabel ? "sr-only" : "context-picker-label flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground"}>{label}</Label>
-    <Dialog open={open} onOpenChange={next => { if (!next || !empty) setOpen(next); }}>
+    <Dialog open={open} onOpenChange={next => { if (!next || !triggerDisabled) setOpen(next); }}>
       <DialogTrigger asChild>
         {variant === "sidebar" ? (
           <Button
@@ -77,7 +80,7 @@ export function ContextPicker({
             size="sm"
             className={`context-picker-trigger ${kind}-picker-trigger context-picker-trigger-sidebar w-full min-w-0 max-w-full justify-between text-xs aria-disabled:opacity-50`}
             data-muted={muted ? "true" : undefined}
-            aria-disabled={empty}
+            aria-disabled={triggerDisabled}
             aria-labelledby={`${id}-label ${id}-value`}
             aria-describedby={`${id}-hint`}
             title={trigger.title}
@@ -93,7 +96,7 @@ export function ContextPicker({
             variant="outline"
             size="sm"
             className={`context-picker-trigger ${kind}-picker-trigger context-picker-trigger-compact h-7 min-w-0 max-w-[210px] shrink justify-between gap-1.5 px-2.5 text-xs aria-disabled:opacity-50 sm:max-w-[240px]`}
-            aria-disabled={empty}
+            aria-disabled={triggerDisabled}
             aria-labelledby={`${id}-label ${id}-value`}
             aria-describedby={`${id}-hint`}
             title={trigger.title}
@@ -104,7 +107,7 @@ export function ContextPicker({
         ) : (
           <Button id={id} type="button" variant="outline" size="sm"
             className={`context-picker-trigger ${kind}-picker-trigger min-w-0 max-w-full shrink justify-between text-xs aria-disabled:opacity-50 ${kind === "workspace" ? "w-56 sm:w-64" : "w-64 sm:w-80"}`}
-            aria-disabled={empty} aria-labelledby={`${id}-label ${id}-value`} aria-describedby={`${id}-hint`} title={trigger.title}>
+            aria-disabled={triggerDisabled} aria-labelledby={`${id}-label ${id}-value`} aria-describedby={`${id}-hint`} title={trigger.title}>
             <span id={`${id}-value`} className="min-w-0 truncate">{trigger.text}</span>
             <ChevronDown aria-hidden="true" />
           </Button>
@@ -144,6 +147,11 @@ export function ContextPicker({
               </li>)}
             </ul>}
         </div>
+        {footer ? (
+          <div className={`context-picker-footer ${kind}-picker-footer`}>
+            {footer(() => setOpen(false))}
+          </div>
+        ) : null}
       </DialogContent>
     </Dialog>
     <span id={`${id}-hint`} className="sr-only">{trigger.hint}</span>

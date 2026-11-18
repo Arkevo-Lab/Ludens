@@ -1,10 +1,23 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  emptyWorkspaceDraft, normalizedWorkspacePath, switchWorkspaceEnvironment, workspaceCreateInput,
-  workspaceDriverCapabilities, workspaceLocation, initialWorkspaceSetup,
+  emptyWorkspaceDraft,
+  findExistingWorkspaceConflict,
+  initialWorkspaceSetup,
+  normalizedWorkspacePath,
+  switchWorkspaceEnvironment,
+  switchWorkspaceTargetMode,
+  workspaceCreateInput,
+  workspaceDriverCapabilities,
+  workspaceLocation,
 } from "../features/workspaces/workspace-create-model";
+import {
+  isSelectedModelAuthenticated,
+  resolveCreationModelDefaults,
+} from "../features/workspaces/use-workspace-creation-catalog";
+import type { AvailableModelsCatalog } from "../components/model-picker-dialog";
 import type { DiscoveredDriver } from "../lib/drivers";
+import type { BasewareDriverOverviewItem, BasewareMachineRuntimeStatus } from "../lib/workspaces";
 
 const root = "/Users/example/workspaces";
 const desktop = { ...emptyWorkspaceDraft, name: "My workspace" };
@@ -78,4 +91,150 @@ test("switching environments clears device options and never submits a hidden co
   assert.deepEqual(workspaceCreateInput(root, { ...community, environment: "desktop" }, driver), {
     ok: true, input: { name: desktop.name, driver: "cua", cuaCommand: "/driver" },
   });
+});
+
+test("3-mode target selector builds rich payload for machine pool, installed driver, and package registration", () => {
+  const gbaMachine: BasewareMachineRuntimeStatus = {
+    id: "gba-mgba",
+    name: "GBA · LeafGreen",
+    driver: "mgba",
+    driverPackage: "file:/drivers/mgba",
+    transport: { kind: "bridge", port: 47653, host: "127.0.0.1" },
+    updatedAt: "2026-11-07T00:00:00.000Z",
+    usedByWorkspaceIds: [],
+  };
+
+  const machineDraft = switchWorkspaceTargetMode(
+    { ...desktop, model: "anthropic/claude-sonnet-4-5", effort: "high", serviceTier: null },
+    "machine",
+    { defaultMachine: gbaMachine },
+  );
+  assert.deepEqual(
+    workspaceCreateInput(root, machineDraft, null, { machines: [gbaMachine] }),
+    {
+      ok: true,
+      input: {
+        name: "My workspace",
+        driver: "mgba",
+        machineId: "gba-mgba",
+        driverPackage: "file:/drivers/mgba",
+        model: "anthropic/claude-sonnet-4-5",
+        effort: "high",
+        serviceTier: null,
+      },
+    },
+  );
+
+  const catalogDriver: BasewareDriverOverviewItem = {
+    key: "mgba::file:/drivers/mgba",
+    id: "mgba",
+    spec: "file:/drivers/mgba",
+    sourceKind: "file",
+    registrationStatus: "registered",
+    available: true,
+    transport: "bridge",
+    defaultPort: 47653,
+    needsGame: true,
+    usedByMachineIds: [],
+    usedByWorkspaceIds: [],
+    usedByCurrentWorkspace: false,
+    updatedAt: "2026-11-07T00:00:00.000Z",
+  };
+  const driverModeDraft = {
+    ...switchWorkspaceTargetMode(desktop, "driver", { defaultDriver: catalogDriver }),
+    game: "/roms/leafgreen.gba",
+    port: "47701",
+  };
+  assert.deepEqual(
+    workspaceCreateInput(root, driverModeDraft, null, { catalogDriver }),
+    {
+      ok: true,
+      input: {
+        name: "My workspace",
+        driver: "mgba",
+        driverPackage: "file:/drivers/mgba",
+        game: "/roms/leafgreen.gba",
+        port: 47701,
+      },
+    },
+  );
+  assert.equal(
+    workspaceCreateInput(root, { ...driverModeDraft, port: "99999" }, null, { catalogDriver }).ok,
+    false,
+  );
+
+  const pkgDraft = {
+    ...switchWorkspaceTargetMode(desktop, "package"),
+    driverPackage: driver.spec,
+    registerDriver: true,
+  };
+  assert.deepEqual(workspaceCreateInput(root, pkgDraft, driver), {
+    ok: true,
+    input: {
+      name: "My workspace",
+      driver: driver.id,
+      driverPackage: driver.spec,
+      registerDriver: true,
+    },
+  });
+});
+
+test("detects duplicate workspace path conflicts and resolves authenticated model defaults", () => {
+  const conflict = findExistingWorkspaceConflict(
+    [
+      {
+        id: "ws-existing",
+        name: "My workspace",
+        workspace: "/Users/example/workspaces/My workspace",
+        updatedAt: "2026-11-18T00:00:00.000Z",
+        available: true,
+      },
+    ],
+    root,
+    desktop,
+  );
+  assert.equal(conflict?.id, "ws-existing");
+  assert.equal(findExistingWorkspaceConflict([], root, desktop), null);
+
+  const catalog: AvailableModelsCatalog = {
+    models: [
+      {
+        provider: "openai-codex",
+        id: "gpt-6.1-sol",
+        fullId: "openai-codex/gpt-6.1-sol",
+        name: "GPT 6.1",
+        reasoning: true,
+        contextWindow: 200000,
+        maxTokens: 16000,
+        authenticated: false,
+        supportedServiceTiers: [],
+        supportedEfforts: ["low", "medium", "high"],
+        defaultEffort: "medium",
+      },
+      {
+        provider: "anthropic",
+        id: "claude-sonnet-4-5",
+        fullId: "anthropic/claude-sonnet-4-5",
+        name: "Claude Sonnet 4.5",
+        reasoning: true,
+        contextWindow: 200000,
+        maxTokens: 16000,
+        authenticated: true,
+        supportedServiceTiers: [],
+        supportedEfforts: ["low", "medium", "high"],
+        defaultEffort: "medium",
+      },
+    ],
+    providers: [
+      { id: "openai-codex", count: 1, authenticated: false },
+      { id: "anthropic", count: 1, authenticated: true },
+    ],
+  };
+
+  // When global default has no explicit model, prefers first authenticated model
+  const resolvedAuto = resolveCreationModelDefaults({}, catalog);
+  assert.equal(resolvedAuto.model, "anthropic/claude-sonnet-4-5");
+  assert.equal(resolvedAuto.authenticated, true);
+  assert.equal(isSelectedModelAuthenticated("openai-codex/gpt-6.1-sol", catalog), false);
+  assert.equal(isSelectedModelAuthenticated("anthropic/claude-sonnet-4-5", catalog), true);
 });

@@ -20,6 +20,7 @@ export function workspaceRunLinks(project: string | undefined, locale: "en" | "z
   const link = (params: Record<string, string>) => "/?" + new URLSearchParams(params);
   return {
     workspaces: link({ view: "workspaces" }),
+    createWorkspace: link({ view: "workspaces", create: "1" }),
     capabilities: project ? link({ view: "caps", project }) : undefined,
     quickstart: link({ view: "docs", doc: "tutorials/quickstart", docLang: locale }),
   };

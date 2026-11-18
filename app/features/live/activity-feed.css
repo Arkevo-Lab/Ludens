@@ -1337,6 +1337,64 @@ details.codex-step-group:not([open])::details-content {
   line-height: 1.6;
   color: var(--muted-foreground);
 }
+.codex-empty-readiness {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  max-width: 560px;
+  margin-top: 4px;
+}
+.codex-empty-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-inset);
+  font-size: 11.5px;
+  color: var(--muted-foreground);
+}
+.codex-empty-pill[data-online="true"] {
+  border-color: color-mix(in srgb, var(--sage) 45%, var(--border));
+  color: var(--foreground);
+}
+.codex-empty-pill-mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--foreground);
+}
+.codex-empty-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--subtle);
+}
+.codex-empty-pill[data-online="true"] .codex-empty-dot {
+  background: var(--sage);
+}
+.codex-empty-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 11.5px;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.codex-empty-action:hover:not(:disabled) {
+  background: var(--accent);
+  border-color: color-mix(in srgb, var(--foreground) 22%, var(--border));
+}
+.codex-empty-action:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
 .codex-starter-chips {
   display: flex;
   flex-wrap: wrap;

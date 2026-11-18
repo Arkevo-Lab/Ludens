@@ -3,6 +3,7 @@
   .context-picker-header { display:flex; flex:0 0 auto; align-items:center; justify-content:space-between; gap:12px; padding:16px 18px; border-bottom:1px solid var(--border); }
   .context-picker-header h2 { min-width:0; margin:0; font-size:16px; line-height:1.5; overflow-wrap:anywhere; }
   .context-picker-body { min-height:0; overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; padding:16px 18px 18px; }
+  .context-picker-footer { display:flex; flex:0 0 auto; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; padding:12px 18px; border-top:1px solid var(--border); background:var(--surface-inset); }
   .context-picker-description { margin:0 0 14px; line-height:1.6; }
   .context-picker-list { display:grid; gap:8px; margin:0; padding:0; list-style:none; }
   .context-picker-list>li { min-width:0; }

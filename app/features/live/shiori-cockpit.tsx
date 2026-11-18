@@ -2531,6 +2531,8 @@ export interface ShioriWorkbenchProps {
   onSwitchWorkspace?: (projectId: string) => void;
   onOpenPerf(): void;
   onOpenCaps(): void;
+  onOpenStudio?(): void;
+  onOpenBaseware?(): void;
   onOpenReplay?(): void;
   onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
   onReturnLatest(): void;
@@ -2572,6 +2574,8 @@ export function ShioriWorkbench({
   onSwitchWorkspace,
   onOpenPerf: _onOpenPerf,
   onOpenCaps: _onOpenCaps,
+  onOpenStudio,
+  onOpenBaseware,
   onOpenReplay: _onOpenReplay,
   onOpenReplayAt,
   onReturnLatest,
@@ -3633,6 +3637,56 @@ export function ShioriWorkbench({
                   <Bot className="size-8 text-muted-foreground/60" aria-hidden="true" />
                   <h3>{t("emptyThreadTitle")}</h3>
                   <p>{t("emptyThreadDesc")}</p>
+                  <div className="codex-empty-readiness" data-testid="live-empty-readiness">
+                    <span className="codex-empty-pill" data-online={hostOnline ? "true" : "false"}>
+                      <span className="codex-empty-dot" aria-hidden="true" />
+                      <span>
+                        {t(hostOnline ? "emptyReadinessCoreOnline" : "emptyReadinessCoreStandby")}
+                      </span>
+                    </span>
+                    {activeModel ? (
+                      <span className="codex-empty-pill codex-empty-pill-mono">
+                        <span>{shortModelLabel(activeModel, activeModel)}</span>
+                        {activeEffort ? <span className="opacity-70">· {activeEffort}</span> : null}
+                      </span>
+                    ) : null}
+                    {isLiveRun && !hostOnline && project ? (
+                      <button
+                        type="button"
+                        className="codex-empty-action"
+                        disabled={workspaceService.busy || spawningCore}
+                        onClick={() => void workspaceService.startWorkspace()}
+                        data-empty-prestart=""
+                      >
+                        <Play className="size-3 fill-current" aria-hidden="true" />
+                        <span>
+                          {t(
+                            workspaceService.pendingOperation === "up" || spawningCore
+                              ? "emptyReadinessStarting"
+                              : "emptyReadinessStartNow",
+                          )}
+                        </span>
+                      </button>
+                    ) : null}
+                    {onOpenStudio ? (
+                      <button
+                        type="button"
+                        className="codex-empty-action"
+                        onClick={onOpenStudio}
+                      >
+                        <span>{t("emptyReadinessStudio")}</span>
+                      </button>
+                    ) : null}
+                    {onOpenBaseware ? (
+                      <button
+                        type="button"
+                        className="codex-empty-action"
+                        onClick={onOpenBaseware}
+                      >
+                        <span>{t("emptyReadinessBaseware")}</span>
+                      </button>
+                    ) : null}
+                  </div>
                   <div className="codex-starter-chips">
                     <button
                       type="button"

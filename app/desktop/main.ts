@@ -28,6 +28,10 @@ import {
   registerLudensProtocols,
 } from './custom-protocols.js'
 import { dashboardSender, isDashboardUrl, originKey } from './dashboard-window.js'
+import {
+  LUDENS_DIALOG_PICK_PATH_CHANNEL,
+  runDialogPickPath,
+} from './dialog-picker.js'
 import type { LudensPetSnapshot } from './ludens-source.js'
 import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
 import { ActiveCoreQuitGuard, mapDialogButtonToQuitAction } from './quit-guard.js'
@@ -565,6 +569,10 @@ if (values.help) {
         owner.setTitleBarOverlay?.({ color, symbolColor, height })
       })
 
+      ipcMain.handle(LUDENS_DIALOG_PICK_PATH_CHANNEL, async (event, rawOptions: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized dialog access')
+        return runDialogPickPath(owner, dialog.showOpenDialog.bind(dialog), rawOptions)
+      })
       ipcMain.handle('ludens-pet:snapshot', event => {
         if (!trusted(event)) throw new Error('Unauthorized pet access')
         return snapshot

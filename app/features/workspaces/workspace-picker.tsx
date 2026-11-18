@@ -1,6 +1,7 @@
 "use client";
 
-import { FolderIcon } from "lucide-react";
+import { FolderIcon, PlusIcon } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { ContextPicker, type ContextPickerVariant } from "@/features/workspaces/context-picker";
 import { useTranslations } from "@/lib/locale";
 import type { Project } from "@/lib/types";
@@ -24,6 +25,8 @@ export function WorkspacePicker({
   error = "",
   variant = "default",
   muted = false,
+  onCreateWorkspace,
+  onManageWorkspaces,
 }: {
   projects: Project[];
   value: string;
@@ -32,6 +35,8 @@ export function WorkspacePicker({
   error?: string;
   variant?: ContextPickerVariant;
   muted?: boolean;
+  onCreateWorkspace?(): void;
+  onManageWorkspaces?(): void;
 }) {
   const t = useTranslations("workspacePicker");
   const dt = useTranslations("dashboard");
@@ -56,5 +61,41 @@ export function WorkspacePicker({
       title: muted ? t("globalScopeHint") : defaultTitle,
       hint: muted ? `${t("globalScopeHint")}${selected?.workspace ? ` · ${selected.workspace}` : ""}` : defaultHint }}
     copy={{ title: t("choose"), description: t("description"), close: t("close"), current: t("current"),
-      empty: emptyMessage, emptyHint: loading ? undefined : emptyHint }} />;
+      empty: emptyMessage, emptyHint: loading ? undefined : emptyHint }}
+    footer={
+      onCreateWorkspace || onManageWorkspaces
+        ? close => (
+            <>
+              {onCreateWorkspace ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  data-workspace-picker-create=""
+                  onClick={() => {
+                    close();
+                    onCreateWorkspace();
+                  }}
+                >
+                  <PlusIcon className="size-3.5" aria-hidden="true" />
+                  {t("newWorkspace")}
+                </Button>
+              ) : <span />}
+              {onManageWorkspaces ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  data-workspace-picker-manage=""
+                  onClick={() => {
+                    close();
+                    onManageWorkspaces();
+                  }}
+                >
+                  {t("manageWorkspaces")}
+                </Button>
+              ) : null}
+            </>
+          )
+        : undefined
+    } />;
 }

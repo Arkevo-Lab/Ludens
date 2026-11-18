@@ -30,84 +30,15 @@ import {
   type StartBackgroundJobOptions,
 } from "./process-manager.ts";
 
-export interface DriverManifest {
-  id: string;
-  version?: string;
-  transport?: MachineTransportKind;
-  defaultPort?: number;
-  needsGame?: boolean;
-  launchHint?: string;
-  /** Backend executable argv (without the game path); game path is appended by the launcher. */
-  launchCommand?: string[];
-  launchEnv?: Record<string, string>;
-}
-
-export interface LaunchConfig {
-  driver: string;
-  driverPackage?: string;
-  game?: string;
-  port?: number;
-  cuaCommand?: string;
-  model: string;
-  serviceTier?: OmpServiceTier;
-  effort?: OmpEffort;
-  seconds: number;
-  requests: number;
-  /** OMP native compaction trigger override; undefined follows the selected model's native OMP default. */
-  compactionThreshold?: number;
-  connection?: ModelConnectionConfig;
-  machines?: WorkspaceMachinesBinding;
-  dashboard: boolean;
-  pet: boolean;
-  logging: { diagnostics: "normal" | "full" };
-}
+import {
+  parseWorkspaceLaunchConfig,
+  type DriverManifest,
+  type LaunchConfig,
+} from "../core/query/workspace-init.ts";
+export { type DriverManifest, type LaunchConfig };
 
 export function parseConfig(value: unknown, manifest?: DriverManifest): LaunchConfig {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("ludens.json must be an object");
-  const config = value as Record<string, unknown>;
-  const allowed = ["driver", "driverPackage", "game", "port", "cuaCommand", "model", "serviceTier", "effort", "seconds", "requests", "compactionThreshold", "connection", "machines", "dashboard", "pet", "logging"];
-  for (const key of Object.keys(config)) if (!allowed.includes(key)) throw new Error(`Unknown ludens.json field: ${key}`);
-  if (typeof config.driver !== "string" || !config.driver.trim()) throw new Error("ludens.json driver must be a non-empty driver id");
-  if (config.driverPackage !== undefined && (typeof config.driverPackage !== "string" || !config.driverPackage.trim())) {
-    throw new Error("driverPackage must be a non-empty package spec");
-  }
-  if (config.game !== undefined && (typeof config.game !== "string" || !config.game.trim())) throw new Error("game must be a non-empty path");
-  const bridge = manifest ? manifest.transport !== "stdio" : true;
-  if (manifest && manifest.id !== config.driver) throw new Error(`Driver manifest id ${JSON.stringify(manifest.id)} does not match ludens.json driver ${JSON.stringify(config.driver)}`);
-  if (!bridge && (config.game !== undefined || config.port !== undefined)) throw new Error(`${config.driver} does not use game or a bridge port`);
-  if (manifest && config.game !== undefined && !manifest.launchCommand?.length) throw new Error(`${config.driver} does not support launching a game; omit game and prepare the device separately`);
-  if (config.cuaCommand !== undefined && (bridge || typeof config.cuaCommand !== "string" || !config.cuaCommand.trim())) {
-    throw new Error("cuaCommand must be a non-empty executable path for a stdio driver");
-  }
-  const result = { ...(bridge && manifest?.defaultPort !== undefined ? { port: manifest.defaultPort } : {}),
-    model: "openai-codex/gpt-6.1-sol",
-    seconds: 1800, requests: 1000, dashboard: true, pet: false, logging: { diagnostics: "normal" }, ...config } as LaunchConfig;
-  if (!result.logging || typeof result.logging !== "object" || Array.isArray(result.logging)
-    || Object.keys(result.logging).some(key => key !== "diagnostics")
-    || !["normal", "full"].includes(result.logging.diagnostics)) throw new Error("logging must contain diagnostics: normal|full");
-  for (const key of ["seconds", "requests"] as const) {
-    if (!Number.isInteger(result[key]) || result[key] <= 0) throw new Error(`${key} must be a positive integer`);
-  }
-  if (result.compactionThreshold !== undefined && (!Number.isInteger(result.compactionThreshold) || result.compactionThreshold <= 0)) {
-    throw new Error("compactionThreshold must be a positive integer");
-  }
-  if (config.connection !== undefined) {
-    const validated = validateConnectionConfig(config.connection, "connection");
-    if (Object.keys(validated).length > 0) result.connection = validated;
-    else delete result.connection;
-  }
-  if (config.machines !== undefined) {
-    result.machines = validateWorkspaceMachinesBinding(config.machines, "machines");
-  } else {
-    delete result.machines;
-  }
-  if (bridge && result.port === undefined) throw new Error(`${config.driver} requires a bridge port; set port in ludens.json or defaultPort in its driver manifest`);
-  if (result.port !== undefined && (!Number.isInteger(result.port) || result.port <= 0 || result.port > 65535)) throw new Error("port must be an integer from 1 to 65535");
-  if (typeof result.model !== "string" || !result.model.trim()) throw new Error("model must be a non-empty string");
-  if (result.serviceTier !== undefined && !isOmpServiceTier(result.serviceTier)) throw new Error("serviceTier must be priority or ultrafast");
-  if (result.effort !== undefined && !isOmpEffort(result.effort)) throw new Error("effort must be minimal, low, medium, high, xhigh, or max");
-  for (const key of ["dashboard", "pet"] as const) if (typeof result[key] !== "boolean") throw new Error(`${key} must be boolean`);
-  return result;
+  return parseWorkspaceLaunchConfig(value, manifest);
 }
 
 export type ServiceName = "emulator" | "baseware" | "host" | "dashboard" | "pet";

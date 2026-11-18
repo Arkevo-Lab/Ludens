@@ -43,9 +43,19 @@ test("empty-state actions have clean destinations", () => {
   const links = workspaceRunLinks("my workspace", "zh");
   const params = (url: string) => Object.fromEntries(new URL(url, "http://localhost").searchParams);
   assert.deepEqual(params(links.workspaces), { view: "workspaces" });
+  assert.deepEqual(params(links.createWorkspace), { view: "workspaces", create: "1" });
   assert.deepEqual(params(links.capabilities!), { view: "caps", project: "my workspace" });
   assert.deepEqual(params(links.quickstart), { view: "docs", doc: "tutorials/quickstart", docLang: "zh" });
   assert.equal(workspaceRunLinks(undefined, "en").capabilities, undefined);
+
+  const emptyHtml = renderToStaticMarkup(createElement(WorkspaceRunEmpty, {
+    state: "no-workspaces",
+    error: "",
+    retrying: false,
+    onRetry() {},
+    onNavigate() {},
+  }));
+  assert.match(emptyHtml, /view=workspaces&amp;create=1/);
 });
 
 test("no-run guidance prints the copyable workspace up command for the selected workspace", () => {
