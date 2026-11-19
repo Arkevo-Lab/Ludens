@@ -361,7 +361,7 @@ Verified across [`protocol/`](../../../protocol/src/), [`baseware/`](../../../ba
 | `LUDENS_APP_SERVER_URL` | — | Upstream `ludens-server` target proxied by `client/scripts/dev.mjs` / `vite.config.ts` |
 | `LUDENS_APP_DEV_URL` | — | Dev renderer URL loaded by `ludens-app` (`LUDENS_DEV_URL` alias) |
 | `LUDENS_BUN` | — | Path override for the Bun executable |
-| `LUDENS_APP_SERVER_BIN` | — | Binary path override when `ludens-app` or `ludens` spawns `ludens-server` |
+| `LUDENS_SERVER_BIN` / `LUDENS_APP_SERVER_BIN` | — | Binary path override when `ludens` CLI or `ludens-app` spawns `ludens-server` |
 | `LUDENS_DISABLE_COMPANION` | — | Disable launching the optional Desktop Pet from the Electron shell |
 
 ## Related Documentation

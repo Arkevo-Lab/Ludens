@@ -361,7 +361,7 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 | `LUDENS_APP_SERVER_URL` | — | `client/scripts/dev.mjs` / `vite.config.ts` 代理转发的上游 `ludens-server` 地址 |
 | `LUDENS_APP_DEV_URL` | — | `ludens-app` 加载外部开发渲染地址（别名 `LUDENS_DEV_URL`） |
 | `LUDENS_BUN` | — | 覆盖 Bun 可执行文件路径 |
-| `LUDENS_APP_SERVER_BIN` | — | `ludens-app` 或 `ludens` 拉起 `ludens-server` 时的二进制路径覆盖 |
+| `LUDENS_SERVER_BIN` / `LUDENS_APP_SERVER_BIN` | — | `ludens` CLI 或 `ludens-app` 桌面端按需拉起 `ludens-server` 时的二进制路径覆盖 |
 | `LUDENS_DISABLE_COMPANION` | — | 禁止 Electron 桌面端自动拉起可选桌宠窗口 |
 
 ## 相关文档
