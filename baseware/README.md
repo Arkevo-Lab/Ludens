@@ -5,6 +5,7 @@ Cross-device integration and compatibility layer for Ludens: loads built-in (`cu
 ## Scripts
 
 ```sh
+cd baseware && bun run build      # Build self-contained baseware/dist/ (main.js + bin/baseware)
 cd baseware && bun run typecheck
 cd baseware && bun test
 ```
