@@ -63,7 +63,7 @@ function sameConnection(a?: ModelConnectionConfig, b?: ModelConnectionConfig): b
 
 export function reloadWorkspaceHostCommand(workspace: string): string {
   const quoted = `'${workspace.replace(/'/g, "'\\''")}'`;
-  return `env -u LUDENS_WORKSPACE -u LUDENS_SOCKET ludens --workspace ${quoted} down --keep-emulator && env -u LUDENS_WORKSPACE -u LUDENS_SOCKET ludens --workspace ${quoted} up`;
+  return `env -u LUDENS_WORKSPACE -u LUDENS_SOCKET ludens --workspace ${quoted} workspace down --keep-emulator && env -u LUDENS_WORKSPACE -u LUDENS_SOCKET ludens --workspace ${quoted} workspace up`;
 }
 
 export function ConnectionSettings({

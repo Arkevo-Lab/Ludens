@@ -4,7 +4,7 @@ import type {
   BasewareMachineRuntimeStatus,
   CreateWorkspaceInput,
 } from "@ludens/protocol/workspaces";
-import type { OmpEffort, OmpServiceTier, WorkspaceRegistration } from "@ludens/protocol/ludens";
+import type { OmpEffort, OmpServiceTier, WorkspaceRegistration } from "@ludens/protocol/workspaces";
 import { BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
 
 export type WorkspaceEnvironment = "desktop" | "community";
@@ -331,5 +331,5 @@ export function workspaceCreateInput(
 }
 
 export function workspaceUpCommand(workspace: string) {
-  return `ludens --workspace '${workspace.replace(/'/g, "'\\''")}' up`;
+  return `ludens --workspace '${workspace.replace(/'/g, "'\\''")}' workspace up`;
 }

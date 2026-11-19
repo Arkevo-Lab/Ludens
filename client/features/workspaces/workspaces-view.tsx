@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { WorkspaceCreateForm } from "@/features/workspaces/workspace-create-form";
 import type { WorkspaceCreationIntent } from "@/features/workspaces/workspace-create-model";
 import type { CreateWorkspaceInput, WorkspaceRootResult, WorkspaceRemovalResult, WorkspaceSettings } from "@ludens/protocol/workspaces";
-import type { WorkspaceRegistration } from "@ludens/protocol/ludens";
+import type { WorkspaceRegistration } from "@ludens/protocol/workspaces";
 import type { CreateWorkspaceInputDto } from "@ludens/protocol/app-rpc";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";

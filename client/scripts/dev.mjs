@@ -235,7 +235,7 @@ async function spawnManagedAppServer(trustedOrigins, effectiveHome) {
       const timer = setTimeout(() => {
         if (settled) return;
         settled = true;
-        rejectPromise(new Error("Timed out waiting for ludens app-server handshake (15s)"));
+        rejectPromise(new Error("Timed out waiting for ludens-server handshake (15s)"));
       }, 15_000);
 
       const onError = error => {
@@ -251,7 +251,7 @@ async function spawnManagedAppServer(trustedOrigins, effectiveHome) {
         clearTimeout(timer);
         rejectPromise(
           new Error(
-            `ludens app-server exited before ready handshake (code=${code ?? "null"}, signal=${signal ?? "null"})`,
+            `ludens-server exited before ready handshake (code=${code ?? "null"}, signal=${signal ?? "null"})`,
           ),
         );
       };
@@ -412,7 +412,7 @@ async function main() {
       serverChild.once("exit", (code, signal) => {
         if (!shuttingDown) {
           console.error(
-            `[ludens-dev] app-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}); stopping vite`,
+            `[ludens-dev] ludens-server exited (code=${code ?? "null"}, signal=${signal ?? "null"}); stopping vite`,
           );
           void cleanup().finally(() => {
             process.exit(code ?? 1);
@@ -421,7 +421,7 @@ async function main() {
       });
     }
     console.log(
-      `[ludens-dev] mode=web-dev home=${effectiveHome} app-server=${appServerUrl} -> vite ${devOrigin}`,
+      `[ludens-dev] mode=web-dev home=${effectiveHome} server=${appServerUrl} -> vite ${devOrigin}`,
     );
 
     const env = {

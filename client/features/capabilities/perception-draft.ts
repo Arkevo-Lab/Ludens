@@ -146,5 +146,5 @@ export function createPerceptionSession({ scope, storage, read, write }: {
 export type PerceptionSession = ReturnType<typeof createPerceptionSession>;
 
 export function perceptionReloadCommand(workspace: string) {
-  return `env -u LUDENS_SOCKET ludens --workspace '${workspace.replace(/'/g, "'\\''")}' perception reload`;
+  return `env -u LUDENS_SOCKET ludens-core --workspace '${workspace.replace(/'/g, "'\\''")}' perception reload`;
 }

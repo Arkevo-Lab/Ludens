@@ -125,7 +125,7 @@ export function validateDriverSpecInput(spec: string): DriverSpecValidation {
 }
 
 /**
- * When an inline workspace runs via `ludens up` without `machines` config,
+ * When an inline workspace runs via `ludens workspace up` without `machines` config,
  * `baseware/src/main.ts` reports the mounted machine ID as `"primary"`.
  * Map that live `"primary"` runtime mount onto `implicitMachine` (`"workspace-default"`)
  * when no explicit global machine named `"primary"` exists.
@@ -550,6 +550,6 @@ export function formatTransportSummary(transport: MachineTransportConfig): strin
 
 export function formatCliControllerExample(machine: Pick<DisplayMachineItem, "id" | "isImplicit">): string {
   return machine.isImplicit
-    ? "ludens controller controller/screen.capture"
-    : `ludens controller controller/${machine.id}/screen.capture`;
+    ? "ludens-core controller controller/screen.capture"
+    : `ludens-core controller controller/${machine.id}/screen.capture`;
 }

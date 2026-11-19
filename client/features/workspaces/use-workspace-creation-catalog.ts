@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { AvailableModelsCatalog } from "@/components/model-picker-dialog";
 import type { DiscoveredDriver } from "@ludens/protocol/drivers";
 import type { WorkspaceBasewareSnapshot } from "@ludens/protocol/workspaces";
-import type { OmpEffort, OmpServiceTier, WorkspaceDefaults } from "@ludens/protocol/ludens";
+import type { OmpEffort, OmpServiceTier, WorkspaceDefaults } from "@ludens/protocol/workspaces";
 import { BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 

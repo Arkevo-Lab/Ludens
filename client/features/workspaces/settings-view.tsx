@@ -28,7 +28,7 @@ import { useLocale, useTranslations } from "@/lib/locale";
 import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import type { Project } from "@ludens/protocol/types";
 import type { GlobalDefaultsResult, WorkspaceSettings } from "@ludens/protocol/workspaces";
-import type { WorkspaceDefaults } from "@ludens/protocol/ludens";
+import type { WorkspaceDefaults } from "@ludens/protocol/workspaces";
 import type { PetFollow } from "@/features/pet/pet-follow";
 
 export type SettingsCategoryId = "general" | "defaults" | "storage" | "transport" | "pet";

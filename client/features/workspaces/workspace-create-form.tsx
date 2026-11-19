@@ -35,7 +35,7 @@ import type {
   BasewareMachineRuntimeStatus,
   CreateWorkspaceInput,
 } from "@ludens/protocol/workspaces";
-import type { WorkspaceDefaults, WorkspaceRegistration } from "@ludens/protocol/ludens";
+import type { WorkspaceDefaults, WorkspaceRegistration } from "@ludens/protocol/workspaces";
 import { BUILTIN_CUA_DRIVER, BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
 import { BUILTIN_LOCAL_DESKTOP_MACHINE } from "@ludens/protocol/machines";
 import {

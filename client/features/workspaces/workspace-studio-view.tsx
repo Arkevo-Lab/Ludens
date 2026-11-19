@@ -924,7 +924,7 @@ export function ModelAndBudgetPanel({
 
   const deviceName = activeDeviceSummary?.name ?? initial.driver;
   const deviceOnline = activeDeviceSummary?.online ?? isWorkspaceRunning;
-  const reloadCmd = `ludens --workspace ${quoteShellPath(studio.workspace)} down --keep-emulator && ludens --workspace ${quoteShellPath(studio.workspace)} up`;
+  const reloadCmd = `ludens --workspace ${quoteShellPath(studio.workspace)} workspace down --keep-emulator && ludens --workspace ${quoteShellPath(studio.workspace)} workspace up`;
 
   return (
     <div className="grid min-w-0 gap-6">
@@ -1592,9 +1592,9 @@ export function ServicesAndShioriPanel({
   };
 
   const quotedWs = quoteShellPath(studio.workspace);
-  const upCmd = `ludens --workspace ${quotedWs} up`;
-  const reloadCmd = `ludens --workspace ${quotedWs} down --keep-emulator && ludens --workspace ${quotedWs} up`;
-  const downCmd = `ludens --workspace ${quotedWs} down`;
+  const upCmd = `ludens --workspace ${quotedWs} workspace up`;
+  const reloadCmd = `ludens --workspace ${quotedWs} workspace down --keep-emulator && ludens --workspace ${quotedWs} workspace up`;
+  const downCmd = `ludens --workspace ${quotedWs} workspace down`;
   const serviceOps: Array<{
     key: "up" | "reload" | "down";
     runLabel: string;
