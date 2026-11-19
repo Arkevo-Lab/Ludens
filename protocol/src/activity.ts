@@ -125,6 +125,8 @@ export async function retryArchivePreparing<T>(
   }
 }
 
+export { activitySearchText, blockLabels, printable } from "./activity-view.ts";
+
 /** Holds only an opaque cursor. The server owns projection, ordering and reset snapshots. */
 export class ActivityChangesClient {
   private cursor: string | null = null;

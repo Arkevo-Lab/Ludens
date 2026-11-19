@@ -4,7 +4,7 @@ import { createServer, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { send } from "../src/daemon/transport.ts";
-import { initializeWorkspaceState, writeCurrentSession, type WorkspaceState } from "../src/core/storage/workspace-state.ts";
+import { initializeWorkspaceState, resolveWorkspaceAddress, writeCurrentSession, type WorkspaceState } from "../src/core/storage/workspace-state.ts";
 
 const ludensDirectory = resolve(import.meta.dir, "..");
 const entry = join(ludensDirectory, "src/cli/main.ts");
@@ -89,12 +89,14 @@ mock.module(${JSON.stringify(join(ludensDirectory, "src/core/agent-omp/session.t
       return state;
     },
     async status(workspace: string, fromCwd = false) {
-      const cli = Bun.spawn([process.execPath, entry, ...(fromCwd ? [] : ["--workspace", workspace]), "status"], {
+      const cli = Bun.spawn([process.execPath, entry, ...(fromCwd ? [] : ["--workspace", workspace]), "perception", "status"], {
         cwd: fromCwd ? workspace : ludensDirectory, env: environment(), stdout: "pipe", stderr: "pipe",
       });
       const [code, output, errors] = await Promise.all([cli.exited, new Response(cli.stdout).text(), new Response(cli.stderr).text()]);
       expect({ code, errors }).toEqual({ code: 0, errors: "" });
-      return JSON.parse(output);
+      expect(JSON.parse(output)).toHaveProperty("state");
+      const { socket } = await resolveWorkspaceAddress(workspace);
+      return send(socket, { kind: "status", argv: [] });
     },
     async close() {
       for (const { child } of children) if (child.exitCode === null) child.kill("SIGKILL");

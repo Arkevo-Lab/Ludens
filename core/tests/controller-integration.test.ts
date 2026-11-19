@@ -1,10 +1,14 @@
 import { expect, test } from "bun:test";
-import { cliCommand } from "../src/daemon/background-jobs.ts";
 import { pythonExecutable } from "@ludens/protocol/python";
 import { testSocketPath } from "./socket-path.ts";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { connect, type Socket } from "node:net";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
+
+const coreCliCommand = () =>
+  process.platform === "win32"
+    ? [process.execPath, resolve(import.meta.dir, "../src/cli/main.ts")]
+    : [join(import.meta.dir, "../bin/ludens-core")];
 import { tmpdir } from "node:os";
 import { BasewareCore } from "@ludens/baseware/core";
 import { listen as listenBaseware } from "@ludens/baseware/server";
@@ -76,7 +80,7 @@ async function fixture() {
   }
   return {workspace, runDir, source, ludensSocket, runtime, core, actions, events, parentTrace,
     held: () => held, cancelled: () => cancelled, released: () => released,
-    cli: (argv: string[], epoch?: string) => run([...cliCommand(join(import.meta.dir, "../bin/ludens")), "controller", ...argv], epoch),
+    cli: (argv: string[], epoch?: string) => run([...coreCliCommand(), "controller", ...argv], epoch),
     python: (source: string, epoch: string) => run([pythonExecutable(), "-B", "-c", source], epoch),
     async close() {
       await runtime.close(); devices.close(); await closeLudens(); await closeBaseware();

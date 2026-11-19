@@ -1,10 +1,14 @@
 import { expect, test } from "bun:test";
-import { cliCommand } from "../src/daemon/background-jobs.ts";
 import { pythonExecutable } from "@ludens/protocol/python";
 import { testSocketPath } from "./socket-path.ts";
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
+
+const coreCliCommand = () =>
+  process.platform === "win32"
+    ? [process.execPath, resolve(import.meta.dir, "../src/cli/main.ts")]
+    : [join(import.meta.dir, "../bin/ludens-core")];
 import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
 import { Runtime } from "../src/core/shiori/runtime.ts";
@@ -40,7 +44,7 @@ test("local Python, Controller and CLI share a workspace timeline across runs wi
     return JSON.parse(stdout);
   }
   const python = (code: string) => run([pythonExecutable(), "-B", "-c", code]);
-  const cli = (...args: string[]) => run([...cliCommand(join(import.meta.dir, "../bin/ludens")), ...args]);
+  const cli = (...args: string[]) => run([...coreCliCommand(), ...args]);
   const blob = Buffer.from("shared offline audio").toString("base64");
   try {
     await writeFile(join(workspace, "senses.py"), `from ludens_tools import capability, record, Client
@@ -97,11 +101,11 @@ def action():
     expect(await readFile(first.media[0].path, "utf8")).toBe("shared offline audio");
     expect(await Bun.file(join(workspace, "logs/first-run/observations")).exists()).toBe(false);
     expect(JSON.stringify(events)).not.toContain(blob);
-    const history = await cli("observe", "--id", first.timeline.recordId);
+    const history = await cli("perception", "observe", "--id", first.timeline.recordId);
     expect(history.records[0]).toMatchObject({data: {value: 22.5}, space: {frame: "room-a"},
       capability: "python/senses.py:temperature", runId: "first-run", sampledAt: "2026-01-01T00:00:00Z"});
     expect(history.records[0].media[0].timeline).toEqual(first.media[0].timeline);
-    expect((await cli("observe", "--capability", "python/senses.py:outer")).records[0].data.nested).toBe(true);
+    expect((await cli("perception", "observe", "--capability", "python/senses.py:outer")).records[0].data.nested).toBe(true);
     // Marking perception never grants its nested action a control lease.
     await expect(send(socket, {kind: "controller", argv: [], action: "call", id: "python/senses.py:forbidden_input"}))
       .rejects.toThrow("STALE_EPOCH");
@@ -110,12 +114,12 @@ def action():
     configure("second-run");
     await mkdir(join(workspace, "perception.py")); // source read failure must not hide history or disable recording.
     expect((await runtime.perception!.reload()).state).toBe("error");
-    const previous = await cli("observe", "--id", first.timeline.recordId);
+    const previous = await cli("perception", "observe", "--id", first.timeline.recordId);
     expect(previous.records[0].id).toBe(first.timeline.recordId);
     expect(previous.records[0].runId).toBe("first-run");
     const next = await cli("controller", "python/senses.py:temperature");
     expect(next.timeline.sequence).toBe(5);
-    const nextRead = await cli("observe", "--id", next.timeline.recordId);
+    const nextRead = await cli("perception", "observe", "--id", next.timeline.recordId);
     expect(nextRead.records[0].runId).toBe("second-run");
     expect(await readdir(join(workspace, ".ludens/timeline/objects"))).toHaveLength(1);
     expect(await Bun.file(join(workspace, "logs/second-run/observations")).exists()).toBe(false);

@@ -17,9 +17,9 @@ In Ludens, Shiori treats the workspace as a programmable control surface: fast `
 Each workspace runs a persistent Python worker defined by `perception.py:Perception`:
 
 - **Continuous lease-scoped sampling**: During **Auto Run**, `Perception.sample()` is scheduled continuously up to `30 Hz` (configurable via `LUDENS_PERCEPTION_SAMPLE_HZ`; slow samples apply backpressure without overlapping). In **Manual Standby**, sampling pauses and the worker stays warm to serve read-only timeline queries.
-- **Three core decorators**: `@capability` registers a typed, docstringed Python function into the unified `ludens controller` catalog; `@record` persists returned observation envelopes (`text`, `data`, `media`, `sampledAt`, `sources`, `space`, `effect`, `transition`) into `.ludens/timeline/`; `@observe` designates the workspace's single primary observation channel (typically `Perception.sample`).
-- **In-process state machine & hot-reload**: Capabilities inside the resident worker can emit optional `effect` (immediate capability calls) and `transition` (next state target and args) fields to run closed-loop state machines in memory. Inspect or switch states live via `ludens perception state` / `ludens perception transition <target>` (or `Client().state()` / `Client().transition(...)`). Editing `perception.py` or imported `.py` modules automatically reloads the worker while safely zeroing active device inputs.
-- **Unified timeline store**: `.ludens/timeline/` retains `@record` metadata, SHA-256-deduplicated media, and segmented fMP4 video (`video/`), powering `ludens observe`, `Client().observe()`, `Client().replay(...)`, and synchronized scrubbing in Console **Replay** (`?view=replay`).
+- **Three core decorators**: `@capability` registers a typed, docstringed Python function into the unified `ludens-core controller` catalog; `@record` persists returned observation envelopes (`text`, `data`, `media`, `sampledAt`, `sources`, `space`, `effect`, `transition`) into `.ludens/timeline/`; `@observe` designates the workspace's single primary observation channel (typically `Perception.sample`).
+- **In-process state machine & hot-reload**: Capabilities inside the resident worker can emit optional `effect` (immediate capability calls) and `transition` (next state target and args) fields to run closed-loop state machines in memory. Inspect or switch states live via `ludens-core perception state` / `ludens-core perception transition <target>` (or `Client().state()` / `Client().transition(...)`). Editing `perception.py` or imported `.py` modules automatically reloads the worker while safely zeroing active device inputs.
+- **Unified timeline store**: `.ludens/timeline/` retains `@record` metadata, SHA-256-deduplicated media, and segmented fMP4 video (`video/`), powering `ludens-core perception observe`, `Client().observe()`, `Client().replay(...)`, and synchronized scrubbing in Console **Replay** (`?view=replay`).
 
 ## The Capability – Eval – Env Triad
 
@@ -81,11 +81,11 @@ def eval_settle_and_trigger() -> dict:
     return {"passed": passed, "rewards": {"accuracy": 1.0 if passed else 0.0}}
 ```
 
-Running `ludens eval run --all` (or clicking **Run All Evals** in Console **Capabilities**, `?view=caps`) strips all live device sockets and `epoch` leases, executes every bound evaluator against `.ludens/timeline/` or `@eval_env`, and writes immutable records to `.ludens/evals/`.
+Running `ludens workspace eval run --all` (`ludens-core eval run --all` inside the sandbox, or clicking **Run All Evals** in Console **Capabilities**, `?view=caps`) strips all live device sockets and `epoch` leases, executes every bound evaluator against `.ludens/timeline/` or `@eval_env`, and writes immutable records to `.ludens/evals/`.
 
 ## Status Gates, Co-Evolution & the `adapt` Failure-Frame Loop
 
-Static discovery and `.ludens/evals/latest.json` assign every `@capability` one of six statuses visible in `ludens eval list` and Console **Capabilities** (`?view=caps`):
+Static discovery and `.ludens/evals/latest.json` assign every `@capability` one of six statuses visible in `ludens workspace eval list` (or `ludens-core eval list`) and Console **Capabilities** (`?view=caps`):
 
 | Status | Meaning |
 | --- | --- |
@@ -101,10 +101,10 @@ Neither a closed-loop policy (**Actor**) nor its surrogate world (**Critic**) is
 1. **Bootstrap `v0` and probe live**: Write a minimal `@capability` and `@eval_env`, then run a live attempt inside `with record_window() as win:` (or a `@record @capability` probe) while 30 Hz `Perception.sample()` records the whole interaction.
 2. **Gate failures with `adapt`**: Whenever a `verified` capability misbehaves on a real target, mark the regression explicitly with the failing timeline record ID:
    ```sh
-   ludens eval adapt python/skills/watchdog.py:settle_and_trigger --reason "False trigger during backlight shift" --record <record-id>
+   ludens workspace eval adapt python/skills/watchdog.py:settle_and_trigger --reason "False trigger during backlight shift" --record <record-id>
    ```
    `adapt` pins the hash of both the eval module (`evalCodeSHA`) and the bound `@eval_env` module (`envCodeSHA`). Re-running an unchanged suite stays `failed` / `adapting`.
-3. **Upgrade the Critic first, then the Actor**: Slice the 30 Hz timeline around the failure with `Client().replay(around=record_id, before_seconds=2.0, after_seconds=2.0)` or `Client().replay(win)`. Measure real frame timing and negative distractors, update `@eval_env` until the old Actor fails (`passed=False`), and then iterate the `@capability` until `ludens eval run <id>` returns `verified`.
+3. **Upgrade the Critic first, then the Actor**: Slice the 30 Hz timeline around the failure with `Client().replay(around=record_id, before_seconds=2.0, after_seconds=2.0)` or `Client().replay(win)`. Measure real frame timing and negative distractors, update `@eval_env` until the old Actor fails (`passed=False`), and then iterate the `@capability` until `ludens workspace eval run <id>` (or in-sandbox `ludens-core eval run <id>`) returns `verified`.
 
 ## Long-Term Consolidation: `skills/`, `memory/current.md` & `MEMORY.md`
 

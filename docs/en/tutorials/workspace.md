@@ -6,7 +6,7 @@ For design motivation behind this triad, see [Code-First Perception & Self-Verif
 
 ## 1. Workspace Layout
 
-Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runtime and state; workspaces on distinct devices or ports run concurrently under App Daemon, and **Reclaim Control** leaves the Core in **Warm Standby** (**Manual Standby**, `manual`). A newly initialized workspace (via `ludens init`) uses the following directory structure:
+Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runtime and state; workspaces on distinct devices or ports run concurrently under `ludens-server`, and **Reclaim Control** leaves the Core in **Warm Standby** (**Manual Standby**, `manual`). A newly initialized workspace (via `ludens workspace init`) uses the following directory structure:
 
 | Path | Purpose |
 | --- | --- |
@@ -17,7 +17,7 @@ Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runt
 | `skills/` | Reusable skill instructions (`skills/<name>/SKILL.md`) and capability/eval Python modules (for example `skills/visual_guard.py`) |
 | `perception.py` | Resident `Perception` state machine (`start`, `sample`, `close`) running continuously up to 30 Hz during **Auto Run** |
 | `loop.py` (optional) | Programmable outer control loop and turn-start context injector (`Loop.step` / `Loop.inject`) with inter-turn hot-reload, zero-token `@capability` dispatch, and safe fault fallback |
-| `baseware.json` | Exported Baseware controller schema snapshot (`ludens controller list` / `baseware export`) |
+| `baseware.json` | Exported Baseware controller schema snapshot (`ludens-core controller list` / `baseware export`) |
 | `logs/<run-id>/` | Structured run event streams (`events.jsonl`), `manifest.json`, and `diagnostics.jsonl` (plus `logs/baseware/` device logs) |
 | `.ludens/timeline/` | Single-writer workspace timeline keeping local indices, hot write spool, `cache/` LRU media cache, and `pins.json`, while retaining or archiving `video/` 30 Hz fMP4 segments and deduplicated objects |
 | `.ludens/evals/` | Offline verification history and `latest.json` status snapshot |
@@ -25,7 +25,7 @@ Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runt
 
 ## 2. Unified Capability Catalog
 
-Ludens unifies hardware/software device tools and workspace Python functions under one CLI and RPC surface (`ludens controller`):
+Ludens unifies hardware/software device tools and workspace Python functions under one CLI and RPC surface (`ludens-core controller`):
 
 - **Baseware device tools**: Exposed as `controller/<tool>` (or `controller/<machineId>/<tool>` when routing to a specific node in a multi-machine pool). See [Devices & Baseware](devices.md).
 - **Workspace Python capabilities**: Discovered statically via AST inspection across all `.py` files in the workspace (excluding `logs/`, `.ludens/`, `.git/`, `node_modules/`, `.venv/`, `venv/`, and `__pycache__/`), and addressed as `python/<relpath>:<name>` (for example `python/skills/visual_guard.py:act_on_alert`).
@@ -35,16 +35,16 @@ Ludens unifies hardware/software device tools and workspace Python functions und
 Every top-level `@capability` exposed to CLI or Shiori must obey four static-discovery rules:
 
 1. **Synchronous function**: Use `def`, never `async def`.
-2. **Non-empty docstring**: Describes what the capability does and when to invoke it; surfaced in `ludens controller list` and `--help`.
+2. **Non-empty docstring**: Describes what the capability does and when to invoke it; surfaced in `ludens-core controller list` and `--help`.
 3. **Supported type annotations**: All parameters must use `str`, `int`, `float`, `bool`, `list[T]`, `dict[str, T]`, or `Optional[T]` / `T | None`, with JSON literal defaults where optional. Positional-only parameters, `*args`, and `**kwargs` are not allowed.
 4. **No external decorator stacking**: Inside `@capability` modules, only combine `@capability` with Ludens's own `@record` and `@observe` decorators.
 
 Inspect and call discovered capabilities at any time from the terminal:
 
 ```sh
-ludens controller list
-ludens controller python/skills/visual_guard.py:act_on_alert --help
-ludens controller python/skills/visual_guard.py:act_on_alert --args '{"channel":1}'
+ludens-core controller list
+ludens-core controller python/skills/visual_guard.py:act_on_alert --help
+ludens-core controller python/skills/visual_guard.py:act_on_alert --args '{"channel":1}'
 ```
 
 During **Manual Standby** or inside offline tests, capabilities inherit no device control lease (`BASEWARE_EPOCH`); during **Auto Run**, device-mutating calls carry the active Control Cycle `epoch`.
@@ -103,18 +103,18 @@ def eval_act_on_alert() -> dict:
     return {"passed": passed, "rewards": {"accuracy": 1.0 if passed else 0.0}}
 ```
 
-## 4. Running `ludens eval` and Closing the Failure Loop
+## 4. Running `ludens workspace eval` / `ludens-core eval` and Closing the Failure Loop
 
-Run offline evaluations from the workspace root or via Console:
+Run offline evaluations from the terminal via the pure-RPC `ludens workspace eval` command (supports `--remote`) or inside the sandbox via `ludens-core eval`:
 
 ```sh
-ludens eval list
-ludens eval run --all
-ludens eval run python/skills/visual_guard.py:eval_act_on_alert
-ludens eval history python/skills/visual_guard.py:eval_act_on_alert --limit 10
+ludens workspace eval list
+ludens workspace eval run --all
+ludens workspace eval run python/skills/visual_guard.py:eval_act_on_alert
+ludens workspace eval history python/skills/visual_guard.py:eval_act_on_alert --limit 10
 ```
 
-When `ludens eval run` executes, Ludens strips `LUDENS_SOCKET`, `BASEWARE_SOCKET`, `LUDENS_EPOCH`, and `BASEWARE_EPOCH` from the subprocess environment so evaluations can never accidentally touch hardware or active control leases.
+(Inside Shiori's sandbox `bash` tool, invoke `ludens-core eval <list|run|history|adapt>` directly.) When offline evaluations execute, Ludens strips `LUDENS_SOCKET`, `BASEWARE_SOCKET`, `LUDENS_EPOCH`, and `BASEWARE_EPOCH` from the subprocess environment so evaluations can never accidentally touch hardware or active control leases.
 
 ### Six Verification Statuses
 
@@ -124,7 +124,7 @@ Every `@capability` tracks an exact `codeSHA` across the capability function, it
 | --- | --- |
 | `verified` | Latest eval passed against the exact current source hashes |
 | `stale` | Capability, eval, or `@eval_env` source changed since the last pass |
-| `adapting` | Marked with a live failure record via `ludens eval adapt`; blocked until fixed and re-verified |
+| `adapting` | Marked with a live failure record via `ludens workspace eval adapt` (or `ludens-core eval adapt`); blocked until fixed and re-verified |
 | `failed` | Latest eval raised an exception, returned empty rewards, or reported `passed: false` |
 | `unverified` | Eval exists, but has not been executed yet |
 | `missing` | Capability has no bound `@eval_capability` |
@@ -144,15 +144,15 @@ with record_window() as win:
 frames = client.replay(win)
 ```
 
-Whenever a `verified` capability misbehaves against a real device or stream, log the counterexample record ID immediately with `ludens eval adapt`:
+Whenever a `verified` capability misbehaves against a real device or stream, log the counterexample record ID immediately with `ludens workspace eval adapt`:
 
 ```sh
-ludens eval adapt python/skills/visual_guard.py:act_on_alert \
+ludens workspace eval adapt python/skills/visual_guard.py:act_on_alert \
   --reason "False trigger during camera auto-exposure shift" \
   --record <record-id>
 ```
 
-Inspect the exact sequence around `<record-id>` using `client.replay(around=record_id, before_seconds=2.0, after_seconds=2.0)` (or inspect the video and events in Console **Replay**), extend `WatchdogEnv` so the current capability fails (`passed: false`), then refine `act_on_alert` until `ludens eval run --all` reports `verified` again.
+Inspect the exact sequence around `<record-id>` using `client.replay(around=record_id, before_seconds=2.0, after_seconds=2.0)` (or inspect the video and events in Console **Replay**), extend `WatchdogEnv` so the current capability fails (`passed: false`), then refine `act_on_alert` until `ludens workspace eval run --all` reports `verified` again.
 
 ## 5. Programmable Outer Loop (`loop.py`) & Lean Perception Input
 

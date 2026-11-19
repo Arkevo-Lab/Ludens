@@ -9,18 +9,18 @@
 Ludens 内置了基于 `stdio` MCP 传输的 `cua`（`builtin:cua`）桌面自动化驱动，以及默认受控节点 `local-desktop`，无需任何外部驱动包即可启动：
 
 ```sh
-ludens init --name desktop-monitor --driver cua
+ludens workspace init --name desktop-monitor --driver cua
 cd "$HOME/.ludens/workspaces/desktop-monitor"
-ludens up
+ludens workspace up
 ```
 
-如需指定自定义 CUA 服务启动命令，可在 `ludens init` 时传入 `--cua-command <path>`，或在 `ludens.json` 中配置 `cuaCommand`（直接调试时则传给 `baseware serve --driver cua --cua-command <path>`）。
+如需指定自定义 CUA 服务启动命令，可在 `ludens workspace init` 时传入 `--cua-command <path>`，或在 `ludens.json` 中配置 `cuaCommand`（直接调试时则传给 `baseware serve --driver cua --cua-command <path>`）。
 
 工作区启动后，可在终端核验控制器列表与参数 Schema：
 
 ```sh
-ludens controller list
-ludens controller controller/screenshot --help
+ludens-core controller list
+ludens-core controller controller/screenshot --help
 ```
 
 ## 2. 五种传输协议与外部驱动包
@@ -81,10 +81,10 @@ baseware driver discover --package 'file:/path/to/my-driver'
 无需重启工作区或 Baseware，即可在终端动态挂载多个受控节点并切换主设备：
 
 ```sh
-ludens machine list
-ludens machine connect local-desktop lab-bench-ssh
-ludens machine use lab-bench-ssh
-ludens machine disconnect edge-sensor-http
+ludens-core machine list
+ludens-core machine connect local-desktop lab-bench-ssh
+ludens-core machine use lab-bench-ssh
+ludens-core machine disconnect edge-sensor-http
 ```
 
 直接操作 Baseware 服务时对应命令为 `baseware machine list`、`baseware machine use <id>`、`baseware machine connect <id> [<id2> ...]` 与 `baseware machine disconnect <id>`。
@@ -99,9 +99,9 @@ ludens machine disconnect edge-sensor-http
 CLI 示例：
 
 ```sh
-ludens controller controller/screenshot
-ludens controller controller/lab-bench-ssh/gpio.read --args '{"pin":4}'
-ludens controller controller/gpio.read --machine lab-bench-ssh --args '{"pin":4}'
+ludens-core controller controller/screenshot
+ludens-core controller controller/lab-bench-ssh/gpio.read --args '{"pin":4}'
+ludens-core controller controller/gpio.read --machine lab-bench-ssh --args '{"pin":4}'
 ```
 
 Python `ludens_tools` 同样提供对应的多节点 API（`machines()`、`use_machine()`、`connect_machines()`、`disconnect_machines()` 以及 `call(..., machine=...)`）：

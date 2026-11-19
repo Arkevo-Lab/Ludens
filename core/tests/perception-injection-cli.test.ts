@@ -79,7 +79,7 @@ class Perception:
     expect(runtime.perceptionInjectionEnabled()).toBe(false);
     await runtime.stop();
     await runtime.start();
-    expect(JSON.parse((await run(["status"])).stdout).context).toEqual({ perceptionInjection: false });
+    expect((await dispatch(runtime, { kind: "status", argv: [] }) as { context: unknown }).context).toEqual({ perceptionInjection: false });
     expect(JSON.parse((await run(["perception", "inject", "on"])).stdout)).toEqual({ perceptionInjection: true });
     expect(runtime.perception!.status().state).toBe("ready");
   } finally { await runtime.close(); await close(); await rm(workspace, { recursive: true, force: true }); }

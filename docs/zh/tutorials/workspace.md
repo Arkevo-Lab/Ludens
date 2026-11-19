@@ -6,7 +6,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 
 ## 1. 工作区目录结构
 
-每个工作区遵循 **1 Workspace = 1 Core** 隔离原则，独立持有自己的 Core 运行时与状态；绑定不同设备或端口的工作区可在 App Daemon 下并发运行，执行**收回控制权**后 Core 保留在 **Warm Standby**（**手动待命**，`manual`）待命。通过 `ludens init` 初始化后的工作区包含以下核心目录与文件：
+每个工作区遵循 **1 Workspace = 1 Core** 隔离原则，独立持有自己的 Core 运行时与状态；绑定不同设备或端口的工作区可在 `ludens-server` 下并发运行，执行**收回控制权**后 Core 保留在 **Warm Standby**（**手动待命**，`manual`）待命。通过 `ludens workspace init` 初始化后的工作区包含以下核心目录与文件：
 
 | 路径 | 职责 |
 | --- | --- |
@@ -17,7 +17,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 | `skills/` | 可复用技能文档（`skills/<name>/SKILL.md`）与能力/评测 Python 模块（例如 `skills/visual_guard.py`） |
 | `perception.py` | 常驻 `Perception` 状态机（实现 `start`、`sample`、`close`），在**自主运行**期间以最高 30 Hz 持续采样 |
 | `loop.py`（可选） | 可编程外层循环与轮首上下文注入器（`Loop.step` / `Loop.inject`），支持轮间热重载、零 Token `@capability` 调度与故障自动回退 |
-| `baseware.json` | 由 Baseware 导出的实时控制器目录快照（对应 `ludens controller list` / `baseware export`） |
+| `baseware.json` | 由 Baseware 导出的实时控制器目录快照（对应 `ludens-core controller list` / `baseware export`） |
 | `logs/<run-id>/` | 结构化运行事件流（`events.jsonl`）、`manifest.json` 与 `diagnostics.jsonl`（设备事实日志位于 `logs/baseware/`） |
 | `.ludens/timeline/` | 单写入者的工作区时空轴，常驻保留分段索引、热写缓冲、按需回放 `cache/`、`pins.json` 锁定清单，并支持向本机环形盘、外置目录或 S3 归档 `video/` 30 Hz fMP4 视频与去重对象 |
 | `.ludens/evals/` | 离线能力评测历史与 `latest.json` 验证状态快照 |
@@ -25,7 +25,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 
 ## 2. 统一能力目录
 
-Ludens 将底层设备工具与工作区 Python 能力统一收敛到同一个控制器调用面（`ludens controller`）：
+Ludens 将底层设备工具与工作区 Python 能力统一收敛到同一个控制器调用面（`ludens-core controller`）：
 
 - **Baseware 设备工具**：以 `controller/<tool>` 命名（多机池显式路由时写作 `controller/<machineId>/<tool>`），详见 [设备接入与 Baseware](devices.md)。
 - **工作区 Python 能力**：通过静态 AST 扫描工作区内全部 `.py` 文件自动发现（跳过 `logs/`、`.ludens/`、`.git/`、`node_modules/`、`.venv/`、`venv/` 与 `__pycache__/`），以 `python/<relpath>:<name>` 寻址（例如 `python/skills/visual_guard.py:act_on_alert`）。
@@ -35,16 +35,16 @@ Ludens 将底层设备工具与工作区 Python 能力统一收敛到同一个�
 向 CLI 与 Shiori 暴露的顶层 `@capability` 必须满足四条静态规则：
 
 1. **同步函数**：必须使用 `def`，不能使用 `async def`。
-2. **非空 Docstring**：用文档字符串清晰说明用途与前置条件，`ludens controller list` 与 `--help` 会直接展示它。
+2. **非空 Docstring**：用文档字符串清晰说明用途与前置条件，`ludens-core controller list` 与 `--help` 会直接展示它。
 3. **受支持的参数类型标注**：所有参数都必须使用 `str`、`int`、`float`、`bool`、`list[T]`、`dict[str, T]` 或 `Optional[T]` / `T | None`，可选参数的默认值必须是 JSON 字面量；不支持仅限位置参数（`/`）、`*args` 或 `**kwargs`。
 4. **仅叠加 Ludens 装饰器**：同一函数上除 `@capability` 外，仅支持组合使用 `@record` 与 `@observe`。
 
 随时在终端检查并单步试运行已发现的能力：
 
 ```sh
-ludens controller list
-ludens controller python/skills/visual_guard.py:act_on_alert --help
-ludens controller python/skills/visual_guard.py:act_on_alert --args '{"channel":1}'
+ludens-core controller list
+ludens-core controller python/skills/visual_guard.py:act_on_alert --help
+ludens-core controller python/skills/visual_guard.py:act_on_alert --args '{"channel":1}'
 ```
 
 在**手动待命**或离线测试模式下，能力调用不持有设备控制租约（`BASEWARE_EPOCH`）；进入**自主运行**后，所有需要控制权的设备调用都会自动携带当前控制周期的 `epoch`。
@@ -103,18 +103,18 @@ def eval_act_on_alert() -> dict:
     return {"passed": passed, "rewards": {"accuracy": 1.0 if passed else 0.0}}
 ```
 
-## 4. 运行 `ludens eval` 与失败反例闭环
+## 4. 运行 `ludens workspace eval` / `ludens-core eval` 与失败反例闭环
 
-在工作区终端或控制台中运行离线评测：
+操作者在终端可通过纯 RPC 命令 `ludens workspace eval`（支持 `--remote`）或沙盒内 `ludens-core eval` 运行离线评测：
 
 ```sh
-ludens eval list
-ludens eval run --all
-ludens eval run python/skills/visual_guard.py:eval_act_on_alert
-ludens eval history python/skills/visual_guard.py:eval_act_on_alert --limit 10
+ludens workspace eval list
+ludens workspace eval run --all
+ludens workspace eval run python/skills/visual_guard.py:eval_act_on_alert
+ludens workspace eval history python/skills/visual_guard.py:eval_act_on_alert --limit 10
 ```
 
-执行 `ludens eval run` 时，Ludens 会自动剥离 `LUDENS_SOCKET`、`BASEWARE_SOCKET`、`LUDENS_EPOCH` 与 `BASEWARE_EPOCH`，从根源上保证离线评测绝不误触物理设备或干扰活跃控制租约。
+（在 Shiori 沙盒内 `bash` 中则可直接调用 `ludens-core eval <list|run|history|adapt>`。）执行离线评测时，Ludens 会自动剥离 `LUDENS_SOCKET`、`BASEWARE_SOCKET`、`LUDENS_EPOCH` 与 `BASEWARE_EPOCH`，从根源上保证离线评测绝不误触物理设备或干扰活跃控制租约。
 
 ### 六种验证状态
 
@@ -124,7 +124,7 @@ ludens eval history python/skills/visual_guard.py:eval_act_on_alert --limit 10
 | --- | --- |
 | `verified` | 最近一次评测在当前三方源码完全一致的前提下通过 |
 | `stale` | 能力、评测或绑定的 `@eval_env` 源码在通过后发生改动 |
-| `adapting` | 已通过 `ludens eval adapt` 标记了真实失败样本，需修订并通过验证后才能恢复 |
+| `adapting` | 已通过 `ludens workspace eval adapt`（或 `ludens-core eval adapt`）标记了真实失败样本，需修订并通过验证后才能恢复 |
 | `failed` | 最近一次评测抛出异常、返回空奖励或 `passed: false` |
 | `unverified` | 已绑定 `@eval_capability`，但尚未执行过评测 |
 | `missing` | 尚未绑定任何 `@eval_capability` |
@@ -147,12 +147,12 @@ frames = client.replay(win)
 一旦某个原本为 `verified` 的能力在真机任务中失效，立刻将该条时间轴记录标记为失败反例：
 
 ```sh
-ludens eval adapt python/skills/visual_guard.py:act_on_alert \
+ludens workspace eval adapt python/skills/visual_guard.py:act_on_alert \
   --reason "相机自动曝光切换瞬间发生误触发" \
   --record <record-id>
 ```
 
-接着在 Python 中用 `client.replay(around=record_id, before_seconds=2.0, after_seconds=2.0)`（或在控制台 **回放** 页拖拽定位时间点）核对真实帧序与干扰特征，先强化 `WatchdogEnv` 让旧实现明确返回 `passed: false`，再修改 `act_on_alert` 直至 `ludens eval run --all` 重新变为 `verified`。
+接着在 Python 中用 `client.replay(around=record_id, before_seconds=2.0, after_seconds=2.0)`（或在控制台 **回放** 页拖拽定位时间点）核对真实帧序与干扰特征，先强化 `WatchdogEnv` 让旧实现明确返回 `passed: false`，再修改 `act_on_alert` 直至 `ludens workspace eval run --all` 重新变为 `verified`。
 
 ## 5. 可编程外层循环（`loop.py`）与精简感知输入
 

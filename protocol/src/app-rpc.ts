@@ -1,17 +1,42 @@
 import type { ActivityResponse } from "./activity.ts";
+import type {
+  CapabilitiesResult,
+  CapabilityEvalRecord,
+  CapabilityEvalRunResult,
+  CapabilityRuntime,
+  WorkspaceCapabilityEvalResult,
+} from "./capabilities.ts";
 import type { ModelConnectionConfig } from "./connection.ts";
-import type { RegisteredDriverSpec } from "./drivers.ts";
+import type { DocDetail, DocGroupInfo, DocLanguage } from "./docs.ts";
+import type { DiscoveredDriver, RegisteredDriverSpec } from "./drivers.ts";
 import type {
   EventDirection,
   EventPoolSnapshot,
   PoolEvent,
   PoolEventStatus,
 } from "./event-pool.ts";
-import type { OmpEffort, OmpServiceTier, WorkspaceDefaults } from "./ludens.ts";
 import type {
   BasewareMachineSpec,
   WorkspaceMachinesBinding,
 } from "./machines.ts";
+import type {
+  PerceptionRuntimeSnapshot,
+  PerceptionSettings,
+  PerceptionSettingsPatch,
+} from "./perception-config.ts";
+import type {
+  PetConsumerReceipt,
+  PetState,
+  PetTargetReceipt,
+} from "./pet.ts";
+import type {
+  FileMedia,
+  RemoteMedia,
+  ReplayDetail,
+  ReplayOverviewResult,
+  ReplaySearchResult,
+  ReplayWindow,
+} from "./replay-types.ts";
 import type {
   DirectoryBackendConfig,
   EffectiveWorkspaceStorage,
@@ -36,12 +61,35 @@ import type {
   WorkspaceStorageOverride,
   WorkspaceStorageUsageSummary,
 } from "./storage.ts";
+import type { TimelineRecordDetail } from "./timeline-record.ts";
+import type {
+  AvailableModelsCatalog,
+  HostControlStatus,
+  Project,
+  RunData,
+} from "./types.ts";
+import type {
+  CreateWorkspaceInput,
+  LegacyWorkspaceImportReceipt,
+  OmpEffort,
+  OmpServiceTier,
+  WorkspaceBasewareSnapshot,
+  WorkspaceConnectionSnapshot,
+  WorkspaceDefaults,
+  WorkspaceRegistration,
+  WorkspaceServiceControlResult,
+  WorkspaceSettings,
+  WorkspaceShioriMutationInput,
+  WorkspaceStudioConfigPatch,
+  WorkspaceStudioSnapshot,
+} from "./workspaces.ts";
 
 export type {
   DirectoryBackendConfig,
   EffectiveWorkspaceStorage,
   GlobalStorageConfig,
   GlobalStorageUpdateInput,
+  LegacyWorkspaceImportReceipt,
   RedactedGlobalStorageConfig,
   RedactedS3BackendConfig,
   RedactedStorageProfile,
@@ -339,6 +387,15 @@ export interface ReplayRpcQuery {
   track?: "action" | "model" | "tool" | "log" | "all";
 }
 
+export type ReplayRpcResult =
+  | ReplayOverviewResult
+  | ReplayWindow
+  | ReplaySearchResult
+  | ReplayDetail
+  | FileMedia
+  | RemoteMedia
+  | Record<string, unknown>;
+
 export interface DiagnosticRpcQuery {
   afterPosition?: number;
   limit?: number;
@@ -426,31 +483,15 @@ export interface EventPoolMutateResultDto {
   spawned?: boolean;
 }
 
-export interface CreateWorkspaceInputDto {
-  name: string;
-  workspace?: string;
-  driver: string;
-  driverPackage?: string;
-  machineId?: string;
-  game?: string;
-  port?: number;
-  cuaCommand?: string;
-  model?: string;
-  serviceTier?: OmpServiceTier | null;
-  effort?: OmpEffort | null;
-  seconds?: number;
-  requests?: number;
-  pet?: boolean;
-  registerDriver?: boolean;
-}
+export type CreateWorkspaceInputDto = CreateWorkspaceInput;
 
 export type WorkspacesMutateParams =
-  | { action: "open"; workspace: string }
+  | { action: "open"; workspace: string; newId?: boolean }
   | { action: "create"; input: CreateWorkspaceInputDto }
   | { action: "remove"; id: string }
   | { action: "updateRoot"; workspaceRoot: string }
   | { action: "updateGlobalConnection"; connection: Partial<ModelConnectionConfig> }
-  | { action: "updateGlobalDefaults"; defaults: Partial<WorkspaceDefaults> }
+  | { action: "updateGlobalDefaults"; defaults: Partial<WorkspaceDefaults> | Record<string, unknown> }
   | {
       action: "updateConnection";
       workspaceId: string;
@@ -459,13 +500,23 @@ export type WorkspacesMutateParams =
   | {
       action: "updateStudioConfig";
       workspaceId: string;
-      patch: Record<string, unknown>;
+      patch: WorkspaceStudioConfigPatch | Record<string, unknown>;
     }
   | {
       action: "updateShiori";
       workspaceId: string;
-      input: Record<string, unknown>;
+      input: WorkspaceShioriMutationInput | Record<string, unknown>;
     };
+
+export interface WorkspacesImportParams {
+  workspace: string;
+  legacyStateDir?: string;
+  previousWorkspace?: string;
+}
+
+export interface WorkspacesImportResult extends WorkspaceRegistration {
+  import: LegacyWorkspaceImportReceipt;
+}
 
 export type ManagedServiceTarget = "emulator" | "baseware" | "core" | "host";
 
@@ -513,7 +564,68 @@ export type BasewareMutateParams =
       binding: WorkspaceMachinesBinding | Record<string, unknown>;
     };
 
-export type DocLanguageDto = "en" | "zh";
+export interface CapabilitiesEvalHistoryParams {
+  project: string;
+  workspace: string;
+  capabilityId?: string;
+  limit?: number;
+}
+
+export interface CapabilitiesEvalHistoryResult {
+  runs: CapabilityEvalRecord[];
+}
+
+export interface CapabilitiesEvalAdaptParams {
+  project: string;
+  workspace: string;
+  capabilityId: string;
+  reason: string;
+  records?: string[];
+}
+
+export type CapabilitiesEvalAdaptResult = CapabilityEvalRunResult;
+
+export interface LogsScopeParams {
+  /** Registered workspace ID (required in remote mode when `localFsPaths` is disabled). */
+  project?: string;
+  /** Optional workspace directory path hint for resolving relative run paths. */
+  workspace?: string;
+  /** Run identifier (`<runId>`) within `<workspace>/logs/<runId>`, or run directory path when `capabilities.localFsPaths` is enabled. */
+  run: string;
+}
+
+export interface LogsEventsParams extends LogsScopeParams {
+  channel?: "events" | "diagnostics";
+  cursor?: number;
+  limit?: number;
+  /** Optional snapshot version token returned by an earlier page to pin continuation/retry requests to that exact horizon. */
+  snapshot?: string;
+}
+
+export interface LogsEventsResult {
+  events: Record<string, unknown>[];
+  nextCursor: number | null;
+  hasMore: boolean;
+  /** Opaque snapshot version token identifying the pinned log horizon for this pagination session. */
+  snapshot?: string;
+}
+
+export interface LogsReadParams extends LogsScopeParams {
+  /** Direct artifact reference object (from `--ref` or parsed `--file`). Mutually exclusive with `eventSeq`. */
+  reference?: unknown;
+  /** Positive event sequence number in `events.jsonl` (`--event <seq>`). Requires `field`. */
+  eventSeq?: number;
+  /** Field name under `event.data[field]` when resolving via `eventSeq` (`--field <name>`). */
+  field?: string;
+  /** `"reference"` (default) retains `$media` descriptors; `"full"` restores base64 media or fails if unavailable. */
+  media?: "reference" | "full";
+}
+
+export interface LogsReadResult {
+  value: unknown;
+}
+
+export type DocLanguageDto = DocLanguage;
 
 export interface PetConsumerInputDto {
   instanceId: string;
@@ -563,7 +675,7 @@ export interface AppRpcMethods {
   };
   "catalog/get": {
     params: { includeEmpty?: boolean } | undefined;
-    result: unknown[];
+    result: Project[];
   };
   "run/get": {
     params: {
@@ -572,7 +684,7 @@ export interface AppRpcMethods {
       epoch?: string;
       page?: RunPageParams;
     };
-    result: Record<string, unknown>;
+    result: RunData;
   };
   "run/stop": {
     params: { project: string; run: string; epoch?: string | null };
@@ -586,7 +698,7 @@ export interface AppRpcMethods {
       sequence: number;
       source: { call?: string; observation?: string };
     };
-    result: Record<string, unknown>;
+    result: TimelineRecordDetail | null | undefined;
   };
   "activity/get": {
     params: {
@@ -603,7 +715,7 @@ export interface AppRpcMethods {
       run: string;
       query: ReplayRpcQuery;
     };
-    result: unknown;
+    result: ReplayRpcResult;
   };
   "archive/build": {
     params: {
@@ -612,7 +724,7 @@ export interface AppRpcMethods {
       action?: "cancel" | "retry";
       buildId?: string;
     };
-    result: Record<string, unknown>;
+    result: Record<string, unknown> | null;
   };
   "diagnostics/get": {
     params: Record<string, never> | undefined;
@@ -626,6 +738,14 @@ export interface AppRpcMethods {
     };
     result: Record<string, unknown>;
   };
+  "logs/events": {
+    params: LogsEventsParams;
+    result: LogsEventsResult;
+  };
+  "logs/read": {
+    params: LogsReadParams;
+    result: LogsReadResult;
+  };
   "runtime/control": {
     params: {
       project: string;
@@ -633,7 +753,7 @@ export interface AppRpcMethods {
       command: RuntimeControlCommandDto;
       preempt?: boolean;
     };
-    result: Record<string, unknown>;
+    result: HostControlStatus;
   };
   "eventPool/read": {
     params: {
@@ -655,27 +775,31 @@ export interface AppRpcMethods {
   };
   "workspaces/getSettings": {
     params: Record<string, never> | undefined;
-    result: Record<string, unknown>;
+    result: WorkspaceSettings;
   };
   "workspaces/getStudio": {
     params: { workspaceId: string };
-    result: Record<string, unknown>;
+    result: WorkspaceStudioSnapshot;
   };
   "workspaces/getConnection": {
     params: { workspaceId: string };
-    result: Record<string, unknown>;
+    result: WorkspaceConnectionSnapshot;
   };
   "workspaces/mutate": {
     params: WorkspacesMutateParams;
     result: unknown;
   };
+  "workspaces/import": {
+    params: WorkspacesImportParams;
+    result: WorkspacesImportResult;
+  };
   "workspaces/serviceControl": {
     params: WorkspacesServiceControlParams;
-    result: Record<string, unknown>;
+    result: WorkspaceServiceControlResult;
   };
   "baseware/overview": {
     params: { workspaceId?: string } | undefined;
-    result: Record<string, unknown>;
+    result: WorkspaceBasewareSnapshot;
   };
   "baseware/mutate": {
     params: BasewareMutateParams;
@@ -683,15 +807,15 @@ export interface AppRpcMethods {
   };
   "drivers/discover": {
     params: { spec: string };
-    result: Record<string, unknown>;
+    result: DiscoveredDriver;
   };
   "capabilities/get": {
     params: { project: string; workspace: string };
-    result: Record<string, unknown>;
+    result: CapabilitiesResult;
   };
   "capabilities/runtime": {
     params: { project: string; workspace: string };
-    result: Record<string, unknown>;
+    result: CapabilityRuntime;
   };
   "capabilities/eval": {
     params: {
@@ -699,47 +823,55 @@ export interface AppRpcMethods {
       workspace: string;
       options?: { capabilityId?: string; all?: boolean };
     };
-    result: Record<string, unknown>;
+    result: WorkspaceCapabilityEvalResult;
+  };
+  "capabilities/evalHistory": {
+    params: CapabilitiesEvalHistoryParams;
+    result: CapabilitiesEvalHistoryResult;
+  };
+  "capabilities/evalAdapt": {
+    params: CapabilitiesEvalAdaptParams;
+    result: CapabilitiesEvalAdaptResult;
   };
   "perception/getSettings": {
     params: { project: string; workspace: string };
-    result: Record<string, unknown>;
+    result: Partial<PerceptionSettings>;
   };
   "perception/updateSettings": {
     params: {
       project: string;
       workspace: string;
-      patch: Record<string, unknown>;
+      patch: PerceptionSettingsPatch | Record<string, unknown>;
     };
-    result: Record<string, unknown>;
+    result: Partial<PerceptionSettings>;
   };
   "perception/runtime": {
     params: { project: string; workspace: string };
-    result: Record<string, unknown>;
+    result: PerceptionRuntimeSnapshot;
   };
   "models/list": {
     params: { workspaceId?: string } | undefined;
-    result: Record<string, unknown>;
+    result: AvailableModelsCatalog;
   };
   "docs/groups": {
     params: { lang?: DocLanguageDto } | undefined;
-    result: unknown[];
+    result: DocGroupInfo[];
   };
   "docs/read": {
     params: { id: string; lang?: DocLanguageDto };
-    result: Record<string, unknown>;
+    result: DocDetail;
   };
   "pet/getState": {
     params: Record<string, never> | undefined;
-    result: Record<string, unknown>;
+    result: PetState;
   };
   "pet/setTarget": {
     params: { project: string | null; ifUnset?: boolean };
-    result: Record<string, unknown>;
+    result: PetTargetReceipt;
   };
   "pet/recordConsumer": {
     params: PetConsumerInputDto;
-    result: Record<string, unknown>;
+    result: PetConsumerReceipt;
   };
   "storage/get": {
     params: undefined | Record<string, never>;

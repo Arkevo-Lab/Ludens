@@ -1,6 +1,6 @@
 # @ludens/protocol
 
-Zero-dependency contract layer for the Ludens workspace. Every other package (`baseware`, `core`, `app`) consumes these types and helpers through workspace imports only — no cross-package deep relative paths.
+Zero-dependency contract layer for the Ludens workspace. Every other package (`baseware`, `core`, `server`, `client`, and `desktop`) consumes these types and helpers through workspace imports only — no cross-package deep relative paths.
 
 ## Exports
 

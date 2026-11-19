@@ -1,0 +1,551 @@
+import { existsSync } from "node:fs";
+import { open, readdir, readFile, realpath, stat } from "node:fs/promises";
+import { join, basename, relative } from "node:path";
+import { connect } from "node:net";
+import { selectCycle } from "./aggregate";
+import { getLogIndex, type LogIndex } from "./log-index";
+import { refreshRunProjection, selectIndexedCycle, readRunProjection, indexedObservation, hasTimelineReference, runProgress, type RunPage } from "./run-index";
+import { prepareArchive } from "./prepare-run";
+import { controlArchiveBuild } from "./cold-build";
+import { latestGameRun } from "./initial-selection";
+import { readTimelineRecord, type TimelineRecordDetail } from "./timeline-record";
+import { resolveStoredTimelineAsset } from "./storage";
+import type {
+  Event,
+  Manifest,
+  Project,
+  ProjectCoreSummary,
+  ProjectWorkspaceDefaults,
+  RunData,
+  LiveStatus,
+} from "./types";
+import { decodeTimelineFrame } from "@ludens/protocol/timeline-media";
+import {
+  isOmpEffort,
+  isOmpServiceTier,
+  ludensHome,
+  listRegisteredWorkspaces,
+  readGlobalConfig,
+  registeredWorkspace,
+  readWorkspaceIdentity,
+  type LudensConfig,
+} from "@ludens/protocol/ludens";
+import { resolveWorkspaceAddress } from "@ludens/core/core/storage/workspace-state";
+import { jobStateFilePath } from "../daemon/background-jobs.ts";
+import { probeBackgroundJob, readJobRecord } from "../daemon/process-manager.ts";
+export const globalHome = ludensHome();
+const safePart = (value: string) =>
+  /^[a-zA-Z0-9._-]+$/.test(value) && value !== "." && value !== "..";
+
+export async function workspaceForProject(project: string, home = globalHome) {
+  const entry = await registeredWorkspace(project, home);
+  const workspace = await realpath(entry.workspace);
+  if ((await readWorkspaceIdentity(workspace)).id !== project) throw new Error("工作区身份与登记不一致");
+  return workspace;
+}
+async function runRoots(project: string, home: string) {
+  return [join(await workspaceForProject(project, home), "logs")];
+}
+async function resolveInRoots(run: string, roots: string[]) {
+  if (!safePart(run)) throw new Error("无效的运行 ID");
+  for (const root of roots) {
+    const path = join(root, run);
+    try {
+      if ((await realpath(path)) !== path)
+        throw new Error("运行目录必须位于工作区 logs 内");
+      return path;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+  }
+  throw Object.assign(new Error("未找到运行目录"), { code: "ENOENT" });
+}
+export async function resolveRun(
+  project: string,
+  run: string,
+  root = globalHome,
+) {
+  return resolveInRoots(run, await runRoots(project, root));
+}
+const catalogCache = new Map<string, { expires: number; value?: Project[]; pending?: Promise<Project[]> }>();
+export function clearCatalogCache() { catalogCache.clear(); }
+export async function catalog(root = globalHome, includeEmpty = false): Promise<Project[]> {
+  const key = JSON.stringify([root, includeEmpty]);
+  const cached = catalogCache.get(key);
+  if (cached?.pending) return cached.pending;
+  if (cached?.value && cached.expires > Date.now()) return cached.value;
+  const entry: { expires: number; value?: Project[]; pending?: Promise<Project[]> } = { expires: 0 };
+  entry.pending = scanCatalog(root, includeEmpty).then(value => {
+    entry.value = value; entry.expires = Date.now() + 3000; delete entry.pending;
+    return value;
+  }, error => { if (catalogCache.get(key) === entry) catalogCache.delete(key); throw error; });
+  catalogCache.set(key, entry);
+  return entry.pending;
+}
+async function readEventLogBounds(logFile: string): Promise<{ startedAt?: string; endedAt?: string }> {
+  let handle;
+  try {
+    handle = await open(logFile, "r");
+    const info = await handle.stat();
+    if (info.size === 0) return {};
+    const headLen = Math.min(info.size, 8192);
+    const headBuf = Buffer.alloc(headLen);
+    await handle.read(headBuf, 0, headLen, 0);
+    const headText = headBuf.toString("utf8");
+    const firstNewline = headText.indexOf("\n");
+    const firstLine = (firstNewline >= 0 ? headText.slice(0, firstNewline) : headText).trim();
+    let startedAt: string | undefined;
+    if (firstLine) {
+      const parsed = JSON.parse(firstLine);
+      const raw = parsed?.origin?.at ?? parsed?.at;
+      if (typeof raw === "string" && Number.isFinite(Date.parse(raw))) startedAt = raw;
+    }
+    const tailLen = Math.min(info.size, 32768);
+    const tailOffset = info.size - tailLen;
+    const tailBuf = Buffer.alloc(tailLen);
+    await handle.read(tailBuf, 0, tailLen, tailOffset);
+    const tailText = tailBuf.toString("utf8");
+    const lines = tailText.split("\n");
+    let endedAt: string | undefined;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (i === 0 && tailOffset > 0) break;
+      const line = lines[i]?.trim();
+      if (!line) continue;
+      try {
+        const parsed = JSON.parse(line);
+        const raw = parsed?.origin?.at ?? parsed?.at;
+        if (typeof raw === "string" && Number.isFinite(Date.parse(raw))) {
+          endedAt = raw;
+          break;
+        }
+      } catch {
+        // Ignore trailing incomplete JSON line while a run is actively writing.
+      }
+    }
+    return {
+      ...(startedAt ? { startedAt } : {}),
+      ...(endedAt ? { endedAt } : {}),
+    };
+  } catch {
+    return {};
+  } finally {
+    await handle?.close().catch(() => {});
+  }
+}
+async function readWorkspaceDefaults(
+  workspace: string,
+  globalDefaults: LudensConfig["defaults"],
+): Promise<ProjectWorkspaceDefaults | undefined> {
+  let raw: Record<string, unknown> | null = null;
+  try {
+    const parsed: unknown = JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8"));
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      raw = parsed as Record<string, unknown>;
+    }
+  } catch {
+    raw = null;
+  }
+  const model =
+    typeof raw?.model === "string" && raw.model.trim()
+      ? raw.model.trim()
+      : globalDefaults.model ?? undefined;
+  const serviceTier = isOmpServiceTier(raw?.serviceTier)
+    ? raw.serviceTier
+    : globalDefaults.serviceTier ?? undefined;
+  const effort = isOmpEffort(raw?.effort) ? raw.effort : globalDefaults.effort ?? undefined;
+  const maxSeconds =
+    typeof raw?.seconds === "number" && Number.isInteger(raw.seconds) && raw.seconds > 0
+      ? raw.seconds
+      : undefined;
+  const defaults: ProjectWorkspaceDefaults = {
+    ...(model !== undefined ? { model } : {}),
+    ...(serviceTier !== undefined ? { serviceTier } : {}),
+    ...(effort !== undefined ? { effort } : {}),
+    ...(maxSeconds !== undefined ? { maxSeconds } : {}),
+  };
+  return Object.keys(defaults).length > 0 ? defaults : undefined;
+}
+
+async function probeCoreSummary(workspace: string): Promise<ProjectCoreSummary> {
+  type ProbeLiveStatus = LiveStatus & {
+    consolidating?: boolean;
+    eventPool?: { pendingOutbound?: number };
+  };
+  const hostStateFile = jobStateFilePath(join(workspace, "logs", "background"), "host");
+  const [probe, record, address] = await Promise.all([
+    probeBackgroundJob(hostStateFile),
+    readJobRecord(hostStateFile),
+    resolveWorkspaceAddress(workspace).catch(() => null),
+  ]);
+  let live: ProbeLiveStatus | null = null;
+  if (address?.socket && (probe.pid !== null || process.platform === "win32" || existsSync(address.socket))) {
+    live = await Promise.race([
+      hostRequest<ProbeLiveStatus>(address.socket, { kind: "status", argv: [] }).catch(() => null),
+      new Promise<null>(resolveTimeout => setTimeout(() => resolveTimeout(null), 250)),
+    ]);
+  }
+  if (!live && probe.pid === null) {
+    return { online: false };
+  }
+  const launchedBy = live?.launchedBy ?? record?.launchedBy;
+  const appInstanceId = record?.appInstanceId;
+  return {
+    online: true,
+    ...(probe.pid !== null ? { pid: probe.pid } : {}),
+    ...(typeof live?.mode === "string" ? { mode: live.mode } : {}),
+    ...(live?.consolidating !== undefined ? { consolidating: Boolean(live.consolidating) } : {}),
+    ...(launchedBy ? { launchedBy } : {}),
+    ...(appInstanceId ? { appInstanceId } : {}),
+    ...(typeof live?.eventPool?.pendingOutbound === "number"
+      ? { pendingOutbound: live.eventPool.pendingOutbound }
+      : {}),
+    ...(live?.runId ? { runId: live.runId } : {}),
+    ...(live && "model" in live ? { model: live.model ?? null } : {}),
+  };
+}
+
+async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project[]> {
+  const [registered, globalConfig] = await Promise.all([
+    listRegisteredWorkspaces(home),
+    readGlobalConfig(home).catch(() => ({ defaults: {} as LudensConfig["defaults"] })),
+  ]);
+  const projects = await Promise.all(registered.map(async entry => {
+    const project: Project = { id: entry.id, name: entry.name, available: entry.available, runs: [] };
+    if (!entry.available) return project;
+    const workspace = await workspaceForProject(entry.id, home);
+    const identity = await readWorkspaceIdentity(workspace);
+    const archiveIds = new Set([identity.id, ...(identity.historyIds ?? [])]);
+    project.workspace = workspace;
+    const roots = [join(workspace, "logs")];
+    let names: string[];
+    try { names = (await readdir(roots[0], { withFileTypes: true })).filter(item => item.isDirectory()).map(item => item.name); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; names = []; }
+    const [runs, core, defaults] = await Promise.all([
+      Promise.all(names.sort().reverse().map(async id => {
+        try {
+          const path = await resolveInRoots(id, roots);
+          const manifest: Manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
+          if (manifest.workspaceId && !archiveIds.has(manifest.workspaceId)) throw new Error("运行记录与工作区身份不一致");
+          const bounds = await readEventLogBounds(join(path, "events.jsonl"));
+          return { id, ...(manifest.kind ? { kind: manifest.kind } : {}), model: manifest.model,
+            seconds: manifest.seconds, drivers: manifest.drivers, ...bounds };
+        } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+      })),
+      probeCoreSummary(workspace),
+      readWorkspaceDefaults(workspace, globalConfig.defaults),
+    ]);
+    project.runs = runs.filter(item => item !== null);
+    project.core = core;
+    if (defaults) project.defaults = defaults;
+    return project;
+  }));
+  return projects.filter(project => includeEmpty || project.runs.length > 0 || Boolean(project.core?.online))
+    .sort((a, b) => (latestGameRun(b)?.id ?? b.runs[0]?.id ?? "")
+      .localeCompare(latestGameRun(a)?.id ?? a.runs[0]?.id ?? ""));
+}
+export async function openRun(project: string, run: string, home = globalHome) {
+  const workspace = await workspaceForProject(project, home);
+  const path = await resolveInRoots(run, [join(workspace, "logs")]);
+  const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as Manifest;
+  const identity = await readWorkspaceIdentity(workspace);
+  const ownsArchive = typeof manifest.workspaceId === "string" && [identity.id, ...(identity.historyIds ?? [])].includes(manifest.workspaceId);
+  if (manifest.workspaceId && !ownsArchive) throw new Error("运行记录与工作区身份不一致");
+  // Stable identity permits a moved workspace to read its own archive. A record
+  // without identity must still match the current path before reading its timeline.
+  const archiveWorkspace = ownsArchive ? workspace
+    : typeof manifest.workspace === "string" && await realpath(manifest.workspace).catch(() => null) === workspace ? workspace : null;
+  const index = getLogIndex(path), release = index.retain();
+  index.archiveWorkspace = archiveWorkspace;
+  return { path, manifest, index, release, archiveWorkspace };
+}
+export async function archiveBuild(project: string, run: string, action?: "cancel" | "retry", buildId?: string) {
+  const { index, release } = await openRun(project, run);
+  try {
+    return await controlArchiveBuild(index, { action, buildId });
+  } finally { release(); }
+}
+export function hostRequest<T = LiveStatus>(
+  socketPath: string,
+  request: Record<string, unknown>,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const socket = connect(socketPath);
+    let buffer = "";
+    let complete = false;
+    const fail = (error: Error) => {
+      if (!complete) {
+        complete = true;
+        socket.destroy();
+        reject(error);
+      }
+    };
+    socket.setEncoding("utf8");
+    socket.setTimeout(2000, () => fail(new Error("Core 响应超时")));
+    socket.on("connect", () => socket.write(JSON.stringify(request) + "\n"));
+    socket.on("error", fail);
+    socket.on("close", () => fail(new Error("Core 已断开")));
+    socket.on("data", (data) => {
+      buffer += data;
+      const end = buffer.indexOf("\n");
+      if (end < 0 || complete) return;
+      try {
+        const r = JSON.parse(buffer.slice(0, end));
+        if (!r.ok) throw new Error(r.error);
+        complete = true;
+        socket.end();
+        resolve(r.value);
+      } catch (error) {
+        fail(error as Error);
+      }
+    });
+  });
+}
+export function canControl(
+  latest: string,
+  run: string,
+  status: LiveStatus | null,
+  selectedEpoch: string | null,
+) {
+  return (
+    latest === run &&
+    status?.runId === run &&
+    status.connected &&
+    selectedEpoch !== null &&
+    selectedEpoch === status.epoch
+  );
+}
+const prepareRun = (index: LogIndex, signal?: AbortSignal) => prepareArchive(index, { kind: "run", signal,
+  step: signal => refreshRunProjection(index, { maxEvents: 2000, ingest: false, signal }),
+  progress: () => runProgress(index) });
+export async function getRun(
+  project: string,
+  run: string,
+  epoch?: string,
+  page: RunPage = {},
+  signal?: AbortSignal,
+): Promise<RunData> {
+  const { manifest, index, release } = await openRun(project, run);
+  try {
+  const projects = await catalog();
+  await prepareRun(index, signal);
+  const cycle = await selectIndexedCycle(index, manifest, epoch);
+  const { phase, sessionModel, ...projection } = await readRunProjection(index, cycle.selectedEpoch, page, cycle.wholeRun, Date.now(), signal);
+  const latest = latestGameRun(projects.find((p) => p.id === project))?.id;
+  let live: LiveStatus | null = null;
+  // Only the newest manifest may designate a live socket. Archived runs never contact hosts.
+  if (latest === run && manifest.workspaceId === project)
+    live = await hostRequest(manifest.socket, {
+      kind: "status",
+      argv: [],
+    }).catch(() => null);
+  const matched = live?.runId === run;
+  const effectiveModel = matched && live?.model !== undefined ? live.model : sessionModel ?? manifest.model;
+  const controlAllowed =
+    !!latest && !!canControl(latest, run, live, cycle.selectedEpoch);
+  return {
+    project,
+    run,
+    manifest: effectiveModel !== manifest.model ? { ...manifest, model: effectiveModel } : manifest,
+    cycles: cycle.cycles,
+    selectedEpoch: cycle.selectedEpoch,
+    ...projection,
+    live: matched ? live : null,
+    livePhase: matched && live?.connected && live.mode === "auto" && live.epoch === cycle.selectedEpoch ? phase : null,
+    controlAllowed,
+    controlReason:
+      latest !== run
+        ? "历史运行，仅供回放"
+        : !live
+          ? "Core 离线"
+          : !matched
+            ? "Core 属于其他运行"
+            : !live.connected
+              ? "设备连接已断开"
+              : cycle.selectedEpoch !== cycle.cycles.at(-1)?.epoch ||
+                  (live.mode === "auto" && cycle.selectedEpoch !== live.epoch)
+                ? "历史周期，仅供回放"
+                : "已连接当前 Core",
+    updatedAt: new Date().toISOString(),
+  };
+  } finally { release(); }
+}
+export async function controlState(project: string, run: string, epoch: string | null, root = globalHome) {
+  // Human takeover cannot wait for a cold/obsolete archive index to rebuild.
+  const path = await resolveRun(project, run, root);
+  const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as Manifest;
+  let latest = latestGameRun((await catalog(root)).find(item => item.id === project))?.id;
+  if (latest !== run) {
+    // Bypass the 3s catalog cache so a newly started run can be stopped immediately.
+    const fresh = await scanCatalog(root, true);
+    latest = latestGameRun(fresh.find(item => item.id === project))?.id;
+  }
+  const live = latest === run && manifest.workspaceId === project
+    ? await hostRequest(manifest.socket, { kind: "status", argv: [] }).catch(() => null) : null;
+  const resolvedEpoch = typeof epoch === "string" && epoch.trim() ? epoch.trim() : (live?.epoch ?? null);
+  return { manifest, live, selectedEpoch: resolvedEpoch,
+    controlAllowed: !!latest && !!canControl(latest, run, live, resolvedEpoch) };
+}
+export async function stopRun(
+  project: string,
+  run: string,
+  expectedEpoch: string | null,
+  readRun: (project: string, run: string, epoch: string | null) => Promise<Pick<RunData,
+    "manifest" | "live" | "selectedEpoch" | "controlAllowed">> = controlState,
+) {
+  const explicitEpoch = typeof expectedEpoch === "string" && expectedEpoch.trim() ? expectedEpoch.trim() : null;
+  const data = await readRun(project, run, explicitEpoch);
+  const targetEpoch = explicitEpoch ?? (typeof data.live?.epoch === "string" && data.live.epoch.trim() ? data.live.epoch.trim() : null);
+  if (
+    !data.controlAllowed ||
+    !data.live ||
+    !targetEpoch ||
+    (explicitEpoch !== null && data.selectedEpoch !== explicitEpoch) ||
+    data.live.epoch !== targetEpoch
+  ) {
+    if (explicitEpoch === null && data.live && data.live.mode !== "auto") {
+      throw new Error("当前运行未处于自主运行模式");
+    }
+    throw new Error("控制状态已变化，请刷新后重试");
+  }
+  if (data.live.mode !== "auto") throw new Error("当前运行未处于自主运行模式");
+  return hostRequest(data.manifest.socket, {
+    kind: "auto",
+    argv: ["off"],
+    runId: run,
+    expectedEpoch: targetEpoch,
+  });
+}
+export async function mediaFile(
+  project: string,
+  run: string,
+  id: string,
+  root = globalHome,
+  signal?: AbortSignal,
+): Promise<{ bytes: Buffer; mediaType: string; cacheControl: string }> {
+  const { path, manifest, archiveWorkspace, index, release } = await openRun(project, run, root);
+  try {
+  await prepareRun(index, signal);
+  const observation = await indexedObservation(index, id, signal);
+  const textMedia = observation?.mediaType.startsWith("text/") || observation?.mediaType === "application/json";
+  if (
+    !observation ||
+    (!textMedia && !["image/png", "image/jpeg", "image/webp", "audio/wav"].includes(
+      observation.mediaType,
+    ))
+  )
+    throw new Error("未找到可展示的观测");
+  const outMediaType = textMedia ? "text/plain; charset=utf-8" : observation.mediaType;
+  let file: string;
+  const reference = observation.timeline;
+  const outCacheControl = !reference || reference.asset.startsWith("objects/")
+    ? "private, max-age=31536000, immutable" : "no-store";
+  if (reference) {
+    if ((reference.recordId !== undefined && (typeof reference.recordId !== "string" || !reference.recordId))
+      || (reference.sequence !== undefined && (!Number.isSafeInteger(reference.sequence) || reference.sequence < 1))
+      || typeof reference.asset !== "string" || !reference.asset.split("/").every(safePart))
+      throw new Error("无效的时空轴媒体引用");
+    if (!archiveWorkspace) throw new Error("运行记录与工作区身份不一致");
+    const workspace = archiveWorkspace;
+    const timeline = join(workspace, ".ludens", "timeline");
+    if (reference.video) return {
+      bytes: await decodeTimelineFrame(timeline, { asset: reference.asset, video: reference.video }, { signal, home: root }),
+      mediaType: "image/png", cacheControl: "no-store",
+    };
+    const resolved = await resolveStoredTimelineAsset({
+      timelineRoot: timeline,
+      workspacePath: workspace,
+      home: root,
+      asset: reference.asset,
+      signal,
+    });
+    if (resolved.kind === "missing") {
+      throw Object.assign(new Error("观测已过期或已移除"), { status: 410, code: "OBSERVATION_EXPIRED" });
+    }
+    if (resolved.kind === "remote") {
+      let upstream: Response;
+      try {
+        upstream = await fetch(resolved.remoteUrl, { method: "GET", signal });
+      } catch (error) {
+        if (signal?.aborted) throw signal.reason ?? error;
+        throw Object.assign(
+          new Error(`对象存储当前不可用：${error instanceof Error ? error.message : String(error)}`),
+          { status: 503, code: "STORAGE_UNAVAILABLE" },
+        );
+      }
+      if (upstream.status === 404) {
+        await upstream.body?.cancel().catch(() => {});
+        throw Object.assign(new Error("观测已过期或已移除"), { status: 410, code: "OBSERVATION_EXPIRED" });
+      }
+      if (!upstream.ok) {
+        await upstream.body?.cancel().catch(() => {});
+        throw Object.assign(new Error(`对象存储读取失败 (HTTP ${upstream.status})`), {
+          status: 503,
+          code: "STORAGE_UNAVAILABLE",
+        });
+      }
+      return {
+        bytes: Buffer.from(await upstream.arrayBuffer()),
+        mediaType: outMediaType,
+        cacheControl: outCacheControl,
+      };
+    }
+    file = resolved.file;
+  } else {
+    if (typeof observation.path !== "string")
+      throw Object.assign(new Error("此观测未录制，仅保留交付记录"), { status: 404, code: "OBSERVATION_UNRECORDED" });
+    const originalDirectory = typeof manifest.workspace === "string" ? join(manifest.workspace, "logs", run, "observations") : undefined;
+    const originalName = originalDirectory ? relative(originalDirectory, observation.path) : undefined;
+    const relocated = archiveWorkspace && originalName && safePart(originalName)
+      ? join(path, "observations", originalName) : observation.path;
+    file = await realpath(relocated);
+    if (file !== join(path, "observations", basename(file)))
+      throw new Error("观测文件必须位于当前运行目录");
+  }
+  const bytes = await readFile(file).catch(error => {
+    if (reference && error.code === "ENOENT")
+      throw Object.assign(new Error("观测已过期或已移除"), { status: 410, code: "OBSERVATION_EXPIRED" });
+    throw error;
+  });
+  return {
+    bytes,
+    // Text media (including HTML source) is model input, never executable page content.
+    mediaType: outMediaType,
+    cacheControl: outCacheControl,
+  };
+  } finally { release(); }
+}
+
+export async function timelineRecord(project: string, run: string, recordId: string, sequence: number,
+  source: { call?: string; observation?: string }, root = globalHome, signal?: AbortSignal): Promise<TimelineRecordDetail> {
+  if (!recordId || !Number.isSafeInteger(sequence) || sequence < 1) throw new Error("无效的时空轴记录引用");
+  const { index, archiveWorkspace, release } = await openRun(project, run, root);
+  try {
+    await prepareRun(index, signal);
+    if (!await hasTimelineReference(index, recordId, sequence, source, signal)) throw new Error("此运行没有引用指定观测");
+    if (!archiveWorkspace) throw new Error("运行记录与工作区身份不一致");
+    const workspace = archiveWorkspace;
+    const stored = await readTimelineRecord(join(workspace, ".ludens", "timeline"), recordId, sequence, signal)
+      .catch(error => { if (error.code === "ENOENT") return undefined; throw error; });
+    if (stored) return stored;
+
+    // Window-only JSON stays in the resident writer. Ask the current registered
+    // workspace host, without starting a sampler or contacting an old run's socket.
+    const latest = latestGameRun((await catalog(root)).find(item => item.id === project));
+    if (latest) {
+      const path = await resolveRun(project, latest.id, root);
+      const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as Manifest;
+      if (manifest.workspaceId === project) {
+        const live = await hostRequest(manifest.socket, { kind: "status", argv: [] }).catch(() => null);
+        if (live?.runId === latest.id) {
+          const response = await hostRequest<{ records?: Array<{ id: string; sequence: number; data?: unknown; space?: unknown }> }>(
+            manifest.socket, { kind: "perception", argv: ["observe"], query: { id: recordId } },
+          ).catch(() => null);
+          const record = response?.records?.find(item => item.id === recordId && item.sequence === sequence);
+          if (record) return { recordId, sequence, ...(record.data === undefined ? {} : { data: record.data }),
+            ...(record.space === undefined ? {} : { space: record.space }) };
+        }
+      }
+    }
+    throw Object.assign(new Error("观测已过期或已移除"), { status: 410, code: "OBSERVATION_EXPIRED" });
+  } finally { release(); }
+}

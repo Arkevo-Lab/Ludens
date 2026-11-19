@@ -46,11 +46,11 @@ export class WorkspaceController {
     signal.throwIfAborted();
     const device = this.device(id);
     if (device) {
-      return JSON.stringify({ ...device, id, usage: `ludens controller ${id} [--args '<JSON object>' | --file <arguments.json>]` }, null, 2);
+      return JSON.stringify({ ...device, id, usage: `ludens-core controller ${id} [--args '<JSON object>' | --file <arguments.json>]` }, null, 2);
     }
     const capability = await this.pythonCapability(id, signal, trace);
     const latest = await readLatestEvals(this.options.workspace);
-    return JSON.stringify({ id, usage: `ludens controller ${id} --args '<JSON object>'`,
+    return JSON.stringify({ id, usage: `ludens-core controller ${id} --args '<JSON object>'`,
       description: capability.description, parameters: capability.parameters,
       recorded: capability.recorded ?? false,
       ...resolveCapabilityEval(capability, latest[capabilityEvalId(capability)]),
@@ -101,6 +101,6 @@ export class WorkspaceController {
       const diagnostic = discovered.diagnostics.find(item => id.startsWith(`python/${item.path}:`));
       if (diagnostic) throw new Error(`Invalid capability ${id}: ${diagnostic.message}`);
     }
-    throw new Error(`Unknown capability: ${id}; use ludens controller list`);
+    throw new Error(`Unknown capability: ${id}; use ludens-core controller list`);
   }
 }

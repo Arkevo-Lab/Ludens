@@ -40,7 +40,7 @@ CLI, TS/Python API, and MCP accept identical JSON parameter objects (CLI support
 baseware controller pad.play --args '{"inputs":[{"atMs":0,"durationMs":500,"state":{"LEFT":1}}],"wait":false}'
 
 # Call via the unified Ludens entry point (with controller/ namespace prefix)
-ludens controller controller/pad.status --args '{"actionId":"<returned-id>"}'
+ludens-core controller controller/pad.status --args '{"actionId":"<returned-id>"}'
 ```
 
 ```python
@@ -133,7 +133,7 @@ baseware driver discover --package 'github:org/repo#rev'
 ```
 
 - **Verification scope**: `discover` downloads and installs dependencies, imports the package entry module, validates `DriverRegistration` field legality, and outputs the `DriverManifest` as JSON; missing fields or illegal types exit with a non-zero status.
-- **Security boundary**: although discovery **never calls `load()`**, package install scripts and module top-level code still execute on the local machine. `discover`, `ludens init`, and `ludens up --dry-run` are not security sandboxes — only load driver packages from trusted sources.
+- **Security boundary**: although discovery **never calls `load()`**, package install scripts and module top-level code still execute on the local machine. `discover`, `ludens workspace init`, and `ludens workspace up` are not security sandboxes — only load driver packages from trusted sources.
 
 ## Upstream contract and upgrades
 
@@ -152,7 +152,7 @@ Baseware separates the global driver registry (`~/.ludens/drivers.json`, contrac
    - `http` / `sse`: Streamable HTTP or Server-Sent Events MCP endpoints.
 3. **Concurrent multi-device mounting and routing**:
    - A workspace binds an authorized node pool (`machines.allowed`) and a primary target (`machines.active`).
-   - At runtime, `ludens machine list | use <id> | connect <id...> | disconnect <id>` (or the Console **Devices** view, `?view=baseware`) switches the primary machine or mounts multiple machines concurrently without restarting the Host or Baseware.
+   - At runtime, `ludens-core machine list | use <id> | connect <id...> | disconnect <id>` (or the Console **Devices** view, `?view=baseware`) switches the primary machine or mounts multiple machines concurrently without restarting the Host or Baseware.
    - When multiple machines are mounted, unprefixed controller calls (`controller/screen.capture`) route to the active primary machine, while prefixed calls (`controller/<machineId>/screen.capture` or `ludens_tools.call("controller/screen.capture", machine="<machineId>")`) route to the specified machine.
 4. **Auto-resync and 3-attempt reconnect-then-pause resilience**:
    - When a mounted device disconnects and restarts, Baseware's background resync loop automatically reconnects the provider and broadcasts `baseware_reconnected`.

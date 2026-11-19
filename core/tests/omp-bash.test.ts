@@ -203,7 +203,7 @@ while True:
     if phase != previous:
         result = {"phase": phase, "pid": os.getpid(), "ludens": attempt(lambda: act(phase))}
         result["baseware"] = attempt(lambda: Device().controller("pad.echo", {"label": phase}))
-        cli = subprocess.run([shutil.which("ludens") or "ludens", "controller", "controller/pad.echo", "--args", json.dumps({"label": phase})], text=True, capture_output=True)
+        cli = subprocess.run([shutil.which("ludens-core") or "ludens-core", "controller", "controller/pad.echo", "--args", json.dumps({"label": phase})], text=True, capture_output=True)
         result["cli"] = {"exitCode": cli.returncode, "stdout": cli.stdout, "stderr": cli.stderr}
         Path("result-" + phase + ".json").write_text(json.dumps(result))
         print("PHASE " + phase, flush=True)
@@ -399,7 +399,7 @@ class Perception:
     decoder.push(await encodeTerminalImage({ type: "image", data: Buffer.from(oldPng).toString("base64"), mimeType: "image/png" }));
     decoder.finish();
     const expectedImage = (await decoder.images())[0]!;
-    const command = `ludens observe --at '${old.records[0]!.recordedAt}' --images`;
+    const command = `ludens-core perception observe --at '${old.records[0]!.recordedAt}' --images`;
     // Test both sibling orders: the final plain-text result must not add a live screenshot.
     for (const reverse of [false, true]) {
       const id = `history-${reverse}`;
@@ -434,7 +434,7 @@ class Perception:
     }
     // Without --images the JSON remains machine-readable and the normal live
     // context continues. A CLI lookup alone is never logged as pixel delivery.
-    await f.prompt(tool("json-only", "bash", { command: `ludens observe --at '${old.records[0]!.recordedAt}'` }));
+    await f.prompt(tool("json-only", "bash", { command: `ludens-core perception observe --at '${old.records[0]!.recordedAt}'` }));
     const events = await f.events();
     expect(events.some(event => event.type === "observation" && event.trace.toolCallId === "json-only")).toBe(false);
     const jsonOnlyReceipts = events.filter(event => event.type === "observation_context"

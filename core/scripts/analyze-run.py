@@ -8,13 +8,16 @@ import json
 import math
 from pathlib import Path
 import re
+import shutil
 import statistics
 import subprocess
 import tempfile
 import sys
 
-# CreateProcess cannot execute the POSIX shell launcher; Windows uses its .cmd twin.
-LUDENS_CLI = str(Path(__file__).resolve().parents[1] / "bin" / ("ludens.cmd" if sys.platform == "win32" else "ludens"))
+LOG_ARCHIVE_CMD = [
+    shutil.which("bun") or "bun",
+    str(Path(__file__).resolve().parents[1] / "src" / "cli" / "log-archive.ts"),
+]
 
 
 def stats(values):
@@ -73,7 +76,7 @@ def read_events(run, epoch):
                 events.append(event)
 
     if multiple_sources:
-        command = [LUDENS_CLI, "logs", "events", "--run", str(run)]
+        command = [*LOG_ARCHIVE_CMD, "events", "--run", str(run)]
         # stderr is bounded on disk; pipe backpressure keeps the producer bounded.
         with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as errors:
             with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=errors, text=True, encoding="utf-8") as process:
@@ -105,8 +108,8 @@ def archived_skill_paths(run):
     @lru_cache(maxsize=64)
     def read(reference):
         try:
-            result = subprocess.run([LUDENS_CLI,
-                "logs", "read", "--run", str(run), "--ref", reference],
+            result = subprocess.run([*LOG_ARCHIVE_CMD,
+                "read", "--run", str(run), "--ref", reference],
                 capture_output=True, text=True, encoding="utf-8", check=True, timeout=30)
             return skill_paths(json.loads(result.stdout)), None
         except subprocess.CalledProcessError as error:

@@ -40,7 +40,7 @@ CLI、TS/Python API 与 MCP 接收完全一致的 JSON 参数对象（CLI 支持
 baseware controller pad.play --args '{"inputs":[{"atMs":0,"durationMs":500,"state":{"LEFT":1}}],"wait":false}'
 
 # 经 Ludens 统一入口调用（带 controller/ 命名空间前缀）
-ludens controller controller/pad.status --args '{"actionId":"<returned-id>"}'
+ludens-core controller controller/pad.status --args '{"actionId":"<returned-id>"}'
 ```
 
 ```python
@@ -133,7 +133,7 @@ baseware driver discover --package 'github:org/repo#rev'
 ```
 
 - **验证范围**：`discover` 会下载并安装依赖、导入包入口模块、校验 `DriverRegistration` 字段合法性并输出 JSON 格式的 `DriverManifest`；若字段缺失或类型非法则以非零状态码退出。
-- **安全边界**：虽然发现阶段**不会调用 `load()`**，但包安装脚本与模块顶层代码仍会在本机执行。`discover`、`ludens init` 与 `ludens up --dry-run` 均不是安全沙箱，请仅加载可信来源的驱动包。
+- **安全边界**：虽然发现阶段**不会调用 `load()`**，但包安装脚本与模块顶层代码仍会在本机执行。`discover`、`ludens workspace init` 与 `ludens workspace up` 均不是安全沙箱，请仅加载可信来源的驱动包。
 
 ## 上游契约与升级
 
@@ -152,7 +152,7 @@ Baseware 将全局驱动库（`~/.ludens/drivers.json`，契约见 [drivers.ts](
    - `http` / `sse`：Streamable HTTP 或 Server-Sent Events MCP 端点。
 3. **多设备并发挂载与精确路由**：
    - 工作区通过 `machines.allowed` 声明允许访问的受控节点池，通过 `machines.active` 指定默认主控节点。
-   - 运行期可通过 `ludens machine list | use <id> | connect <id...> | disconnect <id>`（或控制台「设备（Devices）」视图（`?view=baseware`））在不重启 Host 与 Baseware 的前提下动态切换主控节点或并发挂载多台设备。
+   - 运行期可通过 `ludens-core machine list | use <id> | connect <id...> | disconnect <id>`（或控制台「设备（Devices）」视图（`?view=baseware`））在不重启 Host 与 Baseware 的前提下动态切换主控节点或并发挂载多台设备。
    - 并发挂载多台设备时，未带前缀的调用（如 `controller/screen.capture`）自动路由至当前主控节点；带节点前缀的调用（如 `controller/<machineId>/screen.capture` 或 `ludens_tools.call("controller/screen.capture", machine="<machineId>")`）精确路由至目标节点。
 4. **断联自愈同步与 3 次重连失败自动暂停**：
    - 当受控设备断联后重新启动时，Baseware 后台自愈循环会自动重连并广播 `baseware_reconnected` 事件。

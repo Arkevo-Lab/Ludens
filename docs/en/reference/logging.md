@@ -53,7 +53,7 @@ Media persistence is governed jointly by global `$LUDENS_HOME/storage.json` (`mo
 
 - **Encoding quality presets (`videoQuality`)**: `high` (`crf=18`), `balanced` (default, `crf=23`), and `compact` (`crf=28`), configurable globally in `storage.json` or overridden per workspace via `ludens.json` `storage.videoQuality`.
 - **Three-tier eviction protection (`pins.json` + `protectReferenced`)**: when `local` or a remote backend exceeds `maxBytes / maxAgeHours`, pruning enforces a strict order: **(1)** assets listed in `.ludens/timeline/pins.json` (`{"version": 1, "assets": [...]}`) are never auto-evicted; **(2)** unreferenced segments (not cited by `.ludens/archive/media/*.json`) are evicted oldest-first; **(3)** when `protectReferenced !== false` (default `true`), frames actually delivered to LLM turns are evicted last only if quota is still exceeded. Evicted segments delete the `.mp4` blob and atomically update `<uuid>.mp4.json` to `{ status: "evicted", evictedAt, evictedReason: "quota" | "ttl" | "manual" }`, returning HTTP `410` on media requests.
-- **App-RPC control & live topic**: `ludens app-server` exposes `storage/get`, `storage/update` (preserving saved S3 secrets when `secretAccessKey` is omitted), `storage/test` (verifying real directory or S3 read/write/delete permissions), `storage/maintain` (`prune`, `sync`, `clear_cache` — acquiring `writer.lock` directly when offline or forwarding live to the active perception runtime), and `storage/pin`, broadcasting updates over the `"storage"` event topic.
+- **App-RPC control & live topic**: `ludens-server` exposes `storage/get`, `storage/update` (preserving saved S3 secrets when `secretAccessKey` is omitted), `storage/test` (verifying real directory or S3 read/write/delete permissions), `storage/maintain` (`prune`, `sync`, `clear_cache` — acquiring `writer.lock` directly when offline or forwarding live to the active perception runtime), and `storage/pin`, broadcasting updates over the `"storage"` event topic.
 
 ### 3. Common event envelope
 
@@ -75,7 +75,7 @@ Quick reference of core event contracts:
 
 | Event type | Semantics and lifecycle boundary |
 | --- | --- |
-| `capability_start / capability_end` | `ludens controller` `list / help / call` boundaries; records parameters, capability ID, epoch check result, terminal state (`success / error / cancelled`), and latency. |
+| `capability_start / capability_end` | `ludens-core controller` `list / help / call` boundaries; records parameters, capability ID, epoch check result, terminal state (`success / error / cancelled`), and latency. |
 | `python_capabilities_start / python_capabilities` | Independent child Span of the workspace `@capability` AST static-scan discovery. |
 | `python_capability / python_capability_result` | Function location, source hash, inputs, return value, and `timing: {importDurationMs, executionDurationMs}` of one CLI Python-capability runner invocation (`python_eval_result` carries the same `timing` breakdown). |
 | `python_call_start / python_call_end` | Actual execution Span of a workspace `@capability`-decorated function; records PID, source hash, terminal state, latency, and scoped `rpc: {calls, errors, durationMs, controllerCalls, observeCalls}` aggregated across nested `Client` IPC calls (native Python input/return objects are not force-serialized). Resident parents omitted under `normal` are flagged `parentOmitted: true` on child events. |
@@ -93,7 +93,7 @@ Quick reference of core event contracts:
 
 - **Query events**: each `observe` execution records `perception_observe_start / perception_observe_end`, using that call's `spanId` as the returned envelope's `queryId`.
 - **Delivery receipts**: automatic delivery happens only at prompt start (`before_agent_start`); explicit `observe` calls and native tool images open their own receipts (`origin` of `explicit` and `tool_result`, respectively). Each context delivery to the model writes one `observation_context` event recording `{id, origin, queries, observations, purpose?}`. A subsequent `model_start` references the newly added receipt IDs via `deliveryIds` (note: `deliveryIds` only identifies newly appended observation sources for that round; the model's full history context is defined by the request archive payload).
-- **Auto-delivery dedup cursor**: with auto-injection on (the `context_policy` event records `ludens perception inject on/off` changes), the extension deduplicates by spacetime-axis `recordId` so the same record is never re-appended on later turns; a new sample with identical pixels but a different `recordId` is still delivered as independent time evidence. The sampler state cursor advances only when auto-delivery actually completes; suppressed or cancelled reads never swallow state-change notifications.
+- **Auto-delivery dedup cursor**: with auto-injection on (the `context_policy` event records `ludens-core perception inject on/off` changes), the extension deduplicates by spacetime-axis `recordId` so the same record is never re-appended on later turns; a new sample with identical pixels but a different `recordId` is still delivered as independent time evidence. The sampler state cursor advances only when auto-delivery actually completes; suppressed or cancelled reads never swallow state-change notifications.
 
 ### 2. Model input re-encoding and tool-image tracking
 
@@ -112,7 +112,7 @@ Quick reference of core event contracts:
 
 ### 1. Console Worker and three-layer rebuildable index (`.dashboard-index/`)
 
-The Console isolates log parsing and index building inside a dedicated Node Worker isolated from request/RPC dispatch in `ludens app-server` (zero Next.js runtime). Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.ludens/archive/`, or `.ludens/timeline/`), with three parts:
+The Console isolates log parsing and index building inside a dedicated Node Worker isolated from request/RPC dispatch in `ludens-server` (zero Next.js runtime). Each run directory's `.dashboard-index/` is a purely derived, freely rebuildable secondary index (never modifying the original `events.jsonl`, `streams/`, `.ludens/archive/`, or `.ludens/timeline/`), with three parts:
 
 1. **Source-event location and relation catalog**: each event keeps only its file byte offset, timestamp (taken as `origin.at ?? at`), type, and call identity; model, Span, action, and observation relation tables all point at source-event byte offsets.
 2. **Activity on-demand display recipes**: each display block (Thinking / Text / Tool / System / Diagnostic) keeps only the source-event offsets or `streams/` cutoff byte counts; text is assembled from originals on recipe only when the frontend or pet requests it, never redundantly stored in the index.
@@ -147,12 +147,12 @@ From the repo root, archives can be read and statistics reports generated withou
 python3 core/scripts/analyze-run.py /path/to/workspace/logs/run-id \
   --epoch epoch-id --output /path/to/analysis.json
 
-# Expand one event's archived reference body (media shows reference summary by default; --full restores only media bytes whose originals still exist; video sources keep the lossy-origin mark)
-core/bin/ludens logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
+# Expand one event's archived reference body via pure-RPC ludens logs (media shows reference summary by default; --full restores only media bytes whose originals still exist; video sources keep the lossy-origin mark)
+ludens logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
 
 # Stream all fact-source events declared by the run in order (add --diagnostics to read the full diagnostic stream)
-core/bin/ludens logs events --run /path/to/workspace/logs/run-id
-core/bin/ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
+ludens logs events --run /path/to/workspace/logs/run-id
+ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
 ```
 
 Core metric semantics of [analyze-run.py](../../../core/scripts/analyze-run.py):

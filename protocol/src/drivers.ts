@@ -26,6 +26,18 @@ export interface DriversRegistryFile {
   drivers: RegisteredDriverSpec[];
 }
 
+export interface DiscoveredDriver {
+  spec: string;
+  id: string;
+  version: string;
+  transport?: string;
+  defaultPort?: number;
+  needsGame?: boolean;
+  launchHint?: string;
+  launchCommand?: string[];
+  launchEnv?: Record<string, string>;
+}
+
 export const BUILTIN_CUA_DRIVER_SPEC = "builtin:cua";
 
 export const BUILTIN_CUA_DRIVER: RegisteredDriverSpec = {

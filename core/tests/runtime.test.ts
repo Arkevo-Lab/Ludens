@@ -181,12 +181,11 @@ test("Ludens IPC requires a workspace controller and an agent environment cannot
   try {
     await expect(send(path, { kind: "sensor", argv: ["any", "command"] })).rejects.toThrow("Unknown command");
     await expect(send(path, { kind: "controller", argv: [] })).rejects.toThrow("Workspace controller is unavailable");
+    await expect(send(path, { kind: "auto", argv: ["on"], epoch: "agent-cycle" })).rejects.toThrow("Control management belongs to the human");
     const cli = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "auto", "on"], {
       env: { ...process.env, LUDENS_SOCKET: path, BASEWARE_EPOCH: "agent-cycle" }, stdout: "pipe", stderr: "pipe",
     });
-    const errors = new Response(cli.stderr).text();
     expect(await cli.exited).toBe(1);
-    expect(await errors).toContain("Control management belongs to the human");
     expect(acquire).not.toHaveBeenCalled();
     expect(runtime.status().mode).toBe("manual");
   } finally { await runtime.close(); await close(); await rm(path, { force: true }); acquire.mockRestore(); }

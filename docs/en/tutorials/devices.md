@@ -9,18 +9,18 @@ For protocol-level contracts, read [Baseware Reference](../reference/baseware.md
 Ludens ships with the built-in `cua` (`builtin:cua`) desktop automation driver and a default `local-desktop` machine entry over `stdio` MCP transport. It works out of the box with zero external driver package:
 
 ```sh
-ludens init --name desktop-monitor --driver cua
+ludens workspace init --name desktop-monitor --driver cua
 cd "$HOME/.ludens/workspaces/desktop-monitor"
-ludens up
+ludens workspace up
 ```
 
-If you want `cua` to launch a custom server command, pass `--cua-command <path>` to `ludens init` or set `cuaCommand` in `ludens.json` (or `--cua-command <path>` when running `baseware serve --driver cua` directly).
+If you want `cua` to launch a custom server command, pass `--cua-command <path>` to `ludens workspace init` or set `cuaCommand` in `ludens.json` (or `--cua-command <path>` when running `baseware serve --driver cua` directly).
 
 To test the built-in desktop target from a terminal while running:
 
 ```sh
-ludens controller list
-ludens controller controller/screenshot --help
+ludens-core controller list
+ludens-core controller controller/screenshot --help
 ```
 
 ## 2. Five Transports & Driver Packages
@@ -81,10 +81,10 @@ A workspace can authorize a pool of controlled machines (`machines.allowed`) and
 Switch the primary machine or mount/unmount nodes live without restarting Baseware or your workspace:
 
 ```sh
-ludens machine list
-ludens machine connect local-desktop lab-bench-ssh
-ludens machine use lab-bench-ssh
-ludens machine disconnect edge-sensor-http
+ludens-core machine list
+ludens-core machine connect local-desktop lab-bench-ssh
+ludens-core machine use lab-bench-ssh
+ludens-core machine disconnect edge-sensor-http
 ```
 
 Equivalent direct `baseware` commands are `baseware machine list`, `baseware machine use <id>`, `baseware machine connect <id> [<id2> ...]`, and `baseware machine disconnect <id>`.
@@ -99,9 +99,9 @@ When multiple machines are mounted concurrently:
 CLI examples:
 
 ```sh
-ludens controller controller/screenshot
-ludens controller controller/lab-bench-ssh/gpio.read --args '{"pin":4}'
-ludens controller controller/gpio.read --machine lab-bench-ssh --args '{"pin":4}'
+ludens-core controller controller/screenshot
+ludens-core controller controller/lab-bench-ssh/gpio.read --args '{"pin":4}'
+ludens-core controller controller/gpio.read --machine lab-bench-ssh --args '{"pin":4}'
 ```
 
 Python `ludens_tools` offers matching multi-machine helpers (`machines()`, `use_machine()`, `connect_machines()`, `disconnect_machines()`, and `call(..., machine=...)`):

@@ -6,7 +6,9 @@
     "protocol",
     "baseware",
     "core",
-    "app"
+    "server",
+    "client",
+    "desktop"
   ],
   "trustedDependencies": [
     "electron",

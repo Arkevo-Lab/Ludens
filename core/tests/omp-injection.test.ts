@@ -90,12 +90,12 @@ class Perception:
       const index = snapshots.length;
       if (index === 6) after = json.find(value => value.records)?.nextAfter;
       const calls: Record<number, { name: string; arguments: Record<string, unknown> }> = {
-        1: { name: "bash", arguments: { command: "ludens perception inject off" } },
+        1: { name: "bash", arguments: { command: "ludens-core perception inject off" } },
         3: { name: "bash", arguments: { command: "printf 'ordinary local work\\n'" } },
         4: { name: "observe", arguments: { id: history[0]?.id } },
         5: { name: "observe", arguments: { start: history[0]?.recordedAt, end: history.at(-1)?.recordedAt, limit: 2 } },
         6: { name: "observe", arguments: { start: history[0]?.recordedAt, end: history.at(-1)?.recordedAt, after, limit: 64 } },
-        7: { name: "bash", arguments: { command: "ludens perception inject on" } },
+        7: { name: "bash", arguments: { command: "ludens-core perception inject on" } },
       };
       const call = calls[index];
       const message: AssistantMessage = { role: "assistant", api: model.api, provider: model.provider, model: model.id,

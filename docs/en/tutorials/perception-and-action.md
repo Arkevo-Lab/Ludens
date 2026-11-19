@@ -69,28 +69,28 @@ class Perception:
         return False
 ```
 
-Inspect or switch the live state machine from CLI (`ludens perception`) or Python (`Client().state()` / `Client().transition(...)`):
+Inspect or switch the live state machine from CLI (`ludens-core perception`) or Python (`Client().state()` / `Client().transition(...)`):
 
 ```sh
-ludens perception status
-ludens perception state
-ludens perception transition python/perception.py:Perception.cooldown --args '{"remaining":10}'
-ludens perception inject on
+ludens-core perception status
+ludens-core perception state
+ludens-core perception transition python/perception.py:Perception.cooldown --args '{"remaining":10}'
+ludens-core perception inject on
 ```
 
-Keep `ludens perception inject on` enabled when Shiori should receive freshly sampled primary observations once per turn start while keeping tool replies lean and cache-friendly; toggle `ludens perception inject off` if you only want explicit `ludens observe` queries.
+Keep `ludens-core perception inject on` enabled when Shiori should receive freshly sampled primary observations once per turn start while keeping tool replies lean and cache-friendly; toggle `ludens-core perception inject off` if you only want explicit `ludens-core perception observe` queries.
 
 ## 2. Hot-Reload & `inputGeneration` Lease Isolation
 
 Saving `perception.py` or any `.py` module imported by it automatically reloads the resident Python worker. If you modify non-Python assets (such as template images or detector weights on disk), trigger a manual reload:
 
 ```sh
-ludens perception reload
+ludens-core perception reload
 ```
 
 During **Auto Run**, reloading increments `inputGeneration` under the active Control Cycle `epoch`, immediately zeroes held inputs and cancels in-flight actions from the old generation, and swaps in the new code without interrupting budgets or your Shiori thread.
 
-## 3. Querying `.ludens/timeline/` (`Client.observe()` & `ludens observe`)
+## 3. Querying `.ludens/timeline/` (`Client.observe()` & `ludens-core perception observe`)
 
 During **Auto Run**, every `@record` sample writes structured metadata and compressed 30 Hz H.264 fragmented MP4 segments under `.ludens/timeline/`. Even in **Manual Standby**, the resident worker stays warm to answer read-only history queries.
 
@@ -106,9 +106,9 @@ Supported query parameters for `Client().observe(query)` (`limit` `1..64`):
 CLI equivalent:
 
 ```sh
-ludens observe --limit 5 --images
-ludens observe --capability '*' --start 2026-04-01T10:00:00Z --end 2026-04-01T10:05:00Z
-ludens observe --id <record-id>
+ludens-core perception observe --limit 5 --images
+ludens-core perception observe --capability '*' --start 2026-04-01T10:00:00Z --end 2026-04-01T10:05:00Z
+ludens-core perception observe --id <record-id>
 ```
 
 Check `res["ok"]` in Python when reading observations defensively. Typical `error.code` values from the host subsystem are:
@@ -131,7 +131,7 @@ Operator retention windows live in `.ludens/settings.json` and can be adjusted s
 | `videoSegmentSeconds` | `LUDENS_VIDEO_SEGMENT_SECONDS` | `10..3600` | `300` | Rotation duration (seconds) for `.ludens/timeline/video/*.mp4` segments |
 | `videoIdleSeconds` | `LUDENS_VIDEO_IDLE_SECONDS` | `1..600` | `10` | Idle timeout before flushing/sealing an inactive video track |
 
-Host infrastructure resource ceilings and rate controls (set in the host environment when starting `ludens up` or `ludens run`):
+Host infrastructure resource ceilings and rate controls (set in the host environment when starting `ludens workspace up` or `ludens-core run`):
 
 - `LUDENS_PERCEPTION_SAMPLE_HZ`: Target sampling ceiling (`30.0` by default)
 - `LUDENS_PERCEPTION_PERSIST`: Persistent `.ludens/timeline/` storage (`1`/`true` by default; `0`/`false` for RAM-only hot window)
