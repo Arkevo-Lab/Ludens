@@ -137,14 +137,15 @@ if (existsSync(coreMainEntry)) {
       '--target=bun',
       '--splitting',
       '--external=omp-legacy-pi-modules',
-      '--outdir=dist/core/src/cli',
+      '--outdir=dist/core',
       '--entry-naming=[name].js',
     ],
     'packaged core runtime',
   )
   writeFileSync('dist/core/package.json', JSON.stringify({ name: '@ludens/core', type: 'module' }, null, 2) + '\n')
-  writePosixBin('dist/core/bin/ludens-core', 'src/cli/main.js')
-  writeWinCmdBin('dist/core/bin/ludens-core.cmd', 'src\\cli\\main.js')
+  writeFileSync('dist/core/src/cli/main.ts', 'import "../../main.js";\n')
+  writePosixBin('dist/core/bin/ludens-core', 'main.js')
+  writeWinCmdBin('dist/core/bin/ludens-core.cmd', 'main.js')
   for (const subdir of ['prompts', 'templates', 'python']) {
     const srcDir = resolve('../core', subdir)
     if (existsSync(srcDir)) {
@@ -167,13 +168,13 @@ if (existsSync(basewareMainEntry)) {
     [
       basewareMainEntry,
       '--target=bun',
-      '--splitting',
-      '--outdir=dist/baseware/src',
-      '--entry-naming=[name].js',
+      '--outfile=dist/baseware/main.js',
     ],
     'packaged baseware runtime',
   )
   writeFileSync('dist/baseware/package.json', JSON.stringify({ name: '@ludens/baseware', type: 'module' }, null, 2) + '\n')
-  writePosixBin('dist/baseware/bin/baseware', 'src/main.js')
-  writeWinCmdBin('dist/baseware/bin/baseware.cmd', 'src\\main.js')
+  // Duplicate the self-contained single-file bundle at src/main.ts so `import.meta.main` stays true under Windows cliCommand fallback.
+  cpSync('dist/baseware/main.js', 'dist/baseware/src/main.ts')
+  writePosixBin('dist/baseware/bin/baseware', 'main.js')
+  writeWinCmdBin('dist/baseware/bin/baseware.cmd', 'main.js')
 }

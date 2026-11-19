@@ -154,6 +154,24 @@ describe('app-server-host', () => {
         }),
       ).toBe(posix.join(resourcesPath, 'docs'))
 
+      // Packaged Resources/server/main.js + LUDENS_APP_SERVER_BIN must keep repo === resourcesPath (not Ludens.app)
+      const packagedWithOverrideBin = resolveDaemonLaunch({
+        resourcesPath,
+        platform: 'darwin',
+        env: {
+          LUDENS_APP_SERVER_BIN: '/opt/custom/ludens-server',
+          LUDENS_HOME: '/tmp/ludens-packaged',
+        },
+        exists: p =>
+          p === posix.join(resourcesPath, 'server', 'main.js') ||
+          p === posix.join(resourcesPath, 'out', 'index.html'),
+      })
+      expect(packagedWithOverrideBin.spawnCommand).toEqual({
+        command: '/opt/custom/ludens-server',
+        argsPrefix: [],
+      })
+      expect(packagedWithOverrideBin.repo).toBe(resourcesPath)
+
       expect(
         resolveDaemonLaunch({
           platform: 'darwin',
@@ -370,6 +388,25 @@ describe('app-server-host', () => {
         expect(basewareRes.error).toBeUndefined()
         expect(basewareRes.status).toBe(0)
         expect(basewareRes.stdout).toContain('baseware serve')
+
+        // Verify Windows cliCommand fallback shims (src/cli/main.ts and src/main.ts) also execute cleanly in isolation
+        const coreShimRes = spawnSync(
+          launch.spawnCommand.command,
+          [join(resourcesPath, 'core', 'src', 'cli', 'main.ts'), '--help'],
+          { cwd: isolatedRoot, encoding: 'utf8', env: isolatedEnv },
+        )
+        expect(coreShimRes.error).toBeUndefined()
+        expect(coreShimRes.status).toBe(0)
+        expect(coreShimRes.stdout).toContain('ludens-core')
+
+        const basewareShimRes = spawnSync(
+          launch.spawnCommand.command,
+          [join(resourcesPath, 'baseware', 'src', 'main.ts'), '--help'],
+          { cwd: isolatedRoot, encoding: 'utf8', env: isolatedEnv },
+        )
+        expect(basewareShimRes.error).toBeUndefined()
+        expect(basewareShimRes.status).toBe(0)
+        expect(basewareShimRes.stdout).toContain('baseware serve')
       } finally {
         rmSync(isolatedRoot, { recursive: true, force: true })
       }

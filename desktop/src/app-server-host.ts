@@ -177,9 +177,18 @@ export function resolveDaemonLaunch(
   const home = resolveLudensHome(options)
   const staticDir = options.staticDir ?? resolveStaticDir(options)
   const serverEntry = resolveRepoServerEntry(options)
-  const inferredRepo = exists(serverEntry)
-    ? pathMod.resolve(pathMod.dirname(serverEntry), '../../..')
-    : options.resourcesPath
+  const hasPackagedResourcesServer = Boolean(
+    options.resourcesPath &&
+      (exists(pathMod.join(options.resourcesPath, 'server', 'main.js')) ||
+        exists(pathMod.join(options.resourcesPath, 'server', 'package.json'))),
+  )
+  const inferredRepo = hasPackagedResourcesServer
+    ? options.resourcesPath
+    : exists(serverEntry)
+      ? pathMod.basename(serverEntry) === 'main.js'
+        ? pathMod.resolve(pathMod.dirname(serverEntry), '..')
+        : pathMod.resolve(pathMod.dirname(serverEntry), '../../..')
+      : options.resourcesPath
   const repo = options.repo ?? inferredRepo
 
   if (options.spawnCommand) {
