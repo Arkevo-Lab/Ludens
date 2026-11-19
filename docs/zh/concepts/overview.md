@@ -18,7 +18,7 @@ Ludens 将设备协议、工作区代码与执行沙盒、多工作区控制面�
 
 ```mermaid
 flowchart LR
-    U["操作者（桌面 / 网页 / 移动端 / CLI --remote）"] --> Con["L1 @ludens/client（Vite SPA client/out & ludens CLI）+ @ludens/desktop（ludens-app）"]
+    U["操作者（桌面 / 网页 / 移动端 / CLI --remote）"] --> Con["L1 @ludens/client（Vite SPA client/dist & ludens CLI）+ @ludens/desktop（ludens-app）"]
     Con -->|"UDS app-server.sock / WS /rpc"| Srv["L2 @ludens/server（ludens-server: JSON-RPC 2.0 + EventHub + HMAC /media）"]
     Srv -->|"ludens-core run"| Sh["L3 @ludens/core（Shiori Agent 线程核心）"]
     Sh --> Ws["工作区与常驻感知（30 Hz 时间轴 / 技能与记忆）"]
@@ -57,10 +57,10 @@ flowchart LR
 
 ### 4. 控制面服务端（L2，`@ludens/server`）与客户端控制台（L1，`@ludens/client` + `@ludens/desktop`）
 
-**控制面服务端**（`@ludens/server`，bin `ludens-server`）统一提供 JSON-RPC 2.0（`@ludens/protocol/app-rpc`）、`EventHub` 实时推送（含 `sinceSeq` 增量补齐）、HMAC `/media`、查询/冷索引 Worker 与多工作区 `WorkspaceSupervisor`。**客户端控制台**（`@ludens/client` Vite 静态 SPA `client/out` + 纯 RPC CLI `ludens`，严格仅依赖 `@ludens/protocol`）与 **All-in-One 桌面发行包**（`@ludens/desktop` `ludens-app`）在此之上覆盖四种工况：
+**控制面服务端**（`@ludens/server`，bin `ludens-server`）统一提供 JSON-RPC 2.0（`@ludens/protocol/app-rpc`）、`EventHub` 实时推送（含 `sinceSeq` 增量补齐）、HMAC `/media`、查询/冷索引 Worker 与多工作区 `WorkspaceSupervisor`。**客户端控制台**（`@ludens/client` Vite 静态 SPA `client/dist` + 纯 RPC CLI `ludens`，严格仅依赖 `@ludens/protocol`）与 **All-in-One 桌面发行包**（`@ludens/desktop` `ludens-app`）在此之上覆盖四种工况：
 
 - **零端口桌面端（`ludens-app`）**：经 Unix Domain Socket（`app-server.sock`，**0 个监听 TCP 端口**）连接本地 `ludens-server`，使用 `ludens-app://console/`、`ludens-media://local/media?...`、`window.ludens.rpc` 与 `ActiveCoreQuitGuard`。
-- **托管 Web / 自托管远端服务**：通过 `ludens-server serve` / `ludens-server start`（`--listen ws://HOST:PORT --auth token`）同时提供 `client/out`、WS `/rpc` 与 HMAC `/media`（`#token=` 通过 `history.replaceState` 即时擦除）。
+- **托管 Web / 自托管远端服务**：通过 `bun run start:selfhost` 或 `ludens-server serve` / `ludens-server start`（`--listen ws://HOST:PORT --auth token`）同时提供 `client/dist`、WS `/rpc` 与 HMAC `/media`（`#token=` 通过 `history.replaceState` 即时擦除）。
 - **纯 RPC 客户端 CLI（`ludens`）**：面向人的 `ludens` 命令（`config`、`workspace <init|list|open|forget|import|up|down|services|eval>`、`status|auto|steer|consolidate|stop|model|logs`）在本地 `app-server.sock`（未启动时自动从 `PATH` 按需唤醒 `ludens-server start`）与 `--remote ws(s)://...` 之间透明切换。
 - **独立部署 Web / 移动端与多目标浏览器**：`@ludens/client` 可独立线上发版，通过 `<ConnectionTargetDialog>` 在 `electron-local`、`same-origin` 与异源 `remote` 目标间无缝切换。
 

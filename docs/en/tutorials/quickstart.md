@@ -19,22 +19,24 @@ Run the repository bootstrap commands from the project root and expose the works
 git clone https://github.com/Arkevo-Lab/Ludens.git && cd Ludens
 bun install --frozen-lockfile
 uv sync --project core/python --frozen
-(cd client && npm run build)
+bun run build
 export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/server/bin:$PWD/client/bin:$PWD/desktop/bin:$PATH"
 ```
+
+> Root `bun run build` builds every autonomous package `dist/` output (`client/dist`, `server/dist`, `core/dist`, `baseware/dist`, `desktop/dist/electron`); you can also run individual pipelines via `bun run build:client`, `bun run build:server`, `bun run build:sandbox`, or `bun run build:desktop`.
 
 After `export PATH`, `ludens` (`@ludens/client` pure-RPC operator CLI), `ludens-server` (`@ludens/server` control-plane server), `ludens-core` (`@ludens/core` per-workspace execution kernel and sandbox CLI), `baseware` (`@ludens/baseware` cross-device integration layer), and `ludens-app` (`@ludens/desktop` desktop app) are available in your shell. To persist `PATH`, add that export line (with the repository path expanded) to your shell profile (`~/.zshrc` or `~/.bashrc`).
 
 ## 3. Three Runtime Surfaces & Pure-RPC CLI
 
-All surfaces share one **Vite Static SPA (`client/out`)**, one `@ludens/protocol/app-rpc` **JSON-RPC 2.0** contract, and one control-plane server **`@ludens/server` (`ludens-server`)** (supervising per-workspace `@ludens/core` `ludens-core run` processes following **1 Workspace = 1 Core**), negotiating an explicit `runtimeProfile` and `HostSessionCapabilities` during session initialization.
+All surfaces share one **Vite Static SPA (`client/dist`)**, one `@ludens/protocol/app-rpc` **JSON-RPC 2.0** contract, and one control-plane server **`@ludens/server` (`ludens-server`)** (supervising per-workspace `@ludens/core` `ludens-core run` processes following **1 Workspace = 1 Core**), negotiating an explicit `runtimeProfile` and `HostSessionCapabilities` during session initialization.
 
 ### 1. Desktop App (`ludens-app` — Primary Daily Local Entry Point, `desktop`)
 
-Build the desktop shell once, then open the native window:
+If you have not already run root `bun run build`, build the desktop shell first, then open the native window:
 
 ```sh
-(cd desktop && npm run desktop:build)
+bun run build:desktop
 ludens-app --show-window
 ```
 
@@ -46,42 +48,52 @@ Common flags for `ludens-app`:
 - `--background`: Launch in tray mode without opening the main window immediately
 - `--show-window`: Bring the Console window to focus on startup
 
-`ludens-app` is the primary daily local entry point. It uses `ensureLocalAppDaemon` per `LUDENS_HOME` (default `~/.ludens`) to start or reuse a singleton `ludens-server` over Unix Domain Socket (`app-server.sock`) with **0 listening TCP ports** and full host capabilities (local filesystem pickers, `file:` driver specs, `cuaCommand` overrides, and local storage directories). It loads the packaged SPA from `ludens-app://console/` (`client/out`), serves media over `ludens-media://local/media?...` (via UDS `media/resolve` with `206` `Range`), and bridges renderer, native directory/ROM dialog pickers, and Desktop Pet RPC via `window.ludens.rpc` and `window.ludens.dialog.pickPath`. While connected cleanly over local `electron-local` UDS, the sidebar hides the connection pill for distraction-free native chrome, while `⌘K / Ctrl+K` Quick Switcher lets you open **Switch Connection Target / Remote Server** anytime.
+`ludens-app` is the primary daily local entry point. It uses `ensureLocalAppDaemon` per `LUDENS_HOME` (default `~/.ludens`) to start or reuse a singleton `ludens-server` over Unix Domain Socket (`app-server.sock`) with **0 listening TCP ports** and full host capabilities (local filesystem pickers, `file:` driver specs, `cuaCommand` overrides, and local storage directories). It loads the packaged SPA from `ludens-app://console/` (`client/dist`, packaged as `Resources/client` in Electron), serves media over `ludens-media://local/media?...` (via UDS `media/resolve` with `206` `Range`), and bridges renderer, native directory/ROM dialog pickers, and Desktop Pet RPC via `window.ludens.rpc` and `window.ludens.dialog.pickPath`. While connected cleanly over local `electron-local` UDS, the sidebar hides the connection pill for distraction-free native chrome, while `⌘K / Ctrl+K` Quick Switcher lets you open **Switch Connection Target / Remote Server** anytime.
 
-Trigger the **New Workspace** wizard from the sidebar Workspace Switcher footer, `⌘K / Ctrl+K` Quick Switcher, or **Workspaces** (`?view=workspaces&create=1`): bind a registered **Device Node** from `~/.ludens/machines.json` in one click, choose an **Installed Driver** with inline ROM & port fields, or verify & save a **New Driver Package**, pick your model inline, and click **Create & launch into Live** to initialize, boot services, and enter **Live** (`?view=live`) directly (even on a 0-run workspace): typing a goal prompt or clicking **Start Auto Run** spawns that workspace's **Core + Baseware** on demand (`launchedBy: "app"`) without running `ludens workspace up` first (you can also explicitly click **Start Workspace / Reload Core / Stop** from **Config**, `?view=perception`). The sidebar **Active Cores** list shows all running Cores with `App` / `CLI` origin badges and inline stop (`■`) buttons. Closing the window (`×`) hides it to the system tray (keeping active Cores running; the optional **Desktop Pet** defaults to `!auto` multi-Core auto-follow, prioritizing pending `🆘` `pendingOutbound > 0`, then the focused window's Core, then a background **Auto Run** Core, and can be toggled in **Settings** or suppressed with `LUDENS_DISABLE_COMPANION=1`); quitting (`⌘Q` / `before-quit` / tray **Quit**) runs `ActiveCoreQuitGuard`: if 0 Cores are running, the app exits immediately leaving the background daemon intact; if active Cores exist, it asks whether to **Keep Running in Background**, **Stop All Cores & Quit**, or **Cancel**. For distributable `.dmg` / `.exe` packages, run `npm --prefix desktop run desktop:dist`.
+Trigger the **New Workspace** wizard from the sidebar Workspace Switcher footer, `⌘K / Ctrl+K` Quick Switcher, or **Workspaces** (`?view=workspaces&create=1`): bind a registered **Device Node** from `~/.ludens/machines.json` in one click, choose an **Installed Driver** with inline ROM & port fields, or verify & save a **New Driver Package**, pick your model inline, and click **Create & launch into Live** to initialize, boot services, and enter **Live** (`?view=live`) directly (even on a 0-run workspace): typing a goal prompt or clicking **Start Auto Run** spawns that workspace's **Core + Baseware** on demand (`launchedBy: "app"`) without running `ludens workspace up` first (you can also explicitly click **Start Workspace / Reload Core / Stop** from **Config**, `?view=perception`). The sidebar **Active Cores** list shows all running Cores with `App` / `CLI` origin badges and inline stop (`■`) buttons. Closing the window (`×`) hides it to the system tray (keeping active Cores running; the optional **Desktop Pet** defaults to `!auto` multi-Core auto-follow, prioritizing pending `🆘` `pendingOutbound > 0`, then the focused window's Core, then a background **Auto Run** Core, and can be toggled in **Settings** or suppressed with `LUDENS_DISABLE_COMPANION=1`); quitting (`⌘Q` / `before-quit` / tray **Quit**) runs `ActiveCoreQuitGuard`: if 0 Cores are running, the app exits immediately leaving the background daemon intact; if active Cores exist, it asks whether to **Keep Running in Background**, **Stop All Cores & Quit**, or **Cancel**. For local unpacked verification, run `bun run pack:desktop`; for distributable `.dmg` / `.exe` installers, run `bun run dist:desktop`.
 
 ### 2. Hosted Cloud / Remote Node & Mobile (`ludens-server` — Managed Sandbox, `remote`)
 
-For hosted cloud SaaS deployments, remote compute nodes, and mobile/tablet browsers, start the control-plane server `ludens-server serve` (or background daemon `ludens-server start`) serving the static SPA (`client/out`), WebSocket JSON-RPC `/rpc`, HMAC capability-ticket `/media`, and `/health` (and optionally `--trusted-origin` for standalone cross-origin `@ludens/client` deployments):
+For hosted cloud SaaS deployments, remote compute nodes, and mobile/tablet browsers, use the root `bun run start:selfhost` shortcut or start the control-plane server `ludens-server serve` (or background daemon `ludens-server start`) serving the static SPA (`client/dist`), WebSocket JSON-RPC `/rpc`, HMAC capability-ticket `/media`, and `/health` (and optionally `--trusted-origin` for standalone cross-origin `@ludens/client` deployments):
 
 ```sh
-# Hosted cloud or remote node (mandatory --auth token whenever ws:// runs without --dev)
+# Root self-host shortcut (verifies/builds client/dist and forwards flags to ludens-server serve)
 LUDENS_APP_TOKEN="your-secret-token" \
-  ludens-server serve --listen ws://0.0.0.0:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir client/out
+  bun run start:selfhost -- --listen ws://0.0.0.0:3015 --auth token --token-env LUDENS_APP_TOKEN
+
+# Or invoke ludens-server directly (mandatory --auth token whenever ws:// runs without --dev)
+LUDENS_APP_TOKEN="your-secret-token" \
+  ludens-server serve --listen ws://0.0.0.0:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir client/dist
 
 # Or launch as a background daemon
 LUDENS_APP_TOKEN="your-secret-token" \
-  ludens-server start --listen ws://0.0.0.0:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir client/out
+  ludens-server start --listen ws://0.0.0.0:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir client/dist
 ```
 
 In `remote` mode, **token authentication** and **`managed-sandbox` capabilities** are enforced automatically (no host filesystem escapes, no arbitrary local path mounting, no `file:` local driver packages, no `cuaCommand` overrides, and no custom host `directory` storage — `RpcRouter` rejects restricted mutations with `403 CAPABILITY_RESTRICTED` and Console forms hide host-only controls cleanly). Running `ludens-server serve` with no `--listen` argument starts **UDS-only (`app-server.sock`, 0 listening TCP ports)**. When opening an authenticated URL with a hash bootstrap (`http(s)://host:port/#token=...`) on a phone, tablet, or desktop browser, the responsive Vite SPA immediately captures the token and strips `#token=` via `history.replaceState`, and `<ConnectionTargetDialog>` switches seamlessly between `electron-local`, `same-origin`, and `remote` (`ws://` / `wss://` + token) targets.
 
-### 3. Frontend & AI Harness Dev Preview (`npm run dev` / `--dev` — Isolated by Default, `web-dev`)
+### 3. Frontend & AI Harness Dev Preview (Root `bun run dev*` — Isolated by Default, `web-dev`)
 
-When developing frontend UI components or running automated AI Harness browser checks, launch the isolated `@ludens/client` dev preview workflow:
+When developing frontend UI components, the control-plane server, or running automated AI Harness browser checks, use the 4 root-orchestrated dev modes (`scripts/dev.mjs`; all modes except pure frontend isolate `LUDENS_HOME` to `~/.ludens-dev` by default, while `-- --real-home` or `:real` aliases mount your real `~/.ludens`):
 
 ```sh
-# Isolated web-dev preview (defaults LUDENS_HOME to ~/.ludens-dev so ~/.ludens Desktop App is untouched)
-(cd client && npm run dev)
+# 1. Full-stack Web dev (managed loopback ludens-server --dev + Vite HMR, isolated to ~/.ludens-dev)
+bun run dev            # alias for bun run dev:web
+bun run dev:web:real   # explicitly mount your real ~/.ludens registry
 
-# Explicitly point Vite web-dev at your real ~/.ludens registry
-(cd client && npm run dev:real)
+# 2. Electron desktop dev (pure Vite HMR + Electron native UDS local server, no duplicate TCP server)
+bun run dev:desktop
+bun run dev:desktop:real
 
-# Build Electron shell + run Vite HMR + attach ludens-app --server against ~/.ludens
-(cd desktop && npm run desktop:dev)
+# 3. Pure cross-origin frontend dev (zero local backend, connects to a remote/cloud ludens-server)
+bun run dev:client
+
+# 4. Standalone foreground dev ludens-server
+bun run dev:server
+bun run dev:server:real
 ```
 
-`npm run dev` (`client/scripts/dev.mjs`) spawns a loopback `ludens-server serve --dev --listen ws://127.0.0.1:0 --parent-watchdog` alongside the Vite dev server (default `127.0.0.1:3015`), isolating `LUDENS_HOME` to `~/.ludens-dev` by default (or a custom directory via `-- --home /custom/dir`) so starting or stopping `npm run dev` never collides with or kills your running `~/.ludens` Desktop App daemon. `--dev` is restricted to loopback hosts (`127.0.0.1`, `localhost`, `::1`), grants full capabilities for local harness/browser testing, displays a semantic **`DEV PREVIEW`** badge in the sidebar, and unlocks a **Dev UI Simulation** switcher inside `<ConnectionTargetDialog>` to preview both full-capability desktop forms and `managed-sandbox` cloud/mobile forms. To preview the static production bundle `client/out` locally, run `(cd client && npm start)` (passes `--dev` on tokenless loopback, or `--auth token --token-env LUDENS_APP_TOKEN` when `LUDENS_APP_TOKEN` is set).
+`bun run dev` / `bun run dev:web` spawns a loopback `ludens-server serve --dev --listen ws://127.0.0.1:0 --parent-watchdog` alongside the Vite dev server (default `127.0.0.1:3015`), isolating `LUDENS_HOME` to `~/.ludens-dev` by default (or a custom directory via `-- --home /custom/dir`) so starting or stopping dev preview never collides with or kills your running `~/.ludens` Desktop App daemon. `bun run dev:desktop` starts only pure Vite HMR while letting Electron manage the local `ludens-server` over native UDS, never spawning a duplicate TCP server. `--dev` is restricted to loopback hosts (`127.0.0.1`, `localhost`, `::1`), grants full capabilities for local harness/browser testing, displays a semantic **`DEV PREVIEW`** badge in the sidebar, and unlocks a **Dev UI Simulation** switcher inside `<ConnectionTargetDialog>` to preview both full-capability desktop forms and `managed-sandbox` cloud/mobile forms. To preview the static production bundle `client/dist` locally, run `bun run start:selfhost`.
 
 ### Pure-RPC Client CLI (`ludens` — Local UDS Auto-Wake & `--remote`)
 

@@ -1,6 +1,6 @@
 # 控制台使用与排障
 
-Ludens 在零端口桌面应用（`@ludens/desktop` 走 UDS `app-server.sock`）、托管 Web / 远端 `ludens-server serve --listen ws://...`、Vite HMR 开发模式（`cd client && npm run dev`，默认 `http://127.0.0.1:3015`）以及独立部署的 Web / 移动端多目标切换（`<ConnectionTargetDialog>`）之间共享同一份 `@ludens/client` Vite SPA（`client/out`）与 `@ludens/protocol/app-rpc` JSON-RPC 2.0 **控制台（Console）**，并与结构化事件日志、30 Hz fMP4 归档及终端诊断命令共享同一套数据底座。本教程涵盖控制台全视图操作、回放取证、控制周期卡顿与能力验证失败排查、守护进程健康检查，以及提交问题前的针对性验证命令。
+Ludens 在零端口桌面应用（`@ludens/desktop` 走 UDS `app-server.sock`）、托管 Web / 远端 `ludens-server serve --listen ws://...`（或 `bun run start:selfhost`）、根目录 Vite HMR 开发模式（`bun run dev` / `bun run dev:web`，默认 `http://127.0.0.1:3015` 且隔离至 `~/.ludens-dev`）以及独立部署的 Web / 移动端多目标切换（`<ConnectionTargetDialog>`）之间共享同一份 `@ludens/client` Vite SPA（`client/dist`）与 `@ludens/protocol/app-rpc` JSON-RPC 2.0 **控制台（Console）**，并与结构化事件日志、30 Hz fMP4 归档及终端诊断命令共享同一套数据底座。本教程涵盖控制台全视图操作、回放取证、控制周期卡顿与能力验证失败排查、守护进程健康检查，以及提交问题前的针对性验证命令。
 
 ## 1. 控制台视图速查
 
@@ -91,26 +91,32 @@ ludens logs read --run logs/<run-id> --event <seq> --field <name> --full
 
 ## 5. 运行针对性验证检查
 
-修改或排查底层模块后，按六包分层运行对应的类型检查与测试套件，在确认故障边界后再汇总报告：
+修改或排查底层模块后，可在仓库根目录一键运行全仓质检，或按六包分层运行单包原子命令，在确认故障边界后再汇总报告：
 
 ```sh
+# 根目录一键全仓构建、类型检查与测试（覆盖全部 6 个包）
+bun run build
+bun run typecheck
+bun run test
+
+# 或按六包分层运行针对性单包检查：
 # 1. 协议 Schema、DTO 与契约检查
-(cd protocol && bun run typecheck && bun test)
+(cd protocol && bun run typecheck && bun run test)
 
 # 2. Baseware 驱动、传输与控制租约
-(cd baseware && bun run typecheck && bun test)
+(cd baseware && bun run build && bun run typecheck && bun run test)
 
 # 3. Core 执行沙盒、Python SDK 与模型传输层
-(cd core && bun run typecheck && bun run typescript:test && bun run python:test)
+(cd core && bun run build && bun run typecheck && bun run test)
 
 # 4. Server 控制面服务端、查询引擎与 RPC 路由
-(cd server && bun run typecheck && bun test)
+(cd server && bun run build && bun run typecheck && bun run test)
 
-# 5. Client 控制台静态构建、UI 单测与纯 RPC ludens CLI 单测
-(cd client && npm run build && npm run typecheck && npm test)
+# 5. Client 控制台静态构建（client/dist）、UI 单测与纯 RPC ludens CLI 单测
+(cd client && bun run build && bun run typecheck && bun run test)
 
-# 6. Desktop Electron 桌面宿主构建与规格测试
-(cd desktop && npm run desktop:typecheck && npm run desktop:build && npm run desktop:test)
+# 6. Desktop Electron 桌面宿主构建（desktop/dist/electron）与规格测试
+(cd desktop && bun run build && bun run typecheck && bun run test)
 ```
 
 按需运行的可选专项验证：

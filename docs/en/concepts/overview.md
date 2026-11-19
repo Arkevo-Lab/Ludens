@@ -18,7 +18,7 @@ Ludens separates device plumbing, workspace code and execution sandboxes, the mu
 
 ```mermaid
 flowchart LR
-    U["Operator (Desktop / Web / Mobile / CLI --remote)"] --> Con["L1 @ludens/client (Vite SPA client/out & ludens CLI) + @ludens/desktop (ludens-app)"]
+    U["Operator (Desktop / Web / Mobile / CLI --remote)"] --> Con["L1 @ludens/client (Vite SPA client/dist & ludens CLI) + @ludens/desktop (ludens-app)"]
     Con -->|"UDS app-server.sock / WS /rpc"| Srv["L2 @ludens/server (ludens-server: JSON-RPC 2.0 + EventHub + HMAC /media)"]
     Srv -->|"ludens-core run"| Sh["L3 @ludens/core (Shiori Agent Thread Core)"]
     Sh --> Ws["Workspace & Resident Perception (30 Hz Timeline / Skills)"]
@@ -57,10 +57,10 @@ A **Workspace** (`~/.ludens/workspaces/<name>` or any registered directory) is a
 
 ### 4. Control-Plane Server (L2, `@ludens/server`) & Client Console (L1, `@ludens/client` + `@ludens/desktop`)
 
-The **Control-Plane Server** (`@ludens/server`, bin `ludens-server`) provides unified JSON-RPC 2.0 (`@ludens/protocol/app-rpc`), real-time `EventHub` push (with `sinceSeq` catch-up), HMAC `/media`, query/cold-index Workers, and multi-workspace `WorkspaceSupervisor`. Atop it, the **Client Console** (`@ludens/client` Vite static SPA `client/out` + pure-RPC CLI `ludens`, strictly depending only on `@ludens/protocol`) and **All-in-One Desktop Distribution** (`@ludens/desktop` `ludens-app`) span four surfaces:
+The **Control-Plane Server** (`@ludens/server`, bin `ludens-server`) provides unified JSON-RPC 2.0 (`@ludens/protocol/app-rpc`), real-time `EventHub` push (with `sinceSeq` catch-up), HMAC `/media`, query/cold-index Workers, and multi-workspace `WorkspaceSupervisor`. Atop it, the **Client Console** (`@ludens/client` Vite static SPA `client/dist` + pure-RPC CLI `ludens`, strictly depending only on `@ludens/protocol`) and **All-in-One Desktop Distribution** (`@ludens/desktop` `ludens-app`) span four surfaces:
 
 - **Zero-port Desktop App (`ludens-app`)**: connects to local `ludens-server` over Unix Domain Socket (`app-server.sock`, **0 listening TCP ports**) using `ludens-app://console/`, `ludens-media://local/media?...`, `window.ludens.rpc`, and `ActiveCoreQuitGuard`.
-- **Hosted Web / Self-Hosted Remote Server**: `ludens-server serve` / `ludens-server start` (`--listen ws://HOST:PORT --auth token`) serves `client/out`, WS `/rpc`, and HMAC-signed `/media` (`#token=` scrubbed via `history.replaceState`).
+- **Hosted Web / Self-Hosted Remote Server**: `bun run start:selfhost` or `ludens-server serve` / `ludens-server start` (`--listen ws://HOST:PORT --auth token`) serves `client/dist`, WS `/rpc`, and HMAC-signed `/media` (`#token=` scrubbed via `history.replaceState`).
 - **Pure-RPC Operator CLI (`ludens`)**: human-facing `ludens` commands (`config`, `workspace <init|list|open|forget|import|up|down|services|eval>`, `status|auto|steer|consolidate|stop|model|logs`) switch transparently between local `app-server.sock` (auto-waking `ludens-server start` from `PATH` when offline) and `--remote ws(s)://...`.
 - **Standalone Web / Mobile & Multi-Target Browser SPA**: `@ludens/client` deploys independently online and switches cleanly between `electron-local`, `same-origin`, and cross-origin `remote` targets via `<ConnectionTargetDialog>`.
 

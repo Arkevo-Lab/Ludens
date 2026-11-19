@@ -1,6 +1,6 @@
 # Console Operations & Debugging
 
-Ludens provides a unified **Console** (built as one `@ludens/client` Vite SPA in `client/out` over `@ludens/protocol/app-rpc` JSON-RPC 2.0 — accessible inside the zero-port `@ludens/desktop` Desktop App via `app-server.sock`, on hosted Web/Remote `ludens-server serve --listen ws://...`, via Vite dev proxy `cd client && npm run dev` on `http://127.0.0.1:3015`, or on standalone Web and mobile browsers via `<ConnectionTargetDialog>`) backed by structured event logs, 30 Hz fMP4 archives, and CLI diagnostic commands. This guide covers operating every Console view, investigating failed capability checks and stalled Control Cycles, verifying daemon and socket health, and running targeted verification checks before reporting issues.
+Ludens provides a unified **Console** (built as one `@ludens/client` Vite SPA in `client/dist` over `@ludens/protocol/app-rpc` JSON-RPC 2.0 — accessible inside the zero-port `@ludens/desktop` Desktop App via `app-server.sock`, on hosted Web/Remote `ludens-server serve --listen ws://...` or `bun run start:selfhost`, via root Vite HMR dev `bun run dev` / `bun run dev:web` on `http://127.0.0.1:3015` isolated to `~/.ludens-dev`, or on standalone Web and mobile browsers via `<ConnectionTargetDialog>`) backed by structured event logs, 30 Hz fMP4 archives, and CLI diagnostic commands. This guide covers operating every Console view, investigating failed capability checks and stalled Control Cycles, verifying daemon and socket health, and running targeted verification checks before reporting issues.
 
 ## 1. Console View Reference
 
@@ -91,26 +91,32 @@ See [Logging Reference](../reference/logging.md) and [CLI Reference](../referenc
 
 ## 5. Running Targeted Verification Checks
 
-Before reporting a bug or validating local workspace toolchain changes across the monorepo, run the relevant checks across the 6 packages (typecheck and tests for the layer you touched):
+Before reporting a bug or validating local workspace toolchain changes across the monorepo, run the root full-repo verification commands or targeted single-package checks across the 6 packages:
 
 ```sh
+# Root full-repo build, typecheck, and test across all 6 packages
+bun run build
+bun run typecheck
+bun run test
+
+# Or run targeted single-package checks by layer:
 # 1. Protocol schemas, DTOs, and contracts
-(cd protocol && bun run typecheck && bun test)
+(cd protocol && bun run typecheck && bun run test)
 
 # 2. Baseware drivers, transports, and leases
-(cd baseware && bun run typecheck && bun test)
+(cd baseware && bun run build && bun run typecheck && bun run test)
 
 # 3. Core execution sandbox, Python SDK, and model transport
-(cd core && bun run typecheck && bun run typescript:test && bun run python:test)
+(cd core && bun run build && bun run typecheck && bun run test)
 
 # 4. Server control plane, query engine, and RPC router
-(cd server && bun run typecheck && bun test)
+(cd server && bun run build && bun run typecheck && bun run test)
 
-# 5. Client Console static build, UI unit tests, and pure-RPC ludens CLI tests
-(cd client && npm run build && npm run typecheck && npm test)
+# 5. Client Console static build (client/dist), UI unit tests, and pure-RPC ludens CLI tests
+(cd client && bun run build && bun run typecheck && bun run test)
 
-# 6. Desktop Electron shell build and spec tests
-(cd desktop && npm run desktop:typecheck && npm run desktop:build && npm run desktop:test)
+# 6. Desktop Electron shell build (desktop/dist/electron) and spec tests
+(cd desktop && bun run build && bun run typecheck && bun run test)
 ```
 
 Optional targeted checks when diagnosing specialized subsystems:

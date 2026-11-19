@@ -6,7 +6,7 @@ This reference documents every user-facing and sandbox-internal subcommand, flag
 - **`ludens-server`** (`@ludens/server`, [`server/bin/ludens-server`](../../../server/bin/ludens-server)): **control-plane server & daemon supervisor CLI** — provides `ludens-server <serve|start|stop|restart|status>`, hosting multi-workspace JSON-RPC 2.0 (`/rpc` and `app-server.sock`), real-time `EventHub` push, HMAC `/media`, the query engine, and `WorkspaceSupervisor`.
 - **`ludens-core`** (`@ludens/core`, [`core/bin/ludens-core`](../../../core/bin/ludens-core)): **per-workspace execution kernel & sandbox-internal tool CLI** — provides the single-workspace sandbox entry point `ludens-core run` and sandbox-internal Shiori / developer tools `ludens-core <controller|perception|event|machine|eval>` (the legacy duplicate top-level `observe` alias is removed, unified under `ludens-core perception observe`).
 - **`baseware`** (`@ludens/baseware`, [`baseware/bin/baseware`](../../../baseware/bin/baseware)): **standalone Cross-Device Integration Layer CLI** — daemon server, driver/package discovery, multi-machine routing, direct controller invocation, and MCP bridge mode.
-- **`ludens-app`** (`@ludens/desktop`, [`desktop/bin/ludens-app`](../../../desktop/bin/ludens-app), Windows [`desktop/bin/ludens-app.cmd`](../../../desktop/bin/ludens-app.cmd)): **All-in-One zero-port Electron desktop shell** (`ludens-app://console/` + `ludens-media://local/media?...`), bundling `client/out` + local `ludens-server` + `ludens-core` + `baseware` with one-click switching to any remote `ludens-server`.
+- **`ludens-app`** (`@ludens/desktop`, [`desktop/bin/ludens-app`](../../../desktop/bin/ludens-app), Windows [`desktop/bin/ludens-app.cmd`](../../../desktop/bin/ludens-app.cmd)): **All-in-One zero-port Electron desktop shell** (`ludens-app://console/` + `ludens-media://local/media?...`), assembling autonomous package outputs `client/dist` (`Resources/client` when packaged) + `server/dist` + `core/dist` + `baseware/dist` with one-click switching to any remote `ludens-server`.
 
 > **Global flags, remote connections & on-demand auto-wake**: All `ludens` subcommands accept `--workspace <path>` (overriding `LUDENS_WORKSPACE` and the current working directory), plus `--remote <ws(s)://...>` and `--token <secret>` (overriding `LUDENS_REMOTE_URL` and `LUDENS_REMOTE_TOKEN`).
 > - When `--remote` is passed: `ludens` connects directly to the remote `ludens-server` over WebSocket JSON-RPC;
@@ -146,7 +146,7 @@ Implemented in [`server/src/`](../../../server/src/). Manages the per-`LUDENS_HO
 
 ### `ludens-server serve`
 
-Run the control-plane server in the foreground, serving JSON-RPC 2.0 (`@ludens/protocol/app-rpc`) over UDS NDJSON and WebSocket `/rpc`, real-time `EventHub` subscriptions, HMAC capability-ticket `/media` (`mt=`, `206 Range`), `/health`, and optional static Vite SPA assets (`client/out`, returning `404` for `/api/*`).
+Run the control-plane server in the foreground, serving JSON-RPC 2.0 (`@ludens/protocol/app-rpc`) over UDS NDJSON and WebSocket `/rpc`, real-time `EventHub` subscriptions, HMAC capability-ticket `/media` (`mt=`, `206 Range`), `/health`, and optional static Vite SPA assets (`client/dist`, returning `404` for `/api/*`).
 
 ```bash
 ludens-server serve [--listen <unix://PATH | ws://HOST:PORT>]... \
@@ -301,7 +301,7 @@ baseware mcp                               # Expose Baseware controllers over st
 
 ### `ludens-app` Desktop CLI
 
-Implemented in [`desktop/src/main.ts`](../../../desktop/src/main.ts). Launches the zero-port Electron desktop app loading the bundled `@ludens/client` Vite SPA (`ludens-app://console/` from `client/out`) and local media (`ludens-media://local/media?...`) over UDS `app-server.sock` via `AppServerHost` (`ensureLocalAppDaemon`), with `ActiveCoreQuitGuard` and the optional Desktop Pet (`PetSessionCoordinator`).
+Implemented in [`desktop/src/main.ts`](../../../desktop/src/main.ts). Launches the zero-port Electron desktop app loading the bundled `@ludens/client` Vite SPA (`ludens-app://console/` from `client/dist`, packaged as `Resources/client`) and local media (`ludens-media://local/media?...`) over UDS `app-server.sock` via `AppServerHost` (`ensureLocalAppDaemon`), with `ActiveCoreQuitGuard` and the optional Desktop Pet (`PetSessionCoordinator`).
 
 ```bash
 ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
@@ -325,7 +325,7 @@ Verified across [`protocol/`](../../../protocol/src/), [`baseware/`](../../../ba
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LUDENS_HOME` | `~/.ludens` | Root directory for global config, driver cache, and state (`client` `npm run dev` defaults to isolated `~/.ludens-dev`) |
+| `LUDENS_HOME` | `~/.ludens` | Root directory for global config, driver cache, and state (root `bun run dev` / `dev:web` / `dev:desktop` / `dev:server` default to isolated `~/.ludens-dev`; pass `--real-home` or use `:real` aliases for real `~/.ludens`) |
 | `LUDENS_WORKSPACE` | Current working directory | Default workspace path when `--workspace` is omitted |
 | `LUDENS_SOCKET` | `/tmp/ludens-core-${uid}-${workspaceHash}.sock` | Override Core daemon Unix domain socket path |
 | `BASEWARE_SOCKET` | `/tmp/ludens-baseware-${uid}-${id}.sock` | Override Baseware Unix domain socket path |
@@ -357,8 +357,8 @@ Verified across [`protocol/`](../../../protocol/src/), [`baseware/`](../../../ba
 | `LUDENS_REMOTE_URL` | — | Default `--remote ws(s)://...` server URL for `ludens` pure-RPC CLI commands |
 | `LUDENS_REMOTE_TOKEN` | — | Default bearer token paired with `LUDENS_REMOTE_URL` / `--remote` |
 | `LUDENS_APP_TOKEN` | — | Bearer token environment variable forwarded/read when running authenticated `ludens-server` (`--token-env LUDENS_APP_TOKEN`) |
-| `LUDENS_STATIC_DIR` | — | Static Vite SPA Console asset directory (`client/out`) served by `ludens-server` |
-| `LUDENS_APP_SERVER_URL` | — | Upstream `ludens-server` target proxied by `client/scripts/dev.mjs` / `vite.config.ts` |
+| `LUDENS_STATIC_DIR` | — | Static Vite SPA Console asset directory (`client/dist`) served by `ludens-server` |
+| `LUDENS_APP_SERVER_URL` | — | Upstream `ludens-server` target proxied by root `scripts/dev.mjs` / `client/vite.config.ts` (`/rpc`, `/media`, `/health`) |
 | `LUDENS_APP_DEV_URL` | — | Dev renderer URL loaded by `ludens-app` (`LUDENS_DEV_URL` alias) |
 | `LUDENS_BUN` | — | Path override for the Bun executable |
 | `LUDENS_SERVER_BIN` / `LUDENS_APP_SERVER_BIN` | — | Binary path override when `ludens` CLI or `ludens-app` spawns `ludens-server` |
