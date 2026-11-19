@@ -140,9 +140,10 @@ test("all relative Markdown file links across repository documentation resolve o
     "protocol/README.md",
     "baseware/README.md",
     "core/README.md",
-    "app/README.md",
-    "app/DESIGN.md",
-    "app/AGENTS.md",
+    "server/README.md",
+    "client/README.md",
+    "client/DESIGN.md",
+    "desktop/README.md",
   ];
   const linkRe = /\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)|!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
   const dead: string[] = [];
