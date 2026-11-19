@@ -16,6 +16,53 @@
     {
       "from": "../client/public",
       "to": "public"
+    },
+    {
+      "from": "../docs",
+      "to": "docs"
+    },
+    {
+      "from": "../server",
+      "to": "server",
+      "filter": [
+        "**/*",
+        "!node_modules/**",
+        "!tests/**",
+        "!perf/**",
+        "!*.tsbuildinfo"
+      ]
+    },
+    {
+      "from": "../core",
+      "to": "core",
+      "filter": [
+        "**/*",
+        "!node_modules/**",
+        "!tests/**",
+        "!python/.venv/**",
+        "!python/**/__pycache__/**",
+        "!*.tsbuildinfo"
+      ]
+    },
+    {
+      "from": "../baseware",
+      "to": "baseware",
+      "filter": [
+        "**/*",
+        "!node_modules/**",
+        "!tests/**",
+        "!*.tsbuildinfo"
+      ]
+    },
+    {
+      "from": "../protocol",
+      "to": "protocol",
+      "filter": [
+        "**/*",
+        "!node_modules/**",
+        "!tests/**",
+        "!*.tsbuildinfo"
+      ]
     }
   ],
   "mac": {

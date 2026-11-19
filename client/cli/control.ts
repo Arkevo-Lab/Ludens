@@ -36,19 +36,45 @@ export async function runControlWithClient(
   const target = await resolveWorkspaceTargetViaRpc(client, selectedWorkspace, explicitWorkspace);
 
   if (kind === "stop") {
-    const catalog = (await client.call("catalog/get", { includeEmpty: true })) as Array<{
-      id?: string;
-      runs?: Array<{ id: string; epoch?: string | null; endedAt?: string }>;
-    }>;
-    const project = catalog.find(item => item.id === target.id);
-    const activeRun = project?.runs?.find(run => !run.endedAt) ?? project?.runs?.[0];
-    if (!activeRun) {
-      throw new Error(`No active or recorded run found for workspace ${target.id}`);
+    let runId: string | undefined;
+    let epoch: string | undefined;
+
+    try {
+      const liveStatus = await client.call("runtime/control", {
+        project: target.id,
+        workspace: target.workspace,
+        command: { action: "status" },
+      });
+      if (typeof liveStatus.runId === "string" && liveStatus.runId.trim()) {
+        runId = liveStatus.runId.trim();
+      }
+      if (typeof liveStatus.epoch === "string" && liveStatus.epoch.trim()) {
+        epoch = liveStatus.epoch.trim();
+      }
+    } catch {
+      // Fall back to catalog lookup if runtime/control status is unavailable.
     }
+
+    if (!runId) {
+      const catalog = (await client.call("catalog/get", { includeEmpty: true })) as Array<{
+        id?: string;
+        runs?: Array<{ id: string; epoch?: string | null; endedAt?: string }>;
+      }>;
+      const project = catalog.find(item => item.id === target.id);
+      const activeRun = project?.runs?.find(run => !run.endedAt) ?? project?.runs?.[0];
+      if (!activeRun) {
+        throw new Error(`No active or recorded run found for workspace ${target.id}`);
+      }
+      runId = activeRun.id;
+      if (!epoch && typeof activeRun.epoch === "string" && activeRun.epoch.trim()) {
+        epoch = activeRun.epoch.trim();
+      }
+    }
+
     const res = await client.call("run/stop", {
       project: target.id,
-      run: activeRun.id,
-      ...(activeRun.epoch !== undefined ? { epoch: activeRun.epoch } : {}),
+      run: runId,
+      ...(epoch ? { epoch } : {}),
     });
     out(JSON.stringify(res, null, 2));
     return;

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { resolveLudensServerCommand, resolveViteBin, withBunNodePath } from "./production.mjs";
+import { buildServerSpawn, resolveLudensServerCommand, resolveViteBin, withBunNodePath } from "./production.mjs";
 
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const LOOPBACK_DEV_HOSTS = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
@@ -218,7 +218,13 @@ async function terminateAppServerChild(child, timeoutMs = 6_500) {
 async function spawnManagedAppServer(trustedOrigins, effectiveHome) {
   mkdirSync(effectiveHome, { recursive: true });
   const { command, argsPrefix } = resolveLudensServerCommand(directory, process.env, process.platform);
-  const child = spawn(command, buildManagedAppServerArgs(trustedOrigins, argsPrefix), {
+  const invocation = buildServerSpawn(
+    command,
+    buildManagedAppServerArgs(trustedOrigins, argsPrefix),
+    process.platform,
+    process.env,
+  );
+  const child = spawn(invocation.command, invocation.args, {
     cwd: resolve(directory, ".."),
     env: {
       ...process.env,

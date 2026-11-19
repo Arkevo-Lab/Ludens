@@ -47,10 +47,11 @@ const DEFAULT_CLIENT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..
 export function extractRemoteArgs(
   args: readonly string[],
   env: NodeJS.ProcessEnv = process.env,
+  seed?: { remoteUrl?: string; token?: string },
 ): { remaining: string[]; remote?: RemoteConnectionConfig } {
   const remaining: string[] = [];
-  let remoteUrl: string | undefined;
-  let token: string | undefined;
+  let remoteUrl: string | undefined = seed?.remoteUrl;
+  let token: string | undefined = seed?.token;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i]!;
@@ -144,7 +145,7 @@ export function resolveLocalLudensServerCommand(options: {
   const sep = platform === "win32" ? ";" : delimiter;
   const binNames =
     platform === "win32"
-      ? ["ludens-server.cmd", "ludens-server.exe", "ludens-server"]
+      ? ["ludens-server.exe", "ludens-server.cmd", "ludens-server.bat", "ludens-server"]
       : ["ludens-server"];
   for (const entry of (env.PATH ?? "").split(sep).filter(Boolean)) {
     for (const binName of binNames) {
@@ -153,6 +154,13 @@ export function resolveLocalLudensServerCommand(options: {
         return { command: candidate, argsPrefix: [] };
       }
     }
+  }
+
+  // Prefer executing the monorepo server TS entry directly via Bun (avoids spawning Windows .cmd shims).
+  const repoEntry = resolve(clientRoot, "../server/src/cli/main.ts");
+  if (exists(repoEntry)) {
+    const bun = resolveBunBinary(env, platform, exists) ?? (platform === "win32" ? "bun.exe" : "bun");
+    return { command: bun, argsPrefix: [repoEntry] };
   }
 
   const repoBin = resolve(
@@ -164,15 +172,23 @@ export function resolveLocalLudensServerCommand(options: {
     return { command: repoBin, argsPrefix: [] };
   }
 
-  const repoEntry = resolve(clientRoot, "../server/src/cli/main.ts");
-  if (exists(repoEntry)) {
-    const bun = resolveBunBinary(env, platform, exists);
-    if (bun) {
-      return { command: bun, argsPrefix: [repoEntry] };
-    }
-  }
-
   return null;
+}
+
+export function buildServerSpawnInvocation(
+  spec: ServerCommandSpec,
+  args: readonly string[],
+  platform: NodeJS.Platform = process.platform,
+  env: NodeJS.ProcessEnv = process.env,
+): { command: string; args: string[] } {
+  const fullArgs = [...spec.argsPrefix, ...args];
+  if (platform === "win32" && /\.(cmd|bat)$/i.test(spec.command)) {
+    return {
+      command: env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", spec.command, ...fullArgs],
+    };
+  }
+  return { command: spec.command, args: fullArgs };
 }
 
 function isLocalSocketUnavailableError(error: unknown): boolean {
@@ -192,9 +208,11 @@ async function runStartLocalServer(
   home: string,
   spec: ServerCommandSpec,
   env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<void> {
+  const invocation = buildServerSpawnInvocation(spec, ["start"], platform, env);
   await new Promise<void>((resolveStart, rejectStart) => {
-    const child = spawn(spec.command, [...spec.argsPrefix, "start"], {
+    const child = spawn(invocation.command, invocation.args, {
       env: { ...env, LUDENS_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -294,7 +312,7 @@ export async function withOperatorRpc<T>(
       if (options.startLocalServer) {
         await options.startLocalServer(home, serverSpec);
       } else {
-        await runStartLocalServer(home, serverSpec, env);
+        await runStartLocalServer(home, serverSpec, env, platform);
       }
     } catch (startError) {
       if ((startError as NodeJS.ErrnoException)?.code === "ENOENT") {
