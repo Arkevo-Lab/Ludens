@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { DaemonStatusResult } from "@ludens/protocol/app-rpc";
+import { resolveRepoRoot } from "../query/repo.ts";
 import { NodeUdsRpcClient } from "./app-rpc-client.ts";
 import {
   appServerLockFilePath,
@@ -163,8 +164,7 @@ export function resolveBunExecutable(environment: NodeJS.ProcessEnv = process.en
 }
 
 function resolveDefaultSpawnCommand(repoOverride?: string): { command: string; argsPrefix: string[] } {
-  const repoRoot =
-    repoOverride ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const repoRoot = repoOverride ? resolve(repoOverride) : resolveRepoRoot();
   const mainCli = join(repoRoot, "server", "src", "cli", "main.ts");
   const serverBin = join(repoRoot, "server", "bin", "ludens-server");
 
@@ -312,7 +312,7 @@ export async function ensureLocalAppDaemon(
         value: null,
       };
       const child = spawn(spawnCmd.command, args, {
-        cwd: options.repo ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
+        cwd: options.repo ? resolve(options.repo) : resolveRepoRoot(),
         env,
         detached: true,
         stdio: ["ignore", logFd, logFd],

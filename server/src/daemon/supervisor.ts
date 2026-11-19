@@ -1,7 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import { defaultDriverCacheRoot, resolveDriver } from "@ludens/baseware/drivers/loader.ts";
 import {
   ludensHome,
@@ -10,6 +9,7 @@ import {
   registerWorkspace,
   type BasewareMachineSpec,
 } from "@ludens/protocol/ludens";
+import { resolveRepoRoot } from "../query/repo.ts";
 import type { ServiceLaunchOrigin } from "../query/types.ts";
 import { jobStateFilePath, ludensSocketPath } from "./background-jobs.ts";
 import {
@@ -88,7 +88,7 @@ export class WorkspaceSupervisor {
 
   constructor(options: WorkspaceSupervisorOptions = {}) {
     this.home = resolve(options.home ?? ludensHome());
-    this.repo = options.repo ?? resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+    this.repo = options.repo ? resolve(options.repo) : resolveRepoRoot();
     this.ioFactory = options.ioFactory;
   }
 

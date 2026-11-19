@@ -3,15 +3,25 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
- * Locate the repository root whether this module runs from the source tree or from an
- * installed (copied) workspace package, where `import.meta.url` points into a store.
+ * Locate the repository root whether this module runs from the source tree, a bundled
+ * packaged resource directory (e.g. `Resources/server/main.js`), or an installed workspace
+ * package where `import.meta.url` points into a store.
  * Path arithmetic on the module file keeps bundlers from rewriting the URL statically.
  */
-export const repoRoot = (() => {
+export function resolveRepoRoot(
+  moduleUrl: string = import.meta.url,
+  env: NodeJS.ProcessEnv = process.env,
+  cwd: string = process.cwd(),
+): string {
+  const moduleDir = dirname(fileURLToPath(moduleUrl));
+  const explicit = env.LUDENS_REPO_ROOT?.trim();
   const candidates = [
-    resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
-    resolve(process.cwd(), ".."),
-    process.cwd(),
+    ...(explicit ? [resolve(explicit)] : []),
+    resolve(moduleDir, "../../.."),
+    resolve(moduleDir, "../.."),
+    resolve(moduleDir, ".."),
+    resolve(cwd, ".."),
+    cwd,
   ];
   return (
     candidates.find(
@@ -20,7 +30,9 @@ export const repoRoot = (() => {
         existsSync(join(root, "server", "package.json")),
     ) ?? candidates[0]!
   );
-})();
+}
+
+export const repoRoot = resolveRepoRoot();
 
 /** Resolve the installed `@ludens/core` package root directory. */
 export const corePackageRoot = (() => {

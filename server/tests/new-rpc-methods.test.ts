@@ -7,7 +7,9 @@ import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/lud
 import { JsonArchive } from "@ludens/protocol/log-archive";
 import { adaptWorkspaceCapabilityEval } from "../src/query/capabilities.ts";
 import { clearLogEventHorizons, DEFAULT_LOG_EVENTS_LIMIT, queryRunLogEvents } from "../src/query/logs.ts";
+import { resolveRepoRoot } from "../src/query/repo.ts";
 import { PRESERVED_ENV_KEYS, startBackgroundJob, stopBackgroundJob } from "../src/daemon/process-manager.ts";
+import { WorkspaceSupervisor } from "../src/daemon/supervisor.ts";
 import { AppRpcClientError, NodeUdsRpcClient, WsAppRpcClient } from "../src/daemon/app-rpc-client.ts";
 import { startAppServer } from "../src/server/app-server.ts";
 
@@ -382,13 +384,23 @@ def eval_score():
         "utf8",
       );
 
+      // Concurrent Reader B starts at cursor=0 and finishes (!hasMore) while Reader A is mid-pagination:
+      // it shares Reader A's active horizon and never clobbers or deletes it.
+      const concurrentB = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 10 }, { allowHostPath: true });
+      expect(concurrentB.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l1", "dev-1", "l2", "l3"]);
+      expect(concurrentB.hasMore).toBe(false);
+
       // Page 2 stays pinned to the Page 1 horizon: returns [l2, l3] without shifting or duplicating dev-1.
       const p2 = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
       expect(p2.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
       expect(p2.hasMore).toBe(false);
       expect(p2.nextCursor).toBeNull();
 
-      // A fresh cursor=0 read captures the updated horizon and sees all 6 events.
+      // Retrying Page 2 after !hasMore still sees the intact cached horizon.
+      const p2Retry = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      expect(p2Retry.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
+
+      // A fresh cursor=0 read after active readers finish captures the updated horizon and sees all 6 events.
       const fresh = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 10 }, { allowHostPath: true });
       expect(fresh.events.map(e => (e.data as { tag: string }).tag)).toEqual([
         "l1",
@@ -401,6 +413,29 @@ def eval_score():
       expect(fresh.hasMore).toBe(false);
     } finally {
       clearLogEventHorizons();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("resolveRepoRoot and WorkspaceSupervisor locate packaged Resources/server/main.js and honor LUDENS_REPO_ROOT", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-packaged-repo-")));
+    const resources = join(root, "Resources");
+    await mkdir(join(resources, "core"), { recursive: true });
+    await mkdir(join(resources, "server"), { recursive: true });
+    await writeFile(join(resources, "core", "package.json"), JSON.stringify({ name: "@ludens/core" }), "utf8");
+    await writeFile(join(resources, "server", "package.json"), JSON.stringify({ name: "@ludens/server" }), "utf8");
+    const prevEnv = process.env.LUDENS_REPO_ROOT;
+    try {
+      const bundledUrl = new URL(`file://${join(resources, "server", "main.js")}`).href;
+      expect(resolveRepoRoot(bundledUrl, {}, root)).toBe(resources);
+
+      process.env.LUDENS_REPO_ROOT = resources;
+      expect(resolveRepoRoot(import.meta.url, process.env, root)).toBe(resources);
+      const supervisor = new WorkspaceSupervisor({ home: join(root, "home") });
+      expect(supervisor.repo).toBe(resources);
+    } finally {
+      if (prevEnv === undefined) delete process.env.LUDENS_REPO_ROOT;
+      else process.env.LUDENS_REPO_ROOT = prevEnv;
       await rm(root, { recursive: true, force: true });
     }
   });

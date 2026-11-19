@@ -17,6 +17,7 @@ import {
   type MachineTransportKind,
   type WorkspaceMachinesBinding,
 } from "@ludens/protocol/machines";
+import { resolveRepoRoot } from "../query/repo.ts";
 import type { ServiceLaunchOrigin } from "../query/types.ts";
 import { NodeUdsRpcClient, WsAppRpcClient } from "./app-rpc-client.ts";
 import { send } from "@ludens/core/daemon/transport";
@@ -61,7 +62,7 @@ export interface LaunchPlan {
 export async function launchPlan(
   config: LaunchConfig,
   workspace: string,
-  repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../.."),
+  repo = resolveRepoRoot(),
   socket?: string,
   manifest?: DriverManifest,
   activeMachine?: BasewareMachineSpec,

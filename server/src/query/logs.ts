@@ -91,10 +91,14 @@ interface LogEventHorizon {
   localPath: string;
   localSize: number | null;
   groups: LogHorizonGroup[];
+  createdAt: number;
+  lastPageAt: number;
   expiresAt: number;
+  activeReaders: number;
 }
 
 const HORIZON_TTL_MS = 60_000;
+const ACTIVE_PAGINATION_WINDOW_MS = 5_000;
 const MAX_HORIZON_ENTRIES = 32;
 const horizonCache = new Map<string, LogEventHorizon>();
 
@@ -177,11 +181,15 @@ async function captureLogHorizon(
     groups.push({ files: sortedFiles, dependencies: group.dependencies });
   }
 
+  const now = Date.now();
   return {
     localPath,
     localSize,
     groups,
-    expiresAt: Date.now() + HORIZON_TTL_MS,
+    createdAt: now,
+    lastPageAt: now,
+    expiresAt: now + HORIZON_TTL_MS,
+    activeReaders: 0,
   };
 }
 
@@ -290,16 +298,46 @@ export async function queryRunLogEvents(
 
   const cacheKey = `${runDir}\0${channel}`;
   const now = Date.now();
+  const cached = horizonCache.get(cacheKey);
   let horizon: LogEventHorizon | undefined;
+  let reused = false;
+
   if (cursor > 0) {
-    const cached = horizonCache.get(cacheKey);
-    if (cached && cached.expiresAt > now && (await isHorizonIntact(cached))) {
+    if (cached) {
+      if (cached.expiresAt <= now) {
+        horizonCache.delete(cacheKey);
+        throw Object.assign(
+          new Error("Log pagination snapshot expired; restart from cursor 0"),
+          { status: 409 },
+        );
+      }
+      if (!(await isHorizonIntact(cached))) {
+        horizonCache.delete(cacheKey);
+        throw Object.assign(
+          new Error("Log archive changed during pagination; restart from cursor 0"),
+          { status: 409 },
+        );
+      }
       cached.expiresAt = now + HORIZON_TTL_MS;
+      cached.lastPageAt = now;
       horizon = cached;
-    } else if (cached) {
-      horizonCache.delete(cacheKey);
+      reused = true;
     }
+  } else if (
+    cached &&
+    cached.expiresAt > now &&
+    cached.activeReaders > 0 &&
+    now - cached.lastPageAt < ACTIVE_PAGINATION_WINDOW_MS &&
+    (await isHorizonIntact(cached))
+  ) {
+    // Share the active snapshot with concurrent readers so a fresh cursor=0 request
+    // never clobbers another reader's in-progress pagination.
+    cached.expiresAt = now + HORIZON_TTL_MS;
+    cached.lastPageAt = now;
+    horizon = cached;
+    reused = true;
   }
+
   if (!horizon) {
     horizon = await captureLogHorizon(runDir, channel, options.signal);
   }
@@ -322,11 +360,19 @@ export async function queryRunLogEvents(
     index += 1;
   }
 
-  if (hasMore) {
-    storeHorizon(cacheKey, horizon);
-  } else {
-    horizonCache.delete(cacheKey);
+  if (cursor === 0) {
+    if (hasMore) {
+      horizon.activeReaders += 1;
+    }
+  } else if (!hasMore && reused) {
+    horizon.activeReaders = Math.max(0, horizon.activeReaders - 1);
   }
+
+  // Keep the snapshot cached until TTL/LRU eviction rather than deleting on !hasMore,
+  // so concurrent readers and retries on the final page remain consistent.
+  horizon.lastPageAt = Date.now();
+  horizon.expiresAt = horizon.lastPageAt + HORIZON_TTL_MS;
+  storeHorizon(cacheKey, horizon);
 
   return {
     events,
