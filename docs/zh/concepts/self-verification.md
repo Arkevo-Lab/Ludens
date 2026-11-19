@@ -17,9 +17,9 @@ Ludens 把智能体从缓慢的“看图-点击”循环转变为工作区工程
 每个工作区由 `perception.py:Perception` 承载一个常驻 Python 子进程：
 
 - **租约作用域连续采样**：在**自主运行**期间，宿主按配置的频率上限（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30 Hz`）连续调度 `Perception.sample()`，若单次采样较慢则自动背压不重叠；退回**手动待命**时停止采样并保持热备，继续服务只读时间轴查询。
-- **三个核心装饰器**：`@capability` 将带类型注解与文档字符串的 Python 函数注册进统一 `ludens controller` 目录；`@record` 将返回信封（`text`、`data`、`media`、`sampledAt`、`sources`、`space`、`effect`、`transition`）持久化至 `.ludens/timeline/`；`@observe` 声明整个工作区唯一的主观测通道（通常标在 `Perception.sample` 上）。
-- **进程内状态机与热重载**：运行在常驻状态机中的能力可返回可选的 `effect`（立即触发设备或本地能力调用）与 `transition`（切换到下一个状态及参数），支持通过 `ludens perception state` / `ludens perception transition <target>`（或 `Client().state()` / `Client().transition(...)`）实时观测与切换状态。编辑 `perception.py` 或其导入的 `.py` 模块会自动触发热重载，并同步安全归零残留设备输入。
-- **单一事实时间轴**：`.ludens/timeline/` 统一存放 `@record` 元数据、SHA-256 去重媒体与分段 fMP4 视频（`video/`），支撑 `ludens observe`、`Client().observe()`、`Client().replay(...)` 以及控制台**回放**页（`?view=replay`）的逐帧对照拖拽。
+- **三个核心装饰器**：`@capability` 将带类型注解与文档字符串的 Python 函数注册进统一 `ludens-core controller` 目录；`@record` 将返回信封（`text`、`data`、`media`、`sampledAt`、`sources`、`space`、`effect`、`transition`）持久化至 `.ludens/timeline/`；`@observe` 声明整个工作区唯一的主观测通道（通常标在 `Perception.sample` 上）。
+- **进程内状态机与热重载**：运行在常驻状态机中的能力可返回可选的 `effect`（立即触发设备或本地能力调用）与 `transition`（切换到下一个状态及参数），支持通过 `ludens-core perception state` / `ludens-core perception transition <target>`（或 `Client().state()` / `Client().transition(...)`）实时观测与切换状态。编辑 `perception.py` 或其导入的 `.py` 模块会自动触发热重载，并同步安全归零残留设备输入。
+- **单一事实时间轴**：`.ludens/timeline/` 统一存放 `@record` 元数据、SHA-256 去重媒体与分段 fMP4 视频（`video/`），支撑 `ludens-core perception observe`、`Client().observe()`、`Client().replay(...)` 以及控制台**回放**页（`?view=replay`）的逐帧对照拖拽。
 
 ## Capability – Eval – Env 三元体系
 
@@ -81,11 +81,11 @@ def eval_settle_and_trigger() -> dict:
     return {"passed": passed, "rewards": {"accuracy": 1.0 if passed else 0.0}}
 ```
 
-执行 `ludens eval run --all`（或在控制台**能力**页 `?view=caps` 点击**运行全部评测**）会自动剥离实时设备 Socket 与 `epoch` 租约，基于 `.ludens/timeline/` 或 `@eval_env` 执行全量验证，并将不可变运行记录持久化至 `.ludens/evals/`。
+执行 `ludens workspace eval run --all`（沙盒内为 `ludens-core eval run --all`，或在控制台**能力**页 `?view=caps` 点击**运行全部评测**）会自动剥离实时设备 Socket 与 `epoch` 租约，基于 `.ludens/timeline/` 或 `@eval_env` 执行全量验证，并将不可变运行记录持久化至 `.ludens/evals/`。
 
 ## 状态门禁、协同演化与 `adapt` 失败帧闭环
 
-静态发现与 `.ludens/evals/latest.json` 会为每项 `@capability` 汇总出六种状态之一，同步呈现在 `ludens eval list` 与控制台**能力**页（`?view=caps`）：
+静态发现与 `.ludens/evals/latest.json` 会为每项 `@capability` 汇总出六种状态之一，同步呈现在 `ludens workspace eval list`（或 `ludens-core eval list`）与控制台**能力**页（`?view=caps`）：
 
 | 状态 | 含义 |
 | --- | --- |
@@ -101,10 +101,10 @@ def eval_settle_and_trigger() -> dict:
 1. **构建最小 `v0` 并实机探针采样**：先写最小可用的 `@capability` 与 `@eval_env`，再用 `with record_window() as win:` 包裹一次真实尝试（或用 `@record @capability` 探针），同时让 30 Hz `Perception.sample()` 录下完整过程。
 2. **用 `adapt` 锁定现实偏差**：一旦已 `verified` 的能力在真实环境中漏检或误触发，立即关联失败记录 ID 标记为待适配：
    ```sh
-   ludens eval adapt python/skills/watchdog.py:settle_and_trigger --reason "背光切换导致误触发" --record <record-id>
+   ludens workspace eval adapt python/skills/watchdog.py:settle_and_trigger --reason "背光切换导致误触发" --record <record-id>
    ```
-   `adapt` 会同时钉住评测模块（`evalCodeSHA`）与绑定 `@eval_env` 模块（`envCodeSHA`）的哈希。若未修改二者源码而直接重跑，`ludens eval run` 仍维持失败与 `adapting` 状态。
-3. **先升级 Critic，再迭代 Actor**：通过 `Client().replay(around=record_id, before_seconds=2.0, after_seconds=2.0)` 或 `Client().replay(win)` 切片调出 30 Hz 失败轨迹，校准真实时序与负样本干扰，先让 `@eval_env` 重现错误并使旧版策略失败（`passed=False`），随后再修改 `@capability` 并执行 `ludens eval run <id>` 直至恢复 `verified`。
+   `adapt` 会同时钉住评测模块（`evalCodeSHA`）与绑定 `@eval_env` 模块（`envCodeSHA`）的哈希。若未修改二者源码而直接重跑，`ludens workspace eval run`（或 `ludens-core eval run`）仍维持失败与 `adapting` 状态。
+3. **先升级 Critic，再迭代 Actor**：通过 `Client().replay(around=record_id, before_seconds=2.0, after_seconds=2.0)` 或 `Client().replay(win)` 切片调出 30 Hz 失败轨迹，校准真实时序与负样本干扰，先让 `@eval_env` 重现错误并使旧版策略失败（`passed=False`），随后再修改 `@capability` 并执行 `ludens workspace eval run <id>`（或沙盒内 `ludens-core eval run <id>`）直至恢复 `verified`。
 
 ## 长期经验沉淀：`skills/`、`memory/current.md` 与 `MEMORY.md`
 

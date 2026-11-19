@@ -37,7 +37,7 @@ Fixing this was not just a matter of changing a prompt comment; it clarified who
 
 ## Why some parameters are editable in Console while others stay in infrastructure
 
-A natural follow-up question is: if `hotSeconds`, `videoSegmentSeconds`, and `videoIdleSeconds` are exposed in `.ludens/settings.json` and the Console's Perception Settings panel (`core/src/core/query/perception-config.ts`), why not expose `sampleHz` or `hotBytes` there too — or conversely, why allow editing those three time windows at all?
+A natural follow-up question is: if `hotSeconds`, `videoSegmentSeconds`, and `videoIdleSeconds` are exposed in `.ludens/settings.json` and the Console's Perception Settings panel (`server/src/query/perception-config.ts`), why not expose `sampleHz` or `hotBytes` there too — or conversely, why allow editing those three time windows at all?
 
 1. **Why the three time-window settings are operator-editable (`hotSeconds`, `videoSegmentSeconds`, `videoIdleSeconds`)**:
    - They express **inspection and archiving ergonomics** that vary by workflow. When debugging a fast-changing scene or real-time task, an operator may want a shorter `videoSegmentSeconds` so finalized MP4 chunks rotate quickly, or a longer `hotSeconds` (`10–3600` seconds) so recent raw frames stay deliverable straight from memory without cold MP4 decode.
@@ -50,4 +50,4 @@ A natural follow-up question is: if `hotSeconds`, `videoSegmentSeconds`, and `vi
 
 - `core/python/ludens_tools/_perception.py` now reads `sample_hz` exclusively from `LUDENS_PERCEPTION_SAMPLE_HZ` (default `30.0` Hz via `core/python/ludens_tools/_sampling.py`), ignoring any `sample_hz` attribute on the workspace class.
 - `core/templates/perception.py` and `core/templates/AGENTS.md` no longer expose `sample_hz` as a class attribute or invite the agent to "tune as needed"; `AGENTS.md` explicitly warns against adding artificial `sleep` throttling inside `Perception.sample()`.
-- The effective `sampleHz` remains visible in `ludens status`, `ludens perception status`, and the Console's read-only runtime status check (`PerceptionRuntimeSnapshot`) as observable infrastructure facts.
+- The effective `sampleHz` remains visible in `ludens status`, `ludens-core perception status`, and the Console's read-only runtime status check (`PerceptionRuntimeSnapshot`) as observable infrastructure facts.

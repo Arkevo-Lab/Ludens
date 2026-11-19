@@ -69,28 +69,28 @@ class Perception:
         return False
 ```
 
-可通过 CLI（`ludens perception`）或 Python（`Client().state()` / `Client().transition(...)`）实时查看与切换状态机：
+可通过 CLI（`ludens-core perception`）或 Python（`Client().state()` / `Client().transition(...)`）实时查看与切换状态机：
 
 ```sh
-ludens perception status
-ludens perception state
-ludens perception transition python/perception.py:Perception.cooldown --args '{"remaining":10}'
-ludens perception inject on
+ludens-core perception status
+ludens-core perception state
+ludens-core perception transition python/perception.py:Perception.cooldown --args '{"remaining":10}'
+ludens-core perception inject on
 ```
 
-保持 `ludens perception inject on` 开启时，Shiori 会在每轮开始时自动接收一次最新的主通道观测，同时保持工具返回体精简以保护 Prompt 缓存命中率；若希望完全改为按需检索，可关闭为 `ludens perception inject off`。
+保持 `ludens-core perception inject on` 开启时，Shiori 会在每轮开始时自动接收一次最新的主通道观测，同时保持工具返回体精简以保护 Prompt 缓存命中率；若希望完全改为按需检索，可关闭为 `ludens-core perception inject off`。
 
 ## 2. 热重载与 `inputGeneration` 租约隔离
 
 修改保存 `perception.py` 或其导入的任意工作区 `.py` 模块时，系统会自动热重载常驻进程；如果更新的是非 Python 资源文件（如权重或模板图片），可手动触发重载：
 
 ```sh
-ludens perception reload
+ludens-core perception reload
 ```
 
 在**自主运行**期间发生重载时，宿主会在当前控制周期 `epoch` 下递增 `inputGeneration`，立即把旧版本持有的设备输入归零并取消未完成动作，再无缝切换到新版状态机——整个过程不会丢失当前 `epoch`、时间/请求预算或 Shiori 会话线程。
 
-## 3. 查询 `.ludens/timeline/`（`Client.observe()` 与 `ludens observe`）
+## 3. 查询 `.ludens/timeline/`（`Client.observe()` 与 `ludens-core perception observe`）
 
 在**自主运行**期间，每次 `@record` 采样都会将元数据与 30 Hz H.264 分片 fMP4 视频写入 `.ludens/timeline/`；即使切回**手动待命**，常驻进程也会保持待命状态以响应只读查询。
 
@@ -106,9 +106,9 @@ ludens perception reload
 对应的终端命令：
 
 ```sh
-ludens observe --limit 5 --images
-ludens observe --capability '*' --start 2026-04-01T10:00:00Z --end 2026-04-01T10:05:00Z
-ludens observe --id <record-id>
+ludens-core perception observe --limit 5 --images
+ludens-core perception observe --capability '*' --start 2026-04-01T10:00:00Z --end 2026-04-01T10:05:00Z
+ludens-core perception observe --id <record-id>
 ```
 
 在 Python 中建议检查 `res["ok"]`，常见返回错误码（`res["error"]["code"]`）包括：
@@ -131,7 +131,7 @@ ludens observe --id <record-id>
 | `videoSegmentSeconds` | `LUDENS_VIDEO_SEGMENT_SECONDS` | `10..3600` | `300` | `.ludens/timeline/video/*.mp4` 视频分片的轮转时长（秒） |
 | `videoIdleSeconds` | `LUDENS_VIDEO_IDLE_SECONDS` | `1..600` | `10` | 视频轨空闲多少秒后自动封口落盘 |
 
-宿主机全局资源上限与采样频率变量（在启动 `ludens up` 或 `ludens run` 前由宿主机环境指定）：
+宿主机全局资源上限与采样频率变量（在启动 `ludens workspace up` 或 `ludens-core run` 前由宿主机环境指定）：
 
 - `LUDENS_PERCEPTION_SAMPLE_HZ`：目标采样率上限（默认 `30.0` Hz）
 - `LUDENS_PERCEPTION_PERSIST`：是否持久化 `.ludens/timeline/`（默认 `1`/`true`；设为 `0`/`false` 仅保留热内存窗口）

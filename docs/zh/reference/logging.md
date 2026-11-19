@@ -57,7 +57,7 @@
 
 - **编码画质档位（`videoQuality`）**：`high`（`crf=18`）、`balanced`（默认，`crf=23`）、`compact`（`crf=28`），支持在 `storage.json` 全局设定或在工作区 `ludens.json` 的 `storage.videoQuality` 按工作区覆盖。
 - **三级淘汰保护（`pins.json` + `protectReferenced`）**：当 `local` 超出 `maxBytes / maxAgeHours` 或远端后端自身超出配额时，清理器遵循严格顺序：**(1)** `.ludens/timeline/pins.json`（`{"version": 1, "assets": [...]}`）中的资产永不自动淘汰；**(2)** 优先淘汰未被 `.ludens/archive/media/*.json` 引用的普通采样分段；**(3)** 当 `protectReferenced !== false`（默认开启）时，实际交付给 LLM 回合的观测帧排在最后，仅在普通分段耗尽仍超配额时才淘汰。已淘汰分段删除 `.mp4` 实体并原子更新 `<uuid>.mp4.json` 为 `{ status: "evicted", evictedAt, evictedReason: "quota" | "ttl" | "manual" }`，媒体端点对此返回 HTTP `410`。
-- **App-RPC 管理与实时推送**：`ludens app-server` 暴露 `storage/get`、`storage/update`（编辑已有 S3 配置留空密钥时自动保留原密钥）、`storage/test`（目录读写与 S3 探针写入/读取/删除校验）、`storage/maintain`（`prune`、`sync`、`clear_cache`，离线工作区获取 `writer.lock` 直接执行，在线工作区经活跃感知进程无损转发）与 `storage/pin`，并通过 `"storage"` 事件主题向控制台广播变更。
+- **App-RPC 管理与实时推送**：`ludens-server` 暴露 `storage/get`、`storage/update`（编辑已有 S3 配置留空密钥时自动保留原密钥）、`storage/test`（目录读写与 S3 探针写入/读取/删除校验）、`storage/maintain`（`prune`、`sync`、`clear_cache`，离线工作区获取 `writer.lock` 直接执行，在线工作区经活跃感知进程无损转发）与 `storage/pin`，并通过 `"storage"` 事件主题向控制台广播变更。
 
 ### 3. 事件通用信封结构
 
@@ -79,7 +79,7 @@
 
 | 事件类型 | 语义与生命周期边界 |
 | --- | --- |
-| `capability_start / capability_end` | `ludens controller` 的 `list / help / call` 边界，记录参数、能力 ID、epoch 校验结果、终态（`success / error / cancelled`）与耗时。 |
+| `capability_start / capability_end` | `ludens-core controller` 的 `list / help / call` 边界，记录参数、能力 ID、epoch 校验结果、终态（`success / error / cancelled`）与耗时。 |
 | `python_capabilities_start / python_capabilities` | 工作区 `@capability` AST 静态扫描发现的独立子 Span。 |
 | `python_capability / python_capability_result` | CLI 单次 Python 能力运行器的函数位置、源码哈希、入参、返回结果及 `timing: {importDurationMs, executionDurationMs}` 模块加载/执行耗时拆分（`python_eval_result` 携带相同 `timing` 字段）。 |
 | `python_call_start / python_call_end` | 工作区 `@capability` 装饰器函数的实际执行 Span，记录 PID、源码哈希、终态、耗时，以及在作用域内跨嵌套 `Client` IPC 调用自动聚合的 `rpc: {calls, errors, durationMs, controllerCalls, observeCalls}`（不强制序列化原生 Python 入参/返回对象）。`normal` 下省略的常驻父层会在子事件标记 `parentOmitted: true`。 |
@@ -97,7 +97,7 @@
 
 - **查询事件**：每次执行 `observe` 记录 `perception_observe_start / perception_observe_end`，以该次调用的 `spanId` 作为返回信封的 `queryId`。
 - **交付收据**：自动交付只在 prompt 开始（`before_agent_start`）发生；显式 `observe` 与原生工具图片各自开自己的收据（`origin` 分别为 `explicit` / `tool_result`）。每次向模型交付上下文时写入一条 `observation_context` 事件，记录 `{id, origin, queries, observations, purpose?}`。随后发起的 `model_start` 通过 `deliveryIds` 引用本次新增的收据 ID（注：`deliveryIds` 仅标识本轮新追加的观测来源，模型完整历史上下文以请求归档 payload 为准）。
-- **自动交付去重游标**：自动注入开启时（`context_policy` 事件记录 `ludens perception inject on/off` 变更），扩展按时空轴 `recordId` 去重，同一条记录不会随续轮重复追加；画面像素相同但 `recordId` 不同的新采样仍作为独立时间证据交付。只有当自动交付实际成功完成时才推进采样器状态游标，被抑制或取消的读取不会吞掉状态变迁通知。
+- **自动交付去重游标**：自动注入开启时（`context_policy` 事件记录 `ludens-core perception inject on/off` 变更），扩展按时空轴 `recordId` 去重，同一条记录不会随续轮重复追加；画面像素相同但 `recordId` 不同的新采样仍作为独立时间证据交付。只有当自动交付实际成功完成时才推进采样器状态游标，被抑制或取消的读取不会吞掉状态变迁通知。
 
 ### 2. 模型输入重编码与工具图片追踪
 
@@ -116,7 +116,7 @@
 
 ### 1. 控制台 Worker 与三层可重建索引（`.dashboard-index/`）
 
-控制台在 `ludens app-server` 中将日志解析与索引构建完全隔离于独立 Node Worker，不依赖 Next.js 请求上下文（已全面移除 Next.js 运行时）。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.ludens/archive/` 或 `.ludens/timeline/`），包含三部分：
+控制台在 `ludens-server` 中将日志解析与索引构建完全隔离于独立 Node Worker，不依赖 Next.js 请求上下文（已全面移除 Next.js 运行时）。每个 run 目录下的 `.dashboard-index/` 是纯派生、可随时重建的二级索引（绝不修改原始 `events.jsonl`、`streams/`、`.ludens/archive/` 或 `.ludens/timeline/`），包含三部分：
 
 1. **源事件位置与关系目录**：每条事件仅保存文件字节偏移、时间戳（取 `origin.at ?? at`）、类型与调用身份；模型、Span、动作与观测的关联表均指向源事件字节偏移。
 2. **Activity 按需展示配方**：仅保存每个展示块（Thinking / Text / Tool / System / Diagnostic）对应的源事件偏移或 `streams/` 截止字节数；前端或桌宠请求时才按配方从原件组装文本，不在索引中冗余存储完整正文。
@@ -151,12 +151,12 @@
 python3 core/scripts/analyze-run.py /path/to/workspace/logs/run-id \
   --epoch epoch-id --output /path/to/analysis.json
 
-# Expand one event's archived reference body (media shows reference summary by default; --full restores only media bytes whose originals still exist; video sources keep the lossy-origin mark)
-core/bin/ludens logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
+# Expand one event's archived reference body via pure-RPC ludens logs (media shows reference summary by default; --full restores only media bytes whose originals still exist; video sources keep the lossy-origin mark)
+ludens logs read --run /path/to/workspace/logs/run-id --event 123 --field payload
 
 # Stream all fact-source events declared by the run in order (add --diagnostics to read the full diagnostic stream)
-core/bin/ludens logs events --run /path/to/workspace/logs/run-id
-core/bin/ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
+ludens logs events --run /path/to/workspace/logs/run-id
+ludens logs events --run /path/to/workspace/logs/run-id --diagnostics
 ```
 
 [analyze-run.py](../../../core/scripts/analyze-run.py) 的核心指标统计口径：

@@ -8,9 +8,9 @@ Ludens 是面向复杂端到端任务的多模态、跨设备 Harness，适用�
 
 | 步骤 | 教程 | 完成目标 |
 | --- | --- | --- |
-| 1 | [快速开始](quickstart.md) | 安装依赖，通过零端口桌面应用、托管 Web / 远端 SPA、统一 CLI（`ludens daemon` / `--remote`）或移动端多目标切换启动与接入 Ludens，启动 **自主运行**、通过事件池协作并随时 **收回控制权** |
+| 1 | [快速开始](quickstart.md) | 安装依赖，通过零端口桌面应用（`ludens-app`）、托管 Web / 远端 SPA（`ludens-server`）、纯 RPC 客户端 CLI（`ludens`）或移动端多目标切换启动与接入 Ludens，启动 **自主运行**、通过事件池协作并随时 **收回控制权** |
 | 2 | [设备接入与 Baseware](devices.md) | 配置内置 CUA 桌面自动化与外部驱动包（覆盖 `stdio`、`bridge`、`ssh`、`http`、`sse`），并在多节点间路由控制器工具 |
-| 3 | [工作区、能力与自验证](workspace.md) | 组织 `ludens.json`、`MEMORY.md`、`skills/` 与 `perception.py`；编写 `@capability`、`@eval_env` 与 `@eval_capability`；运行 `ludens eval` 并在 **能力（Capabilities）** 视图中核验 |
+| 3 | [工作区、能力与自验证](workspace.md) | 组织 `ludens.json`、`MEMORY.md`、`skills/` 与 `perception.py`；编写 `@capability`、`@eval_env` 与 `@eval_capability`；运行 `ludens workspace eval` / `ludens-core eval` 并在 **能力（Capabilities）** 视图中核验 |
 | 4 | [感知、执行与性能调优](perception-and-action.md) | 编写并热重载常驻 `perception.py` 状态机，使用 `Client.observe()` 查询 30 Hz fMP4 归档，配置多模态传输与图片 URL 外置，并调优端到端延迟 |
 | 5 | [控制台使用与排障](console-and-debugging.md) | 掌握 **控制台（Console）** 各视图操作，在 **回放（Replay）** 中检视时间线证据，定位控制周期停滞与能力验证失败，排查守护进程与套接字状态，并运行针对性验证检查 |
 

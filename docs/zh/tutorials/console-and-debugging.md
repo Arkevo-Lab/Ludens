@@ -1,6 +1,6 @@
 # 控制台使用与排障
 
-Ludens 在零端口桌面应用（走 UDS `app-server.sock`）、托管 Web / 远端 `ludens app-server --listen ws://...`、Vite HMR 开发模式（`npm run dev`，默认 `http://127.0.0.1:3015`）以及移动端多目标切换（`<ConnectionTargetDialog>`）之间共享同一份 Vite SPA（`app/out`）与 `@ludens/protocol/app-rpc` JSON-RPC 2.0 **控制台（Console）**，并与结构化事件日志、30 Hz fMP4 归档及终端诊断命令共享同一套数据底座。本教程涵盖控制台全视图操作、回放取证、控制周期卡顿与能力验证失败排查、守护进程健康检查，以及提交问题前的针对性验证命令。
+Ludens 在零端口桌面应用（`@ludens/desktop` 走 UDS `app-server.sock`）、托管 Web / 远端 `ludens-server serve --listen ws://...`、Vite HMR 开发模式（`cd client && npm run dev`，默认 `http://127.0.0.1:3015`）以及独立部署的 Web / 移动端多目标切换（`<ConnectionTargetDialog>`）之间共享同一份 `@ludens/client` Vite SPA（`client/out`）与 `@ludens/protocol/app-rpc` JSON-RPC 2.0 **控制台（Console）**，并与结构化事件日志、30 Hz fMP4 归档及终端诊断命令共享同一套数据底座。本教程涵盖控制台全视图操作、回放取证、控制周期卡顿与能力验证失败排查、守护进程健康检查，以及提交问题前的针对性验证命令。
 
 ## 1. 控制台视图速查
 
@@ -32,44 +32,44 @@ Ludens 在零端口桌面应用（走 UDS `app-server.sock`）、托管 Web / �
 2. **对齐录像与采样节点**：拖动 30 Hz fMP4 时间轴，核实 `Perception.sample()` 是在状态变化之前还是之后完成采帧。
 3. **验证模型真实输入**：点击任意模型请求节点的 **节点详情**，直接查看当时真正送达模型的 `observation_context` 截图、文本与工具返回，不要仅靠外部副作用时间戳猜测模型“看到过什么”。
 
-如果某种边界故障难以稳定复现，建议立刻配合 `ludens eval adapt` 将该时刻记录锁定为离线评测反例。
+如果某种边界故障难以稳定复现，建议立刻配合 `ludens workspace eval adapt`（或沙盒内 `ludens-core eval adapt`）将该时刻记录锁定为离线评测反例。
 
 ## 3. 排查控制周期停滞与能力验证失败
 
 ### 场景 A：控制周期卡顿或需要立即停止设备动作
 
 1. **第一时间回收控制权**：在控制台 **运行（Live）** 点击 **收回控制权**，或执行 `ludens auto off`。若 Baseware 底层仍持锁，可执行 `baseware revoke`（或在 **设备** -> **守护进程与租约** 手动吊销）。
-2. **检查 Core 与服务健康状态**：在工作区目录下依次查看各层状态：
+2. **检查服务端、Core 与服务健康状态**：在工作区目录下依次查看各层状态：
 
 ```sh
-ludens daemon status
+ludens-server status
 ludens status
-ludens services
-ludens perception status
-ludens perception state
+ludens workspace services
+ludens-core perception status
+ludens-core perception state
 baseware status
 ```
 
-3. **排查阻塞或异常退出的 `perception.py`**：若 `perception.state` 显示 `error` 或长期停在 `loading`，检查 `logs/<run-id>/perception/<gen>/` 下的 stderr 输出（或在 **配置** 页查看状态），修复代码后执行 `ludens perception reload`（或点击 **配置 -> 后台服务与会话** 的 **热重载 Core**）。
-4. **恢复断连节点**：打开 **设备**（`?view=baseware`）-> **守护进程与租约** 检查状态，或终端执行 `ludens machine list` 与 `baseware reconnect [--machine <id>]`。
+3. **排查阻塞或异常退出的 `perception.py`**：若 `perception.state` 显示 `error` 或长期停在 `loading`，检查 `logs/<run-id>/perception/<gen>/` 下的 stderr 输出（或在 **配置** 页查看状态），修复代码后执行 `ludens-core perception reload`（或点击 **配置 -> 后台服务与会话** 的 **热重载 Core**）。
+4. **恢复断连节点**：打开 **设备**（`?view=baseware`）-> **守护进程与租约** 检查状态，或终端执行 `ludens-core machine list` 与 `baseware reconnect [--machine <id>]`。
 5. **在不关闭外部目标窗口的前提下干净重启**：
 
 ```sh
-ludens down --keep-emulator
-ludens up
+ludens workspace down --keep-emulator
+ludens workspace up
 ```
 
-### 场景 B：能力发现报错或 `ludens eval` 失败
+### 场景 B：能力发现报错或 `ludens workspace eval` 失败
 
-- **能力未出现在 `ludens controller list` 或能力页报错**：检查对应 `@capability` 是否满足同步 `def`、非空 Docstring、受支持的参数注解（`str`、`int`、`float`、`bool`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`）、JSON 字面量默认值，且没有使用 `*args`、`**kwargs` 或不受支持的第三方装饰器。
-- **状态停留在 `stale` 或 `adapting`**：执行 `ludens eval list` 与 `ludens eval run <eval-id>` 查看精确异常栈与源码哈希差异。若是通过 `ludens eval adapt` 标记的 `adapting`，请先在 `@eval_env` 中复现该反例（确认旧能力评测失败），再改进能力实现直至 `ludens eval run <eval-id>` 重新通过为 `verified`。
+- **能力未出现在 `ludens-core controller list` 或能力页报错**：检查对应 `@capability` 是否满足同步 `def`、非空 Docstring、受支持的参数注解（`str`、`int`、`float`、`bool`、`list[T]`、`dict[str, T]`、`Optional[T]` / `T | None`）、JSON 字面量默认值，且没有使用 `*args`、`**kwargs` 或不受支持的第三方装饰器。
+- **状态停留在 `stale` 或 `adapting`**：执行 `ludens workspace eval list` 与 `ludens workspace eval run <eval-id>`（或沙盒内 `ludens-core eval ...`）查看精确异常栈与源码哈希差异。若是通过 `adapt` 标记的 `adapting`，请先在 `@eval_env` 中复现该反例（确认旧能力评测失败），再改进能力实现直至 `ludens workspace eval run <eval-id>` 重新通过为 `verified`。
 
 ## 4. 开启完整诊断日志、CLI 检视与前台隔离调试
 
 若偶发故障在 `normal` 摘要模式下缺少嵌套调用细节，可将诊断模式切换为 `full`（写入 `logs/<run-id>/diagnostics.jsonl` 与 `logs/baseware/`）：
 
 ```sh
-ludens run --device-only --diagnostics full
+ludens-core run --device-only --diagnostics full
 ```
 
 其中 `--device-only` 会建立设备连接并拉起 `perception.py` 采样，同时**不**触发任何 LLM 请求，非常适合单独验收摄像头流、控制租约与状态机初始化。
@@ -80,7 +80,7 @@ ludens run --device-only --diagnostics full
 baseware serve --driver cua --machine-id local-desktop --diagnostics full
 ```
 
-在终端直接检视归档事件或大字段对象：
+在终端通过纯 RPC 命令直接检视归档事件或大字段对象：
 
 ```sh
 ludens logs events --run logs/<run-id> --diagnostics
@@ -91,26 +91,31 @@ ludens logs read --run logs/<run-id> --event <seq> --field <name> --full
 
 ## 5. 运行针对性验证检查
 
-修改或排查底层模块后，按受影响子包运行对应的类型检查与测试套件，在确认故障边界后再汇总报告：
+修改或排查底层模块后，按六包分层运行对应的类型检查与测试套件，在确认故障边界后再汇总报告：
 
 ```sh
-# 协议 Schema 与契约检查
+# 1. 协议 Schema、DTO 与契约检查
 (cd protocol && bun run typecheck && bun test)
 
-# Baseware 驱动、传输与控制租约
+# 2. Baseware 驱动、传输与控制租约
 (cd baseware && bun run typecheck && bun test)
 
-# Core 运行时、Python SDK 与传输层
+# 3. Core 执行沙盒、Python SDK 与模型传输层
 (cd core && bun run typecheck && bun run typescript:test && bun run python:test)
 
-# 控制台静态构建、Web 与桌面端测试
-(cd app && npm run build && npm run build:check && npm run typecheck && npm run desktop:typecheck && npm test && npm run desktop:test)
+# 4. Server 控制面服务端、查询引擎与 RPC 路由
+(cd server && bun run typecheck && bun test)
+
+# 5. Client 控制台静态构建、UI 单测与纯 RPC ludens CLI 单测
+(cd client && npm run build && npm run typecheck && npm test)
+
+# 6. Desktop Electron 桌面宿主构建与规格测试
+(cd desktop && npm run desktop:typecheck && npm run desktop:build && npm run desktop:test)
 ```
 
 按需运行的可选专项验证：
 
 - `(cd core && bun run python:typecheck)` 与 `(cd core && bun run omp:test:transport)`：Python 类型检查与模型传输专项测试
-- `(cd app && npm run perf)`：大容量归档查询性能与内存基线检查
-- `(cd app && npm run pet:smoke)`：可选托盘**桌宠**小组件冒烟检查
+- `(cd server && bun run perf)`（或对应归档性能基线脚本）：大容量归档查询性能与内存基线检查
 
 反馈问题时，请一并附上失败命令的完整输出、`logs/<run-id>/manifest.json` 以及相关的 **回放** 时间戳或 `record-id`。

@@ -8,7 +8,7 @@ Ludens 是面向复杂端到端任务的多模态、跨设备 Agent Harness，�
 | --- | --- | --- |
 | **系统概览** | 为什么需要代码优先的 Harness，以及 **Baseware**、**工作区**、**Shiori** 与**控制台**四层如何分工协作 | [什么是 Ludens 与四层分工](overview.md) |
 | **循环与控制** | Observe → Reason → Act & Eval → Consolidate 闭环、**自主运行**与**手动待命**、**收回控制权**、单调 `epoch` 租约、预算以及双向**事件池**与 `steer` | [自主循环、控制租约与异步协作](loop-and-control.md) |
-| **感知与自验证** | 30 Hz 常驻感知状态机、**Capability – Eval – Env** 三元闭环、`ludens eval` 门禁、`adapt` 失败帧反馈以及技能与记忆沉淀 | [编码即感知与能力自验证体系](self-verification.md) |
+| **感知与自验证** | 30 Hz 常驻感知状态机、**Capability – Eval – Env** 三元闭环、`ludens workspace eval` / `ludens-core eval` 门禁、`adapt` 失败帧反馈以及技能与记忆沉淀 | [编码即感知与能力自验证体系](self-verification.md) |
 
 ## 核心术语速览
 

@@ -8,7 +8,7 @@ Ludens is a multimodal, cross-device Agent Harness designed for complex end-to-e
 | --- | --- | --- |
 | **System Overview** | Why a code-first Harness beats static action wrappers, and how **Baseware**, **Workspace**, **Shiori**, and **Console** divide responsibilities | [What Is Ludens & System Architecture](overview.md) |
 | **Loop & Control** | The Observe → Reason → Act & Eval → Consolidate loop, **Auto Run** vs. **Manual Standby**, **Reclaim Control**, monotonic `epoch` leases, budgets, **Event Pool**, and `steer` | [Control Cycles, Perception Loop & Collaboration](loop-and-control.md) |
-| **Self-Verification** | Code-first perception at 30 Hz, the **Capability – Eval – Env** triad, `ludens eval` regression gates, `adapt` failure-frame feedback, and skill/memory consolidation | [Code-First Perception & Self-Verification](self-verification.md) |
+| **Self-Verification** | Code-first perception at 30 Hz, the **Capability – Eval – Env** triad, `ludens workspace eval` / `ludens-core eval` regression gates, `adapt` failure-frame feedback, and skill/memory consolidation | [Code-First Perception & Self-Verification](self-verification.md) |
 
 ## Key Terms at a Glance
 

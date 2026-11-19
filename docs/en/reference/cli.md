@@ -1,22 +1,26 @@
-# CLI Reference (`ludens` / `baseware` / `ludens-app`)
+# CLI Reference (`ludens` / `ludens-server` / `ludens-core` / `baseware` / `ludens-app`)
 
-This reference documents every user-facing command, flag, default value, and environment variable exposed by the three Ludens repository binaries:
+This reference documents every user-facing and sandbox-internal subcommand, flag, default value, and environment variable exposed across the **4 orthogonal CLIs + desktop launcher** in the six-package Ludens architecture:
 
-- `ludens` ([`core/bin/ludens`](../../../core/bin/ludens)): unified operator & runtime CLI — manages global config, workspace registry, singleton App-Server daemon (`ludens daemon`), workspace lifecycle (`init`/`up`/`services`/`down`), Shiori runtime control (`status`/`auto`/`steer`/`consolidate`/`stop`/`model` over local UDS or `--remote ws(s)://...`), perception/evaluation tooling, log archives, and `ludens app-server`.
-- `baseware` ([`baseware/bin/baseware`](../../../baseware/bin/baseware)): standalone **Baseware** Cross-device Integration Layer daemon, driver/package discovery, multi-machine routing, direct controller invocation, and MCP bridge mode.
-- `ludens-app` ([`app/bin/ludens-app`](../../../app/bin/ludens-app), Windows [`app/bin/ludens-app.cmd`](../../../app/bin/ludens-app.cmd)): the zero-port Electron desktop shell (`ludens-app://console/` + `ludens-media://local/media?...`) communicating with `app-server.sock` via IPC UDS RPC and hosting the optional Desktop Pet.
+- **`ludens`** (`@ludens/client`, [`client/bin/ludens`](../../../client/bin/ludens)): **human-facing pure-RPC operator client CLI** (strictly depending only on `@ludens/protocol`, with zero `@ludens/core` / `@ludens/server` code dependencies) — manages global config (`ludens config`), full workspace lifecycle and remote evaluation (`ludens workspace <init|list|open|forget|import|up|down|services|eval>`), and top-level live remote control and log inspection (`ludens <status|auto|steer|consolidate|stop|model|logs>`). Uniformly supports local Unix Domain Socket (auto-waking `ludens-server start` from `PATH` on demand when offline) and `--remote ws(s)://... [--token ...]`.
+- **`ludens-server`** (`@ludens/server`, [`server/bin/ludens-server`](../../../server/bin/ludens-server)): **control-plane server & daemon supervisor CLI** — provides `ludens-server <serve|start|stop|restart|status>`, hosting multi-workspace JSON-RPC 2.0 (`/rpc` and `app-server.sock`), real-time `EventHub` push, HMAC `/media`, the query engine, and `WorkspaceSupervisor`.
+- **`ludens-core`** (`@ludens/core`, [`core/bin/ludens-core`](../../../core/bin/ludens-core)): **per-workspace execution kernel & sandbox-internal tool CLI** — provides the single-workspace sandbox entry point `ludens-core run` and sandbox-internal Shiori / developer tools `ludens-core <controller|perception|event|machine|eval>` (the legacy duplicate top-level `observe` alias is removed, unified under `ludens-core perception observe`).
+- **`baseware`** (`@ludens/baseware`, [`baseware/bin/baseware`](../../../baseware/bin/baseware)): **standalone Cross-Device Integration Layer CLI** — daemon server, driver/package discovery, multi-machine routing, direct controller invocation, and MCP bridge mode.
+- **`ludens-app`** (`@ludens/desktop`, [`desktop/bin/ludens-app`](../../../desktop/bin/ludens-app), Windows [`desktop/bin/ludens-app.cmd`](../../../desktop/bin/ludens-app.cmd)): **All-in-One zero-port Electron desktop shell** (`ludens-app://console/` + `ludens-media://local/media?...`), bundling `client/out` + local `ludens-server` + `ludens-core` + `baseware` with one-click switching to any remote `ludens-server`.
 
-> **Global operator flags**: `ludens` subcommands accept `--workspace <path>` (before or inline with operator commands, overriding `LUDENS_WORKSPACE` and the current working directory), plus `--remote <ws(s)://...>` and `--token <secret>` (overriding `LUDENS_REMOTE_URL` and `LUDENS_REMOTE_TOKEN`) to target a remote App-Server over WebSocket JSON-RPC instead of local `app-server.sock`.
+> **Global flags, remote connections & on-demand auto-wake**: All `ludens` subcommands accept `--workspace <path>` (overriding `LUDENS_WORKSPACE` and the current working directory), plus `--remote <ws(s)://...>` and `--token <secret>` (overriding `LUDENS_REMOTE_URL` and `LUDENS_REMOTE_TOKEN`).
+> - When `--remote` is passed: `ludens` connects directly to the remote `ludens-server` over WebSocket JSON-RPC;
+> - When `--remote` is omitted: `ludens` connects to local `$LUDENS_HOME/run/app-server.sock` (falling back to `/tmp/ludens-app-<uid>-<sha256_12>.sock` near the 96-byte path limit); if the local socket is not ready, it automatically runs `ludens-server start` from `PATH` (or repo-relative `../server/bin/ludens-server`) on demand and reconnects; if `ludens-server` is not installed locally, it prints a clear actionable message prompting you to install/start `ludens-server` or pass `--remote <url>`.
 
 ---
 
-## Global Configuration & Workspace Registry
+## 1. `ludens` — Pure-RPC Operator Client CLI (`@ludens/client`)
 
-Implemented in [`core/src/cli/global.ts`](../../../core/src/cli/global.ts) and [`protocol/src/ludens.ts`](../../../protocol/src/ludens.ts). Global state lives under `$LUDENS_HOME` (default `~/.ludens`).
+Implemented in [`client/cli/`](../../../client/cli/) and [`protocol/src/app-rpc.ts`](../../../protocol/src/app-rpc.ts). Global state lives on the server under `$LUDENS_HOME` (default `~/.ludens`).
 
 ### `ludens config`
 
-Inspect or update global defaults shared across newly initialized and launched workspaces (supports `--remote` and `--token`).
+Inspect or update global defaults shared across newly initialized and launched workspaces over RPC (supports `--remote` and `--token`).
 
 ```bash
 ludens config [show] [--remote <url>] [--token <secret>]
@@ -34,105 +38,158 @@ Allowed `defaults.<field>` keys:
 | `defaults.seconds` | Positive integer Auto Run cycle duration (seconds) |
 | `defaults.requests` | Positive integer request budget per cycle |
 | `defaults.compactionThreshold` | Positive integer token threshold for Shiori compaction |
-| `defaults.dashboard` | `true` \| `false` — whether `ludens up` starts the Console server |
-| `defaults.pet` | `true` \| `false` — whether `ludens up` starts the optional Desktop Pet |
-| `defaults.connection.openaiWebsockets` | Boolean / WebSocket transport toggle |
-| `defaults.connection.cacheRetention` | Prompt cache retention policy |
-| `defaults.connection.appendOnlyContext` | Append-only context policy |
+| `defaults.dashboard` | `true` \| `false` — whether `ludens workspace up` ensures the Console server is ready |
+| `defaults.pet` | `true` \| `false` — whether `ludens workspace up` starts the optional Desktop Pet |
+| `defaults.connection.openaiWebsockets` | OpenAI WebSocket transport toggle (`auto` \| `on` \| `off`) |
+| `defaults.connection.cacheRetention` | Prompt cache retention policy (`auto` \| `short` \| `long` \| `none`) |
+| `defaults.connection.appendOnlyContext` | Append-only context policy (`auto` \| `on` \| `off`) |
 | `defaults.connection.imageUrls.enabled` | Boolean toggle for multimodal image URL delivery |
 | `defaults.connection.imageUrls.backends` | Backend list for image URL delivery |
 
-### `ludens workspace`
+### `ludens workspace <init|list|open|forget|import>`
 
-Manage registered workspaces in the global registry (`list`, `open`, and `forget` support `--remote`; `import` and `--new-id` operate on the local host filesystem).
+Create workspaces, manage global registry entries, and import/migrate legacy workspaces (100% over JSON-RPC, uniformly supporting `--workspace`, `--remote`, and `--token`):
 
 ```bash
+# Initialize a workspace directory and write ludens.json (via workspaces/create RPC)
+ludens workspace init --driver <id> \
+  [--name <name>] \
+  [--workspace <path>] \
+  [--machine <id>] \
+  [--driver-package <spec>] \
+  [--game <path>] \
+  [--port <n>] \
+  [--cua-command <path>] \
+  [--model <id>] \
+  [--effort <level>] \
+  [--service-tier <tier>] \
+  [--seconds <n>] \
+  [--requests <n>] \
+  [--register-driver] \
+  [--pet | --no-pet] \
+  [--remote <url>] [--token <secret>]
+
+# List, open/register, forget, and import workspaces (import uses the workspaces/import RPC)
 ludens workspace list [--remote <url>] [--token <secret>]
 ludens workspace open <directory> [--new-id] [--remote <url>] [--token <secret>]
 ludens workspace forget <id> [--remote <url>] [--token <secret>]
-ludens workspace import <directory> [--legacy-state <directory>] [--previous-workspace <directory>]
-```
-
----
-
-## Workspace Lifecycle & App Server
-
-Implemented in [`core/src/cli/workspace.ts`](../../../core/src/cli/workspace.ts), [`core/src/cli/daemon-cli.ts`](../../../core/src/cli/daemon-cli.ts), [`core/src/cli/main.ts`](../../../core/src/cli/main.ts), [`core/src/cli/app-server-cli.ts`](../../../core/src/cli/app-server-cli.ts), and [`core/src/daemon/launcher.ts`](../../../core/src/daemon/launcher.ts).
-
-### `ludens daemon`
-
-Inspect, start, stop, or restart the per-`LUDENS_HOME` singleton `ludens app-server` daemon (`<home>/run/app-server.sock` by default, or `/tmp/ludens-app-<uid>-<sha256_12>.sock` if path length approaches `APP_SERVER_SUN_PATH_LIMIT = 96`).
-
-```bash
-ludens daemon status
-ludens daemon start [--listen <unix://PATH|ws://HOST:PORT>] [--auth <none|token>] \
-  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>]
-ludens daemon stop [--keep-cores | --stop-cores]
-ludens daemon restart [--listen <unix://PATH|ws://HOST:PORT>] [--auth <none|token>] \
-  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>]
-```
-
-- `ludens daemon stop` cleanly shuts down managed workspace Cores before stopping App-Server unless `--keep-cores` is passed (`--stop-cores` is the default).
-- When `--listen ws://HOST:PORT` binds a non-loopback address, `--auth token` is mandatory.
-
-### `ludens init`
-
-Create a workspace directory and write `ludens.json` (also supports `--remote` when creating workspaces on a remote App-Server).
-
-```bash
-ludens init --driver <id> \
-  [--name <name>] \
-  [--workspace <path>] \
-  [--driver-package <spec>] \
-  [--game <path>] \
-  [--cua-command <path>] \
-  [--model <id>] \
-  [--seconds <n>] \
-  [--requests <n>] \
-  [--pet | --no-pet]
+ludens workspace import <directory> [--legacy-state <directory>] [--previous-workspace <directory>] \
+  [--remote <url>] [--token <secret>]
 ```
 
 Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `openai-codex/gpt-6.2-sol`, `seconds` = `1800`, `requests` = `1000`, `dashboard` = `true`, `pet` = `false`, `logging.diagnostics` = `"normal"`.
 
-### `ludens up` / `ludens services` / `ludens down`
+### `ludens workspace <up|services|down>`
 
-Manage supervised workspace processes (**Baseware**, per-workspace **Core** hosting **Shiori** with `launchedBy: "cli"`, optional target/simulator launch command, singleton **App Daemon**, and optional **Desktop Pet**) locally via `app-server.sock` or remotely via `--remote`, following **1 Workspace = 1 Core** isolation.
+Manage supervised workspace processes (**Baseware**, per-workspace **Core** `ludens-core run` hosting **Shiori**, optional target/simulator launch command, and optional **Desktop Pet**) locally via `app-server.sock` or remotely via `--remote`, following **1 Workspace = 1 Core** isolation:
 
 ```bash
-ludens up [--dry-run] [--preempt] [--services <emulator,baseware,core>] \
-  [--dashboard | --no-dashboard] [--pet | --no-pet] [--remote <url>] [--token <secret>]
-ludens services [--remote <url>] [--token <secret>]
-ludens down [--services <emulator,baseware,core>] [--keep-emulator] \
-  [--dashboard] [--pet] [--remote <url>] [--token <secret>]
+ludens workspace up [--workspace <path>] [--dry-run] [--preempt] \
+  [--services <emulator,baseware,core>] [--dashboard | --no-dashboard] [--pet | --no-pet] \
+  [--remote <url>] [--token <secret>]
+ludens workspace services [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens workspace down [--workspace <path>] [--services <emulator,baseware,core>] \
+  [--keep-emulator] [--dashboard] [--pet] [--remote <url>] [--token <secret>]
 ```
 
 - `--preempt` preempts a conflicting workspace Core holding the same physical device.
 - `--services` scopes `up` / `down` to specific managed components (`emulator`, `baseware`, `core`).
-- `--dashboard` / `--no-dashboard` controls ensuring the local `ludens app-server` daemon.
+- `--dashboard` / `--no-dashboard` controls ensuring the local `ludens-server` daemon.
 - `--pet` / `--no-pet` toggles the optional Desktop Pet widget during `up` / `down`.
 - `--keep-emulator` keeps target simulator/runtime processes alive while stopping Ludens daemons.
 
-### `ludens app-server` / `ludens serve`
+### `ludens workspace eval`
 
-Start the unified multi-workspace **App Daemon** serving JSON-RPC 2.0 (`@ludens/protocol/app-rpc`) over UDS NDJSON and WebSocket `/rpc`, real-time `EventHub` subscriptions, HMAC capability-ticket `/media` (`mt=`, `206 Range`), `/health`, and static Vite SPA assets (`app/out`, returning `404` for `/api/*`).
+List, run, inspect evaluation history, and mark live failure counterexamples remotely or locally via the `capabilities/get`, `capabilities/eval`, `capabilities/evalHistory`, and `capabilities/evalAdapt` RPCs (see [Self-Verification](../concepts/self-verification.md)):
 
 ```bash
-ludens app-server [--listen <unix://PATH | ws://HOST:PORT>] \
-  [--auth <none|token>] [--token <secret> | --token-env <var>] \
-  [--static-dir <path>] [--trusted-origin <origin>] [--parent-watchdog] [-h | --help]
-ludens serve ...   # Alias of app-server
+ludens workspace eval list [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens workspace eval run [<capability-id>] [--all] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens workspace eval <python/capability-id> [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens workspace eval history [<capability-id>] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens workspace eval adapt <capability-id> --reason <text> [--record <record-id> ...] \
+  [--workspace <path>] [--remote <url>] [--token <secret>]
 ```
 
-- With no `--listen` argument, `app-server` binds **UDS-only (`app-server.sock`, 0 listening TCP ports)** and `--auth none`.
-- Non-loopback `ws://` listeners refuse to start without `--auth token` (`--token` or `--token-env`).
-- `--trusted-origin <origin>` may be repeated to allowlist browser `Origin` headers. `--parent-watchdog` binds server lifetime to parent stdin/exit, and startup emits a single-line JSON readiness handshake on stdout.
+### Top-Level Live Controls & Logs: `ludens <status|auto|steer|consolidate|stop|model|logs>`
 
-### `ludens run`
-
-Run the workspace **Core** (hosting the **Shiori** Agent Thread Core) directly in the foreground (without `ludens up` supervisor orchestration).
+High-frequency live runtime control and log inspection commands remain top-level `ludens` subcommands, routed 100% over JSON-RPC to `ludens-server`:
 
 ```bash
-ludens [--workspace <path>] run \
+ludens status [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens auto on [--message <text>] [--seconds <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens auto timer <seconds|off|unbounded|none> [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens auto off [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens steer [--message <text> | <text>] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens consolidate [--seconds <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens stop [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
+  [--effort none|minimal|low|medium|high|xhigh|max] [--workspace <path>] [--remote <url>] [--token <secret>]
+
+# Pure-RPC archived log inspection (via logs/events and logs/read RPCs without direct local filesystem reads)
+ludens logs events --run <run-directory-or-id> [--diagnostics] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens logs read --run <run-directory-or-id> \
+  (--ref '<JSON reference>' | --file <reference.json> | --event <seq> --field <name>) \
+  [--full] [--workspace <path>] [--remote <url>] [--token <secret>]
+```
+
+- `ludens auto on` starts an **Auto Run** control cycle (`--seconds` sets the timed control cycle duration).
+- `ludens auto timer` updates the remaining cycle timer (`off`, `unbounded`, or `none` removes the time cap).
+- `ludens auto off` executes **Reclaim Control**, returning Shiori to **Manual Standby** (`manual`) and revoking device control at Baseware.
+- `ludens steer` interrupts a `loop.py` wait or queues a high-priority steering instruction into the active turn.
+- `ludens consolidate` runs memory consolidation (`--seconds` defaults to `600`).
+- `ludens stop` stops the workspace Core daemon cleanly.
+- `ludens model` switches the active model, service tier, or thinking effort while in Manual Standby.
+- `ludens logs` inspects archived run event timelines and reads full offloaded payloads over `logs/*` RPC (see [Logging and Call Chains](logging.md)).
+
+---
+
+## 2. `ludens-server` — Control-Plane Server CLI (`@ludens/server`)
+
+Implemented in [`server/src/`](../../../server/src/). Manages the per-`LUDENS_HOME` multi-workspace control-plane server.
+
+### `ludens-server serve`
+
+Run the control-plane server in the foreground, serving JSON-RPC 2.0 (`@ludens/protocol/app-rpc`) over UDS NDJSON and WebSocket `/rpc`, real-time `EventHub` subscriptions, HMAC capability-ticket `/media` (`mt=`, `206 Range`), `/health`, and optional static Vite SPA assets (`client/out`, returning `404` for `/api/*`).
+
+```bash
+ludens-server serve [--listen <unix://PATH | ws://HOST:PORT>]... \
+  [--auth <none|token>] [--token <secret> | --token-env <var>] \
+  [--static-dir <path>] [--trusted-origin <origin>] [--parent-watchdog] [--dev] [-h | --help]
+```
+
+- With no `--listen` argument, `ludens-server serve` binds **UDS-only (`<home>/run/app-server.sock`, falling back to `/tmp/ludens-app-<uid>-<sha256_12>.sock` near the 96-byte limit, 0 listening TCP ports)** with `--auth none` (`desktop` profile).
+- Non-`--dev` `ws://HOST:PORT` bindings run under the `remote` profile (enforcing `managed-sandbox` boundaries) and refuse to start without `--auth token` (`--token` or `--token-env`).
+- `--dev` is restricted to loopback hosts (`127.0.0.1`, `localhost`, `::1`) and runs under the `web-dev` profile.
+- `--trusted-origin <origin>` may be repeated to allowlist cross-origin `@ludens/client` browser `Origin` headers. `--parent-watchdog` binds server lifetime to parent stdin/exit, and startup emits a single-line JSON readiness handshake on stdout.
+
+### `ludens-server <start|stop|restart|status>`
+
+Inspect, start, stop, or restart the per-`LUDENS_HOME` singleton background `ludens-server` daemon:
+
+```bash
+ludens-server status
+ludens-server start [--listen <unix://PATH|ws://HOST:PORT>]... [--auth <none|token>] \
+  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>] [--dev]
+ludens-server stop [--keep-cores | --stop-cores]
+ludens-server restart [--listen <unix://PATH|ws://HOST:PORT>]... [--auth <none|token>] \
+  [--token <secret> | --token-env <var>] [--static-dir <path>] [--trusted-origin <origin>] [--dev]
+```
+
+- `ludens-server stop` cleanly shuts down managed workspace Cores before stopping the server unless `--keep-cores` is passed (`--stop-cores` is the default).
+
+---
+
+## 3. `ludens-core` — Per-Workspace Execution Kernel & Sandbox Tool CLI (`@ludens/core`)
+
+Implemented in [`core/src/`](../../../core/src/). `@ludens/core` automatically prepends `core/bin` to the `PATH` of Shiori's `bash` tool so both the in-sandbox Agent and local developers invoke `ludens-core` subcommands directly (over the workspace `core.sock` or offline).
+
+### `ludens-core run`
+
+Start the single-workspace **Core** execution sandbox (hosting the **Shiori** Agent Thread Core and resident `perception.py` / `loop.py`, spawned by `ludens-server`'s `WorkspaceSupervisor` or run directly in the foreground for isolated debugging):
+
+```bash
+ludens-core [--workspace <path>] run \
   [--baseware-socket <path>] \
   [--workspace <path>] \
   [--device-only] \
@@ -145,122 +202,75 @@ ludens [--workspace <path>] run \
   [--launched-by app|cli]
 ```
 
-Defaults in [`core/src/cli/main.ts`](../../../core/src/cli/main.ts): `--seconds 300`, `--requests 50`, `--diagnostics normal`, and `--launched-by` (with `LUDENS_LAUNCHED_BY` env fallback) defaults to `cli` (`app` is used by **App Daemon** for App-owned teardown boundaries); `--model` falls back to `ludens.json` or `openai-codex/gpt-6.2-sol`.
+Direct-invocation defaults: `--seconds 300`, `--requests 50`, `--diagnostics normal`, and `--launched-by` (with `LUDENS_LAUNCHED_BY` env fallback) defaults to `cli` (`app` is passed by `ludens-server` for on-demand spawns); `--model` falls back to `ludens.json` or `openai-codex/gpt-6.2-sol`.
 
----
+### `ludens-core controller` & `ludens-core machine`
 
-## Live Control, Event Pool, Perception, Controllers & Machines
-
-Operator control commands (`status`, `auto`, `steer`, `consolidate`, `stop`, `model`) communicate through local `app-server.sock` or `--remote ws(s)://... [--token ...]`, falling back to direct workspace Core socket (`core.sock`) when inside a runtime or directly targeting `LUDENS_SOCKET`. Runtime-internal commands (`event`, `perception`, `observe`, `controller`, `machine`) communicate directly with the workspace Core daemon (`core.sock`) (see [`core/src/cli/control-cli.ts`](../../../core/src/cli/control-cli.ts), [`core/src/cli/operator-rpc.ts`](../../../core/src/cli/operator-rpc.ts), [`core/src/cli/event-cli.ts`](../../../core/src/cli/event-cli.ts), and [`core/src/daemon/transport.ts`](../../../core/src/daemon/transport.ts)).
-
-### Status, Auto Run & Steer
+Inspect and directly execute native driver controllers (`controller/<name>`) or Python-wrapped workspace controllers (`python/<path.py>:<function>`), and manage Baseware machines:
 
 ```bash
-ludens status [--remote <url>] [--token <secret>]
-ludens auto on [--message <text>] [--seconds <n>] [--remote <url>] [--token <secret>]
-ludens auto timer <seconds|off|unbounded|none> [--remote <url>] [--token <secret>]
-ludens auto off [--remote <url>] [--token <secret>]
-ludens steer [--message <text> | <text>] [--remote <url>] [--token <secret>]
-ludens consolidate [--seconds <n>] [--remote <url>] [--token <secret>]
-ludens stop [--remote <url>] [--token <secret>]
-ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
-  [--effort none|minimal|low|medium|high|xhigh|max] [--remote <url>] [--token <secret>]
+ludens-core controller list
+ludens-core controller <id> --help
+ludens-core controller controller/<native name> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
+ludens-core controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
+
+ludens-core machine list
+ludens-core machine use <id>
+ludens-core machine connect <id> [<id2> ...]
+ludens-core machine disconnect <id>
 ```
 
-- `ludens auto on` starts an **Auto Run** control cycle (`--seconds` sets the timed control cycle duration).
-- `ludens auto timer` updates the remaining cycle timer (`off`, `unbounded`, or `none` removes the time cap).
-- `ludens auto off` executes **Reclaim Control**, returning Shiori to **Manual Standby** (`manual`) and revoking device control at Baseware.
-- `ludens steer` interrupts or queues a steering instruction for Shiori.
-- `ludens consolidate` runs memory consolidation (`--seconds` defaults to `600`).
-- `ludens stop` stops the workspace Core daemon cleanly.
-- `ludens model` switches the active model, service tier, or thinking effort while in Manual Standby.
+### `ludens-core perception` (including `perception observe`)
 
-### `ludens event` (Event Pool)
-
-Inspect and respond to the asynchronous workspace Event Pool (user triggers, notifications, and Shiori outbound requests).
+Manage multimodal perception pipelines and query recorded observation windows (note: the legacy duplicate top-level `observe` alias has been removed; always use `ludens-core perception observe`):
 
 ```bash
-ludens event list [--direction <inbound|outbound>] [--status <pending|handled>] [--limit <n>]
-ludens event send [--title <text>] [--message <text> | <text>]
-ludens event reply <event-id> [--message <text> | <text>]
-ludens event ack <event-id> [<event-id2> ...]
-```
-
-### `ludens perception` & `ludens observe`
-
-Manage multimodal perception pipelines and query recorded observation windows.
-
-```bash
-ludens perception status
-ludens perception state
-ludens perception reload
-ludens perception stop
-ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
-ludens perception inject [on|off]
-ludens perception observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] \
-  [--limit <n>] [--after <sequence>] [--images]
-ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] \
+ludens-core perception status
+ludens-core perception state
+ludens-core perception reload
+ludens-core perception stop
+ludens-core perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
+ludens-core perception inject [on|off]
+ludens-core perception observe [--capability <id|*>] \
+  [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] \
   [--limit <n>] [--after <sequence>] [--images]
 ```
 
-`observe` defaults to `--limit 8` (maximum `64`); pass `--images` to include inline frame outputs.
+`perception observe` defaults to `--limit 8` (maximum `64`); pass `--images` to include inline frame outputs.
 
-### `ludens controller` & `ludens machine`
+### `ludens-core event` (Event Pool)
 
-Inspect and directly execute native driver controllers (`controller/<name>`) or Python-wrapped workspace controllers (`python/<path.py>:<function>`), and manage Baseware machines.
+Inspect and mutate the asynchronous workspace Event Pool inside the sandbox or workspace directory (routes through `core.sock` while Core is online and otherwise writes `.ludens/event-pool.json` directly under lock; inside an agent cycle with `BASEWARE_EPOCH` present, human-only mutation subcommands are rejected and direct Shiori to the `event_pool` tool):
 
 ```bash
-ludens controller list
-ludens controller <id> --help
-ludens controller controller/<native name> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
-ludens controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
+ludens-core event list [--direction <inbound|outbound>] [--status <pending|handled>] [--limit <n>]
+ludens-core event send [--title <text>] [--message <text> | <text>]
+ludens-core event reply <event-id> [--message <text> | <text>]
+ludens-core event ack <event-id> [<event-id2> ...]
+```
 
-ludens machine list
-ludens machine use <id>
-ludens machine connect <id> [<id2> ...]
-ludens machine disconnect <id>
+### `ludens-core eval`
+
+Run, inspect history, and adapt capability self-verification harnesses offline inside the sandbox or workspace directory (automatically stripping `LUDENS_SOCKET`, `BASEWARE_SOCKET`, `LUDENS_EPOCH`, and `BASEWARE_EPOCH`):
+
+```bash
+ludens-core eval list
+ludens-core eval run [<capability-id>] [--all] [--limit <n>]
+ludens-core eval <python/capability-id>          # Shorthand when capability ID starts with python/
+ludens-core eval history [<capability-id>] [--limit <n>]
+ludens-core eval adapt <capability-id> --reason <text> [--record <record-id> ...]
 ```
 
 ---
 
-## Evals & Log Archives
+## 4. `baseware` CLI (`@ludens/baseware`) & `ludens-app` Desktop (`@ludens/desktop`)
 
-Implemented in [`core/src/cli/eval-cli.ts`](../../../core/src/cli/eval-cli.ts) and [`core/src/cli/log-archive.ts`](../../../core/src/cli/log-archive.ts).
-
-### `ludens eval`
-
-Run, inspect, and adapt capability self-verification harnesses (see [Self-Verification](../concepts/self-verification.md)).
-
-```bash
-ludens eval list
-ludens eval run [<capability-id>] [--all] [--limit <n>]
-ludens eval <python/capability-id>          # Shorthand when capability ID starts with python/
-ludens eval history [<capability-id>] [--limit <n>]
-ludens eval adapt <capability-id> --reason <text> [--record <record-id> ...]
-```
-
-### `ludens logs`
-
-Inspect archived run event timelines and read full archived payloads offloaded to disk (see [Logging and Call Chains](logging.md)).
-
-```bash
-ludens logs events --run <run-directory> [--diagnostics]
-ludens logs read --run <run-directory> \
-  (--ref '<JSON reference>' | --file <reference.json> | --event <seq> --field <name>) \
-  [--full]
-```
-
----
-
-## `baseware` CLI
+### `baseware` CLI
 
 Implemented in [`baseware/src/cli.ts`](../../../baseware/src/cli.ts) and [`baseware/src/main.ts`](../../../baseware/src/main.ts). Default standalone daemon socket is `/tmp/ludens-baseware-${uid}-${id}.sock`.
 
-### `baseware serve`
-
-Start Baseware directly with a driver, transport, and socket binding.
-
 ```bash
+# Start Baseware directly with a driver, transport, and socket binding
 baseware serve --driver <id> \
   [--driver-package <npm|github:org/repo#rev|https://github.com/org/repo#rev|file:path>] \
   [--port <n>] [--host <host>] \
@@ -269,11 +279,8 @@ baseware serve --driver <id> \
   [--url <url>] [--cua-command <path>] \
   [--socket <path>] [--data-dir <path>] [--machine-id <id>] \
   [--diagnostics normal|full]
-```
 
-### Baseware Client, Driver, Machine & MCP Commands
-
-```bash
+# Baseware Client, Driver, Machine & MCP Commands
 baseware status
 baseware list
 baseware export [--output <path>]          # Default output path: baseware.json
@@ -296,11 +303,9 @@ baseware revoke                            # Revoke active Auto Run lease / Epoc
 baseware mcp                               # Expose Baseware controllers over stdio MCP
 ```
 
----
+### `ludens-app` Desktop CLI
 
-## `ludens-app` Desktop CLI
-
-Implemented in [`app/desktop/main.ts`](../../../app/desktop/main.ts). Launches the zero-port Electron desktop app loading the bundled Vite SPA (`ludens-app://console/`) and local media (`ludens-media://local/media?...`) over UDS `app-server.sock` via `AppServerHost` (`ensureLocalAppDaemon`), with `ActiveCoreQuitGuard` and the optional Desktop Pet (`PetSessionCoordinator`).
+Implemented in [`desktop/src/main.ts`](../../../desktop/src/main.ts). Launches the zero-port Electron desktop app loading the bundled `@ludens/client` Vite SPA (`ludens-app://console/` from `client/out`) and local media (`ludens-media://local/media?...`) over UDS `app-server.sock` via `AppServerHost` (`ensureLocalAppDaemon`), with `ActiveCoreQuitGuard` and the optional Desktop Pet (`PetSessionCoordinator`).
 
 ```bash
 ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
@@ -320,15 +325,15 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 
 ## Environment Variables
 
-Verified across [`core/`](../../../core/src/), [`baseware/`](../../../baseware/src/), and [`app/`](../../../app/):
+Verified across [`protocol/`](../../../protocol/src/), [`baseware/`](../../../baseware/src/), [`core/`](../../../core/src/), [`server/`](../../../server/src/), [`client/`](../../../client/), and [`desktop/`](../../../desktop/src/):
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `LUDENS_HOME` | `~/.ludens` | Root directory for global config, driver cache, and state |
+| `LUDENS_HOME` | `~/.ludens` | Root directory for global config, driver cache, and state (`client` `npm run dev` defaults to isolated `~/.ludens-dev`) |
 | `LUDENS_WORKSPACE` | Current working directory | Default workspace path when `--workspace` is omitted |
 | `LUDENS_SOCKET` | `/tmp/ludens-core-${uid}-${workspaceHash}.sock` | Override Core daemon Unix domain socket path |
 | `BASEWARE_SOCKET` | `/tmp/ludens-baseware-${uid}-${id}.sock` | Override Baseware Unix domain socket path |
-| `BASEWARE_EPOCH` | — | Control lease epoch carried by `run` / Baseware clients |
+| `BASEWARE_EPOCH` | — | Control lease epoch carried by `ludens-core run` / Baseware clients |
 | `BASEWARE_TRACE` | — | Optional trace identifier propagated to Baseware calls |
 | `LUDENS_MACHINE_ID` | — | Default machine identifier filter for Baseware routing |
 | `LUDENS_PYTHON` | — | Python interpreter path used by workspace capabilities and evals |
@@ -353,20 +358,20 @@ Verified across [`core/`](../../../core/src/), [`baseware/`](../../../baseware/s
 | `LUDENS_APP_INDEX_MAX_RUNS` | `3` | Max run indexes retained simultaneously in memory |
 | `LUDENS_APP_INDEX_IDLE_MS` | `300000` | Idle eviction delay for cached Console run indexes |
 | `LUDENS_APP_INDEX_ROOT` | Workspace `.dashboard-index` | Override Console rebuildable index directory |
-| `LUDENS_REMOTE_URL` | — | Default `--remote ws(s)://...` App-Server URL for unified CLI operator commands |
+| `LUDENS_REMOTE_URL` | — | Default `--remote ws(s)://...` server URL for `ludens` pure-RPC CLI commands |
 | `LUDENS_REMOTE_TOKEN` | — | Default bearer token paired with `LUDENS_REMOTE_URL` / `--remote` |
-| `LUDENS_APP_TOKEN` | — | Bearer token environment variable forwarded/read when running authenticated `app-server` or `ludens daemon start --token-env LUDENS_APP_TOKEN` |
-| `LUDENS_STATIC_DIR` | — | Static Vite SPA Console asset directory (`app/out`) served by `app-server` |
-| `LUDENS_APP_SERVER_URL` | — | Upstream `app-server` target proxied by `app/scripts/dev.mjs` / `vite.config.ts` |
+| `LUDENS_APP_TOKEN` | — | Bearer token environment variable forwarded/read when running authenticated `ludens-server` (`--token-env LUDENS_APP_TOKEN`) |
+| `LUDENS_STATIC_DIR` | — | Static Vite SPA Console asset directory (`client/out`) served by `ludens-server` |
+| `LUDENS_APP_SERVER_URL` | — | Upstream `ludens-server` target proxied by `client/scripts/dev.mjs` / `vite.config.ts` |
 | `LUDENS_APP_DEV_URL` | — | Dev renderer URL loaded by `ludens-app` (`LUDENS_DEV_URL` alias) |
 | `LUDENS_BUN` | — | Path override for the Bun executable |
-| `LUDENS_APP_SERVER_BIN` | — | Binary path override when `ludens-app` spawns `app-server` |
+| `LUDENS_APP_SERVER_BIN` | — | Binary path override when `ludens-app` or `ludens` spawns `ludens-server` |
 | `LUDENS_DISABLE_COMPANION` | — | Disable launching the optional Desktop Pet from the Electron shell |
 
 ## Related Documentation
 
-- [Workspace Tutorial](../tutorials/workspace.md) & [Devices Tutorial](../tutorials/devices.md): End-to-end setup examples with `ludens init`, `ludens up`, and `baseware`.
+- [Workspace Tutorial](../tutorials/workspace.md) & [Devices Tutorial](../tutorials/devices.md): End-to-end setup examples with `ludens workspace init`, `ludens workspace up`, `ludens-core`, and `baseware`.
 - [Console & Debugging Tutorial](../tutorials/console-and-debugging.md): Inspecting live runs, replays, and capabilities in the Console.
-- [Architecture Specification](architecture.md): Daemon sockets, startup sequence, and storage boundaries.
+- [Architecture Specification](architecture.md): Four-layer six-package boundaries, daemon sockets, startup sequence, and storage boundaries.
 - [Baseware Specification](baseware.md): Driver loading, lease epochs, and controller capability contracts.
 - [Logging and Call Chains](logging.md): Run archive layout and `ludens logs` inspection fields.

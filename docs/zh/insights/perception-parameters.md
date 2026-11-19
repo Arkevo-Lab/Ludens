@@ -37,7 +37,7 @@ class Perception:
 
 ## 为什么有些参数允许在 控制台 编辑，有些必须留在基础设施层
 
-顺着这张表自然会问：既然 `hotSeconds`、`videoSegmentSeconds` 和 `videoIdleSeconds` 放进了 `.ludens/settings.json` 并允许在 控制台「感知」页面（`core/src/core/query/perception-config.ts`）可视化编辑，为什么不把 `sampleHz` 或 `hotBytes` 也放进去——或者反过来，为什么单单开放那三个时间窗口参数？
+顺着这张表自然会问：既然 `hotSeconds`、`videoSegmentSeconds` 和 `videoIdleSeconds` 放进了 `.ludens/settings.json` 并允许在 控制台「感知」页面（`server/src/query/perception-config.ts`）可视化编辑，为什么不把 `sampleHz` 或 `hotBytes` 也放进去——或者反过来，为什么单单开放那三个时间窗口参数？
 
 1. **为什么三个时间窗口参数开放给操作员编辑（`hotSeconds`、`videoSegmentSeconds`、`videoIdleSeconds`）**：
    - 它们调节的是**因任务而异的回放与核查体验**。调试高频变化的实时场景时，操作员可能希望调小 `videoSegmentSeconds` 让 MP4 分片更快封口落盘，或者调大 `hotSeconds`（`10～3600` 秒）让最近原始帧直接留在内存热窗口里免去冷视频解码。
@@ -50,4 +50,4 @@ class Perception:
 
 - `core/python/ludens_tools/_perception.py` 现在只从宿主环境变量 `LUDENS_PERCEPTION_SAMPLE_HZ`（通过 `core/python/ludens_tools/_sampling.py`，默认 `30.0` Hz）读取频率，不再读取工作区 `Perception` 类上的 `sample_hz` 属性。
 - `core/templates/perception.py` 与 `core/templates/AGENTS.md` 移除了 `sample_hz` 类属性及“按需调优（`tune as needed`）”提示，并在 `AGENTS.md` 中明确禁止在 `Perception.sample()` 内人为加入 `sleep` 降频。
-- 实际生效的 `sampleHz` 继续通过 `ludens status`、`ludens perception status` 以及 控制台 的只读运行态核查（`PerceptionRuntimeSnapshot`）作为可观测的基础设施事实对外暴露。
+- 实际生效的 `sampleHz` 继续通过 `ludens status`、`ludens-core perception status` 以及 控制台 的只读运行态核查（`PerceptionRuntimeSnapshot`）作为可观测的基础设施事实对外暴露。
