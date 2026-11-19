@@ -2,16 +2,16 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolve } from "node:path";
 import {
+  buildDevExecutionPlan,
+  buildDevServerArgs,
   buildLoopbackTrustedOrigins,
   buildManagedAppServerArgs,
+  buildServerSpawn,
   parseDevArgs,
   resolveDevHome,
-} from "../scripts/dev.mjs";
-import {
-  buildProductionStartArgs,
-  buildServerSpawn,
   resolveLudensServerCommand,
-} from "../scripts/production.mjs";
+} from "../../scripts/dev.mjs";
+import { buildSelfhostArgs } from "../../scripts/selfhost.mjs";
 
 test("resolveDevHome defaults to isolated ~/.ludens-dev when no home overrides are set", () => {
   const fakeHome = "/Users/alice";
@@ -34,30 +34,46 @@ test("resolveDevHome follows precedence: --home > --real-home > LUDENS_HOME > ~/
   );
 });
 
-test("parseDevArgs supports isolated default, --real-home, --home, LUDENS_HOME, and --desktop", () => {
+test("parseDevArgs supports web, desktop, and server modes with isolated default and --real-home", () => {
   const fakeHome = "/Users/bob";
 
   const isolated = parseDevArgs([], {}, fakeHome);
+  assert.equal(isolated.mode, "web");
   assert.equal(isolated.port, "3015");
   assert.equal(isolated.hostname, "127.0.0.1");
   assert.equal(isolated.ludensHome, resolve(fakeHome, ".ludens-dev"));
   assert.equal(isolated.realHome, false);
   assert.equal(isolated.home, undefined);
-  assert.equal(isolated.desktop, false);
   assert.deepEqual(isolated.rest, []);
 
-  const fromEnv = parseDevArgs(["--port=3099"], { LUDENS_HOME: "/tmp/harness-home" }, fakeHome);
-  assert.equal(fromEnv.port, "3099");
-  assert.equal(fromEnv.ludensHome, resolve("/tmp/harness-home"));
-  assert.equal(fromEnv.realHome, false);
+  const webFromEnv = parseDevArgs(["web", "--port=3099"], { LUDENS_HOME: "/tmp/harness-home" }, fakeHome);
+  assert.equal(webFromEnv.mode, "web");
+  assert.equal(webFromEnv.port, "3099");
+  assert.equal(webFromEnv.ludensHome, resolve("/tmp/harness-home"));
+  assert.equal(webFromEnv.realHome, false);
 
-  const realHome = parseDevArgs(["--real-home", "--desktop"], { LUDENS_HOME: "/tmp/ignored" }, fakeHome);
-  assert.equal(realHome.ludensHome, resolve(fakeHome, ".ludens"));
-  assert.equal(realHome.realHome, true);
-  assert.equal(realHome.desktop, true);
-  assert.deepEqual(realHome.rest, []);
+  const desktopIsolated = parseDevArgs(["desktop"], {}, fakeHome);
+  assert.equal(desktopIsolated.mode, "desktop");
+  assert.equal(desktopIsolated.ludensHome, resolve(fakeHome, ".ludens-dev"));
+  assert.equal(desktopIsolated.realHome, false);
 
-  const customSpace = parseDevArgs(["--home", "/custom/dir", "--clearScreen", "false"], {}, fakeHome);
+  const desktopReal = parseDevArgs(["desktop", "--real-home"], { LUDENS_HOME: "/tmp/ignored" }, fakeHome);
+  assert.equal(desktopReal.mode, "desktop");
+  assert.equal(desktopReal.ludensHome, resolve(fakeHome, ".ludens"));
+  assert.equal(desktopReal.realHome, true);
+  assert.deepEqual(desktopReal.rest, []);
+
+  const serverIsolated = parseDevArgs(["server", "--listen", "ws://127.0.0.1:48080"], {}, fakeHome);
+  assert.equal(serverIsolated.mode, "server");
+  assert.equal(serverIsolated.ludensHome, resolve(fakeHome, ".ludens-dev"));
+  assert.deepEqual(serverIsolated.rest, ["--listen", "ws://127.0.0.1:48080"]);
+
+  const serverReal = parseDevArgs(["server", "--real-home"], {}, fakeHome);
+  assert.equal(serverReal.mode, "server");
+  assert.equal(serverReal.ludensHome, resolve(fakeHome, ".ludens"));
+  assert.equal(serverReal.realHome, true);
+
+  const customSpace = parseDevArgs(["web", "--home", "/custom/dir", "--clearScreen", "false"], {}, fakeHome);
   assert.equal(customSpace.ludensHome, resolve("/custom/dir"));
   assert.equal(customSpace.home, "/custom/dir");
   assert.deepEqual(customSpace.rest, ["--clearScreen", "false"]);
@@ -67,17 +83,56 @@ test("parseDevArgs supports isolated default, --real-home, --home, LUDENS_HOME, 
   assert.equal(customEquals.home, "/another/dir");
 });
 
-test("parseDevArgs enforces loopback-only hostnames and rejects invalid ports or empty --home", () => {
+test("buildDevExecutionPlan ensures desktop mode never spawns an extra TCP ludens-server", () => {
   const fakeHome = "/Users/bob";
 
-  assert.equal(parseDevArgs(["--hostname", "localhost"], {}, fakeHome).hostname, "localhost");
-  assert.equal(parseDevArgs(["--hostname", "[::1]"], {}, fakeHome).hostname, "::1");
+  const webPlan = buildDevExecutionPlan(["web", "--port", "3120"], {}, fakeHome);
+  assert.equal(webPlan.mode, "web");
+  assert.equal(webPlan.spawnsTcpAppServer, true);
+  assert.equal(webPlan.spawnsVite, true);
+  assert.equal(webPlan.buildsDesktop, false);
+  assert.equal(webPlan.spawnsElectron, false);
+  assert.equal(webPlan.ludensHome, resolve(fakeHome, ".ludens-dev"));
+
+  const desktopPlan = buildDevExecutionPlan(["desktop", "--port", "3120"], {}, fakeHome);
+  assert.equal(desktopPlan.mode, "desktop");
+  assert.equal(desktopPlan.spawnsTcpAppServer, false);
+  assert.equal(desktopPlan.managedServerArgs, null);
+  assert.equal(desktopPlan.buildsDesktop, true);
+  assert.equal(desktopPlan.spawnsVite, true);
+  assert.equal(desktopPlan.spawnsElectron, true);
+  assert.equal(desktopPlan.desktopDevUrl, "http://127.0.0.1:3120");
+  assert.equal(desktopPlan.ludensHome, resolve(fakeHome, ".ludens-dev"));
+
+  const serverPlan = buildDevExecutionPlan(["server"], {}, fakeHome);
+  assert.equal(serverPlan.mode, "server");
+  assert.equal(serverPlan.spawnsTcpAppServer, true);
+  assert.equal(serverPlan.spawnsVite, false);
+  assert.equal(serverPlan.spawnsElectron, false);
+  assert.deepEqual(serverPlan.serverArgs, ["serve", "--dev", "--listen", "ws://127.0.0.1:38080"]);
+  assert.equal(serverPlan.ludensHome, resolve(fakeHome, ".ludens-dev"));
+
+  assert.deepEqual(
+    buildDevServerArgs(["--listen", "ws://127.0.0.1:49000", "--trusted-origin", "http://localhost:3015"]),
+    ["serve", "--dev", "--listen", "ws://127.0.0.1:49000", "--trusted-origin", "http://localhost:3015"],
+  );
+});
+
+test("parseDevArgs enforces loopback-only hostnames and rejects invalid modes, ports, or empty --home", () => {
+  const fakeHome = "/Users/bob";
+
+  assert.equal(parseDevArgs(["web", "--hostname", "localhost"], {}, fakeHome).hostname, "localhost");
+  assert.equal(parseDevArgs(["desktop", "--hostname", "[::1]"], {}, fakeHome).hostname, "::1");
   assert.deepEqual(buildLoopbackTrustedOrigins("3015", "::1"), [
     "http://[::1]:3015",
     "http://127.0.0.1:3015",
     "http://localhost:3015",
   ]);
 
+  assert.throws(
+    () => parseDevArgs(["unknown-mode"], {}, fakeHome),
+    /Unknown dev mode/,
+  );
   assert.throws(
     () => parseDevArgs(["--hostname", "0.0.0.0"], {}, fakeHome),
     /Refusing non-loopback dev hostname/,
@@ -114,18 +169,18 @@ test("buildManagedAppServerArgs passes serve --dev --listen ws://127.0.0.1:0 --p
   assert.equal(args.includes("--port"), false);
 });
 
-test("buildProductionStartArgs passes --dev on tokenless loopback and --auth token when LUDENS_APP_TOKEN is set", () => {
+test("buildSelfhostArgs serves client/dist with --dev on tokenless loopback and --auth token when LUDENS_APP_TOKEN is set", () => {
   const emptyEnv = { NODE_ENV: "test" as const };
-  assert.deepEqual(buildProductionStartArgs([], emptyEnv, "/repo/app"), [
+  assert.deepEqual(buildSelfhostArgs([], emptyEnv, "/repo"), [
     "--listen",
     "ws://127.0.0.1:3015",
     "--dev",
     "--static-dir",
-    resolve("/repo/app", "out"),
+    resolve("/repo", "client/dist"),
   ]);
 
   assert.deepEqual(
-    buildProductionStartArgs([], { NODE_ENV: "test" as const, LUDENS_APP_TOKEN: "secret-123" }, "/repo/app"),
+    buildSelfhostArgs([], { NODE_ENV: "test" as const, LUDENS_APP_TOKEN: "secret-123" }, "/repo"),
     [
       "--listen",
       "ws://127.0.0.1:3015",
@@ -134,19 +189,19 @@ test("buildProductionStartArgs passes --dev on tokenless loopback and --auth tok
       "--token-env",
       "LUDENS_APP_TOKEN",
       "--static-dir",
-      resolve("/repo/app", "out"),
+      resolve("/repo", "client/dist"),
     ],
   );
 
   assert.deepEqual(
-    buildProductionStartArgs(["--listen", "ws://0.0.0.0:3015"], emptyEnv, "/repo/app"),
-    ["--static-dir", resolve("/repo/app", "out"), "--listen", "ws://0.0.0.0:3015"],
+    buildSelfhostArgs(["--listen", "ws://0.0.0.0:3015"], emptyEnv, "/repo"),
+    ["--static-dir", resolve("/repo", "client/dist"), "--listen", "ws://0.0.0.0:3015"],
   );
 });
 
 test("resolveLudensServerCommand prefers bun + server/src/cli/main.ts over .cmd shim and buildServerSpawn wraps Windows .cmd", () => {
   const spec = resolveLudensServerCommand(
-    "/repo/client",
+    "/repo",
     { PATH: "", LUDENS_BUN: "/opt/bun" },
     "win32",
     p => String(p).endsWith("server/src/cli/main.ts") || String(p).endsWith("server/bin/ludens-server.cmd"),

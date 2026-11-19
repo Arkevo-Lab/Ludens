@@ -78,8 +78,8 @@ if (values.help) {
       '--show-window      Open the main window on launch (default unless --background is passed)',
       '--help             Show this help message',
       '',
-      'By default, Ludens ensures a zero-port UDS `ludens-server` daemon for the active LUDENS_HOME and serves `client/out` via `ludens-app://console/`.',
-      'Pass --server URL only to override with an explicit external dev server. Closing the window hides to Tray + Desktop Pet; Cmd+Q checks active Cores before quitting managed workspace services.',
+      'By default, Ludens ensures a zero-port UDS `ludens-server` daemon for the active LUDENS_HOME and serves `client/dist` (or packaged `Resources/client`) via `ludens-app://console/`.',
+      'Pass --server URL (or LUDENS_DESKTOP_DEV_URL) only to override with an explicit external dev server. Closing the window hides to Tray + Desktop Pet; Cmd+Q checks active Cores before quitting managed workspace services.',
     ].join('\n'),
   )
   app.exit(0)
@@ -88,6 +88,7 @@ if (values.help) {
   const workspace = initialWorkspace ? realpathSync(resolve(initialWorkspace)) : undefined
   const explicitDevArg =
     values.server ??
+    process.env.LUDENS_DESKTOP_DEV_URL?.trim() ??
     process.env.LUDENS_APP_DEV_URL?.trim() ??
     process.env.LUDENS_DEV_URL?.trim()
 
@@ -100,7 +101,7 @@ if (values.help) {
       externalDevServer.username ||
       externalDevServer.password
     ) {
-      throw new Error('--server / LUDENS_APP_DEV_URL must be a local HTTP(S) URL')
+      throw new Error('--server / LUDENS_DESKTOP_DEV_URL must be a local HTTP(S) URL')
     }
   }
 

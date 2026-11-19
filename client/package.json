@@ -14,11 +14,9 @@
     "ludens": "./bin/ludens"
   },
   "scripts": {
-    "dev": "node scripts/dev.mjs",
-    "dev:real": "node scripts/dev.mjs --real-home",
-    "build": "node scripts/production.mjs build",
-    "build:check": "node scripts/production.mjs check",
-    "start": "node scripts/production.mjs start",
+    "dev": "vite",
+    "build": "bun scripts/build.mjs build",
+    "build:check": "bun scripts/build.mjs check",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },

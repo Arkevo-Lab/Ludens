@@ -9,21 +9,15 @@
     "ludens-app": "./bin/ludens-app"
   },
   "scripts": {
+    "dev": "node scripts/build-electron.mjs && node scripts/dev-electron.mjs",
     "build": "node scripts/build-electron.mjs",
-    "dev": "npm run build && node ../client/scripts/dev.mjs --real-home --desktop",
+    "start": "electron dist/electron/main.js",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "start": "electron dist/electron/main.js",
-    "pack": "npm --prefix ../client run build && npm run build && npx electron-builder --dir",
-    "dist": "npm --prefix ../client run build && npm run build && npx electron-builder",
-    "desktop:build": "node scripts/build-electron.mjs",
-    "desktop:dev": "npm run desktop:build && node ../client/scripts/dev.mjs --real-home --desktop",
-    "desktop:typecheck": "tsc --noEmit",
-    "desktop:test": "vitest run",
-    "desktop:pack": "npm --prefix ../client run build && npm run desktop:build && npx electron-builder --dir",
-    "desktop:dist": "npm --prefix ../client run build && npm run desktop:build && npx electron-builder",
-    "pet:preview": "npm run build && electron dist/electron/companion-preview.js",
-    "pet:smoke": "npm run build && electron dist/electron/companion-preview.js --smoke"
+    "pet:preview": "bun run build && electron dist/electron/companion-preview.js",
+    "pet:smoke": "bun run build && electron dist/electron/companion-preview.js --smoke"
   },
   "dependencies": {
     "@ludens/protocol": "workspace:*",

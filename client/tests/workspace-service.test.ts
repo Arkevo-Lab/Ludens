@@ -501,15 +501,15 @@ test("app/messages/en.json and app/messages/zh.json maintain 1:1 leaf key parity
 });
 
 test("dev.mjs enforces loopback-only hostnames and brackets IPv6 trusted origins", async () => {
-  const devModule = (await import("../scripts/dev.mjs")) as {
-    parseDevArgs: (argv: string[]) => { port: string; hostname: string; rest: string[] };
+  const devModule = (await import("../../scripts/dev.mjs")) as {
+    parseDevArgs: (argv: string[]) => { mode: string; port: string; hostname: string; rest: string[] };
     buildLoopbackTrustedOrigins: (port: string, hostname: string) => string[];
   };
-  assert.deepEqual(devModule.parseDevArgs(["--port", "3199", "--hostname", "::1"]), {
-    port: "3199",
-    hostname: "::1",
-    rest: [],
-  });
+  const parsed = devModule.parseDevArgs(["--port", "3199", "--hostname", "::1"]);
+  assert.equal(parsed.mode, "web");
+  assert.equal(parsed.port, "3199");
+  assert.equal(parsed.hostname, "::1");
+  assert.deepEqual(parsed.rest, []);
   assert.deepEqual(devModule.buildLoopbackTrustedOrigins("3199", "::1"), [
     "http://[::1]:3199",
     "http://127.0.0.1:3199",
