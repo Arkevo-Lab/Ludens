@@ -19,11 +19,11 @@ All commands support `--remote <ws(s)://...>` (or `LUDENS_REMOTE_URL`) and `--to
 ## Atomic Package Scripts (`client/`)
 
 ```sh
-bun --cwd client run dev          # Pure Vite HMR on 127.0.0.1:3015 (zero local backend; proxies /rpc, /media, /health only if LUDENS_SERVER_URL is set)
-bun --cwd client run build        # Static Vite SPA build into client/dist/ + fingerprint stamp
-bun --cwd client run build:check  # Verify client/dist/index.html & build stamp match sources
-bun --cwd client run typecheck    # TypeScript check (SPA + CLI)
-bun --cwd client run test         # Run SPA & pure-RPC CLI test suites
+bun --cwd=client run dev          # Pure Vite HMR on 127.0.0.1:3015 (zero local backend; proxies /rpc, /media, /health only if LUDENS_SERVER_URL is set)
+bun --cwd=client run build        # Static Vite SPA build into client/dist/ + fingerprint stamp
+bun --cwd=client run build:check  # Verify client/dist/index.html & build stamp match sources
+bun --cwd=client run typecheck    # TypeScript check (SPA + CLI)
+bun --cwd=client run test         # Run SPA & pure-RPC CLI test suites
 ```
 
 ## Full-Stack Root Orchestration

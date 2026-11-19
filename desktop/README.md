@@ -10,15 +10,15 @@ All-in-One Electron desktop shell (`ludens-app`) for Ludens.
 ## Atomic Package Commands (`desktop/`)
 
 ```bash
-bun --cwd desktop run build       # Bundle Electron main/preload/companion-preview into dist/electron/
-bun --cwd desktop run dev         # Build Electron shell and launch with LUDENS_HOME=~/.ludens-dev (reads LUDENS_DESKTOP_DEV_URL or ../client/dist)
-bun --cwd desktop run start       # Launch compiled Electron shell (dist/electron/main.js)
-bun --cwd desktop run typecheck   # Type-check desktop/src
-bun --cwd desktop run test        # Run desktop Vitest specification suite
-bun --cwd desktop run pack        # Run electron-builder --dir (expects sibling dist/ bundles built)
-bun --cwd desktop run dist        # Run electron-builder installers (expects sibling dist/ bundles built)
-bun --cwd desktop run pet:preview # Interactive Desktop Pet companion preview
-bun --cwd desktop run pet:smoke   # Automated Desktop Pet smoke verification
+bun --cwd=desktop run build       # Bundle Electron main/preload/companion-preview into dist/electron/
+bun --cwd=desktop run dev         # Build Electron shell and launch with LUDENS_HOME=~/.ludens-dev (reads LUDENS_DESKTOP_DEV_URL or ../client/dist)
+bun --cwd=desktop run start       # Launch compiled Electron shell (dist/electron/main.js)
+bun --cwd=desktop run typecheck   # Type-check desktop/src
+bun --cwd=desktop run test        # Run desktop Vitest specification suite
+bun --cwd=desktop run pack        # Run electron-builder --dir (expects sibling dist/ bundles built)
+bun --cwd=desktop run dist        # Run electron-builder installers (expects sibling dist/ bundles built)
+bun --cwd=desktop run pet:preview # Interactive Desktop Pet companion preview
+bun --cwd=desktop run pet:smoke   # Automated Desktop Pet smoke verification
 ```
 
 ## Full-Stack Root Orchestration

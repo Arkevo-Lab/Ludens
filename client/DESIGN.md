@@ -86,7 +86,7 @@ The Ludens mark is a `5 × 5` pixel ring around a hollow L with one loose pixel 
 - **Window & Quit Semantics**: `--profile <path>` defaults to the Electron `appData` desktop profile, `--workspace <path>` (`LUDENS_WORKSPACE`) sets initial focus, and `LUDENS_DISABLE_COMPANION=1` disables the optional Desktop Pet widget. Language changes in Console Settings sync bidirectionally via the desktop bridge to native menus, `companion.json`, and pet dialogue.
 - **Assets & I18n**: Pet poses use static transparent WebP frames registered in `client/public/companion/ludens/manifest.json` (synced with `catalog.js`: 24 poses, 8 overlay effects, 3 avatars, and dedicated tray icons under `client/public/companion/ludens/icons/`). Shared pet localization lives in `client/public/companion/companion-i18n.cjs` (update `zh` and `en` together).
 - **Scale & Priority**: Poses bottom-align and scale via `display_scale` relative to the default standing head size while bubbles keep constant geometry. Priority order: pointer interaction (click / pick up / drop) > live log state (`thinking`, `acting`, `smug`, `sheepish`) > interactive Catch-the-Stars round > manual menu pose > idle timers (`30s` sit → `90s` drowsy → `120s` sleep).
-- **Smoke Test**: `bun --cwd desktop run pet:smoke` verifies window bounds, click-through, scaling, audio alerts, and 5 log bubble classes under an isolated profile; `bun --cwd desktop run pet:preview` opens an interactive preview window.
+- **Smoke Test**: `bun --cwd=desktop run pet:smoke` verifies window bounds, click-through, scaling, audio alerts, and 5 log bubble classes under an isolated profile; `bun --cwd=desktop run pet:preview` opens an interactive preview window.
 
 ## 8. Acceptance & Packaging
 
@@ -96,7 +96,7 @@ Run repository-wide checks and builds from the repo root before opening a PR (se
 bun run typecheck
 bun run test
 bun run build
-bun --cwd client run build:check
+bun --cwd=client run build:check
 ```
 
 For Electron desktop binaries and installers:
