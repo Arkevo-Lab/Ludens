@@ -12,7 +12,7 @@ test("address and state resolution never initialize a bare or missing directory"
   try {
     expect(await resolveWorkspaceAddress(alias)).toEqual(await resolveWorkspaceAddress(workspace));
     await expect(resolveWorkspaceState(workspace, home)).rejects.toThrow("ludens workspace import");
-    await expect(resolveWorkspaceState(join(directory, "missing"), home)).rejects.toThrow("ludens init");
+    await expect(resolveWorkspaceState(join(directory, "missing"), home)).rejects.toThrow("ludens workspace init");
     expect(await readdir(workspace)).toEqual([]);
     expect(await Bun.file(join(workspace, ".ludens", "workspace.json")).exists()).toBe(false);
     expect((await readdir(directory)).sort()).toEqual(["alias", "bare"]);
@@ -30,7 +30,7 @@ test("CLI queries and direct run cannot create an identity in an uninitialized d
   const env: NodeJS.ProcessEnv = { ...process.env, LUDENS_HOME: home };
   for (const key of ["LUDENS_SOCKET", "LUDENS_WORKSPACE", "BASEWARE_SOCKET", "BASEWARE_EPOCH"]) delete env[key];
   try {
-    for (const args of [["status"], ["controller", "list"], ["perception", "status"], ["run", "--device-only"]]) {
+    for (const args of [["machine", "list"], ["controller", "list"], ["perception", "status"], ["run", "--device-only"]]) {
       const child = Bun.spawn([process.execPath, resolve(import.meta.dir, "../src/cli/main.ts"), "--workspace", workspace, ...args],
         { cwd: workspace, env, stdout: "pipe", stderr: "pipe" });
       const [code, output, errors] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);

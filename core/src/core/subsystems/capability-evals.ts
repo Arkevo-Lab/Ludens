@@ -206,7 +206,7 @@ export async function runCapabilityEvals(workspace: string, options: { capabilit
   let targets: typeof entries;
   if (options.capabilityId) {
     const target = entries.find(entry => entry.id === options.capabilityId);
-    if (!target) throw new Error(`Unknown Python capability: ${options.capabilityId}; use ludens eval list`);
+    if (!target) throw new Error(`Unknown Python capability: ${options.capabilityId}; use ludens-core eval list`);
     targets = [target];
   } else if (options.all) {
     targets = entries.filter(entry => entry.capability.eval);
@@ -259,7 +259,7 @@ export async function adaptCapabilityEval(workspace: string, options: {
   if (!reason) throw new Error("Adaptation reason must be non-empty");
   const discovered = await new PythonCapabilities(workspace).discover(options.signal);
   const capability = discovered.capabilities.find(item => capabilityEvalId(item) === options.capabilityId);
-  if (!capability) throw new Error(`Unknown Python capability: ${options.capabilityId}; use ludens eval list`);
+  if (!capability) throw new Error(`Unknown Python capability: ${options.capabilityId}; use ludens-core eval list`);
   const latest = await readLatestEvals(workspace);
   const now = new Date().toISOString();
   const records = (options.records ?? []).map(item => item.trim()).filter(Boolean);

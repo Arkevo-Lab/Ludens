@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstat, mkdir, readFile, realpath, readdir, rename, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { ensureWorkspaceIdentity, ludensHome, readWorkspaceIdentity } from "@ludens/protocol/ludens";
-import { ludensSocketPath } from "../../daemon/background-jobs.ts";
+import { localServiceSocketPath } from "@ludens/protocol/local-socket";
 
 export interface WorkspaceState {
   workspace: string;
@@ -19,10 +19,10 @@ export interface WorkspaceState {
 export async function resolveWorkspaceAddress(workspacePath: string) {
   const workspace = await realpath(workspacePath);
   const hash = createHash("sha256").update(workspace).digest("hex").slice(0, 16);
-  return { workspace, socket: ludensSocketPath("core", hash) };
+  return { workspace, socket: localServiceSocketPath("core", hash) };
 }
 
-const initializationRequired = () => new Error("Workspace has no Ludens identity. Use ludens init for a new workspace, or ludens workspace import <directory> for existing history.");
+const initializationRequired = () => new Error("Workspace has no Ludens identity. Use ludens workspace init for a new workspace, or ludens workspace import <directory> for existing history.");
 
 /** Resolve an existing workspace without creating directories, identity, or registration. */
 export async function resolveWorkspaceState(workspacePath: string, globalHome = ludensHome()): Promise<WorkspaceState> {

@@ -1,19 +1,21 @@
 # @ludens/core
 
-Core harness runtime and unified `app-server` for Ludens: hosts **Shiori** (Agent Thread Core powered by **OMP `18.22.2`**), connects **Baseware** cross-device node pools with agent-evolved coding workspaces, runs the resident Python perception/action worker (`perception.py`), routes calls across mounted devices (`controller/<machineId>/<tool>`), and drives offline **Capability – Eval – Env** verification (`ludens eval`).
+Single-workspace execution kernel (`1 Workspace = 1 Core`) for Ludens: hosts **Shiori** (Agent Thread Core powered by **OMP `18.22.2`**), connects **Baseware** cross-device node pools with agent-evolved coding workspaces, runs the resident Python perception/action worker (`perception.py`) and optional programmable outer loop (`loop.py`), routes calls across mounted devices (`controller/<machineId>/<tool>`), and drives offline **Capability – Eval – Env** verification (`ludens-core eval`).
+
+`@ludens/core` has zero dependency on `@ludens/server`, `@ludens/client`, or `@ludens/desktop`.
 
 ## Key Subsystems
 
-- **Host Daemon, App-Server Daemon & Unified CLI (`src/daemon/`, `src/cli/`)**: Manages per-workspace Core sockets (`core.sock` via `LUDENS_SOCKET`) and the per-`LUDENS_HOME` singleton App-Server (`app-server.sock` via `ensureLocalAppDaemon` and `ludens daemon status|start|stop|restart`). Operator commands (`up`, `down`, `services`, `workspace`, `config`, `status`, `auto`, `steer`, `consolidate`, `stop`, `model`) operate uniformly over local UDS `app-server.sock` or remotely via `--remote ws(s)://... [--token ...]`.
-- **Shiori Agent Thread Core (`src/core/agent-omp/`)**: Integrates `@oh-my-pi/pi-coding-agent@18.22.2` with image-capable model catalog discovery and paused-only session switching (`setModel` applies model plus optional `priority`/`ultrafast` service tier and `minimal`..`max` reasoning effort while preserving `imageCountBudget: Infinity` and session-level model stickiness locks `disableModelFallback`, `disableServerSideFallback`, and `suppressAutoPrewalk`), single-channel per-turn perception injection, background speculative compaction (`:spec:` session isolation + `parentSessionId` cache affinity), and stateful WebSocket delta recovery.
-- **Resident Python SDK (`python/ludens_tools/`)**: Provides `ludens_tools.Client`, multi-node `call(..., machine=...)`, `@capability` / `@eval_capability` / `@eval_env` decorators, and high-frequency fMP4/H.264 timeline media recording.
-- **Unified JSON-RPC 2.0 App-Server & Console Query (`src/core/query/`, `src/server/`)**: Serves `@ludens/protocol/app-rpc` over zero-port Unix Domain Socket (NDJSON) and WebSocket `/rpc` (fail-closed token auth on non-loopback `--listen ws://`), real-time `EventHub` push (`events/subscribe` + `sinceSeq` replay over a 1024-event ring, publishing `observation` events after disk write), dual-plane `media/resolve` + HMAC-signed `/media` (`mt=`, `206 Range`), static SPA serving (`--static-dir app/out`), workspace catalogs, live/replay archive projections, 1-click service lifecycle RPCs, and capability eval runs.
+- **Core CLI & Sandbox Tools (`bin/ludens-core`, `src/cli/`, `src/daemon/transport.ts`)**: Exposes `ludens-core run` (per-workspace Core process listening on `core.sock` via `LUDENS_SOCKET`) and in-sandbox Shiori tools (`ludens-core controller`, `ludens-core perception <status|state|reload|stop|transition|inject|observe>`, `ludens-core event`, `ludens-core machine`, `ludens-core eval`).
+- **Shiori Agent Thread Core (`src/core/agent-omp/`, `src/core/shiori/`)**: Integrates `@oh-my-pi/pi-coding-agent@18.22.2` with image-capable model catalog discovery and paused-only session switching (`setModel` applies model plus optional `priority`/`ultrafast` service tier and `minimal`..`max` reasoning effort while preserving `imageCountBudget: Infinity` and session-level model stickiness locks `disableModelFallback`, `disableServerSideFallback`, and `suppressAutoPrewalk`), single-channel per-turn perception injection, background speculative compaction (`:spec:` session isolation + `parentSessionId` cache affinity), and stateful WebSocket delta recovery.
+- **Resident Python SDK (`python/ludens_tools/`)**: Provides `ludens_tools.Client`, multi-node `call(..., machine=...)`, `@capability` / `@eval_capability` / `@eval_env` decorators, `Loop`, and high-frequency fMP4/H.264 timeline media recording.
+- **Storage & Log Archive Library (`src/core/storage/`, `src/cli/log-archive.ts`)**: Per-workspace identity, session pointers, EventLog, duplex Event Pool, and offline log/artifact archive readers consumed by `@ludens/server`.
 
 ## Scripts
 
 ```sh
 cd core && bun run typecheck
-cd core && bun test
+cd core && bun run test
 ```
 
 ## Documentation

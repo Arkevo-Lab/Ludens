@@ -3,35 +3,21 @@ import { parseArgs } from "node:util";
 import type { ObservationQuery, PerceptionRead, TimelineMedia } from "../core/subsystems/perception.ts";
 import { readToolArguments } from "@ludens/baseware/tool-contract";
 import type { ExecutionResult } from "@ludens/baseware/contracts";
-import type { RuntimeControlCommandDto } from "@ludens/protocol/app-rpc";
-import { isOmpEffort, isOmpServiceTier } from "@ludens/protocol/ludens";
-import {
-  resolveWorkspaceTargetViaRpc,
-  withOperatorRpc,
-  type RemoteConnectionConfig,
-} from "./operator-rpc.ts";
 
-export const HELP = `ludens status
-ludens auto on [--message <text>] [--seconds <n>]
-ludens auto timer <seconds|off>
-ludens auto off
-ludens steer <message>
-ludens event <list|send|reply|ack>
-ludens consolidate [--seconds <n>]
-ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]
-ludens perception status | state | reload | stop
-ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
-ludens perception inject [on|off]
-ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
-ludens controller list | <id> --help | <id> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
-ludens machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>
+export const HELP = `ludens-core controller list | <id> --help | <id> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
+ludens-core perception status | state | reload | stop
+ludens-core perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
+ludens-core perception inject [on|off]
+ludens-core perception observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
+ludens-core event <list|send|reply|ack>
+ludens-core machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>
+ludens-core eval <list|run|history|adapt|<capability-id>>
 
-Control management is unavailable inside agent cycles carrying BASEWARE_EPOCH.
 The current directory is the workspace; --workspace <path> or LUDENS_WORKSPACE overrides it.
-LUDENS_SOCKET overrides its default host address. Each workspace resumes its own session.
-Use ludens controller for device and workspace capabilities.`;
+LUDENS_SOCKET overrides its default Core host address.
+Use ludens-core controller for device and workspace capabilities.`;
 
-export const OBSERVE_HELP = `ludens observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
+export const OBSERVE_HELP = `ludens-core perception observe [--capability <id|*>] [--id <record-id> | --at <ISO> | --start <ISO> --end <ISO>] [--limit <n>] [--after <sequence>] [--images]
 Read the workspace timeline without sampling. Default: latest Perception.sample record.
 --capability selects a recorded capability, or '*' for the whole timeline; --id selects a record.
 --at selects the last record at or before the given recordedAt timestamp.
@@ -43,12 +29,11 @@ Default output is one query result: queryId, ok, records with media, and paginat
 An empty range succeeds; missing point/latest data, expiration and query errors have explicit error codes.
 --images displays the same compact observation text and requested pixels through
 OMP's native terminal image support; use it when reading pictures through bash.
-availability reports the retained range; non-persistent history expires outside its hot window.
-The same command is available as ludens perception observe.`;
+availability reports the retained range; non-persistent history expires outside its hot window.`;
 
-const PERCEPTION_HELP = `ludens perception status | state | reload | stop
-ludens perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
-ludens perception inject [on|off]
+const PERCEPTION_HELP = `ludens-core perception status | state | reload | stop
+ludens-core perception transition <target> [--args '<JSON object>' | --file <arguments.json>]
+ludens-core perception inject [on|off]
 ${OBSERVE_HELP}
 Loads workspace/perception.py:Perception in a resident process and calls sample() continuously.
 Samples at LUDENS_PERCEPTION_SAMPLE_HZ (default 30 Hz; slow samples never overlap). Python source edits auto-reload; explicitly reload after changing non-Python assets such as weights.
@@ -56,7 +41,7 @@ Mark sample() with @capability and @record from ludens_tools. Only marked result
 Persistent history survives reload and new runs. Defaults: 10-minute hot window, hourly segments.
 Set LUDENS_PERCEPTION_PERSIST=0 in the host environment for hot-window-only history.
 inject off disables automatic observation attachment to model context; sampling, recording and explicit observe continue.
-inject on restores automatic attachment; inject without arguments shows the policy (also in ludens status).
+inject on restores automatic attachment; inject without arguments shows the policy.
 The policy survives perception reload and control cycles in this host; a new host defaults to on.
 stop ends the sampling process and timeline writer, including video recording. Use inject off to reduce context instead.
 Empty or failed perception supplies no default images.`;
@@ -89,10 +74,10 @@ async function observe(argv: string[], socket: string) {
   console.log(output);
 }
 
-export const CONTROLLER_HELP = `ludens controller list
-ludens controller <id> --help
-ludens controller controller/<native name> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
-ludens controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
+export const CONTROLLER_HELP = `ludens-core controller list
+ludens-core controller <id> --help
+ludens-core controller controller/<native name> [--machine <machineId>] [--args '<JSON object>' | --file <arguments.json>]
+ludens-core controller python/<path.py>:<function> [--args '<JSON object>' | --file <arguments.json>]
 
 Device controllers (including sensors) and decorated Python functions share this workspace catalog.
 List and help discover capabilities without executing workspace code.
@@ -132,9 +117,11 @@ async function controller(argv: string[], socket: string) {
 
 export async function cli(argv: string[], socket: string) {
   const [kind, ...rest] = argv;
-  if (!kind || kind === "--help") { console.log(HELP); return; }
+  if (!kind || kind === "--help" || kind === "-h") { console.log(HELP); return; }
   if (kind === "controller") return controller(rest, socket);
-  if (kind === "observe") return observe(rest, socket);
+  if (kind === "observe") {
+    throw new Error("Top-level 'observe' was removed; use 'ludens-core perception observe'");
+  }
   if (kind === "perception" && rest[0] === "observe") return observe(rest.slice(1), socket);
   if (kind === "perception" && (!rest.length || rest.includes("--help"))) {
     console.log(PERCEPTION_HELP);
@@ -152,157 +139,12 @@ export async function cli(argv: string[], socket: string) {
     console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
     return;
   }
-  if (kind === "model" && rest.length === 0) {
-    const status = await send(socket, { kind: "status", argv: [] }) as { model?: string | null };
-    console.log(status.model ?? "none");
-    return;
+  if (kind !== "perception" && kind !== "machine") {
+    throw new Error("Unknown command; see ludens-core --help");
   }
-  if (!["status", "auto", "steer", "consolidate", "model", "perception", "machine"].includes(kind)) throw new Error("Unknown command; see ludens --help");
-  const control = kind === "auto" || kind === "steer" || kind === "consolidate" || kind === "model"
-    ? await send(socket, { kind: "status", argv: [] }) as { runId: string; epoch: string | null }
-    : undefined;
   const value = await send(socket, {
     kind, argv: rest, epoch: process.env.BASEWARE_EPOCH,
     trace: process.env.BASEWARE_TRACE ? JSON.parse(process.env.BASEWARE_TRACE) : undefined,
-    ...(control ? { runId: control.runId, expectedEpoch: control.epoch } : {}),
   });
   console.log(typeof value === "string" ? value : JSON.stringify(value, null, 2));
-}
-
-export async function runRemoteControlCli(
-  argv: string[],
-  selectedWorkspace: string,
-  explicitWorkspace: boolean,
-  home: string,
-  remote: RemoteConnectionConfig,
-): Promise<void> {
-  const [kind, ...rest] = argv;
-  if (!kind || kind === "--help") {
-    console.log(HELP);
-    return;
-  }
-
-  await withOperatorRpc({ home, remote }, async client => {
-    const target = await resolveWorkspaceTargetViaRpc(client, selectedWorkspace, explicitWorkspace);
-
-    if (kind === "stop") {
-      const catalog = (await client.call("catalog/get", { includeEmpty: true })) as Array<{
-        id?: string;
-        runs?: Array<{ id: string; epoch?: string | null; endedAt?: string }>;
-      }>;
-      const project = catalog.find(item => item.id === target.id);
-      const activeRun =
-        project?.runs?.find(run => !run.endedAt) ?? project?.runs?.[0];
-      if (!activeRun) {
-        throw new Error(`No active or recorded run found for workspace ${target.id}`);
-      }
-      const res = await client.call("run/stop", {
-        project: target.id,
-        run: activeRun.id,
-        ...(activeRun.epoch !== undefined ? { epoch: activeRun.epoch } : {}),
-      });
-      console.log(JSON.stringify(res, null, 2));
-      return;
-    }
-
-    let command: RuntimeControlCommandDto;
-    let preempt = false;
-
-    if (kind === "status") {
-      command = { action: "status" };
-    } else if (kind === "auto") {
-      const [sub, ...autoArgs] = rest;
-      if (sub === "off") {
-        command = { action: "auto_off" };
-      } else if (sub === "on") {
-        const { values } = parseArgs({
-          args: autoArgs,
-          options: {
-            message: { type: "string" },
-            seconds: { type: "string" },
-            preempt: { type: "boolean", default: false },
-          },
-          strict: true,
-        });
-        preempt = Boolean(values.preempt);
-        const seconds = values.seconds !== undefined ? Number(values.seconds) : undefined;
-        if (seconds !== undefined && (!Number.isFinite(seconds) || seconds <= 0)) {
-          throw new Error("--seconds must be a positive number");
-        }
-        command = {
-          action: "auto_on",
-          ...(values.message !== undefined ? { message: values.message } : {}),
-          ...(seconds !== undefined ? { seconds } : {}),
-        };
-      } else if (sub === "timer") {
-        const rawSeconds = autoArgs[0];
-        if (!rawSeconds) throw new Error("auto timer requires <seconds|off>");
-        command = {
-          action: "auto_budget",
-          seconds: rawSeconds === "off" ? null : Number(rawSeconds),
-        };
-      } else {
-        throw new Error("Use ludens auto <on|off|timer>");
-      }
-    } else if (kind === "steer") {
-      const message = rest.join(" ").trim();
-      if (!message) throw new Error("steer requires a message");
-      command = { action: "steer", message };
-    } else if (kind === "consolidate") {
-      const { values } = parseArgs({
-        args: rest,
-        options: { seconds: { type: "string" } },
-        strict: true,
-      });
-      const seconds = values.seconds !== undefined ? Number(values.seconds) : undefined;
-      command = { action: "consolidate", ...(seconds !== undefined ? { seconds } : {}) };
-    } else if (kind === "model") {
-      if (rest.length === 0) {
-        const status = (await client.call("runtime/control", {
-          project: target.id,
-          workspace: target.workspace,
-          command: { action: "status" },
-        })) as { model?: string | null };
-        console.log(status.model ?? "none");
-        return;
-      }
-      const { positionals, values } = parseArgs({
-        args: rest,
-        allowPositionals: true,
-        options: {
-          "service-tier": { type: "string" },
-          effort: { type: "string" },
-        },
-        strict: true,
-      });
-      const model = positionals[0] ?? "";
-      if (!model) throw new Error("model requires <provider/id>");
-      const tierRaw = values["service-tier"];
-      const effortRaw = values.effort;
-      const serviceTier = tierRaw === "none" ? null : tierRaw;
-      const effort = effortRaw === "none" ? null : effortRaw;
-      if (serviceTier !== undefined && serviceTier !== null && !isOmpServiceTier(serviceTier)) {
-        throw new Error("--service-tier must be none, priority, or ultrafast");
-      }
-      if (effort !== undefined && effort !== null && !isOmpEffort(effort)) {
-        throw new Error("--effort must be none, minimal, low, medium, high, xhigh, or max");
-      }
-      command = {
-        action: "set_model",
-        model,
-        ...(serviceTier !== undefined ? { serviceTier } : {}),
-        ...(effort !== undefined ? { effort } : {}),
-      };
-    } else {
-      throw new Error(`Unsupported remote control command '${kind}'; use status, auto, steer, consolidate, stop, or model`);
-    }
-
-    const res = await client.call("runtime/control", {
-      project: target.id,
-      workspace: target.workspace,
-      command,
-      ...(preempt ? { preempt: true } : {}),
-    });
-    console.log(JSON.stringify(res, null, 2));
-  });
 }

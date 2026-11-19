@@ -1,0 +1,147 @@
+import { parentPort } from "node:worker_threads";
+import { archiveBuild, catalog, clearCatalogCache, getRun, mediaFile, stopRun, timelineRecord } from "./data";
+import { diagnosticEvents } from "./diagnostic-events";
+import { getActivity } from "./activity";
+import { availableModels } from "./available-models";
+import { getReplay } from "./replay";
+import { controlWorkspaceRuntime } from "./runtime-control";
+import { mutateWorkspaceEventPool, readWorkspaceEventPool } from "./event-pool";
+import {
+  adaptWorkspaceCapabilityEval,
+  capabilities,
+  capabilityRuntime,
+  runWorkspaceCapabilityEval,
+  workspaceCapabilityEvalHistory,
+} from "./capabilities";
+import { queryRunLogArtifact, queryRunLogEvents } from "./logs";
+import { discoverDriver } from "./drivers";
+import { docGroups, readDoc } from "./docs";
+import { petState, setPetTarget, recordPetConsumer } from "./pet-state";
+import { closeLogIndexes, indexCacheStats } from "./log-index";
+import { workerFailure, type DashboardMethods, type DashboardMethod, type WorkerRequest, type WorkerResponse } from "./dashboard-protocol";
+import { perceptionSettings, updatePerceptionSettings, perceptionRuntime } from "./perception-config";
+import {
+  getStorageOverview,
+  maintainStorage,
+  pinTimelineSegment,
+  testStorageBackend,
+  updateStorageSettings,
+} from "./storage";
+import { closeArchiveBuilds } from "./cold-build";
+import {
+  workspaceSettings,
+  updateWorkspaceRoot,
+  updateGlobalConnection,
+  updateGlobalDefaults,
+  workspaceConnection,
+  updateWorkspaceConnection,
+  workspaceStudio,
+  updateWorkspaceStudioConfig,
+  updateWorkspaceShiori,
+  openWorkspace,
+  importWorkspace,
+  removeWorkspace,
+  createWorkspace,
+  basewareOverview,
+  upsertBasewareMachine,
+  removeBasewareMachine,
+  registerBasewareDriver,
+  removeBasewareDriver,
+  updateWorkspaceMachines,
+  controlWorkspaceMachine,
+  controlWorkspaceService,
+  probeBasewareMachine,
+} from "./workspaces";
+const port = parentPort!;
+const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], signal: AbortSignal) => unknown } = {
+  availableModels: ([workspaceId], signal) => availableModels(workspaceId, undefined, signal),
+  workspaceSettings: () => workspaceSettings(),
+  updateWorkspaceRoot: ([path]) => updateWorkspaceRoot(path),
+  updateGlobalConnection: ([connection]) => updateGlobalConnection(connection),
+  updateGlobalDefaults: ([patch]) => updateGlobalDefaults(patch),
+  workspaceConnection: ([id]) => workspaceConnection(id),
+  updateWorkspaceConnection: ([id, connection]) => updateWorkspaceConnection(id, connection),
+  workspaceStudio: ([id]) => workspaceStudio(id),
+  updateWorkspaceStudioConfig: ([id, patch]) => updateWorkspaceStudioConfig(id, patch),
+  updateWorkspaceShiori: ([id, input]) => updateWorkspaceShiori(id, input),
+  openWorkspace: ([path, options]) => openWorkspace(path, undefined, options),
+  importWorkspace: ([input]) => importWorkspace(input),
+  removeWorkspace: ([id]) => removeWorkspace(id),
+  createWorkspace: ([input], signal) => createWorkspace(input, signal),
+  basewareOverview: ([workspaceId]) => basewareOverview(workspaceId),
+  upsertBasewareMachine: ([input, options]) => upsertBasewareMachine(input, undefined, options),
+  removeBasewareMachine: ([id]) => removeBasewareMachine(id),
+  registerBasewareDriver: ([input], signal) => registerBasewareDriver(input, signal),
+  removeBasewareDriver: ([input]) => removeBasewareDriver(input),
+  updateWorkspaceMachines: ([id, input]) => updateWorkspaceMachines(id, input),
+  controlWorkspaceMachine: ([id, input]) => controlWorkspaceMachine(id, input),
+  controlWorkspaceService: ([id, input]) => controlWorkspaceService(id, input),
+  probeBasewareMachine: ([input]) => probeBasewareMachine(input),
+  diagnosticEvents: ([project, run, query], signal) => diagnosticEvents(project, run, query, signal),
+  diagnostics: () => ({ memory: process.memoryUsage(), index: indexCacheStats(), activeRequests: requests.size - 1 }),
+  catalog: ([includeEmpty]) => catalog(undefined, includeEmpty),
+  archiveBuild: ([project, run, action, buildId]) => archiveBuild(project, run, action, buildId),
+  run: ([project, run, epoch, page], signal) => getRun(project, run, epoch, page, signal),
+  activity: ([project, run, epoch, query], signal) => getActivity(project, run, epoch, query, signal),
+  replay: ([project, run, query], signal) => getReplay(project, run, query, undefined, signal),
+  media: ([project, run, id], signal) => mediaFile(project, run, id, undefined, signal),
+  timelineRecord: ([project, run, record, sequence, source], signal) => timelineRecord(project, run, record, sequence, source, undefined, signal),
+  capabilities: ([project, workspace], signal) => capabilities(project, workspace, undefined, signal),
+  runWorkspaceCapabilityEval: ([project, workspace, options], signal) => runWorkspaceCapabilityEval(project, workspace, options, undefined, signal),
+  workspaceCapabilityEvalHistory: ([project, workspace, options]) => workspaceCapabilityEvalHistory(project, workspace, options),
+  adaptWorkspaceCapabilityEval: ([project, workspace, options], signal) => adaptWorkspaceCapabilityEval(project, workspace, options, undefined, signal),
+  logsEvents: ([params, allowHostPath]) => queryRunLogEvents(params, { allowHostPath }),
+  logsRead: ([params, allowHostPath]) => queryRunLogArtifact(params, { allowHostPath }),
+  capabilityRuntime: ([project, workspace]) => capabilityRuntime(project, workspace),
+  runtimeControl: ([project, workspace, command]) => controlWorkspaceRuntime(project, workspace, command),
+  eventPoolRead: ([project, workspace, filter]) => readWorkspaceEventPool(project, workspace, filter),
+  eventPoolMutate: ([project, workspace, command]) => mutateWorkspaceEventPool(project, workspace, command),
+  discoverDriver: ([spec], signal) => discoverDriver(spec, signal),
+  docGroups: ([root, lang]) => docGroups(root, lang),
+  readDoc: ([id, root, lang]) => readDoc(id, root, lang),
+  stop: ([project, run, epoch]) => stopRun(project, run, epoch),
+  perceptionSettings: ([project, workspace]) => perceptionSettings(project, workspace),
+  updatePerceptionSettings: ([project, patch, workspace]) => updatePerceptionSettings(project, patch, workspace),
+  perceptionRuntime: ([project, workspace]) => perceptionRuntime(project, workspace),
+  petState: () => petState(),
+  petTarget: ([project, ifUnset]) => setPetTarget(project, ifUnset),
+  petConsumer: ([input]) => recordPetConsumer(input),
+  storageGet: () => getStorageOverview(),
+  storageUpdate: ([input]) => updateStorageSettings(input),
+  storageTest: ([params], signal) => testStorageBackend(params, undefined, signal),
+  storageMaintain: ([params], signal) => maintainStorage(params, undefined, undefined, signal),
+  storagePin: ([params]) => pinTimelineSegment(params),
+  clearCatalogCache: () => { clearCatalogCache(); return null; },
+};
+const requests = new Map<number, { abort: AbortController; work: Promise<void> }>();
+let closing = false;
+port.on("message", (message: WorkerRequest) => {
+  if (message.type === "cancel") { requests.get(message.id)?.abort.abort(); return; }
+  if (message.type === "close") {
+    closing = true;
+    for (const request of requests.values()) request.abort.abort();
+    void Promise.allSettled([...requests.values()].map(request => request.work)).then(async () => {
+      await closeArchiveBuilds(); await closeLogIndexes(); port.close();
+    });
+    return;
+  }
+  if (closing) return;
+  if (requests.size >= 64) {
+    port.postMessage({ type: "error", id: message.id, error: workerFailure(Object.assign(new Error("Dashboard reader is busy; retry shortly"), { status: 503 })) } satisfies WorkerResponse);
+    return;
+  }
+  const abort = new AbortController();
+  const work = Promise.resolve().then(async () => {
+    try {
+      if (!Object.hasOwn(handlers, message.method)) throw new Error("Unknown Dashboard operation");
+      abort.signal.throwIfAborted();
+      const value = await (handlers[message.method] as (args: unknown[], signal: AbortSignal) => unknown)(message.args, abort.signal);
+      abort.signal.throwIfAborted();
+      port.postMessage({ type: "result", id: message.id, value } satisfies WorkerResponse);
+    } catch (error) {
+      if (!abort.signal.aborted) port.postMessage({ type: "error", id: message.id, error: workerFailure(error) } satisfies WorkerResponse);
+    } finally { requests.delete(message.id); }
+  });
+  requests.set(message.id, { abort, work });
+});
+port.postMessage({ type: "ready" } satisfies WorkerResponse);

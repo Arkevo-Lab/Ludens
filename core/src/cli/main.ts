@@ -2,9 +2,7 @@
 import { mkdir, realpath, writeFile } from "node:fs/promises";
 import { resolve, join } from "node:path";
 import { parseArgs } from "node:util";
-import { cli, HELP, runRemoteControlCli } from "./control-cli.ts";
-import { daemonCommand, DAEMON_HELP } from "./daemon-cli.ts";
-import { extractRemoteArgs, type RemoteConnectionConfig } from "./operator-rpc.ts";
+import { cli, HELP } from "./control-cli.ts";
 import { Runtime } from "../core/shiori/runtime.ts";
 import { listen } from "../daemon/transport.ts";
 import { connectBaseware } from "../core/subsystems/baseware.ts";
@@ -16,115 +14,59 @@ import { runProvenance } from "../core/storage/provenance.ts";
 import { readCurrentSession, resolveWorkspaceAddress, resolveWorkspaceState } from "../core/storage/workspace-state.ts";
 import { validateSessionWorkspace } from "../core/agent-omp/workspace-session.ts";
 import perceptionTemplate from "../../templates/perception.py" with { type: "text" };
-import { WORKSPACE_HELP, workspaceCommand } from "./workspace.ts";
-import { LOG_HELP, logCommand } from "./log-archive.ts";
 import { ludensHome, registerWorkspace } from "@ludens/protocol/ludens";
-import { GLOBAL_HELP, globalCommand } from "./global.ts";
 import { evalCommand } from "./eval-cli.ts";
 import { eventCommand } from "./event-cli.ts";
-import { APP_SERVER_HELP, appServerCommand } from "./app-server-cli.ts";
-import { runBackgroundJobCli } from "../daemon/process-manager.ts";
+
 const globalHome = ludensHome();
 let exit: (code: number) => void | Promise<void> = code => process.exit(code);
-const RUN_HELP = `ludens [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--seconds <n>] [--requests <n>] [--compaction-threshold <tokens>]
+
+const RUN_HELP = `ludens-core [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--seconds <n>] [--requests <n>] [--compaction-threshold <tokens>] [--diagnostics normal|full] [--launched-by app|cli]
 Each workspace keeps its sessions in .ludens/shiori/; --new-session starts fresh without deleting workspace files.
 The current directory is the default workspace. Run logs go to <workspace>/logs/<run-id>/.
 --resume selects an existing session from the same workspace, then remembers it for future starts.
 --compaction-threshold configures OMP's native compaction trigger; default follows the selected model's native OMP setting.
 --diagnostics normal|full selects recording detail at startup (default normal).
-Perception starts empty. Implement workspace/perception.py and use ludens perception reload.
-ludens perception inject off disables automatic context attachment while sampling and recording continue.
+Perception starts empty. Implement workspace/perception.py and use ludens-core perception reload.
+ludens-core perception inject off disables automatic context attachment while sampling and recording continue.
 Hardware and device bridges are provided by an independent Baseware integration service. Its default socket is derived from the workspace.`;
 
 async function main() {
   const args = process.argv.slice(2);
   let selectedWorkspace = process.env.LUDENS_WORKSPACE ?? process.cwd();
-  let explicitWorkspace = !!process.env.LUDENS_WORKSPACE;
-  let remoteUrl = process.env.LUDENS_REMOTE_URL?.trim() || undefined;
-  let remoteToken = process.env.LUDENS_REMOTE_TOKEN?.trim() || undefined;
 
   while (args.length > 0 && args[0]!.startsWith("--") && args[0] !== "--help") {
     const flag = args[0]!;
     if (flag === "--workspace") {
       if (!args[1] || args[1].startsWith("--")) throw new Error("--workspace requires a path");
       selectedWorkspace = args[1];
-      explicitWorkspace = true;
       args.splice(0, 2);
       continue;
     }
     if (flag.startsWith("--workspace=")) {
       selectedWorkspace = flag.slice("--workspace=".length);
       if (!selectedWorkspace) throw new Error("--workspace requires a path");
-      explicitWorkspace = true;
-      args.splice(0, 1);
-      continue;
-    }
-    if (flag === "--remote") {
-      if (!args[1] || args[1].startsWith("--")) throw new Error("--remote requires a URL");
-      remoteUrl = args[1];
-      args.splice(0, 2);
-      continue;
-    }
-    if (flag.startsWith("--remote=")) {
-      remoteUrl = flag.slice("--remote=".length);
-      if (!remoteUrl) throw new Error("--remote requires a URL");
-      args.splice(0, 1);
-      continue;
-    }
-    if (flag === "--token") {
-      if (args[1] === undefined || args[1].startsWith("--")) throw new Error("--token requires a secret");
-      remoteToken = args[1];
-      args.splice(0, 2);
-      continue;
-    }
-    if (flag.startsWith("--token=")) {
-      remoteToken = flag.slice("--token=".length);
       args.splice(0, 1);
       continue;
     }
     break;
   }
 
-  if (args[0] === "__supervise-job") {
-    process.exitCode = await runBackgroundJobCli(["--supervise", ...args.slice(1)]);
+  if (!args.length || args[0] === "--help" || args[0] === "-h" || (args[0] === "run" && args.includes("--help"))) {
+    console.log(`${RUN_HELP}\n\n${HELP}`);
     return;
   }
-  if (!args.length || args[0] === "--help" || (args[0] === "run" && args.includes("--help"))) {
-    console.log(`${GLOBAL_HELP}\n\n${DAEMON_HELP}\n\n${WORKSPACE_HELP}\n\n${APP_SERVER_HELP}\n\n${RUN_HELP}\n${HELP}\nludens eval <list|run|history> — workspace capability evaluations; ludens eval --help\n${LOG_HELP}`);
-    return;
-  }
-  if (args[0] === "app-server" || args[0] === "serve") return appServerCommand(args.slice(1), globalHome, args[0]);
-  if (args[0] === "daemon") return daemonCommand(args.slice(1), globalHome);
 
-  const remoteSeed: RemoteConnectionConfig | undefined = remoteUrl
-    ? { url: remoteUrl, ...(remoteToken ? { token: remoteToken } : {}) }
-    : undefined;
-
-  if (args[0] === "config" || args[0] === "workspace") {
-    const parsed = extractRemoteArgs(args.slice(1));
-    const remote = parsed.remote ?? remoteSeed;
-    return globalCommand(args[0]!, parsed.remaining, globalHome, remote);
-  }
   if (args[0] === "eval") return evalCommand(args.slice(1), selectedWorkspace);
   if (args[0] === "event") {
     const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(selectedWorkspace)).socket;
     return eventCommand(args.slice(1), selectedWorkspace, socket, globalHome);
   }
-  if (args[0] === "logs") return logCommand(args.slice(1));
-  if (["init", "up", "services", "down"].includes(args[0]!)) {
-    const parsed = extractRemoteArgs(args.slice(1));
-    const remote = parsed.remote ?? remoteSeed;
-    return workspaceCommand(args[0]!, parsed.remaining, selectedWorkspace, explicitWorkspace, globalHome, remote);
-  }
   if (args[0] !== "run") {
-    const parsed = extractRemoteArgs(args);
-    const remote = parsed.remote ?? remoteSeed;
-    if (remote?.url && ["status", "auto", "steer", "consolidate", "stop", "model"].includes(parsed.remaining[0] ?? "")) {
-      return runRemoteControlCli(parsed.remaining, selectedWorkspace, explicitWorkspace, globalHome, remote);
-    }
     const socket = process.env.LUDENS_SOCKET ?? (await resolveWorkspaceAddress(selectedWorkspace)).socket;
-    return cli(parsed.remaining, socket);
+    return cli(args, socket);
   }
+
   const { values } = parseArgs({ args: args.slice(1), options: {
     workspace: { type: "string", default: selectedWorkspace },
     "baseware-socket": { type: "string" },
@@ -177,8 +119,6 @@ async function main() {
   })();
   let unregisterCleanup: (() => void) | undefined;
   try {
-    // Own the workspace before touching its session or device. A custom address
-    // is only an alias, so it cannot start a second writer for this workspace.
     const getRuntime = () => {
       if (!ready || !runtime) throw new Error("Host is starting or closing");
       return runtime;
@@ -204,10 +144,7 @@ async function main() {
       .catch(() => undefined);
     const model = configuredModel ?? "openai-codex/gpt-6.2-sol";
     if (!values["device-only"]) {
-      // Device-only mode can run without importing OMP or opening credential storage.
       const postmortem = await import("@oh-my-pi/pi-utils/postmortem");
-      // OMP's signal handler exits after its registered callbacks, so it must
-      // await this host's cleanup too. The signal and finally share one promise.
       unregisterCleanup = postmortem.register("ludens-run", close, { exitOnly: true });
       exit = postmortem.quit;
     }
@@ -235,8 +172,5 @@ async function main() {
   }
 }
 
-// OMP owns process-wide background services; exit after all application cleanup finishes.
-// A signal-driven shutdown reports the signal's exit status (SIGTERM 143/SIGINT 130),
-// not a clean 0, so a killed host still reads as interrupted rather than successful.
 let shutdownSignal: NodeJS.Signals | undefined;
 main().then(() => exit(shutdownSignal === "SIGTERM" ? 143 : shutdownSignal === "SIGINT" ? 130 : Number(process.exitCode ?? 0)), (error) => { console.error(String(error)); return exit(1); });

@@ -14,8 +14,7 @@ import {
   type OmpEffort,
   type OmpServiceTier,
 } from "@ludens/protocol/ludens";
-import type { AvailableModelItem, AvailableModelsCatalog } from "../query/available-models";
-
+import type { AvailableModelItem, AvailableModelsCatalog } from "@ludens/protocol/types";
 export type { AvailableModelItem, AvailableModelsCatalog };
 
 export function ompSettingsOverrides(options: {
