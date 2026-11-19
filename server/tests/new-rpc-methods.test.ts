@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { APP_RPC_ERROR_CODES, type LudensServerEvent } from "@ludens/protocol/app-rpc";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { JsonArchive } from "@ludens/protocol/log-archive";
 import { adaptWorkspaceCapabilityEval } from "../src/query/capabilities.ts";
-import { DEFAULT_LOG_EVENTS_LIMIT, queryRunLogEvents } from "../src/query/logs.ts";
+import { clearLogEventHorizons, DEFAULT_LOG_EVENTS_LIMIT, queryRunLogEvents } from "../src/query/logs.ts";
+import { PRESERVED_ENV_KEYS, startBackgroundJob, stopBackgroundJob } from "../src/daemon/process-manager.ts";
 import { AppRpcClientError, NodeUdsRpcClient, WsAppRpcClient } from "../src/daemon/app-rpc-client.ts";
 import { startAppServer } from "../src/server/app-server.ts";
 
@@ -279,6 +280,21 @@ def eval_score():
       await expect(
         queryRunLogEvents({ run: bigRunDir }, { allowHostPath: true, root: home, signal: abortedLogs.signal }),
       ).rejects.toThrow("aborted log read");
+
+      // 9. run/stop rejects non-string epoch with INVALID_PARAMS (-32602)
+      let badEpochErr: unknown;
+      try {
+        await uds.call("run/stop", {
+          project: logsIdentity.id,
+          run: "run-alpha",
+          epoch: 123 as unknown as string,
+        });
+      } catch (err) {
+        badEpochErr = err;
+      }
+      expect(badEpochErr).toBeInstanceOf(AppRpcClientError);
+      expect((badEpochErr as AppRpcClientError).code).toBe(APP_RPC_ERROR_CODES.INVALID_PARAMS);
+      expect((badEpochErr as AppRpcClientError).message).toContain("run/stop requires optional string epoch");
     } finally {
       await remote.close().catch(() => {});
       await uds.close().catch(() => {});
@@ -286,4 +302,146 @@ def eval_score():
       await rm(root, { recursive: true, force: true });
     }
   }, 20_000);
+
+  test("logs/events pins a stable file horizon across pages despite interleaved appends", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-logs-horizon-")));
+    const runDir = join(root, "run");
+    const sourceRoot = join(root, "baseware-src");
+    const sourceEventsDir = join(sourceRoot, "events");
+    await mkdir(runDir, { recursive: true });
+    await mkdir(sourceEventsDir, { recursive: true });
+    try {
+      clearLogEventHorizons();
+      await writeFile(
+        join(sourceRoot, "source.json"),
+        JSON.stringify({ sourceId: "dev-1", format: "baseware-events-v1" }),
+        "utf8",
+      );
+      const sourceFile = join(sourceEventsDir, "0001.jsonl");
+      await writeFile(
+        sourceFile,
+        JSON.stringify({
+          serviceId: "dev-1",
+          seq: 1,
+          at: "2026-11-19T00:00:01.500Z",
+          trace: { recordingId: "rec-1" },
+          type: "device_frame",
+          data: { tag: "dev-1" },
+        }) + "\n",
+        "utf8",
+      );
+      await writeFile(
+        join(runDir, "manifest.json"),
+        JSON.stringify({
+          runId: "run",
+          eventSources: [
+            {
+              sourceId: "dev-1",
+              root: sourceRoot,
+              format: "baseware-events-v1",
+              recordingId: "rec-1",
+              windows: [{ afterSeq: 0 }],
+            },
+          ],
+        }),
+        "utf8",
+      );
+      const localEvents = join(runDir, "events.jsonl");
+      await writeFile(
+        localEvents,
+        [
+          JSON.stringify({ seq: 1, at: "2026-11-19T00:00:01.000Z", type: "local", data: { tag: "l1" } }),
+          JSON.stringify({ seq: 2, at: "2026-11-19T00:00:02.000Z", type: "local", data: { tag: "l2" } }),
+          JSON.stringify({ seq: 3, at: "2026-11-19T00:00:03.000Z", type: "local", data: { tag: "l3" } }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+
+      // Page 1 captures the file-size horizon: [l1 (1.0s), dev-1 (1.5s)]
+      const p1 = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 2 }, { allowHostPath: true });
+      expect(p1.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l1", "dev-1"]);
+      expect(p1.hasMore).toBe(true);
+      expect(p1.nextCursor).toBe(2);
+
+      // Between pages, append an earlier-timestamp device event AND a new tail local event.
+      await appendFile(
+        sourceFile,
+        JSON.stringify({
+          serviceId: "dev-1",
+          seq: 2,
+          at: "2026-11-19T00:00:01.200Z",
+          trace: { recordingId: "rec-1" },
+          type: "device_frame",
+          data: { tag: "dev-late" },
+        }) + "\n",
+        "utf8",
+      );
+      await appendFile(
+        localEvents,
+        JSON.stringify({ seq: 4, at: "2026-11-19T00:00:04.000Z", type: "local", data: { tag: "l4" } }) + "\n",
+        "utf8",
+      );
+
+      // Page 2 stays pinned to the Page 1 horizon: returns [l2, l3] without shifting or duplicating dev-1.
+      const p2 = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      expect(p2.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
+      expect(p2.hasMore).toBe(false);
+      expect(p2.nextCursor).toBeNull();
+
+      // A fresh cursor=0 read captures the updated horizon and sees all 6 events.
+      const fresh = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 10 }, { allowHostPath: true });
+      expect(fresh.events.map(e => (e.data as { tag: string }).tag)).toEqual([
+        "l1",
+        "dev-1",
+        "dev-late",
+        "l2",
+        "l3",
+        "l4",
+      ]);
+      expect(fresh.hasMore).toBe(false);
+    } finally {
+      clearLogEventHorizons();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("LUDENS_BUN is preserved in background jobs and respected by Windows .cmd launchers", async () => {
+    expect(PRESERVED_ENV_KEYS).toContain("LUDENS_BUN");
+    const repoRoot = resolve(import.meta.dir, "../..");
+    for (const rel of ["baseware/bin/baseware.cmd", "core/bin/ludens-core.cmd", "server/bin/ludens-server.cmd"]) {
+      const content = await readFile(join(repoRoot, rel), "utf8");
+      expect(content).toContain("if defined LUDENS_BUN");
+      expect(content).toContain('"%LUDENS_BUN%"');
+      expect(content.trim().endsWith("exit /b %ERRORLEVEL%")).toBe(true);
+    }
+
+    if (process.platform !== "win32") {
+      const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-bun-env-")));
+      const prevLudensBun = process.env.LUDENS_BUN;
+      const customBun = "/custom/non-path/bin/bun";
+      process.env.LUDENS_BUN = customBun;
+      let stateFile: string | undefined;
+      try {
+        const started = await startBackgroundJob({
+          name: "env-check",
+          cwd: root,
+          command: ["/bin/sh", "-c", 'printf "LUDENS_BUN=%s\\n" "$LUDENS_BUN"; sleep 5'],
+        });
+        stateFile = started.stateFile;
+        const deadline = Date.now() + 3000;
+        let logText = "";
+        while (Date.now() < deadline) {
+          logText = await readFile(started.log, "utf8").catch(() => "");
+          if (logText.includes("LUDENS_BUN=")) break;
+          await Bun.sleep(25);
+        }
+        expect(logText).toContain(`LUDENS_BUN=${customBun}`);
+      } finally {
+        if (stateFile) await stopBackgroundJob(stateFile, { immediate: true }).catch(() => {});
+        if (prevLudensBun === undefined) delete process.env.LUDENS_BUN;
+        else process.env.LUDENS_BUN = prevLudensBun;
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
 });
