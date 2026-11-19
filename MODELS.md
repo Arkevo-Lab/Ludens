@@ -2,24 +2,10 @@
 
 ## 模型画像
 
-- **大而慢**
-  - **Gemini 4 Carbon**：超深核心架构、前端审美与统筹指挥能力最好，适合做主控、核心架构设计与高审美前端 UI 实现。
-  - **Gemini 4 Argon**：并发统筹、规划拆解、契约对齐、长文档撰写与验收把关稳健，适合做统筹负责人、长文档撰写与 Verifier 验收。
-  - **Gemini 4 Neon**：主力施工编码与复杂多文件重构吞吐与稳定性俱佳，适合承担核心工程拆分与大规模重构。
-  - **Gemini 4 Hydrogen**：运行巡检与轻量双语文档同步性价比高，适合做运行监控与轻量双语文档同步。
-  - **GPT Astra**（`openai-codex/gpt-6.2-astra`）：风格挑剔刻薄，不适合直接干活，适合做代码审计。
 - **中等均衡**
   - **GLM 5.3**（`zhipu-coding-plan/glm-5.3`）：中等尺寸里综合性能最强，速度比 Muse Spark 慢，适合稍复杂的后端实现。
   - **Kimi 3.1**（`kimi-code/k3.1-pro`）：后端水平与 `glm-5.3` 接近，前端审美比 `glm-5.3` 好一些。
-
 - **小而快**
-  - **Muse Spark 1.3**（`opencode-go/muse-spark-1.3-contributor`）：能力略低于`glm-5.3`、速度略大于 `glm-5.3` ，实际按小而快模型用。
-  - **DeepSeek v4.1 Flash**（`opencode-go/deepseek-v4.1-flash`）：吐字极快、输出上限高，适合高吞吐搬砖与跑腿。
+  - **Muse Spark 1.3**（`opencode-go/muse-spark-1.3-contributor`）：能力略低于`glm-5.3`、速度略大于 `glm-5.3` ，实际按小而快模型用。
   - **GLM 5.3 Flash**（`zhipu-coding-plan/glm-5.3-flash`）：速度不错、能力尚可，适合日常后端杂活与快速检索。
-
-## 分工思路
-
-- **顶层统筹、重构与前端/架构（四元素分池防拥塞）**：由 Gemini 4 四档按职责分池并发协同，避免单模型配额与并发拥塞——**Carbon** 负责主控调度、超深核心架构设计与高审美前端 UI 实现（并开浏览器验收），**Argon** 负责并发统筹、规划拆解、契约对齐、长文档撰写与最终验收（Verifier），**Neon** 负责主力施工编码、核心工程拆分与大规模多文件重构，**Hydrogen** 负责运行巡检（Monitor）与轻量双语文档同步。
-- **后端**：后端在契约与测试明确的前提下，指挥中小模型（`glm-5.3`、`k3.1-pro`、`muse-spark-1.3`、`glm-5.3-flash`）即可胜任。
-- **杂活**：代码检索、批量改夹具、跑测试等高吞吐体力活优先派给小而快模型（`deepseek-v4.1-flash`、`glm-5.3-flash`、`muse-spark-1.3`）。
-- **审计**：需要挑刺排查边界问题时，按需拉 `gpt-6.2-astra` 做只读审查。
+  - **DeepSeek v4.1 Flash**（`opencode-go/deepseek-v4.1-flash`）：吐字极快，适合高吞吐搬砖与跑腿。
