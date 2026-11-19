@@ -8,6 +8,8 @@ import { JsonArchive } from "@ludens/protocol/log-archive";
 import { adaptWorkspaceCapabilityEval } from "../src/query/capabilities.ts";
 import { clearLogEventHorizons, DEFAULT_LOG_EVENTS_LIMIT, queryRunLogEvents } from "../src/query/logs.ts";
 import { resolveRepoRoot } from "../src/query/repo.ts";
+import { resolveDefaultSpawnCommand } from "../src/daemon/app-daemon.ts";
+import { cliCommand } from "../src/daemon/background-jobs.ts";
 import { PRESERVED_ENV_KEYS, startBackgroundJob, stopBackgroundJob } from "../src/daemon/process-manager.ts";
 import { WorkspaceSupervisor } from "../src/daemon/supervisor.ts";
 import { AppRpcClientError, NodeUdsRpcClient, WsAppRpcClient } from "../src/daemon/app-rpc-client.ts";
@@ -384,25 +386,10 @@ def eval_score():
         "utf8",
       );
 
-      // Concurrent Reader B starts at cursor=0 and finishes (!hasMore) while Reader A is mid-pagination:
-      // it shares Reader A's active horizon and never clobbers or deletes it.
+      // Concurrent Reader B starts at cursor=0 after new appends: gets a fresh versioned snapshot H2
+      // ([l1, dev-1, dev-late, l2, l3, l4]) appended to the bucket without clobbering Reader A's H1.
       const concurrentB = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 10 }, { allowHostPath: true });
-      expect(concurrentB.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l1", "dev-1", "l2", "l3"]);
-      expect(concurrentB.hasMore).toBe(false);
-
-      // Page 2 stays pinned to the Page 1 horizon: returns [l2, l3] without shifting or duplicating dev-1.
-      const p2 = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
-      expect(p2.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
-      expect(p2.hasMore).toBe(false);
-      expect(p2.nextCursor).toBeNull();
-
-      // Retrying Page 2 after !hasMore still sees the intact cached horizon.
-      const p2Retry = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
-      expect(p2Retry.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
-
-      // A fresh cursor=0 read after active readers finish captures the updated horizon and sees all 6 events.
-      const fresh = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 10 }, { allowHostPath: true });
-      expect(fresh.events.map(e => (e.data as { tag: string }).tag)).toEqual([
+      expect(concurrentB.events.map(e => (e.data as { tag: string }).tag)).toEqual([
         "l1",
         "dev-1",
         "dev-late",
@@ -410,24 +397,120 @@ def eval_score():
         "l3",
         "l4",
       ]);
-      expect(fresh.hasMore).toBe(false);
+      expect(concurrentB.hasMore).toBe(false);
+
+      // Page 2 for Reader A stays pinned to H1: returns [l2, l3] without shifting or duplicating dev-1.
+      const p2 = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      expect(p2.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
+      expect(p2.hasMore).toBe(false);
+      expect(p2.nextCursor).toBeNull();
+
+      // Retrying Page 2 after !hasMore still matches H1 via servedCursors.
+      const p2Retry = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      expect(p2Retry.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
     } finally {
       clearLogEventHorizons();
       await rm(root, { recursive: true, force: true });
     }
   });
 
-  test("resolveRepoRoot and WorkspaceSupervisor locate packaged Resources/server/main.js and honor LUDENS_REPO_ROOT", async () => {
+  test("logs/events versioned buckets isolate A/B retries from C and persist 409 tombstones for shared expired snapshots", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-logs-bucket-")));
+    const runDir = join(root, "run");
+    await mkdir(runDir, { recursive: true });
+    try {
+      clearLogEventHorizons();
+      const localEvents = join(runDir, "events.jsonl");
+      await writeFile(
+        localEvents,
+        [
+          JSON.stringify({ seq: 1, at: "2026-11-19T00:00:01.000Z", type: "local", data: { n: 1 } }),
+          JSON.stringify({ seq: 2, at: "2026-11-19T00:00:02.000Z", type: "local", data: { n: 2 } }),
+          JSON.stringify({ seq: 3, at: "2026-11-19T00:00:03.000Z", type: "local", data: { n: 3 } }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+
+      // Counterexample 1: A & B share [1, 2, 3]; append 4; A reads tail + retries tail;
+      // C calls cursor=0 and gets [1..4]; B then reads tail and still gets exact [2, 3].
+      const a1 = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true });
+      const b1 = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true });
+      expect(a1.events.map(e => (e.data as { n: number }).n)).toEqual([1]);
+      expect(b1.events.map(e => (e.data as { n: number }).n)).toEqual([1]);
+
+      await appendFile(
+        localEvents,
+        JSON.stringify({ seq: 4, at: "2026-11-19T00:00:04.000Z", type: "local", data: { n: 4 } }) + "\n",
+        "utf8",
+      );
+
+      const aTail = await queryRunLogEvents({ run: runDir, cursor: a1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      expect(aTail.events.map(e => (e.data as { n: number }).n)).toEqual([2, 3]);
+      expect(aTail.hasMore).toBe(false);
+
+      const aTailRetry = await queryRunLogEvents({ run: runDir, cursor: a1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      expect(aTailRetry.events.map(e => (e.data as { n: number }).n)).toEqual([2, 3]);
+
+      const cFresh = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 10 }, { allowHostPath: true });
+      expect(cFresh.events.map(e => (e.data as { n: number }).n)).toEqual([1, 2, 3, 4]);
+      expect(cFresh.hasMore).toBe(false);
+
+      const bTail = await queryRunLogEvents({ run: runDir, cursor: b1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      expect(bTail.events.map(e => (e.data as { n: number }).n)).toEqual([2, 3]);
+      expect(bTail.hasMore).toBe(false);
+
+      // Counterexample 2: A & B share a short-TTL snapshot; once expired, BOTH A and B receive 409.
+      clearLogEventHorizons();
+      const shortA = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true, horizonTtlMs: 25 });
+      const shortB = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true, horizonTtlMs: 25 });
+      await Bun.sleep(40);
+
+      let errA: unknown;
+      try {
+        await queryRunLogEvents({ run: runDir, cursor: shortA.nextCursor!, limit: 2 }, { allowHostPath: true, horizonTtlMs: 25 });
+      } catch (err) {
+        errA = err;
+      }
+      expect((errA as { status?: number })?.status).toBe(409);
+
+      let errB: unknown;
+      try {
+        await queryRunLogEvents({ run: runDir, cursor: shortB.nextCursor!, limit: 2 }, { allowHostPath: true, horizonTtlMs: 25 });
+      } catch (err) {
+        errB = err;
+      }
+      expect((errB as { status?: number })?.status).toBe(409);
+    } finally {
+      clearLogEventHorizons();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("resolveRepoRoot, resolveDefaultSpawnCommand, cliCommand(win32), and WorkspaceSupervisor support packaged main.js bundles", async () => {
     const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-packaged-repo-")));
     const resources = join(root, "Resources");
-    await mkdir(join(resources, "core"), { recursive: true });
-    await mkdir(join(resources, "server"), { recursive: true });
+    await mkdir(join(resources, "core", "bin"), { recursive: true });
+    await mkdir(join(resources, "baseware", "bin"), { recursive: true });
+    await mkdir(join(resources, "server", "bin"), { recursive: true });
     await writeFile(join(resources, "core", "package.json"), JSON.stringify({ name: "@ludens/core" }), "utf8");
+    await writeFile(join(resources, "core", "main.js"), "// bundled core\n", "utf8");
+    await writeFile(join(resources, "baseware", "package.json"), JSON.stringify({ name: "@ludens/baseware" }), "utf8");
+    await writeFile(join(resources, "baseware", "main.js"), "// bundled baseware\n", "utf8");
     await writeFile(join(resources, "server", "package.json"), JSON.stringify({ name: "@ludens/server" }), "utf8");
+    await writeFile(join(resources, "server", "main.js"), "// bundled server\n", "utf8");
+    await writeFile(join(resources, "server", "bin", "ludens-server"), "#!/bin/sh\n", "utf8");
     const prevEnv = process.env.LUDENS_REPO_ROOT;
     try {
       const bundledUrl = new URL(`file://${join(resources, "server", "main.js")}`).href;
       expect(resolveRepoRoot(bundledUrl, {}, root)).toBe(resources);
+
+      const spawnCmd = resolveDefaultSpawnCommand(resources);
+      expect(spawnCmd.argsPrefix).toEqual([join(resources, "server", "main.js")]);
+
+      const coreWinCmd = cliCommand(join(resources, "core", "bin", "ludens-core"), "win32");
+      expect(coreWinCmd[1]).toBe(join(resources, "core", "main.js"));
+      const basewareWinCmd = cliCommand(join(resources, "baseware", "bin", "baseware"), "win32");
+      expect(basewareWinCmd[1]).toBe(join(resources, "baseware", "main.js"));
 
       process.env.LUDENS_REPO_ROOT = resources;
       expect(resolveRepoRoot(import.meta.url, process.env, root)).toBe(resources);
