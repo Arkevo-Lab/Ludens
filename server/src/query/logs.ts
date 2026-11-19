@@ -92,18 +92,39 @@ interface LogEventHorizon {
   localSize: number | null;
   groups: LogHorizonGroup[];
   createdAt: number;
-  lastPageAt: number;
   expiresAt: number;
-  activeReaders: number;
+  pendingCursors: number[];
+  servedCursors: Set<number>;
+  invalidated?: boolean;
 }
 
 const HORIZON_TTL_MS = 60_000;
-const ACTIVE_PAGINATION_WINDOW_MS = 5_000;
-const MAX_HORIZON_ENTRIES = 32;
-const horizonCache = new Map<string, LogEventHorizon>();
+const MAX_HORIZON_KEYS = 32;
+const MAX_BUCKET_VERSIONS = 8;
+const horizonCache = new Map<string, LogEventHorizon[]>();
+const inFlightCaptures = new Map<string, Promise<LogEventHorizon>>();
 
 export function clearLogEventHorizons(): void {
   horizonCache.clear();
+  inFlightCaptures.clear();
+}
+
+function sameHorizonBounds(a: LogEventHorizon, b: LogEventHorizon): boolean {
+  if (a.localPath !== b.localPath || a.localSize !== b.localSize || a.groups.length !== b.groups.length) {
+    return false;
+  }
+  for (let i = 0; i < a.groups.length; i++) {
+    const ga = a.groups[i]!;
+    const gb = b.groups[i]!;
+    if (ga.files.length !== gb.files.length) return false;
+    for (let j = 0; j < ga.files.length; j++) {
+      const fa = ga.files[j]!;
+      const fb = gb.files[j]!;
+      if (fa.name !== fb.name || fa.path !== fb.path || fa.size !== fb.size) return false;
+    }
+    if (JSON.stringify(ga.dependencies) !== JSON.stringify(gb.dependencies)) return false;
+  }
+  return true;
 }
 
 async function* readEventFileBounded(
@@ -136,6 +157,7 @@ async function* readEventFileBounded(
 async function captureLogHorizon(
   runDir: string,
   channel: EventChannel,
+  ttlMs = HORIZON_TTL_MS,
   signal?: AbortSignal,
 ): Promise<LogEventHorizon> {
   signal?.throwIfAborted();
@@ -187,10 +209,50 @@ async function captureLogHorizon(
     localSize,
     groups,
     createdAt: now,
-    lastPageAt: now,
-    expiresAt: now + HORIZON_TTL_MS,
-    activeReaders: 0,
+    expiresAt: now + ttlMs,
+    pendingCursors: [],
+    servedCursors: new Set<number>(),
   };
+}
+
+async function captureLogHorizonDeduped(
+  cacheKey: string,
+  runDir: string,
+  channel: EventChannel,
+  ttlMs: number,
+  signal?: AbortSignal,
+): Promise<LogEventHorizon> {
+  signal?.throwIfAborted();
+  let pending = inFlightCaptures.get(cacheKey);
+  if (!pending) {
+    pending = captureLogHorizon(runDir, channel, ttlMs).finally(() => {
+      if (inFlightCaptures.get(cacheKey) === pending) {
+        inFlightCaptures.delete(cacheKey);
+      }
+    });
+    inFlightCaptures.set(cacheKey, pending);
+  }
+  if (!signal) return pending;
+  const result = await new Promise<LogEventHorizon>((resolvePromise, rejectPromise) => {
+    const onAbort = () => rejectPromise(signal.reason ?? Object.assign(new Error("Aborted"), { name: "AbortError" }));
+    if (signal.aborted) {
+      onAbort();
+      return;
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    pending.then(
+      val => {
+        signal.removeEventListener("abort", onAbort);
+        resolvePromise(val);
+      },
+      err => {
+        signal.removeEventListener("abort", onAbort);
+        rejectPromise(err);
+      },
+    );
+  });
+  signal.throwIfAborted();
+  return result;
 }
 
 async function isHorizonIntact(horizon: LogEventHorizon): Promise<boolean> {
@@ -258,10 +320,13 @@ async function* readHorizonEvents(
   }
 }
 
-function storeHorizon(key: string, horizon: LogEventHorizon): void {
+function storeBucket(key: string, bucket: LogEventHorizon[]): void {
+  while (bucket.length > MAX_BUCKET_VERSIONS) {
+    bucket.shift();
+  }
   horizonCache.delete(key);
-  horizonCache.set(key, horizon);
-  while (horizonCache.size > MAX_HORIZON_ENTRIES) {
+  horizonCache.set(key, bucket);
+  while (horizonCache.size > MAX_HORIZON_KEYS) {
     const oldest = horizonCache.keys().next().value;
     if (oldest === undefined) break;
     horizonCache.delete(oldest);
@@ -270,12 +335,16 @@ function storeHorizon(key: string, horizon: LogEventHorizon): void {
 
 export async function queryRunLogEvents(
   params: LogsEventsParams,
-  options: { allowHostPath: boolean; root?: string; signal?: AbortSignal } = { allowHostPath: true },
+  options: { allowHostPath: boolean; root?: string; signal?: AbortSignal; horizonTtlMs?: number } = { allowHostPath: true },
 ): Promise<LogsEventsResult> {
   options.signal?.throwIfAborted();
   const runDir = await resolveLogRunDir(params, options);
   options.signal?.throwIfAborted();
   const channel: EventChannel = params.channel === "diagnostics" ? "diagnostics" : "events";
+  const ttlMs =
+    typeof options.horizonTtlMs === "number" && Number.isFinite(options.horizonTtlMs) && options.horizonTtlMs > 0
+      ? options.horizonTtlMs
+      : HORIZON_TTL_MS;
   const cursor =
     typeof params.cursor === "number" && Number.isSafeInteger(params.cursor) && params.cursor >= 0
       ? params.cursor
@@ -298,48 +367,53 @@ export async function queryRunLogEvents(
 
   const cacheKey = `${runDir}\0${channel}`;
   const now = Date.now();
-  const cached = horizonCache.get(cacheKey);
-  let horizon: LogEventHorizon | undefined;
-  let reused = false;
+  const bucket = horizonCache.get(cacheKey) ?? [];
+  let horizon: LogEventHorizon;
 
-  if (cursor > 0) {
-    if (cached) {
-      if (cached.expiresAt <= now) {
-        horizonCache.delete(cacheKey);
-        throw Object.assign(
-          new Error("Log pagination snapshot expired; restart from cursor 0"),
-          { status: 409 },
-        );
+  if (cursor === 0) {
+    const fresh = await captureLogHorizonDeduped(cacheKey, runDir, channel, ttlMs, options.signal);
+    let latestValid: LogEventHorizon | undefined;
+    for (let i = bucket.length - 1; i >= 0; i--) {
+      const candidate = bucket[i]!;
+      if (!candidate.invalidated && candidate.expiresAt > now) {
+        latestValid = candidate;
+        break;
       }
-      if (!(await isHorizonIntact(cached))) {
-        horizonCache.delete(cacheKey);
-        throw Object.assign(
-          new Error("Log archive changed during pagination; restart from cursor 0"),
-          { status: 409 },
-        );
-      }
-      cached.expiresAt = now + HORIZON_TTL_MS;
-      cached.lastPageAt = now;
-      horizon = cached;
-      reused = true;
     }
-  } else if (
-    cached &&
-    cached.expiresAt > now &&
-    cached.activeReaders > 0 &&
-    now - cached.lastPageAt < ACTIVE_PAGINATION_WINDOW_MS &&
-    (await isHorizonIntact(cached))
-  ) {
-    // Share the active snapshot with concurrent readers so a fresh cursor=0 request
-    // never clobbers another reader's in-progress pagination.
-    cached.expiresAt = now + HORIZON_TTL_MS;
-    cached.lastPageAt = now;
-    horizon = cached;
-    reused = true;
-  }
-
-  if (!horizon) {
-    horizon = await captureLogHorizon(runDir, channel, options.signal);
+    if (latestValid && sameHorizonBounds(latestValid, fresh)) {
+      latestValid.expiresAt = now + ttlMs;
+      horizon = latestValid;
+    } else {
+      bucket.push(fresh);
+      horizon = fresh;
+    }
+    storeBucket(cacheKey, bucket);
+  } else if (bucket.length > 0) {
+    const matched =
+      bucket.find(h => h.pendingCursors.includes(cursor)) ??
+      bucket.find(h => h.servedCursors.has(cursor)) ??
+      bucket[0]!;
+    if (matched.invalidated || matched.expiresAt <= now || !(await isHorizonIntact(matched))) {
+      // Retain the invalidated snapshot in the bucket as a tombstone so every concurrent
+      // reader sharing it consistently receives 409 on continuation.
+      matched.invalidated = true;
+      storeBucket(cacheKey, bucket);
+      throw Object.assign(
+        new Error("Log pagination snapshot expired or changed; restart from cursor 0"),
+        { status: 409 },
+      );
+    }
+    const pendingIdx = matched.pendingCursors.indexOf(cursor);
+    if (pendingIdx >= 0) {
+      matched.pendingCursors.splice(pendingIdx, 1);
+    }
+    matched.expiresAt = now + ttlMs;
+    horizon = matched;
+    storeBucket(cacheKey, bucket);
+  } else {
+    horizon = await captureLogHorizonDeduped(cacheKey, runDir, channel, ttlMs, options.signal);
+    bucket.push(horizon);
+    storeBucket(cacheKey, bucket);
   }
 
   const events: Record<string, unknown>[] = [];
@@ -360,23 +434,17 @@ export async function queryRunLogEvents(
     index += 1;
   }
 
-  if (cursor === 0) {
-    if (hasMore) {
-      horizon.activeReaders += 1;
-    }
-  } else if (!hasMore && reused) {
-    horizon.activeReaders = Math.max(0, horizon.activeReaders - 1);
+  const nextCursor = hasMore ? cursor + events.length : null;
+  horizon.servedCursors.add(cursor);
+  if (hasMore && nextCursor !== null) {
+    horizon.pendingCursors.push(nextCursor);
   }
-
-  // Keep the snapshot cached until TTL/LRU eviction rather than deleting on !hasMore,
-  // so concurrent readers and retries on the final page remain consistent.
-  horizon.lastPageAt = Date.now();
-  horizon.expiresAt = horizon.lastPageAt + HORIZON_TTL_MS;
-  storeHorizon(cacheKey, horizon);
+  horizon.expiresAt = Date.now() + ttlMs;
+  storeBucket(cacheKey, bucket);
 
   return {
     events,
-    nextCursor: hasMore ? cursor + events.length : null,
+    nextCursor,
     hasMore,
   };
 }

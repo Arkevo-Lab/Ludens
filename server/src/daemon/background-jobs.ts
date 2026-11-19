@@ -1,14 +1,20 @@
 import { localServiceSocketPath } from "@ludens/protocol/local-socket";
+import { existsSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import type { ServiceLaunchOrigin } from "../query/types.ts";
 import { isPidAlive, probeBackgroundJob, readJobRecord } from "./process-manager.ts";
 
 export { isPidAlive, readJobRecord };
 
-export function cliCommand(path: string): [string, ...string[]] {
-  if (process.platform !== "win32") return [path];
-  const entry = basename(path) === "baseware" ? "src/main.ts" : "src/cli/main.ts";
-  return [process.versions.bun ? process.execPath : "bun.exe", resolve(dirname(path), "..", entry)];
+export function cliCommand(path: string, platform: NodeJS.Platform = process.platform): [string, ...string[]] {
+  if (platform !== "win32") return [path];
+  const pkgRoot = resolve(dirname(path), "..");
+  const bundled = join(pkgRoot, "main.js");
+  const entry = existsSync(bundled)
+    ? bundled
+    : join(pkgRoot, basename(path) === "baseware" ? "src/main.ts" : "src/cli/main.ts");
+  const bunExe = process.env.LUDENS_BUN?.trim() || (process.versions.bun ? process.execPath : "bun.exe");
+  return [bunExe, entry];
 }
 
 export interface BackgroundJobStatus {

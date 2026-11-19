@@ -163,17 +163,19 @@ export function resolveBunExecutable(environment: NodeJS.ProcessEnv = process.en
   return binName;
 }
 
-function resolveDefaultSpawnCommand(repoOverride?: string): { command: string; argsPrefix: string[] } {
+export function resolveDefaultSpawnCommand(repoOverride?: string): { command: string; argsPrefix: string[] } {
   const repoRoot = repoOverride ? resolve(repoOverride) : resolveRepoRoot();
-  const mainCli = join(repoRoot, "server", "src", "cli", "main.ts");
+  const bundledCli = join(repoRoot, "server", "main.js");
+  const isBundled = existsSync(bundledCli);
+  const mainCli = isBundled ? bundledCli : join(repoRoot, "server", "src", "cli", "main.ts");
   const serverBin = join(repoRoot, "server", "bin", "ludens-server");
 
-  // Under Bun, reuse the exact active Bun executable directly with main.ts.
+  // Under Bun, reuse the exact active Bun executable directly with the entrypoint.
   if (typeof (globalThis as { Bun?: unknown }).Bun !== "undefined") {
     return { command: process.execPath, argsPrefix: [mainCli] };
   }
 
-  if (process.platform !== "win32" && existsSync(serverBin)) {
+  if (!isBundled && process.platform !== "win32" && existsSync(serverBin)) {
     return { command: serverBin, argsPrefix: [] };
   }
 
