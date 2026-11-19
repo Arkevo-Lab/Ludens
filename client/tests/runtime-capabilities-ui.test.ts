@@ -289,7 +289,7 @@ test("LudensRpcClient persists lastKnownServerInfo across disconnects and format
     desktopDisconnectedSnap,
     key => (zh.connectionTarget as Record<string, string>)[key] ?? key,
   );
-  assert.equal(desktopZh, "本机后台守护进程连接暂时中断，可点击重试恢复连接。");
+  assert.equal(desktopZh, "本机 ludens-server 连接暂时中断，可点击重试恢复连接。");
 
   const remoteDisconnectedSnap: LudensRpcSnapshot = {
     status: "reconnecting",
