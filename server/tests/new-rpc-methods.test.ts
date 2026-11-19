@@ -215,6 +215,7 @@ def eval_score():
         project: logsIdentity.id,
         run: "run-alpha",
         cursor: page1.nextCursor!,
+        snapshot: page1.snapshot,
         limit: 2,
       });
       expect(page2.events).toHaveLength(1);
@@ -400,13 +401,19 @@ def eval_score():
       expect(concurrentB.hasMore).toBe(false);
 
       // Page 2 for Reader A stays pinned to H1: returns [l2, l3] without shifting or duplicating dev-1.
-      const p2 = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      const p2 = await queryRunLogEvents(
+        { run: runDir, cursor: p1.nextCursor!, snapshot: p1.snapshot, limit: 2 },
+        { allowHostPath: true },
+      );
       expect(p2.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
       expect(p2.hasMore).toBe(false);
       expect(p2.nextCursor).toBeNull();
 
-      // Retrying Page 2 after !hasMore still matches H1 via servedCursors.
-      const p2Retry = await queryRunLogEvents({ run: runDir, cursor: p1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      // Retrying Page 2 after !hasMore still matches H1.
+      const p2Retry = await queryRunLogEvents(
+        { run: runDir, cursor: p1.nextCursor!, snapshot: p1.snapshot, limit: 2 },
+        { allowHostPath: true },
+      );
       expect(p2Retry.events.map(e => (e.data as { tag: string }).tag)).toEqual(["l2", "l3"]);
     } finally {
       clearLogEventHorizons();
@@ -444,42 +451,112 @@ def eval_score():
         "utf8",
       );
 
-      const aTail = await queryRunLogEvents({ run: runDir, cursor: a1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      const aTail = await queryRunLogEvents(
+        { run: runDir, cursor: a1.nextCursor!, snapshot: a1.snapshot, limit: 2 },
+        { allowHostPath: true },
+      );
       expect(aTail.events.map(e => (e.data as { n: number }).n)).toEqual([2, 3]);
       expect(aTail.hasMore).toBe(false);
 
-      const aTailRetry = await queryRunLogEvents({ run: runDir, cursor: a1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      const aTailRetry = await queryRunLogEvents(
+        { run: runDir, cursor: a1.nextCursor!, snapshot: a1.snapshot, limit: 2 },
+        { allowHostPath: true },
+      );
       expect(aTailRetry.events.map(e => (e.data as { n: number }).n)).toEqual([2, 3]);
 
       const cFresh = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 10 }, { allowHostPath: true });
       expect(cFresh.events.map(e => (e.data as { n: number }).n)).toEqual([1, 2, 3, 4]);
       expect(cFresh.hasMore).toBe(false);
 
-      const bTail = await queryRunLogEvents({ run: runDir, cursor: b1.nextCursor!, limit: 2 }, { allowHostPath: true });
+      const bTail = await queryRunLogEvents(
+        { run: runDir, cursor: b1.nextCursor!, snapshot: b1.snapshot, limit: 2 },
+        { allowHostPath: true },
+      );
       expect(bTail.events.map(e => (e.data as { n: number }).n)).toEqual([2, 3]);
       expect(bTail.hasMore).toBe(false);
 
-      // Counterexample 2: A & B share a short-TTL snapshot; once expired, BOTH A and B receive 409.
+      // Counterexample 2: A & B share a short-TTL snapshot; once expired, BOTH A and B receive 409,
+      // and restarting from cursor=0 recovers cleanly without hitting the old 409 tombstone.
       clearLogEventHorizons();
       const shortA = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true, horizonTtlMs: 25 });
       const shortB = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true, horizonTtlMs: 25 });
+      expect(typeof shortA.snapshot).toBe("string");
+      expect(typeof shortB.snapshot).toBe("string");
+      expect(shortA.snapshot).not.toBe(shortB.snapshot);
       await Bun.sleep(40);
 
       let errA: unknown;
       try {
-        await queryRunLogEvents({ run: runDir, cursor: shortA.nextCursor!, limit: 2 }, { allowHostPath: true, horizonTtlMs: 25 });
+        await queryRunLogEvents(
+          { run: runDir, cursor: shortA.nextCursor!, limit: 2, snapshot: shortA.snapshot },
+          { allowHostPath: true, horizonTtlMs: 25 },
+        );
       } catch (err) {
         errA = err;
       }
       expect((errA as { status?: number })?.status).toBe(409);
 
+      // Restarting from cursor=0 after 409 succeeds on cursor=1 (both with and without explicit snapshot)
+      const restartedA = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true });
+      const restartedAPage2 = await queryRunLogEvents(
+        { run: runDir, cursor: restartedA.nextCursor!, limit: 2 },
+        { allowHostPath: true },
+      );
+      expect(restartedAPage2.events.map(e => (e.data as { n: number }).n)).toEqual([2, 3]);
+
       let errB: unknown;
       try {
-        await queryRunLogEvents({ run: runDir, cursor: shortB.nextCursor!, limit: 2 }, { allowHostPath: true, horizonTtlMs: 25 });
+        await queryRunLogEvents(
+          { run: runDir, cursor: shortB.nextCursor!, limit: 2, snapshot: shortB.snapshot },
+          { allowHostPath: true, horizonTtlMs: 25 },
+        );
       } catch (err) {
         errB = err;
       }
       expect((errB as { status?: number })?.status).toBe(409);
+
+      // Counterexample 3: A finishes tail at cursor=1 (2 events, limit=1); append 3rd event;
+      // B starts at cursor=0 (limit=1, pendingCursor=1); A retries tail cursor=1 with A's snapshot token
+      // without consuming B's pending cursor or leaking event 3 into A.
+      clearLogEventHorizons();
+      await writeFile(
+        localEvents,
+        [
+          JSON.stringify({ seq: 1, at: "2026-11-19T00:00:01.000Z", type: "local", data: { n: 1 } }),
+          JSON.stringify({ seq: 2, at: "2026-11-19T00:00:02.000Z", type: "local", data: { n: 2 } }),
+        ].join("\n") + "\n",
+        "utf8",
+      );
+      const snapA0 = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true });
+      const snapA1 = await queryRunLogEvents(
+        { run: runDir, cursor: snapA0.nextCursor!, limit: 1, snapshot: snapA0.snapshot },
+        { allowHostPath: true },
+      );
+      expect(snapA1.events.map(e => (e.data as { n: number }).n)).toEqual([2]);
+      expect(snapA1.hasMore).toBe(false);
+
+      await appendFile(
+        localEvents,
+        JSON.stringify({ seq: 3, at: "2026-11-19T00:00:03.000Z", type: "local", data: { n: 3 } }) + "\n",
+        "utf8",
+      );
+      const snapB0 = await queryRunLogEvents({ run: runDir, cursor: 0, limit: 1 }, { allowHostPath: true });
+      expect(snapB0.nextCursor).toBe(1);
+
+      const snapA1Retry = await queryRunLogEvents(
+        { run: runDir, cursor: snapA0.nextCursor!, limit: 1, snapshot: snapA0.snapshot },
+        { allowHostPath: true },
+      );
+      expect(snapA1Retry.events.map(e => (e.data as { n: number }).n)).toEqual([2]);
+      expect(snapA1Retry.hasMore).toBe(false);
+
+      const snapB1 = await queryRunLogEvents(
+        { run: runDir, cursor: snapB0.nextCursor!, limit: 1, snapshot: snapB0.snapshot },
+        { allowHostPath: true },
+      );
+      expect(snapB1.events.map(e => (e.data as { n: number }).n)).toEqual([2]);
+      expect(snapB1.hasMore).toBe(true);
+      expect(snapB1.nextCursor).toBe(2);
     } finally {
       clearLogEventHorizons();
       await rm(root, { recursive: true, force: true });

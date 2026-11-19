@@ -637,6 +637,12 @@ export class RpcRouter {
             : typeof params.limit === "number" && Number.isSafeInteger(params.limit) && params.limit >= 1 && params.limit <= 1000
               ? params.limit
               : (() => { throw invalidParams("limit must be an integer between 1 and 1000"); })();
+        const snapshot =
+          params.snapshot === undefined
+            ? undefined
+            : typeof params.snapshot === "string" && params.snapshot.trim()
+              ? params.snapshot.trim()
+              : (() => { throw invalidParams("snapshot must be a non-empty string"); })();
         const { capabilities: caps } = this.getSessionCapabilities(session);
         const isSafeId = /^[a-zA-Z0-9._-]+$/.test(run) && run !== "." && run !== "..";
         if ((!project || !isSafeId) && !caps.localFsPaths) {
@@ -651,6 +657,7 @@ export class RpcRouter {
           ...(channel ? { channel } : {}),
           ...(cursor !== undefined ? { cursor } : {}),
           ...(limit !== undefined ? { limit } : {}),
+          ...(snapshot !== undefined ? { snapshot } : {}),
         };
         return this.ctx.worker.call("logsEvents", [logsParams, caps.localFsPaths], signal);
       }

@@ -130,6 +130,7 @@ export async function runLogsWithClient(
     const DEFAULT_LOGS_PAGE_SIZE = 200;
     const MAX_LOGS_PAGE_SIZE = 500;
     let cursor = startCursor;
+    let snapshot: string | undefined;
     let remaining = explicitLimit;
     for (;;) {
       const pageLimit =
@@ -140,8 +141,12 @@ export async function runLogsWithClient(
         ...scope,
         channel,
         ...(cursor !== undefined ? { cursor } : {}),
+        ...(snapshot !== undefined ? { snapshot } : {}),
         limit: pageLimit,
       });
+      if (typeof page.snapshot === "string" && page.snapshot) {
+        snapshot = page.snapshot;
+      }
       for (const event of page.events) {
         await writeLine(JSON.stringify(event));
       }

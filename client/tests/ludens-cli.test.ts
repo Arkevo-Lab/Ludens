@@ -504,9 +504,9 @@ test("ludens logs events paginates over logs/events RPC and logs read supports -
     if (method === "logs/events") {
       pageCalls++;
       if (pageCalls === 1) {
-        return { events: [{ seq: 1, type: "run_start" }], nextCursor: 1, hasMore: true };
+        return { events: [{ seq: 1, type: "run_start" }], nextCursor: 1, hasMore: true, snapshot: "snap-v1" };
       }
-      return { events: [{ seq: 2, type: "run_end" }], nextCursor: null, hasMore: false };
+      return { events: [{ seq: 2, type: "run_end" }], nextCursor: null, hasMore: false, snapshot: "snap-v1" };
     }
     if (method === "logs/read") {
       return { value: { restored: true, params } };
@@ -530,10 +530,12 @@ test("ludens logs events paginates over logs/events RPC and logs read supports -
     ],
   );
   assert.equal(pageCalls, 2);
-  // Bounded default page size (200) is always sent on logs/events RPC
+  // Bounded default page size (200) is always sent on logs/events RPC, and continuation forwards snapshot
   const eventCalls = calls.filter(c => c.method === "logs/events");
-  assert.equal((eventCalls[0]?.params as { limit?: number }).limit, 200);
-  assert.equal((eventCalls[1]?.params as { limit?: number }).limit, 200);
+  assert.equal((eventCalls[0]?.params as { limit?: number; snapshot?: string }).limit, 200);
+  assert.equal((eventCalls[0]?.params as { snapshot?: string }).snapshot, undefined);
+  assert.equal((eventCalls[1]?.params as { limit?: number; snapshot?: string }).limit, 200);
+  assert.equal((eventCalls[1]?.params as { snapshot?: string }).snapshot, "snap-v1");
 
   // Explicit --limit > 500 is capped to 500 per RPC page
   const cappedLimits: number[] = [];

@@ -598,12 +598,16 @@ export interface LogsEventsParams extends LogsScopeParams {
   channel?: "events" | "diagnostics";
   cursor?: number;
   limit?: number;
+  /** Optional snapshot version token returned by an earlier page to pin continuation/retry requests to that exact horizon. */
+  snapshot?: string;
 }
 
 export interface LogsEventsResult {
   events: Record<string, unknown>[];
   nextCursor: number | null;
   hasMore: boolean;
+  /** Opaque snapshot version token identifying the pinned log horizon for this pagination session. */
+  snapshot?: string;
 }
 
 export interface LogsReadParams extends LogsScopeParams {
