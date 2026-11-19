@@ -48,7 +48,8 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
   const args = [...argv];
 
   let selectedWorkspace = env.LUDENS_WORKSPACE?.trim() || options.cwd || process.cwd();
-  let explicitWorkspace = false;
+  let explicitWorkspace = Boolean(env.LUDENS_WORKSPACE?.trim());
+  let explicitCliWorkspace = false;
   let explicitRemoteUrl: string | undefined;
   let explicitRemoteToken: string | undefined;
 
@@ -58,6 +59,7 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
       if (!args[1] || args[1].startsWith("--")) throw new Error("--workspace requires a path or ID");
       selectedWorkspace = args[1];
       explicitWorkspace = true;
+      explicitCliWorkspace = true;
       args.splice(0, 2);
       continue;
     }
@@ -65,6 +67,7 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
       selectedWorkspace = flag.slice("--workspace=".length);
       if (!selectedWorkspace) throw new Error("--workspace requires a path or ID");
       explicitWorkspace = true;
+      explicitCliWorkspace = true;
       args.splice(0, 1);
       continue;
     }
@@ -115,6 +118,7 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
         }
         selectedWorkspace = input[++i]!;
         explicitWorkspace = true;
+        explicitCliWorkspace = true;
         continue;
       }
       if (arg.startsWith("--workspace=")) {
@@ -122,6 +126,7 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
         if (!value) throw new Error("--workspace requires a path or ID");
         selectedWorkspace = value;
         explicitWorkspace = true;
+        explicitCliWorkspace = true;
         continue;
       }
       cleaned.push(arg);
@@ -149,7 +154,14 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
   }
 
   if (command === "workspace") {
-    return workspaceCommand(subArgs, selectedWorkspace, explicitWorkspace, rpcOptions, { out, err });
+    return workspaceCommand(
+      subArgs,
+      selectedWorkspace,
+      explicitWorkspace,
+      rpcOptions,
+      { out, err },
+      explicitCliWorkspace,
+    );
   }
 
   if (command === "logs") {

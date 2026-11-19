@@ -195,12 +195,13 @@ export function resolveDaemonLaunch(
     }
   }
 
-  if (env.LUDENS_APP_SERVER_BIN?.trim()) {
+  const explicitServerBin = env.LUDENS_APP_SERVER_BIN?.trim() || env.LUDENS_SERVER_BIN?.trim()
+  if (explicitServerBin) {
     return {
       home,
       staticDir,
       spawnCommand: {
-        command: env.LUDENS_APP_SERVER_BIN.trim(),
+        command: explicitServerBin,
         argsPrefix: [],
       },
       ...(repo ? { repo } : {}),
@@ -379,15 +380,28 @@ export class AppServerHost {
 
   private async performStart(): Promise<StartedAppDaemon> {
     const launch = resolveDaemonLaunch({ ...this.options, home: this.home })
-    const result = await this.ensureDaemon({
-      home: launch.home,
-      repo: launch.repo,
-      wsListen: null,
-      staticDir: launch.staticDir,
-      trustedOrigins: launch.trustedOrigins,
-      spawnCommand: launch.spawnCommand,
-      timeoutMs: this.startupTimeoutMs,
-    })
+    const previousRepoRoot = process.env.LUDENS_REPO_ROOT
+    const injectedRepoRoot = Boolean(launch.repo && !previousRepoRoot)
+    if (injectedRepoRoot && launch.repo) {
+      process.env.LUDENS_REPO_ROOT = launch.repo
+    }
+    let result: EnsureLocalAppDaemonResult
+    try {
+      result = await this.ensureDaemon({
+        home: launch.home,
+        repo: launch.repo,
+        wsListen: null,
+        staticDir: launch.staticDir,
+        trustedOrigins: launch.trustedOrigins,
+        spawnCommand: launch.spawnCommand,
+        timeoutMs: this.startupTimeoutMs,
+      })
+    } finally {
+      if (injectedRepoRoot) {
+        if (previousRepoRoot === undefined) delete process.env.LUDENS_REPO_ROOT
+        else process.env.LUDENS_REPO_ROOT = previousRepoRoot
+      }
+    }
     const started = toStartedDaemon(result, this.home)
     if (!this.stopped) {
       this.daemonInfo = started

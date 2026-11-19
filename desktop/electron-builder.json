@@ -26,36 +26,12 @@
       "to": "server"
     },
     {
-      "from": "../core",
-      "to": "core",
-      "filter": [
-        "**/*",
-        "!node_modules/**",
-        "!tests/**",
-        "!python/.venv/**",
-        "!python/**/__pycache__/**",
-        "!*.tsbuildinfo"
-      ]
+      "from": "dist/core",
+      "to": "core"
     },
     {
-      "from": "../baseware",
-      "to": "baseware",
-      "filter": [
-        "**/*",
-        "!node_modules/**",
-        "!tests/**",
-        "!*.tsbuildinfo"
-      ]
-    },
-    {
-      "from": "../protocol",
-      "to": "protocol",
-      "filter": [
-        "**/*",
-        "!node_modules/**",
-        "!tests/**",
-        "!*.tsbuildinfo"
-      ]
+      "from": "dist/baseware",
+      "to": "baseware"
     }
   ],
   "mac": {

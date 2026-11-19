@@ -79,7 +79,8 @@ export function resolveLudensServerCommand(
 function quoteWindowsCmdToken(arg) {
   if (!arg.length) return '""';
   const escaped = arg.replace(/"/g, '""');
-  return /[\s"&|<>()^%!]/.test(arg) ? `"${escaped}"` : escaped;
+  if (!/[\s"&|<>()^%!]/.test(arg)) return escaped;
+  return `"${escaped.replace(/(\\*)$/, "$1$1")}"`;
 }
 
 export function buildServerSpawn(
@@ -89,7 +90,7 @@ export function buildServerSpawn(
   env = process.env,
 ) {
   if (platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
-    const quotedCmd = `"${command.replace(/"/g, '""')}"`;
+    const quotedCmd = `"${command.replace(/"/g, '""').replace(/(\\*)$/, "$1$1")}"`;
     const quotedArgs = args.map(quoteWindowsCmdToken).join(" ");
     const cmdLine = quotedArgs ? `"${quotedCmd} ${quotedArgs}"` : `"${quotedCmd}"`;
     return {

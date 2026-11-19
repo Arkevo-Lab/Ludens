@@ -178,7 +178,8 @@ export function resolveLocalLudensServerCommand(options: {
 function quoteWindowsCmdToken(arg: string): string {
   if (!arg.length) return '""';
   const escaped = arg.replace(/"/g, '""');
-  return /[\s"&|<>()^%!]/.test(arg) ? `"${escaped}"` : escaped;
+  if (!/[\s"&|<>()^%!]/.test(arg)) return escaped;
+  return `"${escaped.replace(/(\\*)$/, "$1$1")}"`;
 }
 
 export function buildServerSpawnInvocation(
@@ -189,7 +190,7 @@ export function buildServerSpawnInvocation(
 ): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
   const fullArgs = [...spec.argsPrefix, ...args];
   if (platform === "win32" && /\.(cmd|bat)$/i.test(spec.command)) {
-    const quotedCmd = `"${spec.command.replace(/"/g, '""')}"`;
+    const quotedCmd = `"${spec.command.replace(/"/g, '""').replace(/(\\*)$/, "$1$1")}"`;
     const quotedArgs = fullArgs.map(quoteWindowsCmdToken).join(" ");
     const cmdLine = quotedArgs ? `"${quotedCmd} ${quotedArgs}"` : `"${quotedCmd}"`;
     return {

@@ -193,6 +193,7 @@ export async function runWorkspaceWithClient(
     out?: (line: string) => void;
     err?: (line: string) => void;
   } = {},
+  explicitCliWorkspace = explicitWorkspace,
 ): Promise<number> {
   const out = io.out ?? console.log;
   const err = io.err ?? console.error;
@@ -301,7 +302,7 @@ export async function runWorkspaceWithClient(
     }
     if (
       typeof values.workspace === "string" &&
-      explicitWorkspace &&
+      explicitCliWorkspace &&
       resolve(values.workspace) !== resolve(selectedWorkspace)
     ) {
       throw new Error("Choose one --workspace directory");
@@ -317,7 +318,7 @@ export async function runWorkspaceWithClient(
         ? mode === "remote"
           ? values.workspace
           : expandDirectory(values.workspace)
-        : explicitWorkspace
+        : explicitCliWorkspace
           ? mode === "remote"
             ? selectedWorkspace
             : expandDirectory(selectedWorkspace)
@@ -419,6 +420,7 @@ export async function workspaceCommand(
   explicitWorkspace: boolean,
   rpcOptions: OperatorRpcOptions,
   io?: { out?: (line: string) => void; err?: (line: string) => void },
+  explicitCliWorkspace = explicitWorkspace,
 ): Promise<number> {
   const [action, ...rest] = args;
   if (!action || action === "--help" || (action !== "eval" && rest.includes("--help"))) {
@@ -430,6 +432,14 @@ export async function workspaceCommand(
     return 0;
   }
   return withOperatorRpc(rpcOptions, (client, mode) =>
-    runWorkspaceWithClient(client, args, selectedWorkspace, explicitWorkspace, mode, io),
+    runWorkspaceWithClient(
+      client,
+      args,
+      selectedWorkspace,
+      explicitWorkspace,
+      mode,
+      io,
+      explicitCliWorkspace,
+    ),
   );
 }
