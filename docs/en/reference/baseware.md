@@ -133,7 +133,7 @@ baseware driver discover --package 'github:org/repo#rev'
 ```
 
 - **Verification scope**: `discover` downloads and installs dependencies, imports the package entry module, validates `DriverRegistration` field legality, and outputs the `DriverManifest` as JSON; missing fields or illegal types exit with a non-zero status.
-- **Security boundary**: although discovery **never calls `load()`**, package install scripts and module top-level code still execute on the local machine. `discover`, `ludens workspace init`, and `ludens workspace up --dry-run` are not security sandboxes — only load driver packages from trusted sources.
+- **Security boundary**: although discovery **never calls `load()`**, package install scripts and module top-level code still execute on the local machine. `discover`, `ludens workspace init`, and `ludens workspace up` are not security sandboxes — only load driver packages from trusted sources.
 
 ## Upstream contract and upgrades
 

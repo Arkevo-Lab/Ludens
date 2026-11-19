@@ -38,8 +38,7 @@ ludens config set defaults.<field> <value> [--remote <url>] [--token <secret>]
 | `defaults.seconds` | 单次自主运行周期默认时长（秒，正整数） |
 | `defaults.requests` | 单周期默认请求配额（正整数） |
 | `defaults.compactionThreshold` | Shiori 压缩阈值（Token 数，正整数） |
-| `defaults.dashboard` | `true` \| `false` —— `ludens workspace up` 时是否确保控制台服务就绪 |
-| `defaults.pet` | `true` \| `false` —— `ludens workspace up` 时是否拉起可选桌宠 |
+| `defaults.pet` | `true` \| `false` —— 新建工作区默认是否开启可选桌宠 |
 | `defaults.connection.openaiWebsockets` | OpenAI WebSocket 传输开关（`auto` \| `on` \| `off`） |
 | `defaults.connection.cacheRetention` | Prompt 缓存保留策略（`auto` \| `short` \| `long` \| `none`） |
 | `defaults.connection.appendOnlyContext` | 仅追加上下文策略（`auto` \| `on` \| `off`） |
@@ -51,7 +50,7 @@ ludens config set defaults.<field> <value> [--remote <url>] [--token <secret>]
 管理工作区创建、全局注册表登记与旧状态迁移（全线走 JSON-RPC，统一支持 `--workspace`、`--remote`、`--token`）：
 
 ```bash
-# 初始化工作区并生成 ludens.json（走 workspaces/create RPC）
+# 初始化工作区并生成 ludens.json（走 workspaces/mutate action: "create" RPC）
 ludens workspace init --driver <id> \
   [--name <name>] \
   [--workspace <path>] \
@@ -81,21 +80,18 @@ ludens workspace import <directory> [--legacy-state <directory>] [--previous-wor
 
 ### `ludens workspace <up|services|down>`
 
-按 **1 Workspace = 1 Core** 隔离统一拉起、检查与关闭受管工作区进程（Baseware、承载 **Shiori** 的工作区 **Core** `ludens-core run`、可选目标应用/模拟器启动命令与可选桌宠），支持本地 `app-server.sock` 与 `--remote`：
+按 **1 Workspace = 1 Core** 隔离统一拉起、检查与关闭受管工作区进程（Baseware、承载 **Shiori** 的工作区 **Core** `ludens-core run` 及可选目标应用/模拟器启动命令），支持本地 `app-server.sock` 与 `--remote`：
 
 ```bash
-ludens workspace up [--workspace <path>] [--dry-run] [--preempt] \
-  [--services <emulator,baseware,core>] [--dashboard | --no-dashboard] [--pet | --no-pet] \
-  [--remote <url>] [--token <secret>]
+ludens workspace up [--workspace <path>] [--preempt] \
+  [--services <emulator,baseware,core>] [--remote <url>] [--token <secret>]
 ludens workspace services [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace down [--workspace <path>] [--services <emulator,baseware,core>] \
-  [--keep-emulator] [--dashboard] [--pet] [--remote <url>] [--token <secret>]
+  [--keep-emulator] [--remote <url>] [--token <secret>]
 ```
 
 - `--preempt` 自动抢占同一物理设备上冲突的工作区 Core。
 - `--services` 将 `up` / `down` 作用域限定到指定组件（`emulator`、`baseware`、`core`）。
-- `--dashboard` / `--no-dashboard` 控制是否确保本地 `ludens-server` 守护进程就绪。
-- `--pet` / `--no-pet` 控制在 `up` / `down` 时是否联动可选桌宠窗口。
 - `--keep-emulator` 在停止 Ludens 各守护进程的同时保留外部目标应用/模拟器进程。
 
 ### `ludens workspace eval`
@@ -104,7 +100,7 @@ ludens workspace down [--workspace <path>] [--services <emulator,baseware,core>]
 
 ```bash
 ludens workspace eval list [--workspace <path>] [--remote <url>] [--token <secret>]
-ludens workspace eval run [<capability-id>] [--all] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens workspace eval run [<capability-id>] [--all] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace eval <python/capability-id> [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace eval history [<capability-id>] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace eval adapt <capability-id> --reason <text> [--record <record-id> ...] \
@@ -117,8 +113,8 @@ ludens workspace eval adapt <capability-id> --reason <text> [--record <record-id
 
 ```bash
 ludens status [--workspace <path>] [--remote <url>] [--token <secret>]
-ludens auto on [--message <text>] [--seconds <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
-ludens auto timer <seconds|off|unbounded|none> [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens auto on [--message <text>] [--seconds <n>] [--preempt] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens auto timer <seconds|off> [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens auto off [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens steer [--message <text> | <text>] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens consolidate [--seconds <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
@@ -127,20 +123,20 @@ ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
   [--effort none|minimal|low|medium|high|xhigh|max] [--workspace <path>] [--remote <url>] [--token <secret>]
 
 # 纯 RPC 日志归档检索（经 logs/events 与 logs/read RPC 查询历史运行事件与完整卸载载荷，无需直读本地磁盘）
-ludens logs events --run <run-directory-or-id> [--diagnostics] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens logs events --run <run-directory-or-id> [--diagnostics] [--cursor <n>] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens logs read --run <run-directory-or-id> \
   (--ref '<JSON reference>' | --file <reference.json> | --event <seq> --field <name>) \
   [--full] [--workspace <path>] [--remote <url>] [--token <secret>]
 ```
 
-- `ludens auto on` 开启**自主运行（Auto Run）**控制周期（`--seconds` 设置定时周期时长）。
-- `ludens auto timer` 动态调整当前周期剩余计时（`off`、`unbounded` 或 `none` 表示取消时间上限）。
+- `ludens auto on` 开启**自主运行（Auto Run）**控制周期（`--seconds` 设置定时周期时长；`--preempt` 抢占同一物理设备上的冲突 Core）。
+- `ludens auto timer` 动态调整当前周期剩余计时（`off` 表示取消时间上限）。
 - `ludens auto off` 执行**收回控制权（Reclaim Control）**，将 Shiori 切回**手动待命（Manual Standby / `manual`）**并在 Baseware 侧撤销设备控制租约。
 - `ludens steer` 向 Shiori 发送高优引导指令（打断 `loop.py` 等待或排队注入活跃轮次）。
 - `ludens consolidate` 触发记忆整理任务（`--seconds` 默认 `600` 秒）。
-- `ludens stop` 干净停止工作区 Core 守护进程。
+- `ludens stop` 经 `run/stop` RPC 立即停止当前工作区正在进行的活跃控制运行并收回设备控制权（如需关闭工作区 Core / Baseware 后台进程，请使用 `ludens workspace down`）。
 - `ludens model` 在手动待命期间切换模型、Service Tier 或推理深度（Effort）。
-- `ludens logs` 经由 `logs/*` RPC 读取归档事件时间线及卸载到磁盘的大字段载荷（详见 [日志与调用链](logging.md)）。
+- `ludens logs` 经由 `logs/events` 与 `logs/read` RPC 读取归档事件时间线及卸载到磁盘的大字段载荷（详见 [日志与调用链](logging.md)）。
 
 ---
 
@@ -255,7 +251,7 @@ ludens-core event ack <event-id> [<event-id2> ...]
 
 ```bash
 ludens-core eval list
-ludens-core eval run [<capability-id>] [--all] [--limit <n>]
+ludens-core eval run [<capability-id>] [--all]
 ludens-core eval <python/capability-id>          # 当能力 ID 以 python/ 开头时可省略 run
 ludens-core eval history [<capability-id>] [--limit <n>]
 ludens-core eval adapt <capability-id> --reason <text> [--record <record-id> ...]

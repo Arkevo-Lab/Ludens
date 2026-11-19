@@ -133,7 +133,7 @@ baseware driver discover --package 'github:org/repo#rev'
 ```
 
 - **验证范围**：`discover` 会下载并安装依赖、导入包入口模块、校验 `DriverRegistration` 字段合法性并输出 JSON 格式的 `DriverManifest`；若字段缺失或类型非法则以非零状态码退出。
-- **安全边界**：虽然发现阶段**不会调用 `load()`**，但包安装脚本与模块顶层代码仍会在本机执行。`discover`、`ludens workspace init` 与 `ludens workspace up --dry-run` 均不是安全沙箱，请仅加载可信来源的驱动包。
+- **安全边界**：虽然发现阶段**不会调用 `load()`**，但包安装脚本与模块顶层代码仍会在本机执行。`discover`、`ludens workspace init` 与 `ludens workspace up` 均不是安全沙箱，请仅加载可信来源的驱动包。
 
 ## 上游契约与升级
 

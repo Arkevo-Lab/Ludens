@@ -98,7 +98,7 @@ ludens workspace up
 `ludens workspace init` 与 `ludens workspace up` 常用参数：
 
 - `ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]`
-- `ludens workspace up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--pet | --no-pet]`（`--dry-run` 仅打印启动计划不实际拉起进程；`--preempt` 抢占同一设备上的冲突 Core）
+- `ludens workspace up [--preempt] [--services <emulator,baseware,core>]`（`--preempt` 抢占同一设备上的冲突 Core；`--services` 指定启动的子服务）
 
 如果需要在磁盘上纳管已有目录或迁移旧版工作区，可执行 `ludens workspace open <dir> [--new-id]` 或 `ludens workspace import <dir> [--legacy-state <dir>] [--previous-workspace <dir>]`。
 
@@ -136,8 +136,8 @@ ludens consolidate
 - `ludens-core event list | reply | ack`：在工作区或沙盒内查看、回复或确认双向事件池中的消息
 - `ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]`：查看或动态切换当前工作区的模型与推理档位
 - `ludens workspace services [--remote <url>]`：查看当前工作区受管后台服务的运行状态
-- `ludens stop [--remote <url>]`：干净停止当前工作区 Core 守护进程
-- `ludens workspace down [--services <emulator,baseware,core>] [--keep-emulator] [--pet] [--remote <url>]`：停止当前工作区（`--keep-emulator` 保留已启动的目标进程；`--pet` 一并关闭可选桌宠进程）
+- `ludens stop [--remote <url>]`：停止当前工作区正在运行的活跃控制周期并收回设备控制权
+- `ludens workspace down [--services <emulator,baseware,core>] [--keep-emulator] [--remote <url>]`：关闭当前工作区受管后台进程（`--keep-emulator` 保留已启动的目标进程）
 - `ludens-server status | start | stop [--keep-cores|--stop-cores] | restart`：直接管理单例 `ludens-server` 控制面守护进程
 
 ## 5. 工作区配置（`ludens.json`）与全局默认参数

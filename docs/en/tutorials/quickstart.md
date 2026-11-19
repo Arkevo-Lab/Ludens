@@ -98,7 +98,7 @@ All `ludens` commands (`ludens config ...`, `ludens workspace <init|list|open|fo
 Useful flags for `ludens workspace init` and `ludens workspace up`:
 
 - `ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]`
-- `ludens workspace up [--dry-run] [--preempt] [--services <emulator,baseware,core>] [--pet | --no-pet]` (`--dry-run` prints the launch plan without spawning processes; `--preempt` preempts a conflicting active Core on the same device)
+- `ludens workspace up [--preempt] [--services <emulator,baseware,core>]` (`--preempt` preempts a conflicting active Core on the same device; `--services` scopes startup to selected services)
 
 If you move or import an existing directory later, register it with `ludens workspace open <dir> [--new-id]` or migrate legacy state via `ludens workspace import <dir> [--legacy-state <dir>] [--previous-workspace <dir>]`.
 
@@ -136,8 +136,8 @@ Other handy lifecycle commands:
 - `ludens-core event list | reply | ack`: Inspect or acknowledge items in the bidirectional Event Pool inside the workspace or sandbox
 - `ludens model [<provider/id>] [--service-tier none|priority|ultrafast] [--effort none|minimal|low|medium|high|xhigh|max]`: Switch model or reasoning effort on the running workspace
 - `ludens workspace services [--remote <url>]`: Check status of managed background services in the current workspace
-- `ludens stop [--remote <url>]`: Stop the workspace Core daemon cleanly
-- `ludens workspace down [--services <emulator,baseware,core>] [--keep-emulator] [--pet] [--remote <url>]`: Stop the workspace (`--keep-emulator` preserves a launched target process; `--pet` also stops an optional Desktop Pet process)
+- `ludens stop [--remote <url>]`: Stop the active Auto Run control cycle on the current workspace and reclaim device control
+- `ludens workspace down [--services <emulator,baseware,core>] [--keep-emulator] [--remote <url>]`: Shut down managed workspace background processes (`--keep-emulator` preserves a launched target process)
 - `ludens-server status | start | stop [--keep-cores|--stop-cores] | restart`: Manage the singleton `ludens-server` control-plane daemon directly
 
 ## 5. Workspace Config (`ludens.json`) & Global Defaults

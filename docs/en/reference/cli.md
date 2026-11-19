@@ -38,8 +38,7 @@ Allowed `defaults.<field>` keys:
 | `defaults.seconds` | Positive integer Auto Run cycle duration (seconds) |
 | `defaults.requests` | Positive integer request budget per cycle |
 | `defaults.compactionThreshold` | Positive integer token threshold for Shiori compaction |
-| `defaults.dashboard` | `true` \| `false` — whether `ludens workspace up` ensures the Console server is ready |
-| `defaults.pet` | `true` \| `false` — whether `ludens workspace up` starts the optional Desktop Pet |
+| `defaults.pet` | `true` \| `false` — whether newly created workspaces enable the optional Desktop Pet by default |
 | `defaults.connection.openaiWebsockets` | OpenAI WebSocket transport toggle (`auto` \| `on` \| `off`) |
 | `defaults.connection.cacheRetention` | Prompt cache retention policy (`auto` \| `short` \| `long` \| `none`) |
 | `defaults.connection.appendOnlyContext` | Append-only context policy (`auto` \| `on` \| `off`) |
@@ -51,7 +50,7 @@ Allowed `defaults.<field>` keys:
 Create workspaces, manage global registry entries, and import/migrate legacy workspaces (100% over JSON-RPC, uniformly supporting `--workspace`, `--remote`, and `--token`):
 
 ```bash
-# Initialize a workspace directory and write ludens.json (via workspaces/create RPC)
+# Initialize a workspace directory and write ludens.json (via workspaces/mutate action: "create" RPC)
 ludens workspace init --driver <id> \
   [--name <name>] \
   [--workspace <path>] \
@@ -81,21 +80,18 @@ Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `ope
 
 ### `ludens workspace <up|services|down>`
 
-Manage supervised workspace processes (**Baseware**, per-workspace **Core** `ludens-core run` hosting **Shiori**, optional target/simulator launch command, and optional **Desktop Pet**) locally via `app-server.sock` or remotely via `--remote`, following **1 Workspace = 1 Core** isolation:
+Manage supervised workspace processes (**Baseware**, per-workspace **Core** `ludens-core run` hosting **Shiori**, and optional target/simulator launch command) locally via `app-server.sock` or remotely via `--remote`, following **1 Workspace = 1 Core** isolation:
 
 ```bash
-ludens workspace up [--workspace <path>] [--dry-run] [--preempt] \
-  [--services <emulator,baseware,core>] [--dashboard | --no-dashboard] [--pet | --no-pet] \
-  [--remote <url>] [--token <secret>]
+ludens workspace up [--workspace <path>] [--preempt] \
+  [--services <emulator,baseware,core>] [--remote <url>] [--token <secret>]
 ludens workspace services [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace down [--workspace <path>] [--services <emulator,baseware,core>] \
-  [--keep-emulator] [--dashboard] [--pet] [--remote <url>] [--token <secret>]
+  [--keep-emulator] [--remote <url>] [--token <secret>]
 ```
 
 - `--preempt` preempts a conflicting workspace Core holding the same physical device.
 - `--services` scopes `up` / `down` to specific managed components (`emulator`, `baseware`, `core`).
-- `--dashboard` / `--no-dashboard` controls ensuring the local `ludens-server` daemon.
-- `--pet` / `--no-pet` toggles the optional Desktop Pet widget during `up` / `down`.
 - `--keep-emulator` keeps target simulator/runtime processes alive while stopping Ludens daemons.
 
 ### `ludens workspace eval`
@@ -104,7 +100,7 @@ List, run, inspect evaluation history, and mark live failure counterexamples rem
 
 ```bash
 ludens workspace eval list [--workspace <path>] [--remote <url>] [--token <secret>]
-ludens workspace eval run [<capability-id>] [--all] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens workspace eval run [<capability-id>] [--all] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace eval <python/capability-id> [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace eval history [<capability-id>] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens workspace eval adapt <capability-id> --reason <text> [--record <record-id> ...] \
@@ -117,8 +113,8 @@ High-frequency live runtime control and log inspection commands remain top-level
 
 ```bash
 ludens status [--workspace <path>] [--remote <url>] [--token <secret>]
-ludens auto on [--message <text>] [--seconds <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
-ludens auto timer <seconds|off|unbounded|none> [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens auto on [--message <text>] [--seconds <n>] [--preempt] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens auto timer <seconds|off> [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens auto off [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens steer [--message <text> | <text>] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens consolidate [--seconds <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
@@ -127,20 +123,20 @@ ludens model [<provider/id>] [--service-tier none|priority|ultrafast] \
   [--effort none|minimal|low|medium|high|xhigh|max] [--workspace <path>] [--remote <url>] [--token <secret>]
 
 # Pure-RPC archived log inspection (via logs/events and logs/read RPCs without direct local filesystem reads)
-ludens logs events --run <run-directory-or-id> [--diagnostics] [--workspace <path>] [--remote <url>] [--token <secret>]
+ludens logs events --run <run-directory-or-id> [--diagnostics] [--cursor <n>] [--limit <n>] [--workspace <path>] [--remote <url>] [--token <secret>]
 ludens logs read --run <run-directory-or-id> \
   (--ref '<JSON reference>' | --file <reference.json> | --event <seq> --field <name>) \
   [--full] [--workspace <path>] [--remote <url>] [--token <secret>]
 ```
 
-- `ludens auto on` starts an **Auto Run** control cycle (`--seconds` sets the timed control cycle duration).
-- `ludens auto timer` updates the remaining cycle timer (`off`, `unbounded`, or `none` removes the time cap).
+- `ludens auto on` starts an **Auto Run** control cycle (`--seconds` sets the timed control cycle duration; `--preempt` preempts a conflicting Core on the same device).
+- `ludens auto timer` updates the remaining cycle timer (`off` removes the time cap).
 - `ludens auto off` executes **Reclaim Control**, returning Shiori to **Manual Standby** (`manual`) and revoking device control at Baseware.
 - `ludens steer` interrupts a `loop.py` wait or queues a high-priority steering instruction into the active turn.
 - `ludens consolidate` runs memory consolidation (`--seconds` defaults to `600`).
-- `ludens stop` stops the workspace Core daemon cleanly.
+- `ludens stop` stops the active Auto Run control cycle on the running workspace via the `run/stop` RPC and reclaims device control (use `ludens workspace down` to shut down the managed workspace Core / Baseware daemon processes).
 - `ludens model` switches the active model, service tier, or thinking effort while in Manual Standby.
-- `ludens logs` inspects archived run event timelines and reads full offloaded payloads over `logs/*` RPC (see [Logging and Call Chains](logging.md)).
+- `ludens logs` inspects archived run event timelines and reads full offloaded payloads over `logs/events` and `logs/read` RPCs (see [Logging and Call Chains](logging.md)).
 
 ---
 
@@ -255,7 +251,7 @@ Run, inspect history, and adapt capability self-verification harnesses offline i
 
 ```bash
 ludens-core eval list
-ludens-core eval run [<capability-id>] [--all] [--limit <n>]
+ludens-core eval run [<capability-id>] [--all]
 ludens-core eval <python/capability-id>          # Shorthand when capability ID starts with python/
 ludens-core eval history [<capability-id>] [--limit <n>]
 ludens-core eval adapt <capability-id> --reason <text> [--record <record-id> ...]
