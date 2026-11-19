@@ -162,7 +162,7 @@ function hostStubCommand(socketPath: string, runId: string, initialMode: "manual
           thinking: false,
           consolidating: false,
           maxSeconds: 1800,
-          model: "openai-codex/gpt-6.1-sol",
+          model: "openai-codex/gpt-6.2-sol",
           launchedBy,
           queue: { steering: 0 },
           eventPool: { pendingInbound: 0, pendingOutbound: events.filter(e => e.direction === "outbound" && e.status === "pending").length, latestSeq: seq },

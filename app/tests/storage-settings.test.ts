@@ -170,7 +170,7 @@ function makeStudioSnapshot(
     workspace: "/tmp/ws-alpha",
     config: {
       driver: "cua",
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       seconds: 1800,
       requests: 1000,
       pet: false,
@@ -179,7 +179,7 @@ function makeStudioSnapshot(
       ...({} as any),
     },
     defaults: {
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       seconds: 1800,
       requests: 1000,
       pet: false,
@@ -190,7 +190,7 @@ function makeStudioSnapshot(
       jobs: [],
     },
     shiori: {
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       currentSessionFile: null,
       sessions: [],
       memory: {

@@ -258,7 +258,7 @@ test("analysis pairs concurrent capabilities by span, keeps late cancellation, a
   const event = fixture();
   const trace = (spanId: string, parentSpanId?: string) => ({ traceId: "trace", spanId, parentSpanId });
   const native = (row: ReturnType<ReturnType<typeof fixture>>) => ({ ...row,
-    source: { component: "shiori", implementation: "omp", implementationVersion: "18.18.8" } });
+    source: { component: "shiori", implementation: "omp", implementationVersion: "18.22.2" } });
   const report = await analyze([
     event("control", "one", { mode: "auto", epoch: "one" }),
     native(event("shiori_span_start", "one", { operation: "invoke_agent", name: "agent" }, trace("loop"))),
@@ -550,7 +550,7 @@ test("analysis reports explicit native retry warnings despite HTTP 200 and prese
     event("control", "one", { mode: "auto", epoch: "one" }),
     event("compaction_http_start", "one", { bodyBytes: 123 }, { httpId: "first" }),
     event("compaction_http_end", "one", { status: 200 }, { httpId: "first" }),
-    event("compaction_retry", "one", { attempt: 1, retryDelayMs: 1000, model: "gpt-6.1-sol", error,
+    event("compaction_retry", "one", { attempt: 1, retryDelayMs: 1000, model: "gpt-6.2-sol", error,
       headers: { authorization: "private-token" }, prompt: "private-prompt", snapshotLeafId: "private-leaf" }),
     event("compaction_http_start", "one", { bodyBytes: 123 }, { httpId: "second" }),
     event("compaction_http_end", "one", { status: 200 }, { httpId: "second" }),
@@ -561,7 +561,7 @@ test("analysis reports explicit native retry warnings despite HTTP 200 and prese
   ];
   const report = await analyze(events, "one");
   expect(report.compactionRetries).toEqual([
-    { seq: 4, at: events[3]!.at, atMs: 4000, trace: { epoch: "one" }, data: { attempt: 1, retryDelayMs: 1000, model: "gpt-6.1-sol", error } },
+    { seq: 4, at: events[3]!.at, atMs: 4000, trace: { epoch: "one" }, data: { attempt: 1, retryDelayMs: 1000, model: "gpt-6.2-sol", error } },
     { seq: 7, at: events[6]!.at, atMs: 7000, trace: { epoch: "one" }, data: { attempt: 2, retryDelayMs: 2000 } },
     { seq: 10, at: events[9]!.at, atMs: 10_000, trace: { epoch: "one" }, data: { attempt: 1, retryDelayMs: 1000, error: "late retry" } },
   ]);

@@ -8,6 +8,7 @@ import type { AssistantMessage, Model } from "@oh-my-pi/pi-ai";
 import { buildTransformedCodexRequestBody } from "@oh-my-pi/pi-ai/providers/openai-codex-responses";
 import { buildResponsesDeltaInput } from "@oh-my-pi/pi-ai/providers/openai-shared";
 import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { captureResult, readTestController, createTestRuntime, installTestPerception } from "./runtime-fixture.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
@@ -42,7 +43,7 @@ test.each([1, 26])("OMP persists batches of %i images and reuses the Codex prefi
   const authStorage = await AuthStorage.create(join(directory, "auth.db"));
   authStorage.keys.setRuntime("openai-codex", "offline-test-only");
   const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-  const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")! as Model<"openai-codex-responses">;
+  const model = resolveOmpImageModel(modelRegistry, "openai-codex/gpt-6.2-sol") as Model<"openai-codex-responses">;
   let manager = SessionManager.create(workspace, join(directory, "session"));
   const openSession = () => createOmpSession({
     cwd: workspace, agentDir: join(directory, "omp"), model, authStorage, modelRegistry, settings,

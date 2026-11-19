@@ -411,7 +411,7 @@ test("storage RPC (get/update/test/pin), secret masking & preservation, ludens.j
     await mkdir(extMountDir, { recursive: true });
     await writeFile(
       join(wsDir, "ludens.json"),
-      JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.1-sol" }, null, 2),
+      JSON.stringify({ driver: "cua", model: "openai-codex/gpt-6.2-sol" }, null, 2),
       "utf8",
     );
     const identity = await ensureWorkspaceIdentity(wsDir);
@@ -519,7 +519,7 @@ test("storage RPC (get/update/test/pin), secret masking & preservation, ludens.j
         runId,
         workspace: wsDir,
         workspaceId: identity.id,
-        model: "openai-codex/gpt-6.1-sol",
+        model: "openai-codex/gpt-6.2-sol",
         drivers: ["cua"],
         eventSchemaVersion: 1,
       }),

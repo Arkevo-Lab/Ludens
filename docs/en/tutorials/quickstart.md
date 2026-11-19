@@ -148,7 +148,7 @@ Other handy lifecycle commands:
 | --- | --- | --- |
 | `driver` / `driverPackage` | `cua` / unset | Driver identifier and optional external package or manifest path |
 | `game` / `port` / `cuaCommand` | unset | Optional target binary path, controller port, or custom CUA server command |
-| `model` | `openai-codex/gpt-6.1-sol` | Primary model identifier (`provider/model`) for Shiori |
+| `model` | `openai-codex/gpt-6.2-sol` | Primary model identifier (`provider/model`) for Shiori |
 | `serviceTier` / `effort` | unset | Optional inference tier (`none`, `priority`, `ultrafast`) and reasoning effort (`none`..`max`) |
 | `seconds` / `requests` | `1800` / `1000` | Default per-run Auto Run duration budget (seconds) and request limit |
 | `compactionThreshold` | unset | Optional token threshold triggering background context compaction |
@@ -162,7 +162,7 @@ Use `ludens config` to set machine-wide defaults stored under `~/.ludens/` (over
 ```sh
 ludens config show
 ludens config set workspaceRoot "$HOME/ludens-workspaces"
-ludens config set defaults.model "openai-codex/gpt-6.1-sol"
+ludens config set defaults.model "openai-codex/gpt-6.2-sol"
 ludens config set defaults.seconds 1800
 ludens config set defaults.requests 1000
 ludens config set defaults.pet false

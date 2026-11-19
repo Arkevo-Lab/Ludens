@@ -2556,7 +2556,7 @@
     "subtitle": "展示模型注册表中支持图像输入 (Vision) 的可用模型。点击模型即可就地调节推理强度与速度。",
     "refresh": "刷新模型目录",
     "close": "关闭",
-    "searchPlaceholder": "搜索模型名称、提供商或完整 ID（如 gpt-6.1、claude、gemini）…",
+    "searchPlaceholder": "搜索模型名称、提供商或完整 ID（如 gpt-6.2、claude、gemini）…",
     "clearSearch": "清除搜索",
     "showUnauthenticated": "显示未配置凭据 ({count})",
     "hideUnauthenticated": "隐藏未配置凭据",

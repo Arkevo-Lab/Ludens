@@ -64,7 +64,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       binDir: "/tmp",
       ludensSocket: state.socket,
       basewareSocket: "/tmp/unused-baseware.sock",
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       maxRequests: 10,
       authStorage: auth,
     });
@@ -73,7 +73,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
     expect(runtime.status()).toMatchObject({
       mode: "manual",
       agent: true,
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
     });
 
     // Reject non-image-capable and unauthenticated selectors without altering current model.
@@ -87,9 +87,9 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       await expect(runtime.setModel(`${unauthedImage.provider}/${unauthedImage.id}`))
         .rejects.toThrow("No API key");
     }
-    expect(runtime.status().model).toBe("openai-codex/gpt-6.1-sol");
+    expect(runtime.status().model).toBe("openai-codex/gpt-6.2-sol");
 
-    await runtime.setModel("openai/gpt-6.1-sol", "ultrafast", "xhigh");
+    await runtime.setModel("openai/gpt-6.2-sol", "ultrafast", "xhigh");
     expect(runtime.status().serviceTier).toBe("ultrafast");
     expect(runtime.status().effort).toBe("xhigh");
 
@@ -109,7 +109,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       workspaceId: state.id,
       socket: state.socket,
       drivers: [],
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       seconds: 300,
       maxRequests: 10,
       compactionThreshold: null,
@@ -122,8 +122,8 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       .map(line => JSON.parse(line) as { type: string; source?: { component?: string }; data?: { model?: string; file?: string } });
     const sessionEvents = rawEvents.filter(event => event.type === "session" && event.source?.component === "shiori");
     expect(sessionEvents.map(event => event.data?.model)).toEqual([
-      "openai-codex/gpt-6.1-sol",
-      "openai/gpt-6.1-sol",
+      "openai-codex/gpt-6.2-sol",
+      "openai/gpt-6.2-sol",
       nextModelId,
     ]);
 
@@ -144,7 +144,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
 
     // A resumed transcript may contain the earlier Ultrafast entry, but the
     // workspace's explicit Standard configuration must win on every restart.
-    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ model: "openai/gpt-6.1-sol" }));
+    await writeFile(join(workspace, "ludens.json"), JSON.stringify({ model: "openai/gpt-6.2-sol" }));
     await agent.close();
     const resumedAgent = await createOmpAgent({
       runtime,
@@ -155,7 +155,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       binDir: "/tmp",
       ludensSocket: state.socket,
       basewareSocket: "/tmp/unused-baseware.sock",
-      model: "openai/gpt-6.1-sol",
+      model: "openai/gpt-6.2-sol",
       maxRequests: 10,
       authStorage: auth,
     });
@@ -173,7 +173,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
 test("Runtime.setModel strictly blocks hot-switching during auto runs and consolidation", async () => {
   const runGate = Promise.withResolvers<void>();
   const consolidateGate = Promise.withResolvers<void>();
-  let currentModel = "openai-codex/gpt-6.1-sol";
+  let currentModel = "openai-codex/gpt-6.2-sol";
   const agent: AgentRunner = {
     async run({ signal }) {
       const aborted = Promise.withResolvers<void>();
@@ -200,7 +200,7 @@ test("Runtime.setModel strictly blocks hot-switching during auto runs and consol
   try {
     // 1. Blocked while mode === "auto"
     await runtime.start();
-    expect(runtime.status()).toMatchObject({ mode: "auto", model: "openai-codex/gpt-6.1-sol" });
+    expect(runtime.status()).toMatchObject({ mode: "auto", model: "openai-codex/gpt-6.2-sol" });
     await expect(runtime.setModel("anthropic/claude-sonnet-4-5"))
       .rejects.toThrow("Cannot switch model while Shiori is running; pause auto loop first");
     await expect(dispatch(runtime, {
@@ -214,7 +214,7 @@ test("Runtime.setModel strictly blocks hot-switching during auto runs and consol
       argv: ["anthropic/claude-sonnet-4-5"],
       epoch: runtime.status().epoch!,
     })).rejects.toThrow("Control management belongs to the human, not an agent cycle");
-    expect(currentModel).toBe("openai-codex/gpt-6.1-sol");
+    expect(currentModel).toBe("openai-codex/gpt-6.2-sol");
 
     await runtime.stop("human");
     await runtime.runSettled;
@@ -224,7 +224,7 @@ test("Runtime.setModel strictly blocks hot-switching during auto runs and consol
     expect(runtime.status()).toMatchObject({ mode: "manual", consolidating: true });
     await expect(runtime.setModel("anthropic/claude-sonnet-4-5"))
       .rejects.toThrow("Cannot switch model while Shiori is running; pause auto loop first");
-    expect(currentModel).toBe("openai-codex/gpt-6.1-sol");
+    expect(currentModel).toBe("openai-codex/gpt-6.2-sol");
 
     consolidateGate.resolve();
     await runtime.runSettled;
@@ -325,7 +325,7 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
     // Text-only models must never appear in Shiori's picker catalog.
     expect(catalog.models.find(item => item.fullId === "custom-vision/v1-text-only")).toBeUndefined();
     for (const item of catalog.models) {
-      const raw = registry.getAll().find(model => model.provider === item.provider && model.id === item.id);
+      const raw = resolveOmpImageModel(registry, item.fullId);
       expect(raw?.input.includes("image")).toBe(true);
     }
 
@@ -343,11 +343,11 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
     });
     expect(Array.isArray(customVision?.supportedEfforts)).toBe(true);
 
-    const codexSol = catalog.models.find(item => item.fullId === "openai-codex/gpt-6.1-sol");
+    const codexSol = catalog.models.find(item => item.fullId === "openai-codex/gpt-6.2-sol");
     expect(codexSol?.authenticated).toBe(true);
     expect(codexSol?.supportedEfforts).toEqual(["low", "medium", "high", "xhigh", "max"]);
     expect(codexSol?.defaultEffort).toBe("high");
-    const openaiSol = catalog.models.find(item => item.fullId === "openai/gpt-6.1-sol");
+    const openaiSol = catalog.models.find(item => item.fullId === "openai/gpt-6.2-sol");
     expect(openaiSol?.supportedServiceTiers).toEqual(["priority", "ultrafast"]);
     const googleModels = catalog.models.filter(item => item.provider === "google");
     expect(googleModels.length).toBeGreaterThan(0);
@@ -356,7 +356,7 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
       workspace,
       home,
       modelRegistry: registry,
-      currentModel: "openai/gpt-6.1-sol",
+      currentModel: "openai/gpt-6.2-sol",
       currentServiceTier: "ultrafast",
       currentEffort: "xhigh",
     });
@@ -387,10 +387,10 @@ test("listAvailableOmpModels filters to image-capable models and reports authent
     await writeFile(join(home, "config.json"), JSON.stringify({
       version: 1,
       workspaceRoot: join(home, "workspaces"),
-      defaults: { model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast", effort: "xhigh" },
+      defaults: { model: "openai-codex/gpt-6.2-sol", serviceTier: "ultrafast", effort: "xhigh" },
     }));
     const globalCatalog = await availableModels(undefined, home);
-    expect(globalCatalog.currentModel).toBe("openai-codex/gpt-6.1-sol");
+    expect(globalCatalog.currentModel).toBe("openai-codex/gpt-6.2-sol");
     expect(globalCatalog.currentEffort).toBe("xhigh");
     expect(globalCatalog.models.length).toBeGreaterThan(0);
 
@@ -410,7 +410,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
   const home = join(directory, "home");
   const workspace = join(directory, "workspace");
   const gate = Promise.withResolvers<void>();
-  let activeModel = "openai-codex/gpt-6.1-sol";
+  let activeModel = "openai-codex/gpt-6.2-sol";
   let activeServiceTier: "priority" | "ultrafast" | null = null;
   let activeEffort: "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | null = null;
   const agent: AgentRunner = {
@@ -443,7 +443,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     await mkdir(workspace, { recursive: true });
     await writeFile(join(workspace, "ludens.json"), JSON.stringify({
       driver: "cua",
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
     }, null, 2));
     const identity = await ensureWorkspaceIdentity(workspace);
     await writeFile(
@@ -466,10 +466,10 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     const tieredSwitch = await controlWorkspaceRuntime(
       identity.id,
       workspace,
-      { action: "set_model", model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast", effort: "xhigh" },
+      { action: "set_model", model: "openai-codex/gpt-6.2-sol", serviceTier: "ultrafast", effort: "xhigh" },
       home,
     );
-    expect(tieredSwitch).toMatchObject({ model: "openai-codex/gpt-6.1-sol", serviceTier: "ultrafast", effort: "xhigh" });
+    expect(tieredSwitch).toMatchObject({ model: "openai-codex/gpt-6.2-sol", serviceTier: "ultrafast", effort: "xhigh" });
     const tieredRaw = JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8"));
     expect(tieredRaw.serviceTier).toBe("ultrafast");
     expect(tieredRaw.effort).toBe("xhigh");
@@ -489,10 +489,10 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     try {
       await cli(["model"], socket);
       expect(printed.at(-1)).toBe("anthropic/claude-sonnet-4-5");
-      await cli(["model", "openai-codex/gpt-6.1-sol", "--service-tier", "ultrafast", "--effort", "high"], socket);
+      await cli(["model", "openai-codex/gpt-6.2-sol", "--service-tier", "ultrafast", "--effort", "high"], socket);
       expect(JSON.parse(printed.at(-1)!)).toMatchObject({
         mode: "manual",
-        model: "openai-codex/gpt-6.1-sol",
+        model: "openai-codex/gpt-6.2-sol",
         serviceTier: "ultrafast",
         effort: "high",
       });
@@ -503,13 +503,13 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     // Online running auto loop rejects set_model and leaves ludens.json untouched.
     await writeFile(join(workspace, "ludens.json"), JSON.stringify({
       driver: "cua",
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
     }, null, 2));
     await runtime.start();
     await expect(
       controlWorkspaceRuntime(identity.id, workspace, { action: "set_model", model: "anthropic/claude-opus-4-6" }, home),
     ).rejects.toThrow("Cannot switch model while Shiori is running; pause auto loop first");
-    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("openai-codex/gpt-6.1-sol");
+    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("openai-codex/gpt-6.2-sol");
     await runtime.stop("human");
     await runtime.runSettled;
 
@@ -532,7 +532,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
     const offlineTieredSwitch = await controlWorkspaceRuntime(
       identity.id,
       workspace,
-      { action: "set_model", model: "openai-codex/gpt-6.1-sol", serviceTier: "priority" },
+      { action: "set_model", model: "openai-codex/gpt-6.2-sol", serviceTier: "priority" },
       home,
     );
     expect(offlineTieredSwitch).toMatchObject({ coreOffline: true, serviceTier: "priority" });
@@ -567,7 +567,7 @@ test("controlWorkspaceRuntime set_model and CLI ludens model synchronize live ho
         updateWorkspaceShiori(identity.id, { kind: "setModel", model: invalidSelector }, home),
       ).rejects.toThrow("provider/model");
     }
-    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("openai-codex/gpt-6.1-sol");
+    expect(JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")).model).toBe("openai-codex/gpt-6.2-sol");
   } finally {
     gate.resolve();
     await runtime.close();

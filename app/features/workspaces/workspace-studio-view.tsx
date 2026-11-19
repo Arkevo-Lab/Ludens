@@ -79,20 +79,20 @@ const STUDIO_TABS: readonly StudioTab[] = ["device", "model", "connection", "per
 
 const MODEL_PRESETS: Array<{ id: string; label: string; badgeEn: string; badgeZh: string }> = [
   {
-    id: "openai-codex/gpt-6.1-sol",
-    label: "openai-codex/gpt-6.1-sol",
+    id: "openai-codex/gpt-6.2-sol",
+    label: "openai-codex/gpt-6.2-sol",
     badgeEn: "Stateful WS Delta (Recommended)",
     badgeZh: "有状态 WS 增量（默认推荐）",
   },
   {
-    id: "openai/gpt-6.1-sol",
-    label: "openai/gpt-6.1-sol",
+    id: "openai/gpt-6.2-sol",
+    label: "openai/gpt-6.2-sol",
     badgeEn: "OpenAI Responses",
     badgeZh: "OpenAI Responses",
   },
   {
-    id: "anthropic/claude-sonnet-4-6",
-    label: "anthropic/claude-sonnet-4-6",
+    id: "anthropic/claude-sonnet-5-5",
+    label: "anthropic/claude-sonnet-5-5",
     badgeEn: "Anthropic Prefix Cache",
     badgeZh: "Anthropic 前缀缓存",
   },
@@ -776,7 +776,7 @@ export function ModelAndBudgetPanel({
 
   const initial: Omit<WorkspaceConfigSummary, "dashboard"> = studio.config ?? {
     driver: "cua",
-    model: studio.defaults.model ?? "openai-codex/gpt-6.1-sol",
+    model: studio.defaults.model ?? "openai-codex/gpt-6.2-sol",
     serviceTier: studio.defaults.serviceTier,
     effort: studio.defaults.effort,
     seconds: studio.defaults.seconds ?? 1800,
@@ -978,7 +978,7 @@ export function ModelAndBudgetPanel({
                     setEffort(null);
                     setSavedNotice(false);
                   }}
-                  placeholder="openai-codex/gpt-6.1-sol"
+                  placeholder="openai-codex/gpt-6.2-sol"
                   className="font-mono text-sm sm:flex-1"
                   spellCheck={false}
                 />

@@ -148,7 +148,7 @@ ludens consolidate
 | --- | --- | --- |
 | `driver` / `driverPackage` | `cua` / 未设置 | 驱动标识符，以及可选的外部驱动包或清单路径 |
 | `game` / `port` / `cuaCommand` | 未设置 | 可选目标程序路径、控制器端口或自定义 CUA 启动命令 |
-| `model` | `openai-codex/gpt-6.1-sol` | Shiori 使用的主推理模型（`provider/model`） |
+| `model` | `openai-codex/gpt-6.2-sol` | Shiori 使用的主推理模型（`provider/model`） |
 | `serviceTier` / `effort` | 未设置 | 可选服务档位（`none`、`priority`、`ultrafast`）与推理力度（`none`..`max`） |
 | `seconds` / `requests` | `1800` / `1000` | 单次自主运行的默认时长预算（秒）与请求上限 |
 | `compactionThreshold` | 未设置 | 触发后台上下文压缩的 Token 阈值 |
@@ -162,7 +162,7 @@ ludens consolidate
 ```sh
 ludens config show
 ludens config set workspaceRoot "$HOME/ludens-workspaces"
-ludens config set defaults.model "openai-codex/gpt-6.1-sol"
+ludens config set defaults.model "openai-codex/gpt-6.2-sol"
 ludens config set defaults.seconds 1800
 ludens config set defaults.requests 1000
 ludens config set defaults.pet false

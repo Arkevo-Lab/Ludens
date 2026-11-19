@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession } from "@oh-my-pi/pi-coding-agent";
 import { streamOpenAICompletions } from "@oh-my-pi/pi-ai/providers/openai-completions";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModels } from "@oh-my-pi/pi-catalog";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import { logger } from "@oh-my-pi/pi-utils";
@@ -146,7 +147,7 @@ test("native V2 retry warnings preserve explicit evidence without copying arbitr
     for (const unrelated of [`prefix ${message}`, `${message} suffix`, "V2 compaction attempt 0 failed, retrying in 1000ms"])
       logger.warn(unrelated, {error: "private-unrelated"});
     expect(await Bun.file(join(directory, "events.jsonl")).exists()).toBe(false);
-    logger.warn(message, {model: "gpt-6.1-sol", error: "V2 compaction stream error (server_error): fixture failure",
+    logger.warn(message, {model: "gpt-6.2-sol", error: "V2 compaction stream error (server_error): fixture failure",
       attempt: 999, retryDelayMs: 999, prompt: "private-prompt", headers: {authorization: "private-token"}});
     epoch = undefined;
     logger.warn("V2 compaction attempt 2 failed, retrying in 2000ms", {
@@ -155,7 +156,7 @@ test("native V2 retry warnings preserve explicit evidence without copying arbitr
     const events = await lines(join(directory, "events.jsonl"));
     expect(events.map(event => event.type)).toEqual(["compaction_retry", "compaction_retry"]);
     expect(events[0].trace).toEqual({epoch: "first-epoch"});
-    expect(events[0].data).toEqual({attempt: 1, retryDelayMs: 1000, model: "gpt-6.1-sol",
+    expect(events[0].data).toEqual({attempt: 1, retryDelayMs: 1000, model: "gpt-6.2-sol",
       error: "V2 compaction stream error (server_error): fixture failure"});
     expect(events[1].trace).toEqual({});
     expect(events[1].data).toEqual({attempt: 2, retryDelayMs: 2000});
@@ -171,7 +172,13 @@ test("WS outbound frames are dispatch, not the first server event", async () => 
   let now = 100;
   const log = new EventLog(directory, {id: "ws-trace", now: () => now});
   const trace = new ModelTrace(log, () => ({epoch: "epoch"}));
-  const model = getBundledModels("openai-codex").find(m => m.id === "gpt-6.1-sol")!;
+  const model = buildModel({
+    id: "gpt-6.2-sol", name: "GPT-6.2 Sol", api: "openai-codex-responses", provider: "openai-codex",
+    baseUrl: "https://chatgpt.com/backend-api", reasoning: true, input: ["text", "image"],
+    cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 }, contextWindow: 500_000, maxTokens: 128_000,
+    preferWebsockets: true, useResponsesLite: true, serviceTiers: ["priority"],
+    remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
+  });
   const payload = {type: "response.create", previous_response_id: "previous", input: [{text: "中文"}]};
   const fixtureEnd = new Error("fixture ended after server event");
   const forwarded: string[] = [];

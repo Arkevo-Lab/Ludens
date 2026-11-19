@@ -92,7 +92,7 @@ ludens init --driver <id> \
   [--pet | --no-pet]
 ```
 
-Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `openai-codex/gpt-6.1-sol`, `seconds` = `1800`, `requests` = `1000`, `dashboard` = `true`, `pet` = `false`, `logging.diagnostics` = `"normal"`.
+Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `openai-codex/gpt-6.2-sol`, `seconds` = `1800`, `requests` = `1000`, `dashboard` = `true`, `pet` = `false`, `logging.diagnostics` = `"normal"`.
 
 ### `ludens up` / `ludens services` / `ludens down`
 
@@ -145,7 +145,7 @@ ludens [--workspace <path>] run \
   [--launched-by app|cli]
 ```
 
-Defaults in [`core/src/cli/main.ts`](../../../core/src/cli/main.ts): `--seconds 300`, `--requests 50`, `--diagnostics normal`, and `--launched-by` (with `LUDENS_LAUNCHED_BY` env fallback) defaults to `cli` (`app` is used by **App Daemon** for App-owned teardown boundaries); `--model` falls back to `ludens.json` or `openai-codex/gpt-6.1-sol`.
+Defaults in [`core/src/cli/main.ts`](../../../core/src/cli/main.ts): `--seconds 300`, `--requests 50`, `--diagnostics normal`, and `--launched-by` (with `LUDENS_LAUNCHED_BY` env fallback) defaults to `cli` (`app` is used by **App Daemon** for App-owned teardown boundaries); `--model` falls back to `ludens.json` or `openai-codex/gpt-6.2-sol`.
 
 ---
 

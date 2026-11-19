@@ -242,7 +242,7 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
       ...(typeof raw.game === "string" && raw.game.trim() ? { game: raw.game.trim() } : {}),
       ...(typeof raw.port === "number" && Number.isInteger(raw.port) ? { port: raw.port } : {}),
       ...(typeof raw.cuaCommand === "string" && raw.cuaCommand.trim() ? { cuaCommand: raw.cuaCommand.trim() } : {}),
-      model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "openai-codex/gpt-6.1-sol",
+      model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "openai-codex/gpt-6.2-sol",
       ...(isOmpServiceTier(raw.serviceTier) ? { serviceTier: raw.serviceTier } : {}),
       ...(isOmpEffort(raw.effort) ? { effort: raw.effort } : {}),
       seconds: typeof raw.seconds === "number" && Number.isInteger(raw.seconds) && raw.seconds > 0 ? raw.seconds : 1800,

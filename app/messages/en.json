@@ -2556,7 +2556,7 @@
     "subtitle": "Image-capable models discovered in your model registry. Select a model to configure effort and speed inline.",
     "refresh": "Refresh model catalog",
     "close": "Close",
-    "searchPlaceholder": "Search by model name, provider, or full ID (e.g. gpt-6.1, claude, gemini)…",
+    "searchPlaceholder": "Search by model name, provider, or full ID (e.g. gpt-6.2, claude, gemini)…",
     "clearSearch": "Clear search",
     "showUnauthenticated": "Show unconfigured ({count})",
     "hideUnauthenticated": "Hide unconfigured",

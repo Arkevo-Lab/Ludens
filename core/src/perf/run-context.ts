@@ -28,7 +28,7 @@ export async function createPerfContext(root: string, options: PerfContextOption
   await mkdir(workspace, { recursive: true });
   const seconds = options.seconds ?? 60;
   const log = new EventLog(runDir, { id: runId, now: () => performance.now() }, workspace);
-  return { runDir, workspace, log, metadata: {}, model: options.model ?? "openai-codex/gpt-6.1-sol",
+  return { runDir, workspace, log, metadata: {}, model: options.model ?? "openai-codex/gpt-6.2-sol",
     seconds, maxRequests: 1000, seed: options.seed ?? 7, signal: options.signal,
     budget: { deadlineMs: Date.now() + seconds * 1000, signal: new AbortController().signal } };
 }

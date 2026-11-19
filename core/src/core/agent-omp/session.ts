@@ -388,14 +388,95 @@ export function createOmpLoopDriver(options: {
 // `imageCountBudget` to Infinity (applied where the model is selected below)
 // and retain images until compaction. Token/body budgets and server limits
 // remain; no dependency patch.
-export async function createOmpSession(options: Parameters<typeof createAgentSession>[0] & { model: Model }) {
-  const result = await createAgentSession(options);
-  // The CustomTool adapter does not expose concurrency. Set it on the actual
-  // AgentTools: an observation must wait for preceding environment actions.
-  for (const tool of result.session.agent.state.tools) {
-    if (tool.name === "observe" || tool.name === "event_pool") tool.concurrency = "exclusive";
+const kImageRefreshGuarded = Symbol("ludens.imageRefreshGuarded");
+
+function assertImageCapableModel(candidate: Model | undefined, fallbackLabel = "unknown"): Model {
+  if (!candidate || !Array.isArray(candidate.input) || !candidate.input.includes("image")) {
+    const label = candidate ? `${candidate.provider}/${candidate.id}` : fallbackLabel;
+    throw new Error(`An image-capable model is required: ${label}`);
   }
-  return result;
+  return candidate.imageCountBudget === Infinity
+    ? candidate
+    : { ...candidate, imageCountBudget: Infinity };
+}
+
+function guardModelRegistryRefresh(
+  registry: { refreshSelectedModelMetadata?: (model: Model) => Promise<Model> } | undefined,
+): void {
+  const current = registry?.refreshSelectedModelMetadata as
+    | (((model: Model) => Promise<Model>) & { [kImageRefreshGuarded]?: boolean })
+    | undefined;
+  if (!registry || typeof current !== "function" || current[kImageRefreshGuarded]) return;
+  const rawRefresh = current.bind(registry);
+  const guarded = Object.assign(
+    async (candidate: Model) => {
+      const refreshed = await rawRefresh(candidate);
+      return assertImageCapableModel(refreshed, `${candidate.provider}/${candidate.id}`);
+    },
+    { [kImageRefreshGuarded]: true as const },
+  );
+  registry.refreshSelectedModelMetadata = guarded;
+}
+
+export function ompSessionOptions(
+  options: Parameters<typeof createAgentSession>[0] & { model: Model },
+): Parameters<typeof createAgentSession>[0] & {
+  model: Model;
+  disableModelFallback: boolean;
+  disableServerSideFallback: boolean;
+  suppressAutoPrewalk: boolean;
+} {
+  guardModelRegistryRefresh(options.modelRegistry);
+  return {
+    ...options,
+    model: options.model.imageCountBudget === Infinity
+      ? options.model
+      : { ...options.model, imageCountBudget: Infinity },
+    // Host invariant: the selected multimodal model must remain sticky across
+    // turns. Lock out context promotion / retry / usage-aware fallback,
+    // provider server-side fallback chains, and automatic prewalk handoffs.
+    disableModelFallback: options.disableModelFallback ?? true,
+    disableServerSideFallback: options.disableServerSideFallback ?? true,
+    suppressAutoPrewalk: options.suppressAutoPrewalk ?? true,
+  };
+}
+
+export async function createOmpSession(options: Parameters<typeof createAgentSession>[0] & { model: Model }) {
+  const result = await createAgentSession(ompSessionOptions(options));
+  try {
+    guardModelRegistryRefresh(result.session.modelRegistry);
+    const initialModel = assertImageCapableModel(
+      result.session.model,
+      `${options.model.provider}/${options.model.id}`,
+    );
+    const rawAgentSetModel = result.session.agent.setModel.bind(result.session.agent);
+    result.session.agent.setModel = (nextModel: Model) => {
+      const checked = assertImageCapableModel(nextModel);
+      rawAgentSetModel(checked);
+      if (result.session.agent.state.model && result.session.agent.state.model.imageCountBudget !== Infinity) {
+        result.session.agent.state.model = {
+          ...result.session.agent.state.model,
+          imageCountBudget: Infinity,
+        };
+      }
+    };
+    const rawSessionSetModel = result.session.setModel.bind(result.session);
+    result.session.setModel = async (nextModel, role, setModelOptions) => {
+      const checked = assertImageCapableModel(nextModel);
+      guardModelRegistryRefresh(result.session.modelRegistry);
+      return rawSessionSetModel(checked, role, setModelOptions);
+    };
+    result.session.agent.setModel(initialModel);
+    // The CustomTool adapter does not expose concurrency. Set it on the actual
+    // AgentTools: an observation must wait for preceding environment actions.
+    for (const tool of result.session.agent.state.tools) {
+      if (tool.name === "observe" || tool.name === "event_pool") tool.concurrency = "exclusive";
+    }
+    return result;
+  } catch (error) {
+    await result.session.dispose();
+    throw error;
+  }
 }
 
 export async function createOmpAgent(options: {
@@ -531,12 +612,14 @@ export async function createOmpAgent(options: {
         if (cycle) throw new Error("Cannot switch model while Shiori is running; pause auto loop first");
         const candidate = resolveOmpImageModel(modelRegistry, nextSelector);
         await session.setModel(candidate, "default", { persist: false });
-        const selected = session.model ?? candidate;
+        let selected = session.model ?? candidate;
         if (!selected.input.includes("image")) {
           throw new Error(`An image-capable model is required: ${nextSelector}`);
         }
         if (selected.imageCountBudget !== Infinity) {
-          session.agent.setModel({ ...selected, imageCountBudget: Infinity });
+          selected = { ...selected, imageCountBudget: Infinity };
+          session.agent.setModel(selected);
+          selected = session.model ?? selected;
         }
         activeServiceTier = effectiveOmpServiceTier(selected, nextServiceTier === undefined ? activeServiceTier : nextServiceTier);
         session.setServiceTierFamily("openai", activeServiceTier ?? undefined);

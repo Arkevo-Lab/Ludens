@@ -7,6 +7,7 @@ import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import * as AIError from "@oh-my-pi/pi-ai/error";
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
@@ -25,7 +26,7 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
   const auth = await AuthStorage.create(join(directory, "auth.db"));
   auth.keys.setRuntime("openai-codex", "offline-test-only");
   const registry = new ModelRegistry(auth, undefined, { settings });
-  const model = registry.find("openai-codex", "gpt-6.1-sol")!;
+  const model = resolveOmpImageModel(registry, "openai-codex/gpt-6.2-sol");
   let cycle: Cycle | undefined;
   let cancelTimer: ReturnType<typeof setTimeout> | undefined;
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),

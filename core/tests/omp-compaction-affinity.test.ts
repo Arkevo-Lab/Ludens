@@ -6,7 +6,7 @@ import * as piUtils from "@oh-my-pi/pi-utils";
 import type { FetchImpl, ProviderSessionState } from "@oh-my-pi/pi-ai/types";
 
 const model = buildModel({
-  id: "gpt-6.1-sol", name: "Offline native compaction", api: "openai-codex-responses",
+  id: "gpt-6.2-sol", name: "Offline native compaction", api: "openai-codex-responses",
   provider: "openai-codex", baseUrl: "http://127.0.0.1:9", reasoning: true,
   input: ["text"], contextWindow: 272000, maxTokens: 4096, useResponsesLite: true,
   remoteCompaction: {v2StreamingEnabled: true},

@@ -6,6 +6,7 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createLudensExtension, type Cycle } from "../src/core/agent-omp/extension.ts";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { consolidateOmpSession, createOmpSession } from "../src/core/agent-omp/session.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
@@ -29,7 +30,7 @@ test("workspace Python capabilities do not grow OMP's tool list across writes, r
   const authStorage = await AuthStorage.create(join(directory, "auth.db"));
   authStorage.keys.setRuntime("openai-codex", "offline-test-only");
   const modelRegistry = new ModelRegistry(authStorage, undefined, {settings});
-  const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
+  const model = resolveOmpImageModel(modelRegistry, "openai-codex/gpt-6.2-sol");
   const baseTools = ["read", "write", "edit", "observe", "bash"];
   const source = `from ludens_tools import capability
 @capability

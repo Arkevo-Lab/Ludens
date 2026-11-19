@@ -3,6 +3,7 @@ import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promis
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { gzipSync } from "node:zlib";
+import { buildModel } from "@oh-my-pi/pi-catalog/build";
 import { getBundledModels } from "@oh-my-pi/pi-catalog";
 import type { StreamFn } from "@oh-my-pi/pi-agent-core";
 import type { AgentSession } from "@oh-my-pi/pi-coding-agent";
@@ -64,7 +65,13 @@ test("indexed request, compressed HTTP and stream share semantic content with di
 test("indexed WS capture leaves actual objects and callback framing untouched", async () => {
   const f = await fixture();
   const trace = new ModelTrace(f.log, () => ({ epoch: "epoch" }));
-  const model = getBundledModels("openai-codex").find(m => m.id === "gpt-6.1-sol")!;
+  const model = buildModel({
+    id: "gpt-6.2-sol", name: "GPT-6.2 Sol", api: "openai-codex-responses", provider: "openai-codex",
+    baseUrl: "https://chatgpt.com/backend-api", reasoning: true, input: ["text", "image"],
+    cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 0 }, contextWindow: 500_000, maxTokens: 128_000,
+    preferWebsockets: true, useResponsesLite: true, serviceTiers: ["priority"],
+    remoteCompaction: { enabled: true, api: "openai-codex-responses", v2StreamingEnabled: true },
+  });
   const original = { type: "response.create", input: [{ text: "original" }] };
   const actual = { ...original, previous_response_id: "previous", input: [{ text: "extension replacement" }] };
   const expected = JSON.stringify(actual);

@@ -8,15 +8,15 @@
     "core",
     "app"
   ],
-  "patchedDependencies": {
-    "@oh-my-pi/pi-ai@18.18.8": "core/patches/@oh-my-pi%2Fpi-ai@18.18.8.patch",
-    "@oh-my-pi/pi-coding-agent@18.18.8": "core/patches/@oh-my-pi%2Fpi-coding-agent@18.18.8.patch",
-    "@oh-my-pi/pi-agent-core@18.18.8": "core/patches/@oh-my-pi%2Fpi-agent-core@18.18.8.patch"
-  },
   "trustedDependencies": [
     "electron",
     "esbuild",
     "onnxruntime-node",
     "protobufjs"
-  ]
+  ],
+  "patchedDependencies": {
+    "@oh-my-pi/pi-agent-core@18.22.2": "core/patches/@oh-my-pi%2Fpi-agent-core@18.22.2.patch",
+    "@oh-my-pi/pi-ai@18.22.2": "core/patches/@oh-my-pi%2Fpi-ai@18.22.2.patch",
+    "@oh-my-pi/pi-coding-agent@18.22.2": "core/patches/@oh-my-pi%2Fpi-coding-agent@18.22.2.patch"
+  }
 }

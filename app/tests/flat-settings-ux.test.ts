@@ -55,7 +55,7 @@ function makeStudioSnapshot(): WorkspaceStudioSnapshot {
       driver: "switch2",
       driverPackage: "file:/tmp/ludens-switch2-driver",
       port: 18765,
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       serviceTier: "priority",
       effort: "high",
       seconds: 1800,
@@ -66,7 +66,7 @@ function makeStudioSnapshot(): WorkspaceStudioSnapshot {
       ...({} as any),
     },
     defaults: {
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       seconds: 1800,
       requests: 1000,
       pet: false,
@@ -100,7 +100,7 @@ function makeStudioSnapshot(): WorkspaceStudioSnapshot {
       ],
     },
     shiori: {
-      model: "openai-codex/gpt-6.1-sol",
+      model: "openai-codex/gpt-6.2-sol",
       currentSessionFile: ".ludens/shiori/sessions/session-1.jsonl",
       sessions: [],
       memory: {

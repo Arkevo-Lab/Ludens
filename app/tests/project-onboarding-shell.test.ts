@@ -35,7 +35,7 @@ test("WorkspaceCreateForm renders 3-mode target selector, model readiness row, a
     createElement(WorkspaceCreateForm, {
       defaultRoot: "/Users/demo/.ludens/workspaces",
       globalDefaults: {
-        model: "openai-codex/gpt-6.1-sol",
+        model: "openai-codex/gpt-6.2-sol",
         effort: "medium",
       },
       existingWorkspaces: [],
@@ -50,7 +50,7 @@ test("WorkspaceCreateForm renders 3-mode target selector, model readiness row, a
   assert.match(html, /data-target-mode="driver"/);
   assert.match(html, /data-target-mode="package"/);
   assert.match(html, /data-machine-card="local-desktop"/);
-  assert.match(html, /gpt-6\.1-sol/);
+  assert.match(html, /gpt-6\.2-sol/);
   assert.match(html, /Create only/);
   assert.match(html, /Create &amp; launch into Live/);
 });

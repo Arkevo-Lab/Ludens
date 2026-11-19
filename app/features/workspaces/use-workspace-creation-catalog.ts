@@ -20,7 +20,7 @@ export function resolveCreationModelDefaults(
   globalDefaults: WorkspaceDefaults | undefined,
   catalog: AvailableModelsCatalog | null,
 ): ResolvedCreationModelDefaults {
-  const configuredModel = globalDefaults?.model?.trim() || catalog?.currentModel?.trim() || "openai-codex/gpt-6.1-sol";
+  const configuredModel = globalDefaults?.model?.trim() || catalog?.currentModel?.trim() || "openai-codex/gpt-6.2-sol";
   const configuredTier = globalDefaults?.serviceTier ?? catalog?.currentServiceTier ?? null;
   const configuredEffort = globalDefaults?.effort ?? catalog?.currentEffort ?? null;
 

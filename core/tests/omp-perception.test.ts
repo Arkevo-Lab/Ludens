@@ -7,6 +7,7 @@ import { AuthStorage, ModelRegistry, SessionManager, Settings, type AgentSession
 import { AssistantMessageEventStream } from "@oh-my-pi/pi-ai/utils/event-stream";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { createLudensExtension } from "../src/core/agent-omp/extension.ts";
+import { resolveOmpImageModel } from "../src/core/agent-omp/models.ts";
 import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { PerceptionRuntime } from "../src/core/subsystems/perception.ts";
@@ -43,7 +44,7 @@ test("OMP bootstraps empty perception and repairs it through the real reload CLI
   const authStorage = await AuthStorage.create(join(directory, "auth.db"));
   authStorage.keys.setRuntime("openai-codex", "offline-test-only");
   const modelRegistry = new ModelRegistry(authStorage, undefined, { settings });
-  const model = modelRegistry.find("openai-codex", "gpt-6.1-sol")!;
+  const model = resolveOmpImageModel(modelRegistry, "openai-codex/gpt-6.2-sol");
   const manager = SessionManager.create(workspace, join(directory, "session"));
   const baseTools = ["read", "write", "edit", "bash", "observe"];
   const source = (text: string, broken = false) => `from ludens_tools import capability, record
