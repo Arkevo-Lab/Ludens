@@ -7,4 +7,4 @@ while [ -L "$SCRIPT" ]; do
   case "$SCRIPT" in /*) ;; *) SCRIPT=$DIRECTORY/$SCRIPT ;; esac
 done
 CORE_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")/.." && pwd)
-exec bun "$CORE_ROOT/src/cli/main.ts" "$@"
+exec "${LUDENS_BUN:-bun}" "$CORE_ROOT/src/cli/main.ts" "$@"

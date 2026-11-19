@@ -369,38 +369,45 @@ export async function getRun(
   };
   } finally { release(); }
 }
-export async function controlState(project: string, run: string, epoch: string, root = globalHome) {
+export async function controlState(project: string, run: string, epoch: string | null, root = globalHome) {
   // Human takeover cannot wait for a cold/obsolete archive index to rebuild.
   const path = await resolveRun(project, run, root);
   const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as Manifest;
   const latest = latestGameRun((await catalog(root)).find(item => item.id === project))?.id;
   const live = latest === run && manifest.workspaceId === project
     ? await hostRequest(manifest.socket, { kind: "status", argv: [] }).catch(() => null) : null;
-  return { manifest, live, selectedEpoch: epoch,
-    controlAllowed: !!latest && !!canControl(latest, run, live, epoch) };
+  const resolvedEpoch = typeof epoch === "string" && epoch.trim() ? epoch.trim() : (live?.epoch ?? null);
+  return { manifest, live, selectedEpoch: resolvedEpoch,
+    controlAllowed: !!latest && !!canControl(latest, run, live, resolvedEpoch) };
 }
 export async function stopRun(
   project: string,
   run: string,
   expectedEpoch: string | null,
-  readRun: (project: string, run: string, epoch: string) => Promise<Pick<RunData,
+  readRun: (project: string, run: string, epoch: string | null) => Promise<Pick<RunData,
     "manifest" | "live" | "selectedEpoch" | "controlAllowed">> = controlState,
 ) {
-  if (!expectedEpoch) throw new Error("必须明确选择控制周期");
-  const data = await readRun(project, run, expectedEpoch);
+  const explicitEpoch = typeof expectedEpoch === "string" && expectedEpoch.trim() ? expectedEpoch.trim() : null;
+  const data = await readRun(project, run, explicitEpoch);
+  const targetEpoch = explicitEpoch ?? (typeof data.live?.epoch === "string" && data.live.epoch.trim() ? data.live.epoch.trim() : null);
   if (
     !data.controlAllowed ||
     !data.live ||
-    data.selectedEpoch !== expectedEpoch ||
-    data.live.epoch !== expectedEpoch
-  )
+    !targetEpoch ||
+    (explicitEpoch !== null && data.selectedEpoch !== explicitEpoch) ||
+    data.live.epoch !== targetEpoch
+  ) {
+    if (explicitEpoch === null && data.live && data.live.mode !== "auto") {
+      throw new Error("当前运行未处于自主运行模式");
+    }
     throw new Error("控制状态已变化，请刷新后重试");
+  }
   if (data.live.mode !== "auto") throw new Error("当前运行未处于自主运行模式");
   return hostRequest(data.manifest.socket, {
     kind: "auto",
     argv: ["off"],
     runId: run,
-    expectedEpoch,
+    expectedEpoch: targetEpoch,
   });
 }
 export async function mediaFile(

@@ -2,9 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LudensServerEvent } from "@ludens/protocol/app-rpc";
+import { APP_RPC_ERROR_CODES, type LudensServerEvent } from "@ludens/protocol/app-rpc";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
 import { JsonArchive } from "@ludens/protocol/log-archive";
+import { adaptWorkspaceCapabilityEval } from "../src/query/capabilities.ts";
+import { DEFAULT_LOG_EVENTS_LIMIT, queryRunLogEvents } from "../src/query/logs.ts";
 import { AppRpcClientError, NodeUdsRpcClient, WsAppRpcClient } from "../src/daemon/app-rpc-client.ts";
 import { startAppServer } from "../src/server/app-server.ts";
 
@@ -94,6 +96,39 @@ def eval_score():
         limit: 10,
       });
       expect(hist2.runs.length).toBeGreaterThanOrEqual(2);
+
+      // limit > 500 must be rejected with INVALID_PARAMS (-32602)
+      let limitErr: unknown;
+      try {
+        await client.call("capabilities/evalHistory", {
+          project: identity.id,
+          workspace,
+          limit: 501,
+        });
+      } catch (err) {
+        limitErr = err;
+      }
+      expect(limitErr).toBeInstanceOf(AppRpcClientError);
+      expect((limitErr as AppRpcClientError).code).toBe(APP_RPC_ERROR_CODES.INVALID_PARAMS);
+
+      // Aborted signal prevents adaptWorkspaceCapabilityEval from writing any record
+      const abortController = new AbortController();
+      abortController.abort(new Error("cancelled"));
+      await expect(
+        adaptWorkspaceCapabilityEval(
+          identity.id,
+          workspace,
+          { capabilityId: "python/skills_cap.py:score", reason: "Should not persist" },
+          home,
+          abortController.signal,
+        ),
+      ).rejects.toThrow("cancelled");
+      const histAfterAbort = await client.call("capabilities/evalHistory", {
+        project: identity.id,
+        workspace,
+        limit: 10,
+      });
+      expect(histAfterAbort.runs.length).toBe(hist2.runs.length);
     } finally {
       await client.close().catch(() => {});
       await server.close({ emergency: true });
@@ -207,6 +242,43 @@ def eval_score():
       const localRead = await uds.call("logs/read", { run: runDir, reference: ref });
       expect(localRead.value).toEqual({ message: "hello archived artifact", answer: 42 });
       expect(await readFile(join(runDir, "manifest.json"), "utf8")).toContain("run-alpha");
+
+      // 7. logs/events enforces hard limit ceiling (1000) via INVALID_PARAMS (-32602)
+      let logsLimitErr: unknown;
+      try {
+        await remote.call("logs/events", {
+          project: logsIdentity.id,
+          run: "run-alpha",
+          limit: 1001,
+        });
+      } catch (err) {
+        logsLimitErr = err;
+      }
+      expect(logsLimitErr).toBeInstanceOf(AppRpcClientError);
+      expect((logsLimitErr as AppRpcClientError).code).toBe(APP_RPC_ERROR_CODES.INVALID_PARAMS);
+
+      // 8. logs/events defaults to DEFAULT_LOG_EVENTS_LIMIT (200) and honors AbortSignal
+      const bigRunDir = join(wsLogs, "logs", "run-big");
+      await mkdir(bigRunDir, { recursive: true });
+      await writeFile(
+        join(bigRunDir, "manifest.json"),
+        JSON.stringify({ runId: "run-big", workspace: wsLogs, workspaceId: logsIdentity.id }),
+        "utf8",
+      );
+      const manyLines = Array.from({ length: DEFAULT_LOG_EVENTS_LIMIT + 5 }, (_, idx) =>
+        JSON.stringify({ seq: idx + 1, at: "2026-11-19T00:00:00Z", atMs: 1000 + idx, type: "tick", data: { idx } }),
+      );
+      await writeFile(join(bigRunDir, "events.jsonl"), manyLines.join("\n") + "\n", "utf8");
+      const defaultPage = await queryRunLogEvents({ run: bigRunDir }, { allowHostPath: true, root: home });
+      expect(defaultPage.events).toHaveLength(DEFAULT_LOG_EVENTS_LIMIT);
+      expect(defaultPage.hasMore).toBe(true);
+      expect(defaultPage.nextCursor).toBe(DEFAULT_LOG_EVENTS_LIMIT);
+
+      const abortedLogs = new AbortController();
+      abortedLogs.abort(new Error("aborted log read"));
+      await expect(
+        queryRunLogEvents({ run: bigRunDir }, { allowHostPath: true, root: home, signal: abortedLogs.signal }),
+      ).rejects.toThrow("aborted log read");
     } finally {
       await remote.close().catch(() => {});
       await uds.close().catch(() => {});

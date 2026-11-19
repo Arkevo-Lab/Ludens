@@ -18,7 +18,8 @@
   "scripts": {
     "ludens-server": "bun src/cli/main.ts",
     "typecheck": "tsc --noEmit",
-    "test": "uv run --project ../core/python --frozen bun test"
+    "test": "uv run --project ../core/python --frozen bun test",
+    "perf": "bun perf/index-memory.ts"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",
@@ -27,6 +28,7 @@
   "dependencies": {
     "@ludens/baseware": "workspace:*",
     "@ludens/core": "workspace:*",
-    "@ludens/protocol": "workspace:*"
+    "@ludens/protocol": "workspace:*",
+    "tsx": "^4.20.6"
   }
 }

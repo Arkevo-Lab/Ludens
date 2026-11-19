@@ -143,7 +143,7 @@ class Client:
         })
 
     def observe(self, query: dict[str, Any] | None = None) -> Any:
-        """Read timeline history without sampling; returns the same envelope as ludens observe."""
+        """Read timeline history without sampling; returns the same envelope as ludens-core perception observe."""
         context = self._context()
         env = context.get("eval_env")
         if (env is not None and not _in_eval_env_observe.get()

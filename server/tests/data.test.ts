@@ -525,8 +525,8 @@ test("old epoch disables the button and POST stop guard rejects before any contr
   assert.equal(canControl("same-run", "same-run", live, "new"), true);
   assert.equal(canControl("same-run", "same-run", live, "old"), false);
   assert.equal(canControl("same-run", "same-run", live, null), false);
-  let selected: string | undefined;
-  const read = async (_project: string, _run: string, epoch?: string) => {
+  let selected: string | null | undefined;
+  const read = async (_project: string, _run: string, epoch: string | null) => {
     selected = epoch;
     return { live, selectedEpoch: "old", controlAllowed: false } as RunData;
   };
@@ -546,10 +546,61 @@ test("old epoch disables the button and POST stop guard rejects before any contr
     ),
     /控制状态已变化/,
   );
-  await assert.rejects(
-    stopRun("project", "same-run", null, read),
-    /必须明确选择/,
-  );
+  // Omitting epoch auto-resolves the active live epoch and dispatches auto off.
+  const sockDir = await mkdtemp(join(tmpdir(), "ludens-stop-auto-"));
+  const sockPath = join(sockDir, "core.sock");
+  const received: Record<string, unknown>[] = [];
+  const srv = createServer((conn) => {
+    let buf = "";
+    conn.setEncoding("utf8");
+    conn.on("data", (chunk) => {
+      buf += chunk;
+      const nl = buf.indexOf("\n");
+      if (nl < 0) return;
+      received.push(JSON.parse(buf.slice(0, nl)));
+      conn.end(JSON.stringify({ ok: true, value: { mode: "manual" } }) + "\n");
+    });
+  });
+  await new Promise<void>((resolve) => srv.listen(sockPath, resolve));
+  try {
+    const res = await stopRun(
+      "project",
+      "same-run",
+      null,
+      async (_p, _r, epoch) => {
+        selected = epoch;
+        return {
+          manifest: { socket: sockPath },
+          live,
+          selectedEpoch: live.epoch,
+          controlAllowed: true,
+        } as RunData;
+      },
+    );
+    assert.equal(selected, null);
+    assert.deepEqual(res, { mode: "manual" });
+    assert.deepEqual(received, [
+      { kind: "auto", argv: ["off"], runId: "same-run", expectedEpoch: "new" },
+    ]);
+    await assert.rejects(
+      stopRun(
+        "project",
+        "same-run",
+        "",
+        async () =>
+          ({
+            manifest: { socket: sockPath },
+            live: { ...live, mode: "manual", epoch: null },
+            selectedEpoch: null,
+            controlAllowed: false,
+          }) as RunData,
+      ),
+      /未处于自主运行模式/,
+    );
+  } finally {
+    srv.close();
+    await rm(sockDir, { recursive: true, force: true });
+  }
 });
 
 test("exec timing joins epoch/model/tool identity and pending durations stay unknown", () => {
