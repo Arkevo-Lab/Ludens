@@ -100,16 +100,19 @@ export function buildConfigUpdate(
       return { mode: "defaults", defaults: { [key]: value === "true" } };
     }
     if (key === "seconds") {
+      const MAX_TIMEOUT_SECONDS = 2_147_483;
       const parsed = value.trim() ? Number(value) : Number.NaN;
-      if (!Number.isFinite(parsed) || parsed <= 0) {
-        throw new Error(`Invalid value '${value}' for defaults.seconds: expected a positive number`);
+      if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > MAX_TIMEOUT_SECONDS) {
+        throw new Error(
+          `Invalid value '${value}' for defaults.seconds: expected an integer between 1 and ${MAX_TIMEOUT_SECONDS}`,
+        );
       }
       return { mode: "defaults", defaults: { seconds: parsed } };
     }
     if (key === "requests") {
       const parsed = value.trim() ? Number(value) : Number.NaN;
-      if (!Number.isInteger(parsed) || parsed <= 0) {
-        throw new Error(`Invalid value '${value}' for defaults.requests: expected a positive integer`);
+      if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+        throw new Error(`Invalid value '${value}' for defaults.requests: expected a positive safe integer`);
       }
       return { mode: "defaults", defaults: { requests: parsed } };
     }
@@ -118,9 +121,9 @@ export function buildConfigUpdate(
         return { mode: "defaults", defaults: { compactionThreshold: null } };
       }
       const parsed = value.trim() ? Number(value) : Number.NaN;
-      if (!Number.isInteger(parsed) || parsed <= 0) {
+      if (!Number.isSafeInteger(parsed) || parsed <= 0) {
         throw new Error(
-          `Invalid value '${value}' for defaults.compactionThreshold: expected a positive integer or 'none'`,
+          `Invalid value '${value}' for defaults.compactionThreshold: expected a positive safe integer or 'none'`,
         );
       }
       return { mode: "defaults", defaults: { compactionThreshold: parsed } };

@@ -48,7 +48,7 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
   const args = [...argv];
 
   let selectedWorkspace = env.LUDENS_WORKSPACE?.trim() || options.cwd || process.cwd();
-  let explicitWorkspace = Boolean(env.LUDENS_WORKSPACE?.trim());
+  let explicitWorkspace = false;
   let explicitRemoteUrl: string | undefined;
   let explicitRemoteToken: string | undefined;
 
@@ -153,7 +153,13 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
   }
 
   if (command === "logs") {
-    await logsCommand(subArgs, selectedWorkspace, explicitWorkspace, rpcOptions, { out });
+    await logsCommand(
+      subArgs,
+      selectedWorkspace,
+      explicitWorkspace,
+      rpcOptions,
+      options.out ? { out: options.out } : undefined,
+    );
     return 0;
   }
 

@@ -35,8 +35,9 @@ export function resolveLudensServerCommand(
   platform = process.platform,
   exists = existsSync,
 ) {
-  if (env.LUDENS_SERVER_BIN?.trim()) {
-    return { command: env.LUDENS_SERVER_BIN.trim(), argsPrefix: [] };
+  const explicitBin = env.LUDENS_SERVER_BIN?.trim() || env.LUDENS_APP_SERVER_BIN?.trim();
+  if (explicitBin) {
+    return { command: explicitBin, argsPrefix: [] };
   }
   const binNames =
     platform === "win32"
@@ -75,6 +76,12 @@ export function resolveLudensServerCommand(
   };
 }
 
+function quoteWindowsCmdToken(arg) {
+  if (!arg.length) return '""';
+  const escaped = arg.replace(/"/g, '""');
+  return /[\s"&|<>()^%!]/.test(arg) ? `"${escaped}"` : escaped;
+}
+
 export function buildServerSpawn(
   command,
   args,
@@ -82,9 +89,13 @@ export function buildServerSpawn(
   env = process.env,
 ) {
   if (platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
+    const quotedCmd = `"${command.replace(/"/g, '""')}"`;
+    const quotedArgs = args.map(quoteWindowsCmdToken).join(" ");
+    const cmdLine = quotedArgs ? `"${quotedCmd} ${quotedArgs}"` : `"${quotedCmd}"`;
     return {
       command: env.ComSpec || "cmd.exe",
-      args: ["/d", "/s", "/c", command, ...args],
+      args: ["/d", "/s", "/c", cmdLine],
+      windowsVerbatimArguments: true,
     };
   }
   return { command, args };
@@ -284,6 +295,7 @@ async function startAppServer(args) {
     cwd: resolve(directory, ".."),
     env: process.env,
     label: "ludens-server serve",
+    ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
   });
 }
 

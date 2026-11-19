@@ -231,6 +231,7 @@ async function spawnManagedAppServer(trustedOrigins, effectiveHome) {
       LUDENS_HOME: effectiveHome,
     },
     stdio: ["pipe", "pipe", "inherit"],
+    ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
   });
   child.stdin?.on("error", () => {});
 

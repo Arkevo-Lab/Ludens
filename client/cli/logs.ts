@@ -1,3 +1,4 @@
+import { once } from "node:events";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -77,9 +78,15 @@ export async function runLogsWithClient(
   const out = io.out ?? console.log;
   const writeLine =
     io.writeLine ??
-    ((line: string) => {
-      out(line);
-    });
+    (io.out
+      ? (line: string) => {
+          io.out!(line);
+        }
+      : async (line: string) => {
+          if (!process.stdout.write(`${line}\n`)) {
+            await once(process.stdout, "drain");
+          }
+        });
   const readLocalFile = io.readLocalFile ?? ((path: string) => readFile(path, "utf8"));
 
   if (!argv.length || argv[0] === "--help" || argv.includes("--help")) {

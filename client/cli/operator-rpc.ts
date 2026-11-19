@@ -137,7 +137,7 @@ export function resolveLocalLudensServerCommand(options: {
   const clientRoot = options.clientRoot ?? DEFAULT_CLIENT_ROOT;
   const exists = options.exists ?? existsSync;
 
-  const explicit = env.LUDENS_SERVER_BIN?.trim();
+  const explicit = env.LUDENS_SERVER_BIN?.trim() || env.LUDENS_APP_SERVER_BIN?.trim();
   if (explicit) {
     return { command: explicit, argsPrefix: [] };
   }
@@ -175,17 +175,27 @@ export function resolveLocalLudensServerCommand(options: {
   return null;
 }
 
+function quoteWindowsCmdToken(arg: string): string {
+  if (!arg.length) return '""';
+  const escaped = arg.replace(/"/g, '""');
+  return /[\s"&|<>()^%!]/.test(arg) ? `"${escaped}"` : escaped;
+}
+
 export function buildServerSpawnInvocation(
   spec: ServerCommandSpec,
   args: readonly string[],
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
-): { command: string; args: string[] } {
+): { command: string; args: string[]; windowsVerbatimArguments?: boolean } {
   const fullArgs = [...spec.argsPrefix, ...args];
   if (platform === "win32" && /\.(cmd|bat)$/i.test(spec.command)) {
+    const quotedCmd = `"${spec.command.replace(/"/g, '""')}"`;
+    const quotedArgs = fullArgs.map(quoteWindowsCmdToken).join(" ");
+    const cmdLine = quotedArgs ? `"${quotedCmd} ${quotedArgs}"` : `"${quotedCmd}"`;
     return {
       command: env.ComSpec || "cmd.exe",
-      args: ["/d", "/s", "/c", spec.command, ...fullArgs],
+      args: ["/d", "/s", "/c", cmdLine],
+      windowsVerbatimArguments: true,
     };
   }
   return { command: spec.command, args: fullArgs };
@@ -215,6 +225,7 @@ async function runStartLocalServer(
     const child = spawn(invocation.command, invocation.args, {
       env: { ...env, LUDENS_HOME: home },
       stdio: ["ignore", "pipe", "pipe"],
+      ...(invocation.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}),
     });
     let stderr = "";
     let stdout = "";
@@ -369,6 +380,9 @@ export async function resolveWorkspaceTargetViaRpc(
 
     throw new Error(`Workspace '${selectedWorkspace}' was not found on the server`);
   }
+
+  const directDefault = findByCandidate(selectedWorkspace);
+  if (directDefault) return { id: directDefault.id, workspace: directDefault.workspace };
 
   const canonicalCwd = await realpath(selectedWorkspace).catch(() => resolve(selectedWorkspace));
   const cwdDirect = findByCandidate(canonicalCwd);

@@ -22,15 +22,8 @@
       "to": "docs"
     },
     {
-      "from": "../server",
-      "to": "server",
-      "filter": [
-        "**/*",
-        "!node_modules/**",
-        "!tests/**",
-        "!perf/**",
-        "!*.tsbuildinfo"
-      ]
+      "from": "dist/server",
+      "to": "server"
     },
     {
       "from": "../core",
