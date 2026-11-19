@@ -84,16 +84,16 @@ Requires **Bun 1.4+**, **Node.js 22.13+**, **Python 3.12+** with **uv**, and con
 git clone https://github.com/Arkevo-Lab/Ludens.git && cd Ludens
 bun install --frozen-lockfile
 uv sync --project core/python --frozen
-(cd client && npm run build)
+bun run build
 export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/server/bin:$PWD/client/bin:$PWD/desktop/bin:$PATH"
 ```
 
 ### 2. Launch Modes
 
-Ludens runs an isomorphic React 19 + Vite static SPA (`@ludens/client`, `client/out`), a pure-RPC CLI (`ludens`), an All-in-One Electron desktop shell (`@ludens/desktop`, `ludens-app`), and a unified JSON-RPC 2.0 control-plane server (`@ludens/server`, `ludens-server`) across four operating modes:
+Ludens runs an isomorphic React 19 + Vite static SPA (`@ludens/client`, `client/dist`), a pure-RPC CLI (`ludens`), an All-in-One Electron desktop shell (`@ludens/desktop`, `ludens-app`), and a unified JSON-RPC 2.0 control-plane server (`@ludens/server`, `ludens-server`) across four operating modes:
 
-- **Desktop App (`ludens-app` — All-in-One Zero-Port Local Mode)**: Build once with `(cd desktop && npm run desktop:build)` and launch `ludens-app --show-window` (or package native macOS `.dmg` / Windows `.exe` installers via `npm --prefix desktop run desktop:dist`). Bundles `client + server + core + baseware` out of the box per `LUDENS_HOME` over a Unix Domain Socket (`app-server.sock`) with **0 listening TCP ports** (`ludens-app://console/`, `ludens-media://local/media?...`, `window.ludens.rpc`), and supports one-click switching to any remote `ludens-server`. Closing (`×`) hides to tray + optional Desktop Pet; Quit (`⌘Q` / tray **Quit**) exits immediately if no Cores are active (keeping the background service intact) or asks whether to **Keep Running in Background**, **Stop All Cores & Quit**, or **Cancel**.
-- **Hosted Web / Remote Server (`ludens-server`)**: Open-source control-plane server for local, self-hosted, or cloud deployment. Serves the static Console SPA, WebSocket JSON-RPC `/rpc`, and HMAC capability-ticket `/media` endpoint over TCP with explicit auth: `ludens-server start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir "$PWD/client/out"` (or foreground `ludens-server serve --static-dir "$PWD/client/out" ...`; non-loopback `--listen ws://` requires `--auth token`; URL `#token=...` bootstraps are scrubbed immediately via `history.replaceState`). Manage the background service with `ludens-server <start|stop|restart|status>`. For frontend HMR development, run `(cd client && npm run dev)` (Vite dev server on `127.0.0.1:3015` proxying `/rpc`, `/media`, and `/health`).
+- **Desktop App (`ludens-app` — All-in-One Zero-Port Local Mode)**: Build once with `bun run build` (or `bun run build:desktop`) and launch `ludens-app --show-window` (or package native macOS `.dmg` / Windows `.exe` installers via `bun run pack:desktop` / `bun run dist:desktop`). Bundles `client + server + core + baseware` out of the box per `LUDENS_HOME` over a Unix Domain Socket (`app-server.sock`) with **0 listening TCP ports** (`ludens-app://console/`, `ludens-media://local/media?...`, `window.ludens.rpc`), and supports one-click switching to any remote `ludens-server`. Closing (`×`) hides to tray + optional Desktop Pet; Quit (`⌘Q` / tray **Quit**) exits immediately if no Cores are active (keeping the background service intact) or asks whether to **Keep Running in Background**, **Stop All Cores & Quit**, or **Cancel**.
+- **Hosted Web / Remote Server (`ludens-server`)**: Open-source control-plane server for local, self-hosted, or cloud deployment. Serves the static Console SPA, WebSocket JSON-RPC `/rpc`, and HMAC capability-ticket `/media` endpoint over TCP with explicit auth: `ludens-server start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir "$PWD/client/dist"` (or run `bun run start:selfhost` for single-machine/VPS self-hosted foreground `ludens-server serve --static-dir client/dist`; non-loopback `--listen ws://` requires `--auth token`; URL `#token=...` bootstraps are scrubbed immediately via `history.replaceState`). Manage the background service with `ludens-server <start|stop|restart|status>`.
 - **Pure-RPC CLI (`ludens` — Local UDS & `--remote`)**: Human-facing pure-RPC CLI (`@ludens/client`, zero Core/Server/Baseware dependencies). Initialize and orchestrate workspaces over local `app-server.sock` or target a remote `ludens-server` via `--remote ws(s)://... [--token ...]` (see [Devices & Drivers](docs/en/tutorials/devices.md) to attach external drivers via `--driver-package` or SSH/bridge targets):
 
 ```sh
@@ -106,7 +106,22 @@ ludens workspace up
 
 - **Mobile & Multi-Target Console**: Open the same isomorphic responsive Vite SPA (`@ludens/client`) from mobile or desktop browsers and switch cleanly between `electron-local` (IPC UDS), `same-origin` (hosted WebSocket `/rpc`), and `remote` (`ws://` / `wss://` + token) targets via `<ConnectionTargetDialog>`.
 
-### 3. Auto Run, Reclaim Control & Async Collaboration
+### 3. Development, Build & Verification
+
+All development, build, packaging, and monorepo verification workflows are orchestrated from the repository root. Dev commands isolate state in `~/.ludens-dev` by default; pass `--real-home` (or use the `:real` script suffix) to mount your real `~/.ludens`:
+
+- **Development (`~/.ludens-dev` by default, `:real` / `--real-home` for `~/.ludens`)**:
+  - `bun run dev` (or `bun run dev:web` / `bun run dev:web:real`) — Web full-stack development (managed `ludens-server --dev` + Vite HMR)
+  - `bun run dev:desktop` (or `bun run dev:desktop:real`) — Electron desktop development (Vite HMR + Electron native UDS)
+  - `bun run dev:client` — Standalone cross-origin frontend development (connects directly to a remote/cloud `ludens-server`)
+  - `bun run dev:server` (or `bun run dev:server:real`) — Standalone dev-mode `ludens-server`
+- **Production Build, Packaging & Quality Checks**:
+  - `bun run build` — Build all packages (`client/dist`, `server/dist`, `core/dist`, `baseware/dist`, `desktop/dist`), or build by pipeline via `bun run build:client` / `build:server` / `build:sandbox` / `build:desktop`
+  - `bun run pack:desktop` / `bun run dist:desktop` — Package the All-in-One Electron desktop app
+  - `bun run start:selfhost` — Single-machine / VPS self-hosted production run (`ludens-server serve --static-dir client/dist`)
+  - `bun run typecheck` / `bun run test` — Run type checks and tests across all 6 packages
+
+### 4. Auto Run, Reclaim Control & Async Collaboration
 
 Open **Live** (`?view=live`) in the Desktop App or your connected Web Console to click **Start Auto Run**, or control the loop from CLI (locally or with `--remote`):
 
@@ -150,7 +165,7 @@ flowchart TB
 
 | Layer | Package | Path & Bin | Role |
 | --- | --- | --- | --- |
-| **L1 Client** | [`@ludens/client`](client/README.md) | `client/` · `ludens` | Isomorphic Web & Mobile Vite SPA Console (`client/out`), independently releasable, remote-first (depends only on `@ludens/protocol`), plus human-facing pure-RPC CLI `ludens`. |
+| **L1 Client** | [`@ludens/client`](client/README.md) | `client/` · `ludens` | Isomorphic Web & Mobile Vite SPA Console (`client/dist`), independently releasable, remote-first (depends only on `@ludens/protocol`), plus human-facing pure-RPC CLI `ludens`. |
 | **L1 Desktop Shell** | [`@ludens/desktop`](desktop/README.md) | `desktop/` · `ludens-app` | All-in-One Electron desktop shell bundling `client + server + core + baseware` for zero-port local out-of-the-box use (`ludens-app://` / `ludens-media://`), `<ConnectionTargetDialog>`, optional Desktop Pet, and one-click switching to remote `ludens-server`. |
 | **L2 Control Plane** | [`@ludens/server`](server/README.md) | `server/` · `ludens-server` | Open-source control-plane server for local, self-hosted, or cloud deployment: unified JSON-RPC 2.0, `EventHub`, HMAC `/media`, query engine, and Core runtime supervision. |
 | **L3 Execution Kernel** | [`@ludens/core`](core/README.md) | `core/` · `ludens-core` | `1 Workspace = 1 Core` execution sandbox hosting **Shiori** (OMP `18.22.2`), resident `perception.py`, `loop.py`, workspace code & self-verification (`ludens-core run` and `ludens-core <controller\|perception\|event\|machine\|eval>`). |
