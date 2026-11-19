@@ -2,9 +2,12 @@
 node_modules/
 dist/
 dist-ssr/
-.next/
-/app/out/
-/app/release/
+/client/dist/
+/server/dist/
+/core/dist/
+/baseware/dist/
+/desktop/dist/
+/desktop/release/
 *.tsbuildinfo
 coverage/
 test-results/

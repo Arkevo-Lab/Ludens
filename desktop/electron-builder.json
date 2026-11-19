@@ -10,8 +10,8 @@
   ],
   "extraResources": [
     {
-      "from": "../client/out",
-      "to": "out"
+      "from": "../client/dist",
+      "to": "client"
     },
     {
       "from": "../client/public",
@@ -22,15 +22,15 @@
       "to": "docs"
     },
     {
-      "from": "dist/server",
+      "from": "../server/dist",
       "to": "server"
     },
     {
-      "from": "dist/core",
+      "from": "../core/dist",
       "to": "core"
     },
     {
-      "from": "dist/baseware",
+      "from": "../baseware/dist",
       "to": "baseware"
     }
   ],

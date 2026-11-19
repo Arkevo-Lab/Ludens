@@ -19,6 +19,7 @@
   },
   "scripts": {
     "ludens-core": "bun src/cli/main.ts",
+    "build": "bun scripts/build.mjs",
     "test": "bun run typescript:test && bun run python:test",
     "typecheck": "bun run typescript:typecheck && bun run python:typecheck",
     "typescript:test": "uv run --project python --frozen bun test",

@@ -335,7 +335,7 @@ export function registerLudensPrivilegedSchemes(
   ])
 }
 
-/** Serves `client/out` over `ludens-app://console/...` with MIME resolution, traversal guard, and SPA fallback. */
+/** Serves `client/dist` (or packaged `Resources/client`) over `ludens-app://console/...` with MIME resolution, traversal guard, and SPA fallback. */
 export function createAppProtocolHandler(
   options: AppProtocolHandlerOptions,
 ): (request: Request) => Promise<Response> {

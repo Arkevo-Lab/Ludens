@@ -264,11 +264,11 @@ test("LudensRpcClient persists lastKnownServerInfo across disconnects and format
       key => (en.connectionTarget as Record<string, string>)[key] ?? key,
     );
     assert.match(zhMsg, /本地开发预览服务（http:\/\/127\.0\.0\.1:43120）已停止/);
-    assert.match(zhMsg, /npm run dev/);
+    assert.match(zhMsg, /bun run dev/);
     assert.doesNotMatch(zhMsg, /1006|WebSocket closed/);
 
     assert.match(enMsg, /Local dev preview server \(http:\/\/127\.0\.0\.1:43120\) has stopped/);
-    assert.match(enMsg, /npm run dev/);
+    assert.match(enMsg, /bun run dev/);
     assert.doesNotMatch(enMsg, /1006|WebSocket closed/);
   } finally {
     client.dispose();

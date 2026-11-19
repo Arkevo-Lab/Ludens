@@ -6,7 +6,7 @@
 - **`ludens-server`**（`@ludens/server`，[`server/bin/ludens-server`](../../../server/bin/ludens-server)）：**控制面服务端与守护进程管理 CLI** —— 统一提供 `ludens-server <serve|start|stop|restart|status>`，承载多工作区 JSON-RPC 2.0（`/rpc` 与 `app-server.sock`）、`EventHub` 实时推送、HMAC `/media`、查询引擎与 `WorkspaceSupervisor`。
 - **`ludens-core`**（`@ludens/core`，[`core/bin/ludens-core`](../../../core/bin/ludens-core)）：**单工作区执行内核与沙盒内工具 CLI** —— 提供单工作区内核启动入口 `ludens-core run` 以及沙盒内 Shiori / 开发者直连工具 `ludens-core <controller|perception|event|machine|eval>`（已移除旧顶层重复的 `observe` 别名，统一收敛为 `ludens-core perception observe`）。
 - **`baseware`**（`@ludens/baseware`，[`baseware/bin/baseware`](../../../baseware/bin/baseware)）：**独立运行的跨设备集成层 CLI** —— 守护进程服务、驱动包发现与管理、多机路由、原生控制器直调以及 MCP 暴露入口。
-- **`ludens-app`**（`@ludens/desktop`，[`desktop/bin/ludens-app`](../../../desktop/bin/ludens-app)，Windows [`desktop/bin/ludens-app.cmd`](../../../desktop/bin/ludens-app.cmd)）：**All-in-One 零端口 Electron 桌面壳**（`ludens-app://console/` + `ludens-media://local/media?...`），自包含组装 `client/out` + 本地 `ludens-server` + `ludens-core` + `baseware`，并支持一键切连远程 `ludens-server`。
+- **`ludens-app`**（`@ludens/desktop`，[`desktop/bin/ludens-app`](../../../desktop/bin/ludens-app)，Windows [`desktop/bin/ludens-app.cmd`](../../../desktop/bin/ludens-app.cmd)）：**All-in-One 零端口 Electron 桌面壳**（`ludens-app://console/` + `ludens-media://local/media?...`），自包含组装各包自治产物 `client/dist`（打包态 `Resources/client`）+ `server/dist` + `core/dist` + `baseware/dist`，并支持一键切连远程 `ludens-server`。
 
 > **全局前缀、远程连接与按需唤醒策略**：`ludens` 的所有子命令均支持 `--workspace <path>`（覆盖 `LUDENS_WORKSPACE` 与当前工作目录），以及 `--remote <ws(s)://...>` 与 `--token <secret>`（覆盖 `LUDENS_REMOTE_URL` 与 `LUDENS_REMOTE_TOKEN`）。
 > - 传入 `--remote` 时：`ludens` 直接经 WebSocket JSON-RPC 连接远端 `ludens-server`；
@@ -146,7 +146,7 @@ ludens logs read --run <run-directory-or-id> \
 
 ### `ludens-server serve`
 
-在前台启动控制面服务端，提供 UDS NDJSON 与 WebSocket `/rpc` JSON-RPC 2.0（`@ludens/protocol/app-rpc`）、`EventHub` 实时事件推送、HMAC capability ticket `/media`（`mt=`、`206 Range`）、`/health` 以及可选静态 Vite SPA（`client/out`，`/api/*` 返回 `404`）。
+在前台启动控制面服务端，提供 UDS NDJSON 与 WebSocket `/rpc` JSON-RPC 2.0（`@ludens/protocol/app-rpc`）、`EventHub` 实时事件推送、HMAC capability ticket `/media`（`mt=`、`206 Range`）、`/health` 以及可选静态 Vite SPA（`client/dist`，`/api/*` 返回 `404`）。
 
 ```bash
 ludens-server serve [--listen <unix://PATH | ws://HOST:PORT>]... \
@@ -301,7 +301,7 @@ baseware mcp                               # 通过标准输入输出以 MCP 协
 
 ### `ludens-app` 桌面端 CLI
 
-实现位于 [`desktop/src/main.ts`](../../../desktop/src/main.ts)。启动零监听 TCP 端口的 Electron 桌面壳，通过 `AppServerHost`（`ensureLocalAppDaemon`）走 UDS `app-server.sock`、使用 `ludens-app://console/` 加载 `@ludens/client` 打包产物（`client/out`）、使用 `ludens-media://local/media?...` 加载本地媒体，并通过 `ActiveCoreQuitGuard` 与可选桌宠（`PetSessionCoordinator`）运行。
+实现位于 [`desktop/src/main.ts`](../../../desktop/src/main.ts)。启动零监听 TCP 端口的 Electron 桌面壳，通过 `AppServerHost`（`ensureLocalAppDaemon`）走 UDS `app-server.sock`、使用 `ludens-app://console/` 加载 `@ludens/client` 打包产物（`client/dist`，打包态 `Resources/client`）、使用 `ludens-media://local/media?...` 加载本地媒体，并通过 `ActiveCoreQuitGuard` 与可选桌宠（`PetSessionCoordinator`）运行。
 
 ```bash
 ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
@@ -325,7 +325,7 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 
 | 变量名 | 默认值 | 用途 |
 | --- | --- | --- |
-| `LUDENS_HOME` | `~/.ludens` | 全局配置、驱动缓存与全局状态根目录（`client` 的 `npm run dev` 默认隔离为 `~/.ludens-dev`） |
+| `LUDENS_HOME` | `~/.ludens` | 全局配置、驱动缓存与全局状态根目录（根目录 `bun run dev` / `dev:web` / `dev:desktop` / `dev:server` 默认隔离为 `~/.ludens-dev`，传入 `--real-home` 或使用 `:real` 别名挂载真实 `~/.ludens`） |
 | `LUDENS_WORKSPACE` | 当前工作目录 | 未传入 `--workspace` 时的默认工作区路径 |
 | `LUDENS_SOCKET` | `/tmp/ludens-core-${uid}-${workspaceHash}.sock` | 覆盖 Core 守护进程 Unix Socket 路径 |
 | `BASEWARE_SOCKET` | `/tmp/ludens-baseware-${uid}-${id}.sock` | 覆盖 Baseware Unix Socket 路径 |
@@ -357,8 +357,8 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 | `LUDENS_REMOTE_URL` | — | `ludens` 纯 RPC CLI 默认接入的 `--remote ws(s)://...` 地址 |
 | `LUDENS_REMOTE_TOKEN` | — | 与 `LUDENS_REMOTE_URL` / `--remote` 配套的默认鉴权 Token |
 | `LUDENS_APP_TOKEN` | — | 启停鉴权版 `ludens-server`（`--token-env LUDENS_APP_TOKEN`）时传递/读取的 Token 环境变量 |
-| `LUDENS_STATIC_DIR` | — | `ludens-server` 托管的 Vite 静态 SPA 控制台构建产物目录（`client/out`） |
-| `LUDENS_APP_SERVER_URL` | — | `client/scripts/dev.mjs` / `vite.config.ts` 代理转发的上游 `ludens-server` 地址 |
+| `LUDENS_STATIC_DIR` | — | `ludens-server` 托管的 Vite 静态 SPA 控制台构建产物目录（`client/dist`） |
+| `LUDENS_APP_SERVER_URL` | — | 根目录 `scripts/dev.mjs` / `client/vite.config.ts` 代理转发的上游 `ludens-server` 地址（`/rpc`、`/media`、`/health`） |
 | `LUDENS_APP_DEV_URL` | — | `ludens-app` 加载外部开发渲染地址（别名 `LUDENS_DEV_URL`） |
 | `LUDENS_BUN` | — | 覆盖 Bun 可执行文件路径 |
 | `LUDENS_SERVER_BIN` / `LUDENS_APP_SERVER_BIN` | — | `ludens` CLI 或 `ludens-app` 桌面端按需拉起 `ludens-server` 时的二进制路径覆盖 |

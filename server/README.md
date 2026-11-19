@@ -14,6 +14,9 @@ ludens-server <start|stop|restart|status> [--keep-cores|--stop-cores] [--dev] [-
 ## Scripts
 
 ```sh
+cd server && bun run dev          # Foreground dev server (ws://127.0.0.1:38080, LUDENS_HOME=~/.ludens-dev)
+cd server && bun run start        # Foreground server (UDS only by default)
+cd server && bun run build        # Build self-contained server/dist/ (main.js + workers + bin/ludens-server)
 cd server && bun run typecheck
 cd server && bun run test
 ```
