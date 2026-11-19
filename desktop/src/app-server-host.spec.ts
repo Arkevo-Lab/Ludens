@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join, posix, resolve, win32 } from 'node:path'
+import { dirname, join, posix, resolve, win32 } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 import { resolveAppServerSocketPath } from '@ludens/server/daemon/app-daemon'
 import {
@@ -12,6 +13,8 @@ import {
   resolveLudensHome,
   resolveStaticDir,
 } from './app-server-host.js'
+
+const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
 describe('app-server-host', () => {
   describe('path and launch resolution', () => {
@@ -25,10 +28,10 @@ describe('app-server-host', () => {
           platform: 'darwin',
           here: hereDist,
           resourcesPath,
-          env: { LUDENS_STATIC_DIR: '/custom/static-out' },
+          env: { LUDENS_STATIC_DIR: '/custom/static-dist' },
           exists: () => true,
         }),
-      ).toBe(posix.resolve('/custom/static-out'))
+      ).toBe(posix.resolve('/custom/static-dist'))
 
       expect(
         resolveStaticDir({
@@ -36,9 +39,9 @@ describe('app-server-host', () => {
           here: hereDist,
           resourcesPath,
           env: {},
-          exists: p => p === posix.join(resourcesPath, 'out', 'index.html'),
+          exists: p => p === posix.join(resourcesPath, 'client', 'index.html'),
         }),
-      ).toBe(posix.join(resourcesPath, 'out'))
+      ).toBe(posix.join(resourcesPath, 'client'))
 
       expect(
         resolveStaticDir({
@@ -46,18 +49,18 @@ describe('app-server-host', () => {
           here: hereDist,
           resourcesPath,
           env: {},
-          exists: p => p === '/repo/client/out/index.html',
+          exists: p => p === '/repo/client/dist/index.html',
         }),
-      ).toBe('/repo/client/out')
+      ).toBe('/repo/client/dist')
 
       expect(
         resolveStaticDir({
           platform: 'darwin',
           here: hereDesktop,
           env: {},
-          exists: p => p === '/repo/client/out/index.html',
+          exists: p => p === '/repo/client/dist/index.html',
         }),
-      ).toBe('/repo/client/out')
+      ).toBe('/repo/client/dist')
     })
 
     it('resolves bun executable across LUDENS_BUN, PATH, and standard locations', () => {
@@ -107,13 +110,15 @@ describe('app-server-host', () => {
         resourcesPath,
         platform: 'darwin',
         env: { LUDENS_HOME: '/tmp/ludens-packaged' },
-        exists: p => p === posix.join(resourcesPath, 'bin', 'ludens-server') || p === posix.join(resourcesPath, 'out', 'index.html'),
+        exists: p =>
+          p === posix.join(resourcesPath, 'bin', 'ludens-server') ||
+          p === posix.join(resourcesPath, 'client', 'index.html'),
       })
       expect(packagedLaunch.spawnCommand).toEqual({
         command: posix.join(resourcesPath, 'bin', 'ludens-server'),
         argsPrefix: [],
       })
-      expect(packagedLaunch.staticDir).toBe(posix.join(resourcesPath, 'out'))
+      expect(packagedLaunch.staticDir).toBe(posix.join(resourcesPath, 'client'))
       expect(packagedLaunch.repo).toBe(resourcesPath)
 
       const packagedBundleLaunch = resolveDaemonLaunch({
@@ -122,13 +127,14 @@ describe('app-server-host', () => {
         env: { LUDENS_BUN: '/opt/bun', LUDENS_HOME: '/tmp/ludens-packaged' },
         exists: p =>
           p === posix.join(resourcesPath, 'server', 'main.js') ||
-          p === posix.join(resourcesPath, 'out', 'index.html') ||
+          p === posix.join(resourcesPath, 'client', 'index.html') ||
           p === posix.join(resourcesPath, 'docs'),
       })
       expect(packagedBundleLaunch.spawnCommand).toEqual({
         command: '/opt/bun',
         argsPrefix: [posix.join(resourcesPath, 'server', 'main.js')],
       })
+      expect(packagedBundleLaunch.staticDir).toBe(posix.join(resourcesPath, 'client'))
       expect(packagedBundleLaunch.repo).toBe(resourcesPath)
 
       const packagedSourceLaunch = resolveDaemonLaunch({
@@ -137,7 +143,7 @@ describe('app-server-host', () => {
         env: { LUDENS_BUN: '/opt/bun', LUDENS_HOME: '/tmp/ludens-packaged' },
         exists: p =>
           p === posix.join(resourcesPath, 'server', 'src', 'cli', 'main.ts') ||
-          p === posix.join(resourcesPath, 'out', 'index.html') ||
+          p === posix.join(resourcesPath, 'client', 'index.html') ||
           p === posix.join(resourcesPath, 'docs'),
       })
       expect(packagedSourceLaunch.spawnCommand).toEqual({
@@ -164,7 +170,7 @@ describe('app-server-host', () => {
         },
         exists: p =>
           p === posix.join(resourcesPath, 'server', 'main.js') ||
-          p === posix.join(resourcesPath, 'out', 'index.html'),
+          p === posix.join(resourcesPath, 'client', 'index.html'),
       })
       expect(packagedWithOverrideBin.spawnCommand).toEqual({
         command: '/opt/custom/ludens-server',
@@ -187,12 +193,13 @@ describe('app-server-host', () => {
         here: '/repo/desktop/dist/electron',
         platform: 'darwin',
         env: { LUDENS_BUN: '/opt/bun', LUDENS_HOME: '/tmp/ludens-dev' },
-        exists: p => p === '/repo/server/src/cli/main.ts' || p === '/repo/client/out/index.html',
+        exists: p => p === '/repo/server/src/cli/main.ts' || p === '/repo/client/dist/index.html',
       })
       expect(repoLaunch.spawnCommand).toEqual({
         command: '/opt/bun',
         argsPrefix: ['/repo/server/src/cli/main.ts'],
       })
+      expect(repoLaunch.staticDir).toBe('/repo/client/dist')
       expect(repoLaunch.repo).toBe('/repo')
     })
   })
@@ -327,10 +334,10 @@ describe('app-server-host', () => {
       await expect(host.start()).rejects.toThrow(/stopped/i)
     })
 
-    it('resolves and runs prebuilt server, core, and baseware bundles from an isolated resourcesPath without node_modules', () => {
-      const builtServerDir = resolve('dist/server')
-      const builtCoreDir = resolve('dist/core')
-      const builtBasewareDir = resolve('dist/baseware')
+    it('assembles and runs autonomous ../server/dist, ../core/dist, and ../baseware/dist bundles from an isolated resourcesPath without node_modules', () => {
+      const builtServerDir = resolve(desktopRoot, '../server/dist')
+      const builtCoreDir = resolve(desktopRoot, '../core/dist')
+      const builtBasewareDir = resolve(desktopRoot, '../baseware/dist')
       if (
         !existsSync(join(builtServerDir, 'main.js')) ||
         !existsSync(join(builtCoreDir, 'bin', 'ludens-core')) ||
@@ -341,7 +348,8 @@ describe('app-server-host', () => {
       const isolatedRoot = mkdtempSync(join(tmpdir(), 'ludens-packaged-resources-'))
       try {
         const resourcesPath = join(isolatedRoot, 'Resources')
-        mkdirSync(join(resourcesPath, 'out'), { recursive: true })
+        mkdirSync(join(resourcesPath, 'client'), { recursive: true })
+        writeFileSync(join(resourcesPath, 'client', 'index.html'), '<!doctype html><html></html>')
         cpSync(builtServerDir, join(resourcesPath, 'server'), { recursive: true })
         cpSync(builtCoreDir, join(resourcesPath, 'core'), { recursive: true })
         cpSync(builtBasewareDir, join(resourcesPath, 'baseware'), { recursive: true })
@@ -352,6 +360,7 @@ describe('app-server-host', () => {
           env: process.env,
         })
         expect(launch.spawnCommand.argsPrefix).toEqual([join(resourcesPath, 'server', 'main.js')])
+        expect(launch.staticDir).toBe(join(resourcesPath, 'client'))
         expect(launch.repo).toBe(resourcesPath)
 
         const isolatedEnv = {
@@ -368,6 +377,23 @@ describe('app-server-host', () => {
         expect(serverRes.error).toBeUndefined()
         expect(serverRes.status).toBe(0)
         expect(serverRes.stdout).toContain('ludens-server — Ludens Control Plane Server')
+
+        const serverBin = join(
+          resourcesPath,
+          'server',
+          'bin',
+          process.platform === 'win32' ? 'ludens-server.cmd' : 'ludens-server',
+        )
+        if (existsSync(serverBin)) {
+          const serverBinRes = spawnSync(serverBin, ['--help'], {
+            cwd: isolatedRoot,
+            encoding: 'utf8',
+            env: isolatedEnv,
+          })
+          expect(serverBinRes.error).toBeUndefined()
+          expect(serverBinRes.status).toBe(0)
+          expect(serverBinRes.stdout).toContain('ludens-server — Ludens Control Plane Server')
+        }
 
         const coreBin = join(resourcesPath, 'core', 'bin', process.platform === 'win32' ? 'ludens-core.cmd' : 'ludens-core')
         const coreRes = spawnSync(coreBin, ['--help'], {

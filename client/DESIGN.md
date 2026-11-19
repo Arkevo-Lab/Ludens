@@ -4,28 +4,31 @@ Internal engineering contract for the `@ludens/client` Vite Static SPA console, 
 
 ## 1. Architecture & Runtime Surfaces
 
-Ludens adopts a 6-package, 4-layer concurrent architecture (`Client` / `Server` / `Core` / `Baseware`, sharing zero-dependency `@ludens/protocol`) following **1 Workspace = 1 Core** isolation. `@ludens/client` depends **exclusively** on `@ludens/protocol` (zero `@ludens/core`, `@ludens/server`, `@ludens/baseware`, or `electron` dependencies) and shares a single React 19, Vite static build (`client/out`), Tailwind CSS 4, and shadcn/ui (Radix / New York) bundle backed by `@ludens/server`'s unified JSON-RPC 2.0 `ludens-server`, exposed across three explicit `LudensRuntimeProfile` surfaces:
+Ludens adopts a 6-package, 4-layer concurrent architecture (`Client` / `Server` / `Core` / `Baseware`, sharing zero-dependency `@ludens/protocol`) following **1 Workspace = 1 Core** isolation. `@ludens/client` depends **exclusively** on `@ludens/protocol` (zero `@ludens/core`, `@ludens/server`, `@ludens/baseware`, or `electron` dependencies) and shares a single React 19, Vite static build (`client/dist`), Tailwind CSS 4, and shadcn/ui (Radix / New York) bundle backed by `@ludens/server`'s unified JSON-RPC 2.0 `ludens-server`, exposed across three explicit `LudensRuntimeProfile` surfaces:
 
 1. **Desktop App (`runtimeProfile: "desktop"` — `desktop/bin/ludens-app` / `desktop/bin/ludens-app.cmd` / packaged installer)**:
-   - Primary local All-in-One entry point (`@ludens/desktop`). Ensures a zero-TCP-port singleton `ludens-server` over Unix Domain Socket (`~/.ludens/run/app-server.sock` with 96-byte BSD `sun_path` fallback) via `ensureLocalAppDaemon` (unless `--server <url>` attaches the renderer to an external local dev server), serving `client/out` over `ludens-app://console/` and media over `ludens-media://local/media?...`.
+   - Primary local All-in-One entry point (`@ludens/desktop`). Ensures a zero-TCP-port singleton `ludens-server` over Unix Domain Socket (`~/.ludens/run/app-server.sock` with 96-byte BSD `sun_path` fallback) via `ensureLocalAppDaemon` (unless `--server <url>` or `LUDENS_DESKTOP_DEV_URL` attaches the renderer to an explicit local Vite dev server), serving `client/dist` (or packaged `Resources/client`) over `ludens-app://console/` and media over `ludens-media://local/media?...`.
    - Grants full `HostSessionCapabilities` (`localFsPaths: true`, `localFileDrivers: true`, `hostProcessOverrides: true`, `hostStorageConfig: true`). Hides the sidebar connection pill while healthy on `electron-local` UDS (reachable anytime via `Cmd/Ctrl + K` Quick Switcher or Settings).
    - Closing the main window (`×`) hides to the system tray and optional **Desktop Pet** while keeping running Cores alive; **Quit** (`⌘Q` / tray **Quit**) runs `ActiveCoreQuitGuard`, exiting cleanly when 0 Cores are active or prompting to keep running in background, stop all Cores & quit, or cancel.
 2. **Hosted Cloud / Remote Node & Mobile (`runtimeProfile: "remote"` — `ludens-server serve --listen ws://... --auth token --token-env ...`)**:
-   - Serves `client/out`, WebSocket `/rpc`, HMAC capability-ticket `/media`, and `/health`. Requires `--auth token` (`--token` or `--token-env`) whenever binding `ws://` without `--dev`.
+   - Serves `client/dist` (optional `--static-dir`), WebSocket `/rpc`, HMAC capability-ticket `/media`, and `/health`. Requires `--auth token` (`--token` or `--token-env`) whenever binding `ws://` without `--dev`.
    - Enforces `managed-sandbox` capabilities (`localFsPaths: false`, `localFileDrivers: false`, `hostProcessOverrides: false`, `hostStorageConfig: false`): `RpcRouter` rejects host-escaping paths/overrides with `403 CAPABILITY_RESTRICTED`, and `useRuntimeCapabilities()` hides local filesystem pickers, custom target directories, `file:` driver specs, `cuaCommand`, and `directory` storage backends across Console forms.
-3. **Frontend & AI Harness Dev Preview (`runtimeProfile: "web-dev"` — `npm run dev` / `--dev`)**:
-   - `client/scripts/dev.mjs` spawns an ephemeral loopback `ludens-server serve --dev --listen ws://127.0.0.1:0 --parent-watchdog` alongside Vite HMR (`127.0.0.1:3015`).
-   - Defaults `LUDENS_HOME` to isolated `~/.ludens-dev` (override precedence: `--home <dir>` > `--real-home` (`npm run dev:real`) > `env.LUDENS_HOME` > `~/.ludens-dev`; `dev.mjs --desktop` builds `@ludens/desktop` and launches `ludens-app --server` against `~/.ludens`) so `npm run dev` never collides with or stops a running `~/.ludens` Desktop App server.
-   - `--dev` is restricted to loopback hosts (`127.0.0.1`, `localhost`, `::1`), grants full host capabilities for local browser/harness testing, renders a **`DEV PREVIEW`** badge in the sidebar, and unlocks a Dev UI Simulation toggle inside `<ConnectionTargetDialog>`. `npm start` (`client/scripts/production.mjs start`) verifies `client/out/.ludens-build.json` and launches `ludens-server serve` with `--dev` on tokenless loopback or `--auth token --token-env LUDENS_APP_TOKEN` when `LUDENS_APP_TOKEN` is set.
+3. **Frontend & AI Harness Dev Preview (`runtimeProfile: "web-dev"` — `bun run dev` / `--dev`)**:
+   - Root orchestration `scripts/dev.mjs` coordinates multi-package dev lifecycles while keeping each subpackage strictly single-package:
+     - `bun run dev` / `bun run dev:web`: spawns an ephemeral loopback `ludens-server serve --dev --listen ws://127.0.0.1:0 --parent-watchdog` alongside Vite HMR (`127.0.0.1:3015`).
+     - `bun run dev:desktop`: compiles `desktop/dist/electron`, starts pure Vite HMR, and launches Electron with `LUDENS_DESKTOP_DEV_URL` so Electron natively manages its UDS `ludens-server` without spawning a redundant TCP server.
+     - `bun run dev:client`: starts pure cross-origin Vite HMR (`client/`) with zero local backend.
+     - `bun run dev:server`: runs foreground `ludens-server serve --dev --listen ws://127.0.0.1:38080`.
+   - Defaults `LUDENS_HOME` across all dev modes to isolated `~/.ludens-dev` (override precedence: `--home <dir>` > `--real-home` / `:real` > `env.LUDENS_HOME` > `~/.ludens-dev`) so development never collides with or stops a running `~/.ludens` Desktop App server.
+   - `--dev` is restricted to loopback hosts (`127.0.0.1`, `localhost`, `::1`), grants full host capabilities for local browser/harness testing, renders a **`DEV PREVIEW`** badge in the sidebar, and unlocks a Dev UI Simulation toggle inside `<ConnectionTargetDialog>`. `bun run start:selfhost` (`scripts/selfhost.mjs`) verifies/builds `client/dist/.ludens-build.json` and launches `ludens-server serve --static-dir client/dist` with `--dev` on tokenless loopback or `--auth token --token-env LUDENS_APP_TOKEN` when `LUDENS_APP_TOKEN` is set.
 
 ## 2. Script Naming Conventions
 
-Component `package.json` scripts follow one naming scheme:
+Root and subpackage `package.json` scripts follow strict separation between root orchestration and single-package lifecycle:
 
-- Generic package commands: `dev`, `build`, `start`, `test` (must include integration coverage; never name a suite `unit`), and `typecheck`.
-- Special-purpose commands: `<object>:<action>[:<variant>]` in lowercase kebab-case (e.g. `dev:real`, `desktop:dev`, `desktop:build`, `desktop:dist`, `desktop:pack`, `pet:preview`, `pet:smoke`, `build:check`, `omp:test:transport`). Never add bare `preview`, `smoke`, or `check` aliases.
-- `build:check` verifies existing artifacts against the source fingerprint and must never run a build.
-- Running `desktop:dev`, `pet:preview`, or `pet:smoke` in `desktop/` invokes `desktop:build` first.
+- Subpackages (`protocol`, `baseware`, `core`, `server`, `client`, `desktop`) expose only single-package atomic commands (`dev`, `build`, `build:check`, `start`, `pack`, `dist`, `typecheck`, `test`, `pet:preview`, `pet:smoke`) outputting to their own `dist/` directory.
+- Root `package.json` orchestrates cross-package development (`dev`, `dev:web`, `dev:web:real`, `dev:desktop`, `dev:desktop:real`, `dev:client`, `dev:server`, `dev:server:real`), production pipelines (`build`, `build:client`, `build:server`, `build:sandbox`, `build:desktop`, `pack:desktop`, `dist:desktop`, `start:selfhost`), and repository QA (`typecheck`, `test`).
+- `build:check` verifies existing `client/dist` artifacts against the source fingerprint and must never run a build.
 
 ## 3. Component Ownership & Styling
 
@@ -83,25 +86,23 @@ The Ludens mark is a `5 × 5` pixel ring around a hollow L with one loose pixel 
 - **Window & Quit Semantics**: `--profile <path>` defaults to the Electron `appData` desktop profile, `--workspace <path>` (`LUDENS_WORKSPACE`) sets initial focus, and `LUDENS_DISABLE_COMPANION=1` disables the optional Desktop Pet widget. Language changes in Console Settings sync bidirectionally via the desktop bridge to native menus, `companion.json`, and pet dialogue.
 - **Assets & I18n**: Pet poses use static transparent WebP frames registered in `client/public/companion/ludens/manifest.json` (synced with `catalog.js`: 24 poses, 8 overlay effects, 3 avatars, and dedicated tray icons under `client/public/companion/ludens/icons/`). Shared pet localization lives in `client/public/companion/companion-i18n.cjs` (update `zh` and `en` together).
 - **Scale & Priority**: Poses bottom-align and scale via `display_scale` relative to the default standing head size while bubbles keep constant geometry. Priority order: pointer interaction (click / pick up / drop) > live log state (`thinking`, `acting`, `smug`, `sheepish`) > interactive Catch-the-Stars round > manual menu pose > idle timers (`30s` sit → `90s` drowsy → `120s` sleep).
-- **Smoke Test**: `(cd desktop && npm run pet:smoke)` verifies window bounds, click-through, scaling, audio alerts, and 5 log bubble classes under an isolated profile; `npm run pet:preview` opens an interactive preview window.
+- **Smoke Test**: `bun --cwd=desktop run pet:smoke` verifies window bounds, click-through, scaling, audio alerts, and 5 log bubble classes under an isolated profile; `bun --cwd=desktop run pet:preview` opens an interactive preview window.
 
 ## 8. Acceptance & Packaging
 
-Run component checks across the 6 packages from repo root before opening a PR (see [Console and Debugging](../docs/en/tutorials/console-and-debugging.md)):
+Run repository-wide checks and builds from the repo root before opening a PR (see [Console and Debugging](../docs/en/tutorials/console-and-debugging.md)):
 
 ```sh
-(cd protocol && bun run typecheck && bun test)
-(cd baseware && bun run typecheck && bun test)
-(cd core && bun run typecheck && bun test)
-(cd server && bun run typecheck && bun test)
-(cd client && npm run typecheck && npm test && npm run build && npm run build:check)
-(cd desktop && npm run desktop:typecheck && npm run desktop:test && npm run desktop:build)
+bun run typecheck
+bun run test
+bun run build
+bun --cwd=client run build:check
 ```
 
 For Electron desktop binaries and installers:
 
 ```sh
-(cd desktop && npm run desktop:build && npm run desktop:pack)
+bun run pack:desktop
 # Optionally build distributable .dmg/.zip or NSIS .exe:
-(cd desktop && npm run desktop:dist)
+bun run dist:desktop
 ```

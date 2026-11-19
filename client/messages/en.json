@@ -2710,7 +2710,7 @@
     "bannerUnconfigured": "No remote server endpoint is configured.",
     "bannerDisconnected": "Disconnected from backend RPC: {reason}",
     "bannerDisconnectedNoReason": "Disconnected from backend RPC; waiting to reconnect.",
-    "bannerWebDevStopped": "Local dev preview server ({target}) has stopped — close this tab if you're done testing, or run npm run dev to restart it. For daily use, open the Ludens Desktop App.",
+    "bannerWebDevStopped": "Local dev preview server ({target}) has stopped — close this tab if you're done testing, or run bun run dev to restart it. For daily use, open the Ludens Desktop App.",
     "bannerDesktopDisconnected": "Connection to the local ludens-server was interrupted. Click Retry to reconnect.",
     "bannerRemoteDisconnected": "Connection to the remote Ludens server ({target}) was interrupted. Check your network or server status and retry.",
     "bannerConfigureBtn": "Configure Connection",

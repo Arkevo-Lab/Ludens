@@ -146,13 +146,13 @@ describe('custom-protocols', () => {
 
     it('blocks encoded traversal, symlinks outside static root, and untrusted hosts', async () => {
       const parentDir = makeTempDir()
-      const outDir = join(parentDir, 'out')
-      mkdirSync(outDir, { recursive: true })
-      writeFileSync(join(outDir, 'index.html'), '<html>ok</html>')
+      const distDir = join(parentDir, 'dist')
+      mkdirSync(distDir, { recursive: true })
+      writeFileSync(join(distDir, 'index.html'), '<html>ok</html>')
       writeFileSync(join(parentDir, 'secret.txt'), 'top-secret')
-      symlinkSync(join(parentDir, 'secret.txt'), join(outDir, 'escaped.txt'))
+      symlinkSync(join(parentDir, 'secret.txt'), join(distDir, 'escaped.txt'))
 
-      const handler = createAppProtocolHandler({ staticDir: outDir })
+      const handler = createAppProtocolHandler({ staticDir: distDir })
 
       const encodedSlashTraversal = await handler(new Request('ludens-app://console/%2e%2e%2fsecret.txt'))
       expect(encodedSlashTraversal.status).toBe(403)

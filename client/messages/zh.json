@@ -2710,7 +2710,7 @@
     "bannerUnconfigured": "尚未配置远程服务连接目标。",
     "bannerDisconnected": "与后台 RPC 服务连接已断开：{reason}",
     "bannerDisconnectedNoReason": "与后台 RPC 服务连接已断开，正在等待重连。",
-    "bannerWebDevStopped": "本地开发预览服务（{target}）已停止 — 若已完成前端或浏览器调试可直接关闭此标签页，或运行 npm run dev 重新启动预览；日常使用请直接打开 Ludens 桌面应用。",
+    "bannerWebDevStopped": "本地开发预览服务（{target}）已停止 — 若已完成前端或浏览器调试可直接关闭此标签页，或运行 bun run dev 重新启动预览；日常使用请直接打开 Ludens 桌面应用。",
     "bannerDesktopDisconnected": "本机 ludens-server 连接暂时中断，可点击重试恢复连接。",
     "bannerRemoteDisconnected": "与远端 Ludens 服务（{target}）的连接已中断，请检查网络或服务状态后重试。",
     "bannerConfigureBtn": "配置连接",

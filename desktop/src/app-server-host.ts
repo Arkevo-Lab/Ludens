@@ -68,10 +68,10 @@ export function resolveStaticDir(options: PathResolutionOptions = {}): string {
   if (envDir) return pathMod.resolve(envDir)
 
   const candidates = [
-    options.resourcesPath ? pathMod.join(options.resourcesPath, 'out') : undefined,
-    pathMod.resolve(here, '../../../client/out'),
-    pathMod.resolve(here, '../../client/out'),
-    pathMod.resolve(here, '../out'),
+    options.resourcesPath ? pathMod.join(options.resourcesPath, 'client') : undefined,
+    pathMod.resolve(here, '../../../client/dist'),
+    pathMod.resolve(here, '../../client/dist'),
+    pathMod.resolve(here, '../client/dist'),
   ].filter((candidate): candidate is string => Boolean(candidate))
 
   for (const candidate of candidates) {
@@ -80,7 +80,7 @@ export function resolveStaticDir(options: PathResolutionOptions = {}): string {
   for (const candidate of candidates) {
     if (exists(candidate)) return candidate
   }
-  return pathMod.resolve(here, '../../../client/out')
+  return pathMod.resolve(here, '../../../client/dist')
 }
 
 export function resolveBunExecutable(options: PathResolutionOptions = {}): string {

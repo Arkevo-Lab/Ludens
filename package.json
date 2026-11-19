@@ -10,6 +10,26 @@
     "client",
     "desktop"
   ],
+  "scripts": {
+    "dev": "bun scripts/dev.mjs web",
+    "dev:web": "bun scripts/dev.mjs web",
+    "dev:web:real": "bun scripts/dev.mjs web --real-home",
+    "dev:desktop": "bun scripts/dev.mjs desktop",
+    "dev:desktop:real": "bun scripts/dev.mjs desktop --real-home",
+    "dev:client": "bun --cwd=client run dev",
+    "dev:server": "bun scripts/dev.mjs server",
+    "dev:server:real": "bun scripts/dev.mjs server --real-home",
+    "build:client": "bun --cwd=client run build",
+    "build:server": "bun --cwd=server run build",
+    "build:sandbox": "bun --cwd=baseware run build && bun --cwd=core run build",
+    "build:desktop": "bun --cwd=desktop run build",
+    "build": "bun run build:client && bun run build:server && bun run build:sandbox && bun run build:desktop",
+    "pack:desktop": "bun run build && bun --cwd=desktop run pack",
+    "dist:desktop": "bun run build && bun --cwd=desktop run dist",
+    "start:selfhost": "bun scripts/selfhost.mjs",
+    "typecheck": "bun --cwd=protocol run typecheck && bun --cwd=baseware run typecheck && bun --cwd=core run typecheck && bun --cwd=server run typecheck && bun --cwd=client run typecheck && bun --cwd=desktop run typecheck",
+    "test": "bun --cwd=protocol run test && bun --cwd=baseware run test && bun --cwd=core run test && bun --cwd=server run test && bun --cwd=client run test && bun --cwd=desktop run test"
+  },
   "trustedDependencies": [
     "electron",
     "esbuild",

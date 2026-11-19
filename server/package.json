@@ -17,6 +17,9 @@
   },
   "scripts": {
     "ludens-server": "bun src/cli/main.ts",
+    "dev": "LUDENS_HOME=${LUDENS_HOME:-$HOME/.ludens-dev} bun src/cli/main.ts serve --dev --listen ws://127.0.0.1:38080",
+    "start": "bun src/cli/main.ts serve",
+    "build": "bun scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "uv run --project ../core/python --frozen bun test",
     "perf": "bun perf/index-memory.ts"
