@@ -1,0 +1,32 @@
+{
+  "name": "@ludens/server",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "ludens-server": "./bin/ludens-server"
+  },
+  "exports": {
+    "./server/app-server": "./src/server/app-server.ts",
+    "./server/*": "./src/server/*.ts",
+    "./daemon/*": "./src/daemon/*.ts",
+    "./query/*": "./src/query/*.ts",
+    "./cli/*": "./src/cli/*.ts",
+    "./package.json": "./package.json"
+  },
+  "scripts": {
+    "ludens-server": "bun src/cli/main.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "uv run --project ../core/python --frozen bun test"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "typescript": "6.0.2"
+  },
+  "dependencies": {
+    "@ludens/baseware": "workspace:*",
+    "@ludens/core": "workspace:*",
+    "@ludens/protocol": "workspace:*"
+  }
+}

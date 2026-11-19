@@ -13,7 +13,8 @@ import {
 } from "@ludens/protocol/event-pool";
 import type { DiagnosticsMode, EventTrace, RecordEvent } from "../storage/events.ts";
 import { isOmpEffort, isOmpServiceTier, type OmpEffort, type OmpServiceTier } from "@ludens/protocol/ludens";
-import type { ServiceLaunchOrigin } from "../query/types.ts";
+import type { ServiceLaunchOrigin } from "@ludens/protocol/types";
+export type { ServiceLaunchOrigin };
 import type { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { PerceptionRuntime } from "../subsystems/perception.ts";
 import type { LoopRuntime } from "../subsystems/loop.ts";

@@ -3,11 +3,11 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { adaptCapabilityEval, historyCapabilityEvals, listCapabilityEvals, runCapabilityEvals } from "../core/subsystems/capability-evals.ts";
 
-export const EVAL_HELP = `ludens eval list
-ludens eval run [<capability-id>] [--all]
-ludens eval history [<capability-id>] [--limit <n>]
-ludens eval adapt <capability-id> --reason <text> [--record <record-id> ...]
-ludens eval <capability-id>
+export const EVAL_HELP = `ludens-core eval list
+ludens-core eval run [<capability-id>] [--all]
+ludens-core eval history [<capability-id>] [--limit <n>]
+ludens-core eval adapt <capability-id> --reason <text> [--record <record-id> ...]
+ludens-core eval <capability-id>
 
 Evaluate workspace @capability functions through their bound @eval_capability.
 list joins static discovery with .ludens/evals/latest.json and reports evalStatus
@@ -37,7 +37,7 @@ export async function evalCommand(args: string[], workspacePath: string) {
   const command = first === "run" || first === "list" || first === "history" || first === "adapt"
     ? first
     : first?.startsWith("python/") ? "run" : undefined;
-  if (!command) throw new Error(`Unknown eval command: ${first}; see ludens eval --help`);
+  if (!command) throw new Error(`Unknown eval command: ${first}; see ludens-core eval --help`);
   const positional = command === "run" && first !== "run" ? [first, ...rest] : rest;
   if (command === "adapt") {
     const { values, positionals } = parseArgs({ args: positional, allowPositionals: true, options: {

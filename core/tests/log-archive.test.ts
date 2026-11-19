@@ -114,13 +114,13 @@ test("nested native audio and base64 source blocks use the same media contract",
     expect(gunzipSync(readFileSync(join(store.root, "objects", file))).toString()).not.toContain(data);
 });
 
-test("offline CLI reads event references without a runtime and reports unavailable media", async () => {
+test("offline log-archive library reads event references without a runtime and reports unavailable media", async () => {
   const { run, store } = setup();
   const ref = store.write({ text: "inspect me", image: { type: "image", data: Buffer.from("unrecorded").toString("base64") } });
   writeFileSync(join(run, "events.jsonl"), JSON.stringify({ seq: 9, data: { payload: ref } }) + "\n");
-  const command = join(import.meta.dir, "../src/cli/main.ts");
+  const entry = join(import.meta.dir, "../src/cli/log-archive.ts");
   const call = async (...args: string[]) => {
-    const child = Bun.spawn([process.execPath, command, "logs", "read", "--run", run, ...args], {
+    const child = Bun.spawn([process.execPath, "-e", `import { logCommand } from ${JSON.stringify(entry)}; await logCommand(${JSON.stringify(["read", "--run", run, ...args])});`], {
       cwd: run, stdout: "pipe", stderr: "pipe",
     });
     const [stdout, stderr, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);

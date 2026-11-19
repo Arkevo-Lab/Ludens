@@ -8,13 +8,13 @@ import {
 import { openWorkspaceEventPool } from "../core/storage/event-pool.ts";
 import { send } from "../daemon/transport.ts";
 
-export const EVENT_HELP = `ludens event list [--direction <inbound|outbound>] [--status <pending|handled>] [--limit <n>]
-ludens event send [--title <text>] [--message <text> | <text>]
-ludens event reply <event-id> [--message <text> | <text>]
-ludens event ack <event-id> [<event-id2> ...]
+export const EVENT_HELP = `ludens-core event list [--direction <inbound|outbound>] [--status <pending|handled>] [--limit <n>]
+ludens-core event send [--title <text>] [--message <text> | <text>]
+ludens-core event reply <event-id> [--message <text> | <text>]
+ludens-core event ack <event-id> [<event-id2> ...]
 
 Post messages or replies into the workspace duplex Event Pool, inspect pending/handled items,
-or acknowledge outbound Shiori requests. Works whether ludens run is online (via host socket)
+or acknowledge outbound Shiori requests. Works whether ludens-core run is online (via host socket)
 or offline (persisted directly into .ludens/event-pool.json for the next cycle).`;
 
 export type ParsedEventCommand =
@@ -50,7 +50,7 @@ export function parseEventCommandArgs(argv: string[]): ParsedEventCommand {
       },
     });
     if (positionals.length > 0) {
-      throw new Error("Usage: ludens event list [--direction <inbound|outbound>] [--status <pending|handled>] [--limit <n>]");
+      throw new Error("Usage: ludens-core event list [--direction <inbound|outbound>] [--status <pending|handled>] [--limit <n>]");
     }
     if (values.direction !== undefined && !(EVENT_DIRECTIONS as readonly string[]).includes(values.direction)) {
       throw new Error("--direction must be inbound|outbound");
@@ -84,7 +84,7 @@ export function parseEventCommandArgs(argv: string[]): ParsedEventCommand {
     });
     const text = (values.message ?? positionals.join(" ")).trim();
     if (!text || (values.message !== undefined && positionals.length > 0)) {
-      throw new Error("Usage: ludens event send [--title <text>] [--message <text> | <text>]");
+      throw new Error("Usage: ludens-core event send [--title <text>] [--message <text> | <text>]");
     }
     return {
       subcommand: "send",
@@ -96,7 +96,7 @@ export function parseEventCommandArgs(argv: string[]): ParsedEventCommand {
   if (subcommand === "reply") {
     const [replyTo, ...replyRest] = rest;
     if (!replyTo || replyTo.startsWith("--")) {
-      throw new Error("Usage: ludens event reply <event-id> [--message <text> | <text>]");
+      throw new Error("Usage: ludens-core event reply <event-id> [--message <text> | <text>]");
     }
     const { values, positionals } = parseArgs({
       args: replyRest,
@@ -107,7 +107,7 @@ export function parseEventCommandArgs(argv: string[]): ParsedEventCommand {
     });
     const text = (values.message ?? positionals.join(" ")).trim();
     if (!text || (values.message !== undefined && positionals.length > 0)) {
-      throw new Error("Usage: ludens event reply <event-id> [--message <text> | <text>]");
+      throw new Error("Usage: ludens-core event reply <event-id> [--message <text> | <text>]");
     }
     return { subcommand: "reply", replyTo: replyTo.trim(), text };
   }
@@ -115,12 +115,12 @@ export function parseEventCommandArgs(argv: string[]): ParsedEventCommand {
   if (subcommand === "ack") {
     const ids = rest.map(id => id.trim()).filter(id => id.length > 0 && !id.startsWith("--"));
     if (!ids.length || ids.length !== rest.length) {
-      throw new Error("Usage: ludens event ack <event-id> [<event-id2> ...]");
+      throw new Error("Usage: ludens-core event ack <event-id> [<event-id2> ...]");
     }
     return { subcommand: "ack", ids };
   }
 
-  throw new Error("Usage: ludens event <list|send|reply|ack> (see ludens event --help)");
+  throw new Error("Usage: ludens-core event <list|send|reply|ack> (see ludens-core event --help)");
 }
 
 export function isHostSocketOfflineError(cause: unknown): boolean {

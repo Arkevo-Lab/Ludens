@@ -42,7 +42,7 @@ def calculate(value: int = 4):
   let request = 0;
   try {
     ({session} = await createOmpSession({cwd: workspace, agentDir: join(directory, "omp"), model, authStorage, modelRegistry, settings,
-      sessionManager: SessionManager.create(workspace, join(directory, "session")), systemPrompt: "Use ludens controller to discover capabilities.", cacheWarming: false,
+      sessionManager: SessionManager.create(workspace, join(directory, "session")), systemPrompt: "Use ludens-core controller to discover capabilities.", cacheWarming: false,
       skills: [], rules: [], contextFiles: [], promptTemplates: [], slashCommands: [],
       enableMCP: false, enableLsp: false, enableIrc: false, skipPythonPreflight: true,
       disableExtensionDiscovery: true, restrictToolNames: true, allowRestrictedCustomTools: true,

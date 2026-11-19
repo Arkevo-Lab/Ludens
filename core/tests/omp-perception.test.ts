@@ -82,7 +82,7 @@ class Perception:
       const content: AssistantMessage["content"] = repairs
         ? [{ type: "toolCall", id: `write-observer-${call}`, name: "write", arguments: { path: "perception.py",
             content: call === 2 ? broken : source(`adapted-v${call === 5 ? 3 : 1}`) } },
-           { type: "toolCall", id: `reload-${call}`, name: "bash", arguments: { command: "ludens perception reload; sleep 0.15" } }]
+           { type: "toolCall", id: `reload-${call}`, name: "bash", arguments: { command: "ludens-core perception reload; sleep 0.15" } }]
         : [{ type: "text", text: `Step ${call}.` }];
       const message: AssistantMessage = { role: "assistant", api: model.api, provider: model.provider, model: model.id,
         timestamp: Date.now(), content, stopReason: repairs ? "toolUse" : "stop",

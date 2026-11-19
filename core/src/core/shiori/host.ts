@@ -1,5 +1,5 @@
 import { delimiter, resolve } from "node:path";
-import { Runtime, type DeviceSession, type SharedBudget } from "./runtime.ts";
+import { Runtime, type DeviceSession, type ServiceLaunchOrigin, type SharedBudget } from "./runtime.ts";
 import { WorkspaceController } from "../subsystems/controller.ts";
 import { PerceptionRuntime } from "../subsystems/perception.ts";
 import { LoopRuntime } from "../subsystems/loop.ts";
@@ -7,7 +7,6 @@ import { WorkspaceEventPool } from "../storage/event-pool.ts";
 import type { EventLog, RecordEvent } from "../storage/events.ts";
 import type { WorkspaceState } from "../storage/workspace-state.ts";
 import type { ModelConnectionConfig } from "@ludens/protocol/ludens";
-import type { ServiceLaunchOrigin } from "../query/types.ts";
 
 /** The Host assembly used by daily play and evaluated agents. Transports remain owned by the caller. */
 export async function createHostRuntime(options: {
