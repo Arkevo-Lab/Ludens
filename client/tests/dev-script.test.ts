@@ -156,13 +156,19 @@ test("resolveLudensServerCommand prefers bun + server/src/cli/main.ts over .cmd 
   assert.ok(spec.argsPrefix[0]?.endsWith("server/src/cli/main.ts"));
 
   const wrapped = buildServerSpawn(
-    "C:\\bin\\ludens-server.cmd",
-    ["serve", "--dev"],
+    "C:\\Program Files\\Ludens\\ludens-server.cmd",
+    ["serve", "--dev", "--static-dir", "C:\\My App\\out"],
     "win32",
     { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
   );
   assert.deepEqual(wrapped, {
     command: "C:\\Windows\\System32\\cmd.exe",
-    args: ["/d", "/s", "/c", "C:\\bin\\ludens-server.cmd", "serve", "--dev"],
+    args: [
+      "/d",
+      "/s",
+      "/c",
+      `""C:\\Program Files\\Ludens\\ludens-server.cmd" serve --dev --static-dir "C:\\My App\\out""`,
+    ],
+    windowsVerbatimArguments: true,
   });
 });

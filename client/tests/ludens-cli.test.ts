@@ -123,10 +123,15 @@ test("ludens config show and set route 100% through workspaces RPC", async () =>
     ["defaults.seconds", "typo"],
     ["defaults.seconds", "0"],
     ["defaults.seconds", "-5"],
+    ["defaults.seconds", "1.5"],
+    ["defaults.seconds", "2147484"],
+    ["defaults.seconds", "9007199254740992"],
     ["defaults.seconds", "NaN"],
     ["defaults.requests", "1.5"],
     ["defaults.requests", "0"],
+    ["defaults.requests", "9007199254740992"],
     ["defaults.compactionThreshold", "typo"],
+    ["defaults.compactionThreshold", "1.5"],
     ["defaults.compactionThreshold", "-1"],
   ]) {
     await assert.rejects(
@@ -176,6 +181,24 @@ test("ludens workspace lifecycle & import route through pure RPC", async () => {
   assert.deepEqual(calls.at(-1), {
     method: "workspaces/mutate",
     params: { action: "create", input: { name: "demo", driver: "cua" } },
+  });
+
+  // LUDENS_WORKSPACE env var must NOT conflict with `ludens workspace init --workspace <new-dir>`
+  await runCli(["workspace", "init", "--workspace", "/tmp/workspaces/brand-new", "--driver", "cua"], {
+    env: { ...env, LUDENS_WORKSPACE: "/tmp/workspaces/alpha" },
+    rpcOptions,
+    out: () => {},
+  });
+  assert.deepEqual(calls.at(-1), {
+    method: "workspaces/mutate",
+    params: {
+      action: "create",
+      input: {
+        name: "brand-new",
+        driver: "cua",
+        workspace: "/tmp/workspaces/brand-new",
+      },
+    },
   });
 
   // open --new-id
@@ -674,16 +697,32 @@ test("withOperatorRpc uses WS directly when --remote is set and resolves monorep
   assert.equal(repoFallback?.argsPrefix.length, 1);
   assert.ok(repoFallback?.argsPrefix[0]?.endsWith("server/src/cli/main.ts"));
 
-  // Windows .cmd/.bat shims from external PATH are wrapped through cmd.exe /d /s /c
+  // LUDENS_APP_SERVER_BIN compatibility alias is also honored
+  assert.deepEqual(
+    resolveLocalLudensServerCommand({
+      env: { LUDENS_APP_SERVER_BIN: "/custom/ludens-server" },
+      platform: "darwin",
+      exists: () => false,
+    }),
+    { command: "/custom/ludens-server", argsPrefix: [] },
+  );
+
+  // Windows .cmd/.bat shims with spaces are wrapped via cmd.exe /d /s /c with outer quotes & windowsVerbatimArguments
   const winCmdInvocation = buildServerSpawnInvocation(
-    { command: "C:\\Tools\\ludens-server.cmd", argsPrefix: [] },
-    ["start"],
+    { command: "C:\\Program Files\\Ludens\\ludens-server.cmd", argsPrefix: [] },
+    ["start", "--static-dir", "C:\\My App\\out"],
     "win32",
     { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
   );
   assert.deepEqual(winCmdInvocation, {
     command: "C:\\Windows\\System32\\cmd.exe",
-    args: ["/d", "/s", "/c", "C:\\Tools\\ludens-server.cmd", "start"],
+    args: [
+      "/d",
+      "/s",
+      "/c",
+      `""C:\\Program Files\\Ludens\\ludens-server.cmd" start --static-dir "C:\\My App\\out""`,
+    ],
+    windowsVerbatimArguments: true,
   });
 });
 

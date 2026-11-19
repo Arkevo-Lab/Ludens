@@ -137,6 +137,7 @@ export function resolveRepoServerEntry(options: PathResolutionOptions = {}): str
   const here = options.here ?? DEFAULT_HERE
   const exists = options.exists ?? existsSync
   const candidates = [
+    options.resourcesPath ? pathMod.join(options.resourcesPath, 'server', 'main.js') : undefined,
     options.resourcesPath ? pathMod.join(options.resourcesPath, 'server', 'src', 'cli', 'main.ts') : undefined,
     pathMod.resolve(here, '../../../server/src/cli/main.ts'),
     pathMod.resolve(here, '../../server/src/cli/main.ts'),
@@ -222,6 +223,20 @@ export function resolveDaemonLaunch(
           argsPrefix: [],
         },
         ...(repo ? { repo } : {}),
+        ...(options.trustedOrigins ? { trustedOrigins: [...options.trustedOrigins] } : {}),
+      }
+    }
+    const packagedBundleEntry = pathMod.join(options.resourcesPath, 'server', 'main.js')
+    if (exists(packagedBundleEntry)) {
+      const bun = resolveBunExecutable(options)
+      return {
+        home,
+        staticDir,
+        spawnCommand: {
+          command: bun,
+          argsPrefix: [packagedBundleEntry],
+        },
+        repo: options.repo ?? options.resourcesPath,
         ...(options.trustedOrigins ? { trustedOrigins: [...options.trustedOrigins] } : {}),
       }
     }

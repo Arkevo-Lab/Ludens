@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process'
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, posix, resolve, win32 } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -113,6 +115,21 @@ describe('app-server-host', () => {
       })
       expect(packagedLaunch.staticDir).toBe(posix.join(resourcesPath, 'out'))
       expect(packagedLaunch.repo).toBe(resourcesPath)
+
+      const packagedBundleLaunch = resolveDaemonLaunch({
+        resourcesPath,
+        platform: 'darwin',
+        env: { LUDENS_BUN: '/opt/bun', LUDENS_HOME: '/tmp/ludens-packaged' },
+        exists: p =>
+          p === posix.join(resourcesPath, 'server', 'main.js') ||
+          p === posix.join(resourcesPath, 'out', 'index.html') ||
+          p === posix.join(resourcesPath, 'docs'),
+      })
+      expect(packagedBundleLaunch.spawnCommand).toEqual({
+        command: '/opt/bun',
+        argsPrefix: [posix.join(resourcesPath, 'server', 'main.js')],
+      })
+      expect(packagedBundleLaunch.repo).toBe(resourcesPath)
 
       const packagedSourceLaunch = resolveDaemonLaunch({
         resourcesPath,
@@ -279,6 +296,39 @@ describe('app-server-host', () => {
       await host.stop()
       expect(host.current()).toBeUndefined()
       await expect(host.start()).rejects.toThrow(/stopped/i)
+    })
+
+    it('resolves and runs the prebuilt packaged server bundle from an isolated resourcesPath without node_modules', () => {
+      const builtServerDir = resolve('dist/server')
+      if (!existsSync(join(builtServerDir, 'main.js'))) {
+        // Build step produces dist/server; skip only if test is invoked without prior build.
+        return
+      }
+      const isolatedRoot = mkdtempSync(join(tmpdir(), 'ludens-packaged-resources-'))
+      try {
+        const resourcesPath = join(isolatedRoot, 'Resources')
+        mkdirSync(join(resourcesPath, 'out'), { recursive: true })
+        cpSync(builtServerDir, join(resourcesPath, 'server'), { recursive: true })
+
+        const launch = resolveDaemonLaunch({
+          here: join(isolatedRoot, 'app', 'dist', 'electron'),
+          resourcesPath,
+          env: process.env,
+        })
+        expect(launch.spawnCommand.argsPrefix).toEqual([join(resourcesPath, 'server', 'main.js')])
+        expect(launch.repo).toBe(resourcesPath)
+
+        const result = spawnSync(
+          launch.spawnCommand.command,
+          [...launch.spawnCommand.argsPrefix, '--help'],
+          { cwd: isolatedRoot, encoding: 'utf8', env: { PATH: process.env.PATH ?? '' } },
+        )
+        expect(result.error).toBeUndefined()
+        expect(result.status).toBe(0)
+        expect(result.stdout).toContain('ludens-server — Ludens Control Plane Server')
+      } finally {
+        rmSync(isolatedRoot, { recursive: true, force: true })
+      }
     })
   })
 })
