@@ -16,7 +16,7 @@ Prints a single-line JSON readiness handshake to stdout once listening.
 --listen unix://PATH overrides the UDS socket path; ws://HOST:PORT enables HTTP + WebSocket /rpc (repeatable).
 --auth <none|token> selects WebSocket authentication mode (required on ws:// without --dev, and whenever ws:// binds a non-loopback host).
 --token / --token-env <VAR> supplies the authentication secret.
---static-dir serves exported static UI assets (e.g. client/out) with SPA fallback.
+--static-dir serves exported static UI assets (e.g. client/dist) with SPA fallback.
 --trusted-origin allows browser Origin access in none auth mode (repeatable).
 --parent-watchdog shuts down all supervised workspace jobs and exits 0 on stdin EOF.`;
 

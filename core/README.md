@@ -14,6 +14,7 @@ Single-workspace execution kernel (`1 Workspace = 1 Core`) for Ludens: hosts **S
 ## Scripts
 
 ```sh
+cd core && bun run build          # Build self-contained core/dist/ (main.js + bin/ludens-core + prompts/templates/python)
 cd core && bun run typecheck
 cd core && bun run test
 ```
