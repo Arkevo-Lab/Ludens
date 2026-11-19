@@ -7,7 +7,11 @@ import {
   parseDevArgs,
   resolveDevHome,
 } from "../scripts/dev.mjs";
-import { buildProductionStartArgs } from "../scripts/production.mjs";
+import {
+  buildProductionStartArgs,
+  buildServerSpawn,
+  resolveLudensServerCommand,
+} from "../scripts/production.mjs";
 
 test("resolveDevHome defaults to isolated ~/.ludens-dev when no home overrides are set", () => {
   const fakeHome = "/Users/alice";
@@ -138,4 +142,27 @@ test("buildProductionStartArgs passes --dev on tokenless loopback and --auth tok
     buildProductionStartArgs(["--listen", "ws://0.0.0.0:3015"], emptyEnv, "/repo/app"),
     ["--static-dir", resolve("/repo/app", "out"), "--listen", "ws://0.0.0.0:3015"],
   );
+});
+
+test("resolveLudensServerCommand prefers bun + server/src/cli/main.ts over .cmd shim and buildServerSpawn wraps Windows .cmd", () => {
+  const spec = resolveLudensServerCommand(
+    "/repo/client",
+    { PATH: "", LUDENS_BUN: "/opt/bun" },
+    "win32",
+    p => String(p).endsWith("server/src/cli/main.ts") || String(p).endsWith("server/bin/ludens-server.cmd"),
+  );
+  assert.equal(spec.command, "/opt/bun");
+  assert.equal(spec.argsPrefix.length, 1);
+  assert.ok(spec.argsPrefix[0]?.endsWith("server/src/cli/main.ts"));
+
+  const wrapped = buildServerSpawn(
+    "C:\\bin\\ludens-server.cmd",
+    ["serve", "--dev"],
+    "win32",
+    { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+  );
+  assert.deepEqual(wrapped, {
+    command: "C:\\Windows\\System32\\cmd.exe",
+    args: ["/d", "/s", "/c", "C:\\bin\\ludens-server.cmd", "serve", "--dev"],
+  });
 });

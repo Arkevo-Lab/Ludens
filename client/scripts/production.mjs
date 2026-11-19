@@ -33,24 +33,31 @@ export function resolveLudensServerCommand(
   clientRoot = directory,
   env = process.env,
   platform = process.platform,
+  exists = existsSync,
 ) {
   if (env.LUDENS_SERVER_BIN?.trim()) {
     return { command: env.LUDENS_SERVER_BIN.trim(), argsPrefix: [] };
   }
   const binNames =
     platform === "win32"
-      ? ["ludens-server.cmd", "ludens-server.exe", "ludens-server"]
+      ? ["ludens-server.exe", "ludens-server.cmd", "ludens-server.bat", "ludens-server"]
       : ["ludens-server"];
 
-  // Prefer PATH-installed ludens-server when present, or fall back to sibling monorepo server package.
-  const pathEntries = (env.PATH ?? "").split(delimiter).filter(Boolean);
+  const pathSep = platform === "win32" ? ";" : delimiter;
+  const pathEntries = (env.PATH ?? "").split(pathSep).filter(Boolean);
   for (const entry of pathEntries) {
     for (const binName of binNames) {
       const candidate = join(entry, binName);
-      if (existsSync(candidate)) {
+      if (exists(candidate)) {
         return { command: candidate, argsPrefix: [] };
       }
     }
+  }
+
+  // Prefer executing the monorepo server TS entry directly via Bun (avoids spawning Windows .cmd shims).
+  const repoEntry = resolve(clientRoot, "../server/src/cli/main.ts");
+  if (exists(repoEntry)) {
+    return { command: resolveBunBinary(env, platform), argsPrefix: [repoEntry] };
   }
 
   const repoBin = resolve(
@@ -58,19 +65,29 @@ export function resolveLudensServerCommand(
     "../server/bin",
     platform === "win32" ? "ludens-server.cmd" : "ludens-server",
   );
-  if (existsSync(repoBin)) {
+  if (exists(repoBin)) {
     return { command: repoBin, argsPrefix: [] };
-  }
-
-  const repoEntry = resolve(clientRoot, "../server/src/cli/main.ts");
-  if (existsSync(repoEntry)) {
-    return { command: resolveBunBinary(env, platform), argsPrefix: [repoEntry] };
   }
 
   return {
     command: platform === "win32" ? "ludens-server.cmd" : "ludens-server",
     argsPrefix: [],
   };
+}
+
+export function buildServerSpawn(
+  command,
+  args,
+  platform = process.platform,
+  env = process.env,
+) {
+  if (platform === "win32" && /\.(cmd|bat)$/i.test(command)) {
+    return {
+      command: env.ComSpec || "cmd.exe",
+      args: ["/d", "/s", "/c", command, ...args],
+    };
+  }
+  return { command, args };
 }
 
 export function resolveBunBinary(env = process.env, platform = process.platform, home = homedir()) {
@@ -262,7 +279,8 @@ async function startAppServer(args) {
     "serve",
     ...buildProductionStartArgs(args, process.env, directory),
   ];
-  await runProcess(command, serverArgs, {
+  const invocation = buildServerSpawn(command, serverArgs, process.platform, process.env);
+  await runProcess(invocation.command, invocation.args, {
     cwd: resolve(directory, ".."),
     env: process.env,
     label: "ludens-server serve",

@@ -6,6 +6,7 @@ import {
   AppServerHost,
   resolveBunExecutable,
   resolveDaemonLaunch,
+  resolveDocsDir,
   resolveLudensHome,
   resolveStaticDir,
 } from './app-server-host.js'
@@ -112,6 +113,29 @@ describe('app-server-host', () => {
       })
       expect(packagedLaunch.staticDir).toBe(posix.join(resourcesPath, 'out'))
       expect(packagedLaunch.repo).toBe(resourcesPath)
+
+      const packagedSourceLaunch = resolveDaemonLaunch({
+        resourcesPath,
+        platform: 'darwin',
+        env: { LUDENS_BUN: '/opt/bun', LUDENS_HOME: '/tmp/ludens-packaged' },
+        exists: p =>
+          p === posix.join(resourcesPath, 'server', 'src', 'cli', 'main.ts') ||
+          p === posix.join(resourcesPath, 'out', 'index.html') ||
+          p === posix.join(resourcesPath, 'docs'),
+      })
+      expect(packagedSourceLaunch.spawnCommand).toEqual({
+        command: '/opt/bun',
+        argsPrefix: [posix.join(resourcesPath, 'server', 'src', 'cli', 'main.ts')],
+      })
+      expect(packagedSourceLaunch.repo).toBe(resourcesPath)
+      expect(
+        resolveDocsDir({
+          platform: 'darwin',
+          resourcesPath,
+          env: {},
+          exists: p => p === posix.join(resourcesPath, 'docs'),
+        }),
+      ).toBe(posix.join(resourcesPath, 'docs'))
 
       const repoLaunch = resolveDaemonLaunch({
         here: '/repo/desktop/dist/electron',

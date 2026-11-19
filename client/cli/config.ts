@@ -1,7 +1,11 @@
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ModelConnectionConfig } from "@ludens/protocol/connection";
-import type { LudensConfig } from "@ludens/protocol/workspaces";
+import {
+  isOmpEffort,
+  isOmpServiceTier,
+  type LudensConfig,
+} from "@ludens/protocol/workspaces";
 import type { AppRpcClient } from "./app-rpc-client.ts";
 import { withOperatorRpc, type OperatorRpcOptions } from "./operator-rpc.ts";
 
@@ -70,25 +74,58 @@ export function buildConfigUpdate(
   }
   if (field.startsWith("defaults.")) {
     const key = field.slice("defaults.".length);
-    if ((key === "serviceTier" || key === "effort") && value === "none") {
-      return {
-        mode: "defaults",
-        defaults: { [key]: null },
-      };
+    if (key === "model") {
+      const trimmed = value.trim();
+      if (!trimmed) throw new Error("defaults.model must not be empty");
+      return { mode: "defaults", defaults: { model: trimmed } };
     }
-    const setting = ["model", "serviceTier", "effort"].includes(key)
-      ? value
-      : ["pet", "dashboard"].includes(key)
-        ? value === "true"
-          ? true
-          : value === "false"
-            ? false
-            : value
-        : Number(value);
-    return {
-      mode: "defaults",
-      defaults: { [key]: setting },
-    };
+    if (key === "serviceTier") {
+      if (value === "none") return { mode: "defaults", defaults: { serviceTier: null } };
+      if (!isOmpServiceTier(value)) {
+        throw new Error(`Invalid value '${value}' for defaults.serviceTier: expected none, priority, or ultrafast`);
+      }
+      return { mode: "defaults", defaults: { serviceTier: value } };
+    }
+    if (key === "effort") {
+      if (value === "none") return { mode: "defaults", defaults: { effort: null } };
+      if (!isOmpEffort(value)) {
+        throw new Error(`Invalid value '${value}' for defaults.effort: expected none, minimal, low, medium, high, xhigh, or max`);
+      }
+      return { mode: "defaults", defaults: { effort: value } };
+    }
+    if (key === "pet" || key === "dashboard") {
+      if (value !== "true" && value !== "false") {
+        throw new Error(`Invalid value '${value}' for defaults.${key}: expected 'true' or 'false'`);
+      }
+      return { mode: "defaults", defaults: { [key]: value === "true" } };
+    }
+    if (key === "seconds") {
+      const parsed = value.trim() ? Number(value) : Number.NaN;
+      if (!Number.isFinite(parsed) || parsed <= 0) {
+        throw new Error(`Invalid value '${value}' for defaults.seconds: expected a positive number`);
+      }
+      return { mode: "defaults", defaults: { seconds: parsed } };
+    }
+    if (key === "requests") {
+      const parsed = value.trim() ? Number(value) : Number.NaN;
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(`Invalid value '${value}' for defaults.requests: expected a positive integer`);
+      }
+      return { mode: "defaults", defaults: { requests: parsed } };
+    }
+    if (key === "compactionThreshold") {
+      if (value === "none") {
+        return { mode: "defaults", defaults: { compactionThreshold: null } };
+      }
+      const parsed = value.trim() ? Number(value) : Number.NaN;
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error(
+          `Invalid value '${value}' for defaults.compactionThreshold: expected a positive integer or 'none'`,
+        );
+      }
+      return { mode: "defaults", defaults: { compactionThreshold: parsed } };
+    }
+    throw new Error(`Unknown global default setting: ${field}`);
   }
   throw new Error(`Unknown global setting: ${field}`);
 }

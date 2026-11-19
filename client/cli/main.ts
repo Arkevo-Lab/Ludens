@@ -49,8 +49,8 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
 
   let selectedWorkspace = env.LUDENS_WORKSPACE?.trim() || options.cwd || process.cwd();
   let explicitWorkspace = Boolean(env.LUDENS_WORKSPACE?.trim());
-  let remoteUrl = env.LUDENS_REMOTE_URL?.trim() || undefined;
-  let remoteToken = env.LUDENS_REMOTE_TOKEN?.trim() || undefined;
+  let explicitRemoteUrl: string | undefined;
+  let explicitRemoteToken: string | undefined;
 
   while (args.length > 0 && args[0]!.startsWith("--") && args[0] !== "--help") {
     const flag = args[0]!;
@@ -70,24 +70,24 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
     }
     if (flag === "--remote") {
       if (!args[1] || args[1].startsWith("--")) throw new Error("--remote requires a URL");
-      remoteUrl = args[1];
+      explicitRemoteUrl = args[1];
       args.splice(0, 2);
       continue;
     }
     if (flag.startsWith("--remote=")) {
-      remoteUrl = flag.slice("--remote=".length);
-      if (!remoteUrl) throw new Error("--remote requires a URL");
+      explicitRemoteUrl = flag.slice("--remote=".length);
+      if (!explicitRemoteUrl) throw new Error("--remote requires a URL");
       args.splice(0, 1);
       continue;
     }
     if (flag === "--token") {
       if (args[1] === undefined || args[1].startsWith("--")) throw new Error("--token requires a secret");
-      remoteToken = args[1];
+      explicitRemoteToken = args[1];
       args.splice(0, 2);
       continue;
     }
     if (flag.startsWith("--token=")) {
-      remoteToken = flag.slice("--token=".length);
+      explicitRemoteToken = flag.slice("--token=".length);
       args.splice(0, 1);
       continue;
     }
@@ -99,10 +99,6 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
     out(CLI_HELP);
     return 0;
   }
-
-  const remoteSeed: RemoteConnectionConfig | undefined = remoteUrl
-    ? { url: remoteUrl, ...(remoteToken ? { token: remoteToken } : {}) }
-    : undefined;
 
   const extractWorkspaceFlag = (input: string[]): string[] => {
     const cleaned: string[] = [];
@@ -133,8 +129,11 @@ export async function runCli(argv: readonly string[], options: RunCliOptions = {
     return cleaned;
   };
 
-  const parsedRemote = extractRemoteArgs(rest, env);
-  const remote = parsedRemote.remote ?? remoteSeed;
+  const parsedRemote = extractRemoteArgs(rest, env, {
+    ...(explicitRemoteUrl !== undefined ? { remoteUrl: explicitRemoteUrl } : {}),
+    ...(explicitRemoteToken !== undefined ? { token: explicitRemoteToken } : {}),
+  });
+  const remote: RemoteConnectionConfig | undefined = parsedRemote.remote;
   const subArgs = extractWorkspaceFlag(parsedRemote.remaining);
   const home = ludensHome(env);
   const rpcOptions: OperatorRpcOptions = {

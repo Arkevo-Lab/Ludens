@@ -7,6 +7,9 @@ while [ -L "$SCRIPT" ]; do
   case "$SCRIPT" in /*) ;; *) SCRIPT=$DIRECTORY/$SCRIPT ;; esac
 done
 CLIENT_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")/.." && pwd)
+if [ -n "${LUDENS_BUN:-}" ]; then
+  exec "$LUDENS_BUN" "$CLIENT_ROOT/cli/main.ts" "$@"
+fi
 if command -v bun >/dev/null 2>&1; then
   exec bun "$CLIENT_ROOT/cli/main.ts" "$@"
 fi

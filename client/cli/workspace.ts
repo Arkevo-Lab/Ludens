@@ -137,9 +137,13 @@ export async function runWorkspaceEvalWithClient(
     if (positionals.length > 1) {
       throw new Error("workspace eval history takes at most one capability ID");
     }
+    const MAX_EVAL_HISTORY_LIMIT = 500;
     const limit = values.limit !== undefined ? Number(values.limit) : undefined;
-    if (limit !== undefined && (!Number.isInteger(limit) || limit <= 0)) {
-      throw new Error("--limit must be a positive integer");
+    if (
+      limit !== undefined &&
+      (!Number.isInteger(limit) || limit < 1 || limit > MAX_EVAL_HISTORY_LIMIT)
+    ) {
+      throw new Error(`--limit must be an integer between 1 and ${MAX_EVAL_HISTORY_LIMIT}`);
     }
     const history = await client.call("capabilities/evalHistory", {
       project: target.id,

@@ -111,14 +111,36 @@ export function resolveBunExecutable(options: PathResolutionOptions = {}): strin
   return binName
 }
 
+export function resolveDocsDir(options: PathResolutionOptions = {}): string {
+  const pathMod = pathApi(options.platform)
+  const here = options.here ?? DEFAULT_HERE
+  const exists = options.exists ?? existsSync
+  const envDir = (options.env ?? process.env).LUDENS_DOCS_DIR?.trim()
+  if (envDir) return pathMod.resolve(envDir)
+
+  const candidates = [
+    options.resourcesPath ? pathMod.join(options.resourcesPath, 'docs') : undefined,
+    pathMod.resolve(here, '../../../docs'),
+    pathMod.resolve(here, '../../docs'),
+  ].filter((candidate): candidate is string => Boolean(candidate))
+
+  for (const candidate of candidates) {
+    if (exists(candidate)) return candidate
+  }
+  return options.resourcesPath
+    ? pathMod.join(options.resourcesPath, 'docs')
+    : pathMod.resolve(here, '../../../docs')
+}
+
 export function resolveRepoServerEntry(options: PathResolutionOptions = {}): string {
   const pathMod = pathApi(options.platform)
   const here = options.here ?? DEFAULT_HERE
   const exists = options.exists ?? existsSync
   const candidates = [
+    options.resourcesPath ? pathMod.join(options.resourcesPath, 'server', 'src', 'cli', 'main.ts') : undefined,
     pathMod.resolve(here, '../../../server/src/cli/main.ts'),
     pathMod.resolve(here, '../../server/src/cli/main.ts'),
-  ]
+  ].filter((candidate): candidate is string => Boolean(candidate))
   for (const candidate of candidates) {
     if (exists(candidate)) return candidate
   }
@@ -200,6 +222,20 @@ export function resolveDaemonLaunch(
           argsPrefix: [],
         },
         ...(repo ? { repo } : {}),
+        ...(options.trustedOrigins ? { trustedOrigins: [...options.trustedOrigins] } : {}),
+      }
+    }
+    const packagedServerEntry = pathMod.join(options.resourcesPath, 'server', 'src', 'cli', 'main.ts')
+    if (exists(packagedServerEntry)) {
+      const bun = resolveBunExecutable(options)
+      return {
+        home,
+        staticDir,
+        spawnCommand: {
+          command: bun,
+          argsPrefix: [packagedServerEntry],
+        },
+        repo: options.repo ?? options.resourcesPath,
         ...(options.trustedOrigins ? { trustedOrigins: [...options.trustedOrigins] } : {}),
       }
     }

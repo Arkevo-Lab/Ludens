@@ -8,6 +8,7 @@ import type { AppRpcMethod, AppRpcParams, AppRpcResult } from "@ludens/protocol/
 import { NodeUdsRpcClient, type AppRpcClient } from "../cli/app-rpc-client.ts";
 import { runCli } from "../cli/main.ts";
 import {
+  buildServerSpawnInvocation,
   extractRemoteArgs,
   resolveLocalLudensServerCommand,
   withOperatorRpc,
@@ -105,6 +106,45 @@ test("ludens config show and set route 100% through workspaces RPC", async () =>
       connection: { openaiWebsockets: "auto", imageUrls: { enabled: true } },
     },
   });
+
+  // compactionThreshold accepts 'none' -> null, and numeric fields strictly reject invalid values without sending NaN/null
+  await runCli(["config", "set", "defaults.compactionThreshold", "none"], {
+    env: { LUDENS_HOME: "/tmp/ludens-test" },
+    rpcOptions: { createUdsClient: () => client },
+    out: () => {},
+  });
+  assert.deepEqual(calls.at(-1), {
+    method: "workspaces/mutate",
+    params: { action: "updateGlobalDefaults", defaults: { compactionThreshold: null } },
+  });
+
+  const beforeBadCount = calls.length;
+  for (const [field, badValue] of [
+    ["defaults.seconds", "typo"],
+    ["defaults.seconds", "0"],
+    ["defaults.seconds", "-5"],
+    ["defaults.seconds", "NaN"],
+    ["defaults.requests", "1.5"],
+    ["defaults.requests", "0"],
+    ["defaults.compactionThreshold", "typo"],
+    ["defaults.compactionThreshold", "-1"],
+  ]) {
+    await assert.rejects(
+      () =>
+        runCli(["config", "set", field!, badValue!], {
+          env: { LUDENS_HOME: "/tmp/ludens-test" },
+          rpcOptions: { createUdsClient: () => client },
+          out: () => {},
+        }),
+      /Invalid value/,
+      `Expected ${field}=${badValue} to fail client-side validation`,
+    );
+  }
+  assert.equal(
+    calls.slice(beforeBadCount).filter(c => c.method === "workspaces/mutate").length,
+    0,
+    "Invalid config values must never be mutated on server",
+  );
 });
 
 test("ludens workspace lifecycle & import route through pure RPC", async () => {
@@ -262,7 +302,7 @@ test("ludens workspace eval supports list, run, shorthand <id>, history, and ada
   });
 
   assert.equal(
-    await runCli(["workspace", "eval", "history", "python/nav.py:walk", "--limit", "5"], {
+    await runCli(["workspace", "eval", "history", "python/nav.py:walk", "--limit", "500"], {
       env,
       rpcOptions,
       out: () => {},
@@ -275,9 +315,28 @@ test("ludens workspace eval supports list, run, shorthand <id>, history, and ada
       project: "ws-alpha",
       workspace: "/tmp/workspaces/alpha",
       capabilityId: "python/nav.py:walk",
-      limit: 5,
+      limit: 500,
     },
   });
+
+  await assert.rejects(
+    () =>
+      runCli(["workspace", "eval", "history", "--limit", "501"], {
+        env,
+        rpcOptions,
+        out: () => {},
+      }),
+    /between 1 and 500/,
+  );
+  await assert.rejects(
+    () =>
+      runCli(["workspace", "eval", "history", "--limit", "0"], {
+        env,
+        rpcOptions,
+        out: () => {},
+      }),
+    /between 1 and 500/,
+  );
 
   assert.equal(
     await runCli(
@@ -310,11 +369,17 @@ test("ludens workspace eval supports list, run, shorthand <id>, history, and ada
 });
 
 test("ludens top-level remote control shortcuts route over runtime/control and run/stop RPC", async () => {
+  let runtimeControlStatus: { runId?: string; epoch?: string | null; mode: string; model?: string } = {
+    runId: "run-live-42",
+    epoch: "ep-active-7",
+    mode: "auto",
+    model: "openai-codex/gpt-6.2-sol",
+  };
   const { client, calls } = createMockRpcClient(method => {
     if (method === "workspaces/getSettings") return DEFAULT_SETTINGS;
-    if (method === "runtime/control") return { mode: "auto", model: "openai-codex/gpt-6.2-sol" };
+    if (method === "runtime/control") return runtimeControlStatus;
     if (method === "catalog/get") {
-      return [{ id: "ws-alpha", runs: [{ id: "run-9", epoch: "ep-1" }] }];
+      return [{ id: "ws-alpha", runs: [{ id: "run-9" }] }];
     }
     if (method === "run/stop") return { ok: true };
     throw new Error(`Unexpected RPC: ${method}`);
@@ -382,10 +447,19 @@ test("ludens top-level remote control shortcuts route over runtime/control and r
     },
   });
 
+  // Active Auto Run: resolves live runId + epoch from runtime/control(status)
   await runCli(["stop"], { env, rpcOptions, out: () => {} });
   assert.deepEqual(calls.at(-1), {
     method: "run/stop",
-    params: { project: "ws-alpha", run: "run-9", epoch: "ep-1" },
+    params: { project: "ws-alpha", run: "run-live-42", epoch: "ep-active-7" },
+  });
+
+  // Fallback when runtime/control has no runId/epoch: omits epoch (never sends "")
+  runtimeControlStatus = { mode: "manual" };
+  await runCli(["stop"], { env, rpcOptions, out: () => {} });
+  assert.deepEqual(calls.at(-1), {
+    method: "run/stop",
+    params: { project: "ws-alpha", run: "run-9" },
   });
 });
 
@@ -422,6 +496,36 @@ test("ludens logs events paginates over logs/events RPC and logs read supports -
     ],
   );
   assert.equal(pageCalls, 2);
+  // Bounded default page size (200) is always sent on logs/events RPC
+  const eventCalls = calls.filter(c => c.method === "logs/events");
+  assert.equal((eventCalls[0]?.params as { limit?: number }).limit, 200);
+  assert.equal((eventCalls[1]?.params as { limit?: number }).limit, 200);
+
+  // Explicit --limit > 500 is capped to 500 per RPC page
+  const cappedLimits: number[] = [];
+  let cappedPage = 0;
+  const { client: cappedClient } = createMockRpcClient((method, params) => {
+    if (method === "workspaces/getSettings") return DEFAULT_SETTINGS;
+    if (method === "logs/events") {
+      cappedLimits.push((params as { limit: number }).limit);
+      cappedPage++;
+      if (cappedPage === 1) {
+        return { events: Array.from({ length: 500 }, (_, i) => ({ seq: i + 1 })), nextCursor: 500, hasMore: true };
+      }
+      return { events: Array.from({ length: 150 }, (_, i) => ({ seq: 501 + i })), nextCursor: null, hasMore: false };
+    }
+    throw new Error(`Unexpected RPC: ${method}`);
+  });
+  let streamedCount = 0;
+  await runCli(["logs", "events", "--run", "2026-11-19T00-00-00", "--limit", "650"], {
+    env,
+    rpcOptions: { createUdsClient: () => cappedClient },
+    out: () => {
+      streamedCount++;
+    },
+  });
+  assert.deepEqual(cappedLimits, [500, 150]);
+  assert.equal(streamedCount, 650);
 
   const dir = await mkdtemp(join(tmpdir(), "ludens-cli-logs-"));
   try {
@@ -560,14 +664,75 @@ test("withOperatorRpc uses WS directly when --remote is set and resolves monorep
   assert.equal(wsConnectedUrl, "wss://cloud.example.com");
 
   const repoFallback = resolveLocalLudensServerCommand({
-    env: { PATH: "" },
-    platform: "darwin",
+    env: { PATH: "", LUDENS_BUN: "/opt/bun" },
+    platform: "win32",
     clientRoot: "/repo/client",
-    exists: p => p === "/repo/server/bin/ludens-server",
+    exists: p =>
+      p.endsWith("server/src/cli/main.ts") || p.endsWith("server/bin/ludens-server.cmd"),
   });
-  assert.deepEqual(repoFallback, {
-    command: "/repo/server/bin/ludens-server",
-    argsPrefix: [],
+  assert.equal(repoFallback?.command, "/opt/bun");
+  assert.equal(repoFallback?.argsPrefix.length, 1);
+  assert.ok(repoFallback?.argsPrefix[0]?.endsWith("server/src/cli/main.ts"));
+
+  // Windows .cmd/.bat shims from external PATH are wrapped through cmd.exe /d /s /c
+  const winCmdInvocation = buildServerSpawnInvocation(
+    { command: "C:\\Tools\\ludens-server.cmd", argsPrefix: [] },
+    ["start"],
+    "win32",
+    { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
+  );
+  assert.deepEqual(winCmdInvocation, {
+    command: "C:\\Windows\\System32\\cmd.exe",
+    args: ["/d", "/s", "/c", "C:\\Tools\\ludens-server.cmd", "start"],
+  });
+});
+
+test("prefix --remote overrides LUDENS_REMOTE_URL and merges cleanly with postfix --token", async () => {
+  const seenRemotes: Array<{ url: string; token?: string }> = [];
+  const { client } = createMockRpcClient(method => {
+    if (method === "workspaces/getSettings") return DEFAULT_SETTINGS;
+    if (method === "runtime/control") return { mode: "manual" };
+    throw new Error(`Unexpected RPC: ${method}`);
+  });
+
+  // Case 1: prefix --remote must beat LUDENS_REMOTE_URL env var
+  await runCli(["--remote", "wss://prefix.example.com", "status"], {
+    env: {
+      LUDENS_HOME: "/tmp/ludens-test",
+      LUDENS_REMOTE_URL: "wss://env-should-lose.example.com",
+      LUDENS_REMOTE_TOKEN: "env-tok",
+    },
+    rpcOptions: {
+      createWsClient: remote => {
+        seenRemotes.push(remote);
+        return client;
+      },
+    },
+    out: () => {},
+  });
+  assert.deepEqual(seenRemotes.at(-1), {
+    url: "wss://prefix.example.com",
+    token: "env-tok",
+  });
+
+  // Case 2: prefix --remote + postfix --token must combine both (and override env token)
+  await runCli(["--remote", "wss://prefix.example.com", "status", "--token", "postfix-tok"], {
+    env: {
+      LUDENS_HOME: "/tmp/ludens-test",
+      LUDENS_REMOTE_URL: "wss://env-should-lose.example.com",
+      LUDENS_REMOTE_TOKEN: "env-tok",
+    },
+    rpcOptions: {
+      createWsClient: remote => {
+        seenRemotes.push(remote);
+        return client;
+      },
+    },
+    out: () => {},
+  });
+  assert.deepEqual(seenRemotes.at(-1), {
+    url: "wss://prefix.example.com",
+    token: "postfix-tok",
   });
 });
 

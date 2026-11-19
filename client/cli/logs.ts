@@ -120,14 +120,20 @@ export async function runLogsWithClient(
     );
     const channel = values.diagnostics ? "diagnostics" : "events";
 
+    const DEFAULT_LOGS_PAGE_SIZE = 200;
+    const MAX_LOGS_PAGE_SIZE = 500;
     let cursor = startCursor;
     let remaining = explicitLimit;
     for (;;) {
+      const pageLimit =
+        remaining !== undefined
+          ? Math.min(remaining, MAX_LOGS_PAGE_SIZE)
+          : DEFAULT_LOGS_PAGE_SIZE;
       const page = await client.call("logs/events", {
         ...scope,
         channel,
         ...(cursor !== undefined ? { cursor } : {}),
-        ...(remaining !== undefined ? { limit: remaining } : {}),
+        limit: pageLimit,
       });
       for (const event of page.events) {
         await writeLine(JSON.stringify(event));
