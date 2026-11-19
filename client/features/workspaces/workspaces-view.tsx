@@ -1,0 +1,653 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, CheckCircle2, ChevronRight, Folder, FolderOpen, Play, Plus, RefreshCw, Search, X } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { WorkspaceCreateForm } from "@/features/workspaces/workspace-create-form";
+import type { WorkspaceCreationIntent } from "@/features/workspaces/workspace-create-model";
+import type { CreateWorkspaceInput, WorkspaceRootResult, WorkspaceRemovalResult, WorkspaceSettings } from "@ludens/protocol/workspaces";
+import type { WorkspaceRegistration } from "@ludens/protocol/ludens";
+import type { CreateWorkspaceInputDto } from "@ludens/protocol/app-rpc";
+import { useLocale, useTranslations } from "@/lib/locale";
+import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { useNativePathPicker } from "@/lib/use-native-path-picker";
+import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
+import { useWorkspaceService } from "@/lib/use-workspace-service";
+import { useRetryFocus } from "@/components/use-retry-focus";
+
+function WorkspaceInlineStartButton({
+  workspaceId,
+  label,
+  busyLabel,
+  variant = "default",
+  disabled,
+  fallbackError,
+  onStarted,
+}: {
+  workspaceId: string;
+  label: string;
+  busyLabel: string;
+  variant?: "default" | "secondary" | "outline";
+  disabled?: boolean;
+  fallbackError: string;
+  onStarted: () => void;
+}) {
+  const service = useWorkspaceService({
+    workspaceId,
+    fallbackError,
+    onSuccess: () => onStarted(),
+  });
+  const starting = service.pendingOperation === "up";
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant={variant}
+      disabled={disabled || service.busy}
+      onClick={() => void service.startWorkspace()}
+      data-workspace-start={workspaceId}
+    >
+      {starting ? (
+        <RefreshCw className="size-3.5 motion-safe:animate-spin" aria-hidden="true" />
+      ) : (
+        <Play className="size-3.5 fill-current" aria-hidden="true" />
+      )}
+      {starting ? busyLabel : label}
+    </Button>
+  );
+}
+
+function WorkspaceInlineServiceError({
+  workspaceId,
+  title,
+  dismissLabel,
+}: {
+  workspaceId: string;
+  title: string;
+  dismissLabel: string;
+}) {
+  const service = useWorkspaceService({ workspaceId });
+  if (!service.error) return null;
+  return (
+    <Alert variant="destructive" className="mt-3" data-workspace-service-error={workspaceId}>
+      <AlertTitle className="flex items-center justify-between gap-2 text-xs">
+        <span>{title}</span>
+        <button
+          type="button"
+          aria-label={dismissLabel}
+          onClick={service.clearError}
+          className="rounded p-0.5 text-muted-foreground transition-colors duration-150 hover:text-foreground"
+        >
+          <X className="size-3.5" aria-hidden="true" />
+        </button>
+      </AlertTitle>
+      <AlertDescription>
+        <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap break-words rounded bg-background/80 p-2 font-mono text-[11px] text-foreground">
+          {service.error}
+        </pre>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+type DialogKind = "create" | "register" | "root";
+type Completion = { kind: "created" | "registered"; entry: WorkspaceRegistration };
+
+export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, catalogLoading, onRetryCatalog, createIntent, onCloseCreateIntent }: {
+  onChanged(): void; onOpen(id: string): void; onConfigure?(id: string): void;
+  catalogError?: string; catalogLoading?: boolean; onRetryCatalog?(): void;
+  createIntent?: WorkspaceCreationIntent | null;
+  onCloseCreateIntent?(): void;
+}) {
+  const t = useTranslations("workspaceLibrary");
+  const { locale } = useLocale();
+  const rpc = useOptionalLudensRpc();
+  const { capabilities } = useRuntimeCapabilities();
+  const rpcRef = useRef(rpc);
+  rpcRef.current = rpc;
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [loadRevision, setLoadRevision] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [pageError, setPageError] = useState("");
+  const [dialog, setDialog] = useState<DialogKind | null>(null);
+  const [initialIntent, setInitialIntent] = useState<WorkspaceCreationIntent | null>(null);
+  const handledIntent = useRef<string | null>(null);
+  const createTrigger = useRef<HTMLButtonElement>(null);
+  const [actionError, setActionError] = useState("");
+  const [pending, setPending] = useState("");
+  const [createStep, setCreateStep] = useState<"creating" | "launching" | null>(null);
+  const [launchRecovery, setLaunchRecovery] = useState<{ entry: WorkspaceRegistration; error: string } | null>(null);
+  const nativePicker = useNativePathPicker();
+  const [filter, setFilter] = useState("");
+  const searchInput = useRef<HTMLInputElement>(null);
+  const [existingPath, setExistingPath] = useState("");
+  const [workspaceRoot, setWorkspaceRoot] = useState("");
+  const [completion, setCompletion] = useState<Completion | null>(null);
+  const [removed, setRemoved] = useState<WorkspaceRegistration | null>(null);
+  const [alreadyRemoved, setAlreadyRemoved] = useState(false);
+  const [savedRoot, setSavedRoot] = useState<string | null>(null);
+  const [removalBlocked, setRemovalBlocked] = useState(false);
+  const trigger = useRef<HTMLElement | null>(null);
+  const [lastDialog, setLastDialog] = useState<DialogKind>("create");
+  const focusCompletion = useRef(false);
+  const resultCard = useRef<HTMLDivElement>(null);
+  const removedNotice = useRef<HTMLDivElement>(null);
+  const undoButton = useRef<HTMLButtonElement>(null);
+  const mounted = useRef(true);
+  const busy = useRef(false);
+  const readVersion = useRef(0);
+  const readController = useRef<AbortController | null>(null);
+  const readFocus = useRetryFocus(loading, loadError);
+  const catalogFocus = useRetryFocus(!!catalogLoading, catalogError);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  useEffect(() => {
+    if (busy.current) return;
+    const caller = rpcRef.current;
+    if (!caller) {
+      setLoading(false);
+      setLoadError(t("operationFailed"));
+      return;
+    }
+    const controller = new AbortController();
+    readController.current = controller;
+    const version = ++readVersion.current;
+    setLoading(true);
+    void caller
+      .call("workspaces/getSettings", undefined, { signal: controller.signal })
+      .then(value => value as WorkspaceSettings)
+      .then(value => {
+        if (version === readVersion.current && !controller.signal.aborted) { setSettings(value); setLoadError(""); }
+      })
+      .catch(error => {
+        if (!controller.signal.aborted && version === readVersion.current) setLoadError(String(error.message ?? error));
+      })
+      .finally(() => {
+        if (!controller.signal.aborted && version === readVersion.current) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [loadRevision, t, Boolean(rpc), rpc?.reconnectGeneration ?? 0]);
+  useLudensEvent(["workspace", "catalog"], () => {
+    if (!busy.current) setLoadRevision(value => value + 1);
+  });
+
+  const requestedPackage = createIntent?.driverPackage;
+  const verifiedDriver = createIntent?.driver;
+  useEffect(() => {
+    if (requestedPackage === undefined) {
+      if (handledIntent.current !== null) setDialog(null);
+      handledIntent.current = null;
+      return;
+    }
+    if (!settings || handledIntent.current === requestedPackage) return;
+    handledIntent.current = requestedPackage;
+    trigger.current = createTrigger.current;
+    setInitialIntent({ driverPackage: requestedPackage, driver: verifiedDriver, machineId: createIntent?.machineId });
+    setLastDialog("create");
+    setActionError("");
+    setLaunchRecovery(null);
+    setCreateStep(null);
+    setDialog("create");
+  }, [requestedPackage, verifiedDriver, createIntent?.machineId, settings]);
+
+  const closeDialog = () => {
+    setDialog(null);
+    setLaunchRecovery(null);
+    setCreateStep(null);
+    if (createIntent) onCloseCreateIntent?.();
+  };
+
+  const openDialog = (kind: DialogKind, element: HTMLElement, path = "") => {
+    if (!capabilities.localFsPaths && (kind === "register" || kind === "root")) return;
+    trigger.current = element;
+    setLastDialog(kind);
+    focusCompletion.current = false;
+    setActionError("");
+    setLaunchRecovery(null);
+    setCreateStep(null);
+    setInitialIntent(null);
+    setExistingPath(path);
+    setWorkspaceRoot(settings?.config.workspaceRoot ?? "");
+    setDialog(kind);
+  };
+  const mutate = async <T,>(label: string, task: () => Promise<T>, accept: (value: T) => void) => {
+    if (busy.current) return;
+    busy.current = true;
+    readVersion.current++;
+    readController.current?.abort();
+    setLoading(false);
+    setPending(label);
+    setActionError("");
+    setPageError("");
+    setRemovalBlocked(false);
+    try {
+      const value = await task();
+      if (mounted.current) {
+        // A locale change may have started a read during this write. The
+        // committed result must win over every earlier directory snapshot.
+        readVersion.current++;
+        readController.current?.abort();
+        accept(value);
+        onChanged();
+      }
+    } catch (error) {
+      if (mounted.current) {
+        const message = error instanceof Error ? error.message : String(error);
+        setRemovalBlocked((error as { code?: string })?.code === "WORKSPACE_REMOVAL_BLOCKED");
+        if (label === "create" || label === "register" || label === "root") setActionError(message);
+        else setPageError(message);
+      }
+    } finally {
+      busy.current = false;
+      if (mounted.current) setPending("");
+    }
+  };
+  const acceptEntry = (entry: WorkspaceRegistration, kind: Completion["kind"]) => {
+    // The mutation already returns the registered identity. A later list read
+    // must not turn a completed creation into an apparent failure.
+    setSettings(previous => previous && ({ ...previous, workspaces: [
+      { ...entry, available: true }, ...previous.workspaces.filter(item => item.id !== entry.id),
+    ] }));
+    setFilter("");
+    setRemoved(null);
+    setAlreadyRemoved(false);
+    setSavedRoot(null);
+    setCompletion({ kind, entry });
+    focusCompletion.current = true;
+    closeDialog();
+  };
+  const callWorkspaceMutate = <T,>(params: Parameters<NonNullable<typeof rpc>["call"]>[1] & { action: string }): Promise<T> => {
+    const caller = rpcRef.current;
+    if (!caller) return Promise.reject(new Error("RPC client is unavailable"));
+    return caller.call("workspaces/mutate", params as never) as Promise<T>;
+  };
+
+  const launchWorkspaceEntry = async (entry: WorkspaceRegistration) => {
+    const caller = rpcRef.current;
+    if (!caller) throw new Error("RPC client is unavailable");
+    const res = (await caller.call("workspaces/serviceControl", {
+      workspaceId: entry.id,
+      action: "up",
+    })) as { ok?: boolean; stderr?: string; stdout?: string };
+    if (res && res.ok === false) {
+      throw new Error(res.stderr?.trim() || t("operationFailed"));
+    }
+  };
+
+  const recordCreatedWorkspaceInState = (entry: WorkspaceRegistration) => {
+    setSettings(previous =>
+      previous && {
+        ...previous,
+        workspaces: [
+          { ...entry, available: true },
+          ...previous.workspaces.filter(item => item.id !== entry.id),
+        ],
+      },
+    );
+    setFilter("");
+    setRemoved(null);
+    setAlreadyRemoved(false);
+    setSavedRoot(null);
+  };
+
+  const createWorkspace = (input: CreateWorkspaceInput, launchAfterCreate = true) => {
+    if (busy.current) return;
+    busy.current = true;
+    readVersion.current++;
+    readController.current?.abort();
+    setLoading(false);
+    setPending("create");
+    setCreateStep("creating");
+    setActionError("");
+    setPageError("");
+    setLaunchRecovery(null);
+
+    void (async () => {
+      let createdEntry: WorkspaceRegistration | null = null;
+      try {
+        createdEntry = await callWorkspaceMutate<WorkspaceRegistration>({
+          action: "create",
+          input: input as unknown as CreateWorkspaceInputDto,
+        });
+        if (!mounted.current) return;
+        readVersion.current++;
+        readController.current?.abort();
+        recordCreatedWorkspaceInState(createdEntry);
+        onChanged();
+
+        if (!launchAfterCreate) {
+          closeDialog();
+          onOpen(createdEntry.id);
+          return;
+        }
+
+        setCreateStep("launching");
+        await launchWorkspaceEntry(createdEntry);
+        if (!mounted.current) return;
+        onChanged();
+        closeDialog();
+        onOpen(createdEntry.id);
+      } catch (error) {
+        if (!mounted.current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        if (createdEntry) {
+          setLaunchRecovery({ entry: createdEntry, error: message });
+        } else {
+          setActionError(message);
+        }
+      } finally {
+        busy.current = false;
+        if (mounted.current) {
+          setPending("");
+          setCreateStep(null);
+        }
+      }
+    })();
+  };
+
+  const retryLaunchCreatedWorkspace = (entry: WorkspaceRegistration) => {
+    if (busy.current) return;
+    busy.current = true;
+    setPending("create");
+    setCreateStep("launching");
+    setActionError("");
+    void (async () => {
+      try {
+        await launchWorkspaceEntry(entry);
+        if (!mounted.current) return;
+        onChanged();
+        closeDialog();
+        onOpen(entry.id);
+      } catch (error) {
+        if (!mounted.current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setLaunchRecovery({ entry, error: message });
+      } finally {
+        busy.current = false;
+        if (mounted.current) {
+          setPending("");
+          setCreateStep(null);
+        }
+      }
+    })();
+  };
+  const matches = settings?.workspaces.filter(entry => `${entry.name}\n${entry.workspace}`.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase())) ?? [];
+  const hasEntries = !!settings?.workspaces.length;
+  const committed = !!(savedRoot || removed || alreadyRemoved || completion);
+  const activeDialog = dialog ?? lastDialog;
+  const dialogTitle = activeDialog === "create" ? t("createTitle") : activeDialog === "register" ? t("addTitle") : t("locationTitle");
+
+  return (
+    <Dialog open={dialog !== null} onOpenChange={open => { if (!open && !busy.current) closeDialog(); }}>
+      <section className="workspace-library mx-auto grid w-full max-w-6xl gap-5">
+        <header className="flex flex-wrap items-start justify-between gap-4 pb-1">
+          <div className="space-y-2"><h1>{t("title")}</h1><p className="text-sm leading-relaxed text-muted-foreground">{t("description")}</p></div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="ghost" aria-label={t(loading ? "refreshing" : "refreshList")} title={t("refreshList")} aria-disabled={loading || !!pending} className="aria-disabled:opacity-50" onClick={() => {
+              if (loading || busy.current) return;
+              setLoadRevision(value => value + 1); onRetryCatalog?.();
+            }}><RefreshCw className={loading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" /><span className="hidden sm:inline">{t(loading ? "refreshing" : "refreshList")}</span></Button>
+            {capabilities.localFsPaths && (
+              <Button type="button" variant="outline" disabled={!settings || !!pending} onClick={event => openDialog("register", event.currentTarget)}><FolderOpen />{t("addExisting")}</Button>
+            )}
+            <Button ref={createTrigger} type="button" disabled={!settings || !!pending} onClick={event => openDialog("create", event.currentTarget)}><Plus />{t("newWorkspace")}</Button>
+          </div>
+        </header>
+
+        {savedRoot && <Alert role="status" className="border-success/35 bg-success/5"><CheckCircle2 className="text-success" /><AlertTitle className="line-clamp-none">{t("locationSavedTitle")}</AlertTitle><AlertDescription>
+          <p>{t("locationSaved")}</p><p className="break-all font-mono text-xs">{savedRoot}</p>
+        </AlertDescription></Alert>}
+        {loadError && <Alert variant={committed ? "default" : "destructive"} className={committed ? "border-primary/35 bg-primary/5" : undefined}><AlertTitle className="line-clamp-none">{t(committed ? "refreshFailed" : "loadFailed")}</AlertTitle><AlertDescription>
+          {committed && <p>{t("committedReadFailed")}</p>}
+          <details className="settings-disclosure border-y-0 text-xs"><summary className="settings-disclosure-summary min-h-0 py-1 font-normal text-inherit"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("technicalDetails")}</summary><p className="mt-2 break-all">{loadError}</p></details>
+          <Button type="button" size="sm" variant="outline" aria-disabled={loading || !!pending} className="aria-disabled:opacity-50" onClick={event => {
+            if (loading || busy.current) return;
+            readFocus.remember(event.currentTarget); setLoadRevision(value => value + 1);
+          }}><RefreshCw className={loading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" />{t(loading ? "refreshing" : "retry")}</Button>
+        </AlertDescription></Alert>}
+        {catalogError && <Alert className="border-primary/35 bg-primary/5"><AlertTitle className="line-clamp-none">{t("catalogRefreshFailed")}</AlertTitle><AlertDescription>
+          <p>{t(committed ? "committedReadFailed" : "catalogRetryHint")}</p>
+          <details className="settings-disclosure border-y-0 text-xs"><summary className="settings-disclosure-summary min-h-0 py-1 font-normal text-inherit"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("technicalDetails")}</summary><p className="mt-2 break-all">{catalogError}</p></details>
+          <Button type="button" variant="outline" size="sm" aria-disabled={catalogLoading || !!pending} className="aria-disabled:opacity-50" onClick={event => {
+            if (catalogLoading || busy.current) return;
+            catalogFocus.remember(event.currentTarget); onRetryCatalog?.();
+          }}><RefreshCw className={catalogLoading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" />{t(catalogLoading ? "refreshing" : "retryCatalog")}</Button>
+        </AlertDescription></Alert>}
+        {pageError && <Alert variant="destructive"><AlertTitle className="line-clamp-none">{t(removalBlocked ? "removeNotCompleted" : "operationFailed")}</AlertTitle><AlertDescription>
+          <p>{removalBlocked ? t("removeBlockedHint") : pageError}</p>
+          {removalBlocked && <details className="settings-disclosure border-y-0 text-xs"><summary className="settings-disclosure-summary min-h-0 py-1 font-normal text-inherit"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("technicalDetails")}</summary><p className="mt-2 break-all">{pageError}</p></details>}
+        </AlertDescription></Alert>}
+        {completion && <Card ref={resultCard} role="region" tabIndex={-1} className="gap-3 border-success/35 bg-success/5 outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={t(completion.kind)}>
+          <CardHeader className="flex flex-row items-start justify-between gap-3">
+            <div className="flex min-w-0 gap-3"><CheckCircle2 className="mt-0.5 size-5 shrink-0 text-success" /><div className="min-w-0 space-y-1">
+              <CardTitle className="text-base">{t(completion.kind)}</CardTitle><p className="text-sm text-muted-foreground">{completion.kind === "created" ? t("createdHint") : t("registeredHint")}</p>
+            </div></div>
+            <Button type="button" size="icon-xs" variant="ghost" aria-label={t("dismiss")} onClick={() => setCompletion(null)}><X /></Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {capabilities.localFsPaths && (
+              <p className="break-all font-mono text-xs text-muted-foreground">{completion.entry.workspace}</p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <WorkspaceInlineStartButton
+                workspaceId={completion.entry.id}
+                label={t("startAndOpen")}
+                busyLabel={t("startingWorkspace")}
+                disabled={!!pending}
+                fallbackError={t("operationFailed")}
+                onStarted={() => {
+                  onChanged();
+                  onOpen(completion.entry.id);
+                }}
+              />
+              <Button type="button" size="sm" variant="outline" onClick={() => onOpen(completion.entry.id)}>{t("openWorkspace")}<ArrowRight /></Button>
+              <Button asChild size="sm" variant="ghost"><a href={`?view=docs&doc=tutorials%2Fquickstart&docLang=${locale}`}>{t("setupGuide")}</a></Button>
+            </div>
+            <WorkspaceInlineServiceError
+              workspaceId={completion.entry.id}
+              title={t("serviceFailedTitle")}
+              dismissLabel={t("dismiss")}
+            />
+          </CardContent>
+        </Card>}
+        {removed && <Alert ref={removedNotice} tabIndex={-1} role="status"><AlertDescription className="flex w-full flex-wrap items-center justify-between gap-3">
+          <span><strong className="font-medium text-foreground">{removed.name}</strong> · {t("removedHint")}</span>
+          {capabilities.localFsPaths && (
+            <Button ref={undoButton} type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => void mutate("undo", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: removed.workspace }), entry => {
+              acceptEntry(entry, "registered");
+              requestAnimationFrame(() => { resultCard.current?.focus(); resultCard.current?.scrollIntoView({ block: "nearest" }); focusCompletion.current = false; });
+            })}>{pending === "undo" ? t("restoring") : t("undo")}</Button>
+          )}
+        </AlertDescription></Alert>}
+        {alreadyRemoved && <Alert ref={removedNotice} tabIndex={-1} role="status"><AlertDescription>{t("alreadyRemoved")}</AlertDescription></Alert>}
+
+        {!settings ? <Card><CardContent className="py-12 text-center text-sm text-muted-foreground" role="status">{loading ? t("loading") : t("retryHint")}</CardContent></Card> : <>
+          <Card ref={node => { readFocus.target.current = node; catalogFocus.target.current = node; }} tabIndex={-1} aria-label={t("collectionTitle")} className="gap-0 outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            {hasEntries ? <>
+              <CardHeader className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-center sm:justify-between">
+                <CardTitle className="flex items-center gap-3 text-base">{t("collectionTitle")}<Badge variant="secondary">{settings.workspaces.length}</Badge></CardTitle>
+                <div className="relative w-full sm:max-w-80"><Search aria-hidden="true" className="pointer-events-none absolute top-2.5 left-3 size-4 text-muted-foreground" /><Input ref={searchInput} className="pl-9" type="search" value={filter} onChange={event => setFilter(event.target.value)} placeholder={t("search")} aria-label={t("search")} /></div>
+              </CardHeader>
+              <CardContent>
+                <ul className="grid gap-3" aria-label={t("collectionTitle")}>
+                  {matches.map(entry => {
+                    const summary = settings.summaries?.[entry.id];
+                    return <li key={entry.id} className="rounded-md border bg-[var(--surface-inset)] p-4">
+                      <div className="flex flex-wrap items-center gap-3.5">
+                        <div aria-hidden="true" className="grid size-9 shrink-0 place-items-center rounded-md border border-border bg-[var(--panel)] text-[var(--gold)]"><Folder className="size-4" /></div>
+                        <div className="min-w-0 flex-1 basis-40 space-y-1.5">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <strong className="block break-words text-sm font-semibold">{entry.name}</strong>
+                            {summary && <>
+                              <Badge variant="outline" className="border-primary/35 bg-primary/10 font-mono text-[11px] text-primary">{summary.driver}</Badge>
+                              <Badge variant="secondary" className="font-mono text-[11px]">{summary.model}</Badge>
+                              <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground">
+                                {Math.round(summary.seconds / 60)}m · {summary.requests} req
+                              </Badge>
+                              {summary.compactionThreshold && (
+                                <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground">
+                                  compact {Math.round(summary.compactionThreshold / 1000)}k
+                                </Badge>
+                              )}
+                              {summary.connection?.imageUrls?.enabled && (
+                                <Badge variant="outline" className="border-success/30 bg-success/10 font-mono text-[11px] text-success">
+                                  blob-broker ({summary.connection.imageUrls.backends?.[0] ?? "auto"})
+                                </Badge>
+                              )}
+                            </>}
+                          </div>
+                          {capabilities.localFsPaths && (
+                            <p className="break-all font-mono text-xs leading-relaxed text-muted-foreground">{entry.workspace}</p>
+                          )}
+                        </div>
+                        <Badge variant="outline" className={entry.available ? "border-success/25 bg-success/5 text-success" : "text-muted-foreground"}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{entry.available ? t("available") : t("unavailable")}</Badge>
+                        <div className="flex w-full flex-wrap items-center gap-2 min-[1200px]:w-auto">
+                          {entry.available && (
+                            <WorkspaceInlineStartButton
+                              workspaceId={entry.id}
+                              label={t("startWorkspace")}
+                              busyLabel={t("startingWorkspace")}
+                              variant="secondary"
+                              disabled={!!pending}
+                              fallbackError={t("operationFailed")}
+                              onStarted={() => {
+                                onChanged();
+                                onOpen(entry.id);
+                              }}
+                            />
+                          )}
+                          <Button type="button" variant="outline" size="sm" disabled={!!pending || !entry.available} onClick={() => onOpen(entry.id)}>{t("open")}<ArrowRight /></Button>
+                          {onConfigure && entry.available && (
+                            <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => onConfigure(entry.id)}>{t("configure")}</Button>
+                          )}
+                          {!entry.available && capabilities.localFsPaths && <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget, entry.workspace)}>{t("reconnect")}</Button>}
+                          <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" disabled={!!pending} onClick={() => void mutate(entry.id, () => callWorkspaceMutate<WorkspaceRemovalResult>({ action: "remove", id: entry.id }), value => {
+                            setSettings(previous => previous && ({ ...previous, workspaces: previous.workspaces.filter(item => item.id !== entry.id) }));
+                            setRemoved(value.removed); setAlreadyRemoved(!value.removed); setCompletion(null); setSavedRoot(null);
+                            requestAnimationFrame(() => (undoButton.current ?? removedNotice.current)?.focus());
+                          })}>{pending === entry.id ? t("removing") : t("remove")}</Button>
+                        </div>
+                      </div>
+                      <WorkspaceInlineServiceError
+                        workspaceId={entry.id}
+                        title={t("serviceFailedTitle")}
+                        dismissLabel={t("dismiss")}
+                      />
+                      {!entry.available && <p className="mt-3 border-t border-border/60 pt-2.5 text-xs leading-relaxed text-muted-foreground">{t("unavailableHint")}</p>}
+                    </li>;
+                  })}
+                </ul>
+                {!matches.length && <div className="space-y-3 py-10 text-center"><p className="text-sm text-muted-foreground">{t("noMatches")}</p><Button type="button" size="sm" variant="outline" onClick={() => { setFilter(""); searchInput.current?.focus(); }}>{t("clearSearch")}</Button></div>}
+                <p className="mt-5 border-t pt-4 text-xs leading-relaxed text-muted-foreground">{t("removeHint")}</p>
+              </CardContent>
+            </> : <CardContent className="flex flex-col items-center py-10 text-center sm:py-16">
+              <div aria-hidden="true" className="mb-5 grid size-12 place-items-center rounded-md border border-primary/25 bg-primary/10 text-primary"><FolderOpen className="size-6" /></div>
+              <h2 className="mb-2 text-xl font-semibold">{t("emptyTitle")}</h2><p className="max-w-md text-sm leading-relaxed text-muted-foreground">{t(capabilities.localFsPaths ? "emptyHint" : "emptyHintManaged")}</p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2">
+                <Button type="button" disabled={!!pending} onClick={event => openDialog("create", event.currentTarget)}><Plus />{t("newWorkspace")}</Button>
+                {capabilities.localFsPaths && (
+                  <Button type="button" variant="outline" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget)}>{t("addExisting")}</Button>
+                )}
+              </div>
+            </CardContent>}
+          </Card>
+          {capabilities.localFsPaths && (
+            <Card className="gap-0"><CardContent className="flex flex-wrap items-center gap-4">
+              <Folder aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1 basis-48 space-y-1.5"><h2 className="text-sm font-semibold">{t("locationTitle")}</h2><p className="break-all font-mono text-xs text-muted-foreground">{settings.config.workspaceRoot}</p><p className="text-xs leading-relaxed text-muted-foreground">{t("locationHint")}</p></div>
+              <Button type="button" size="sm" variant="outline" disabled={!!pending} onClick={event => openDialog("root", event.currentTarget)}>{t("change")}</Button>
+            </CardContent></Card>
+          )}
+        </>}
+      </section>
+      <DialogContent className={`max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-md bg-card ${activeDialog === "create" ? "sm:max-w-2xl" : "sm:max-w-xl"}`} showCloseButton={false}
+        onEscapeKeyDown={event => { if (busy.current) event.preventDefault(); }}
+        onInteractOutside={event => { if (busy.current) event.preventDefault(); }}
+        onCloseAutoFocus={event => {
+          event.preventDefault();
+          if (focusCompletion.current && resultCard.current) { resultCard.current.focus(); resultCard.current.scrollIntoView({ block: "nearest" }); }
+          else trigger.current?.focus();
+          focusCompletion.current = false;
+        }}>
+        <DialogHeader className="pr-6 text-left"><DialogTitle className="text-xl">{dialogTitle}</DialogTitle><DialogDescription className="leading-relaxed">{activeDialog === "create" ? t("createDescription") : activeDialog === "register" ? t("addDescription") : t("locationDescription")}</DialogDescription></DialogHeader>
+        {activeDialog === "create" && settings && <WorkspaceCreateForm
+          key={`${initialIntent?.driverPackage ?? "default"}:${initialIntent?.machineId ?? ""}`}
+          defaultRoot={settings.config.workspaceRoot}
+          globalDefaults={settings.config.defaults}
+          existingWorkspaces={settings.workspaces}
+          initialIntent={initialIntent}
+          pending={pending === "create"}
+          pendingStep={createStep}
+          error={actionError}
+          launchRecovery={launchRecovery}
+          onSubmit={createWorkspace}
+          onRetryLaunch={retryLaunchCreatedWorkspace}
+          onEnterExistingWorkspace={id => {
+            closeDialog();
+            onOpen(id);
+          }}
+          onConfigureWorkspace={onConfigure ? id => {
+            closeDialog();
+            onConfigure(id);
+          } : undefined}
+          onCancel={closeDialog}
+        />}
+        {activeDialog === "register" && <form className="grid gap-5" onSubmit={event => {
+          event.preventDefault();
+          void mutate("register", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: existingPath.trim() }), entry => {
+            acceptEntry(entry, "registered");
+            onOpen(entry.id);
+          });
+        }}>
+          <div className="space-y-2">
+            <Label htmlFor="workspace-existing">{t("pathLabel")}</Label>
+            <div className="flex gap-2">
+              <Input id="workspace-existing" required value={existingPath} disabled={!!pending} onChange={event => setExistingPath(event.target.value)} aria-describedby="workspace-register-hint" placeholder="/Users/you/Ludens/my-workspace" autoComplete="off" spellCheck={false} />
+              {nativePicker.supported && (
+                <Button type="button" variant="outline" disabled={!!pending || nativePicker.picking} onClick={async () => {
+                  const picked = await nativePicker.pickPath({ mode: "directory", title: t("addTitle"), defaultPath: existingPath.trim() || settings?.config.workspaceRoot });
+                  if (picked) setExistingPath(picked);
+                }}><FolderOpen className="size-4" aria-hidden="true" />{t(nativePicker.picking ? "browsingFolder" : "browseFolder")}</Button>
+              )}
+            </div>
+            <p id="workspace-register-hint" className="text-xs leading-relaxed text-muted-foreground">{t("addHint")}</p>
+          </div>
+          {actionError && <Alert variant="destructive"><AlertDescription>{actionError}</AlertDescription></Alert>}
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={!!pending} onClick={() => setDialog(null)}>{t("cancel")}</Button><Button type="submit" disabled={!!pending || !existingPath.trim()}>{pending === "register" ? t("adding") : t("addExisting")}</Button></div>
+        </form>}
+        {activeDialog === "root" && <form className="grid gap-5" onSubmit={event => {
+          event.preventDefault();
+          void mutate("root", () => callWorkspaceMutate<WorkspaceRootResult>({ action: "updateRoot", workspaceRoot: workspaceRoot.trim() }), value => {
+            setSettings(previous => previous && ({ ...previous, config: value.config })); setSavedRoot(value.config.workspaceRoot); setDialog(null);
+          });
+        }}>
+          <div className="space-y-2">
+            <Label htmlFor="workspace-root">{t("locationInput")}</Label>
+            <div className="flex gap-2">
+              <Input id="workspace-root" required value={workspaceRoot} disabled={!!pending} onChange={event => setWorkspaceRoot(event.target.value)} aria-describedby="workspace-root-hint" placeholder="/Users/you/Ludens" autoComplete="off" spellCheck={false} />
+              {nativePicker.supported && (
+                <Button type="button" variant="outline" disabled={!!pending || nativePicker.picking} onClick={async () => {
+                  const picked = await nativePicker.pickPath({ mode: "directory", title: t("locationTitle"), defaultPath: workspaceRoot.trim() || settings?.config.workspaceRoot });
+                  if (picked) setWorkspaceRoot(picked);
+                }}><FolderOpen className="size-4" aria-hidden="true" />{t(nativePicker.picking ? "browsingFolder" : "browseFolder")}</Button>
+              )}
+            </div>
+            <p id="workspace-root-hint" className="text-xs leading-relaxed text-muted-foreground">{t("locationHint")}</p>
+          </div>
+          {actionError && <Alert variant="destructive"><AlertDescription>{actionError}</AlertDescription></Alert>}
+          <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={!!pending} onClick={() => setDialog(null)}>{t("cancel")}</Button><Button type="submit" disabled={!!pending || !workspaceRoot.trim() || workspaceRoot.trim() === settings?.config.workspaceRoot}>{pending === "root" ? t("saving") : t("save")}</Button></div>
+        </form>}
+        <DialogClose asChild><Button type="button" variant="ghost" size="icon-sm" className="absolute top-3 right-3" aria-label={t("close")} disabled={!!pending}><X /></Button></DialogClose>
+      </DialogContent>
+    </Dialog>
+  );
+}

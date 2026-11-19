@@ -1,0 +1,71 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { buildReplayFrameIndex, clampReplayTime, coalesceReplayFrameTicks, indexedAdjacentFrame, indexedFramesAt, indexedStageFramesAt,
+  mergeReplayPages, replayItemActive, replayWindowBounds } from "../features/replay/replay-model";
+
+const replayFramesAt = (frames: ReplayFrame[], at: number, capability = "") => indexedFramesAt(buildReplayFrameIndex(frames), at, capability);
+const replayStageFramesAt = (frames: ReplayFrame[], at: number, capability = "") => indexedStageFramesAt(buildReplayFrameIndex(frames), at, capability);
+const adjacentReplayFrame = (frames: ReplayFrame[], at: number, direction: -1 | 1, capability = "") =>
+  indexedAdjacentFrame(buildReplayFrameIndex(frames), at, direction, capability);
+import type { ReplayFrame, ReplayItem, ReplayWindow } from "@ludens/protocol/replay-types";
+
+const frame = (id: string, at: number, capability = "vision", sequence = at): ReplayFrame =>
+  ({ id, at, capability, sequence, media: [] });
+const window = (startAt: number, frames: ReplayFrame[] = []): ReplayWindow =>
+  ({ startAt, endAt: startAt + 30_000, frames, items: [] });
+
+test("playhead bounds use absolute time, stay in the final window and clamp invalid shares", () => {
+  const range = { startAt: 1_000_000, endAt: 1_060_000 };
+  assert.deepEqual(replayWindowBounds(1_045_000, range), { startAt: 1_030_000, endAt: 1_060_000 });
+  assert.deepEqual(replayWindowBounds(range.endAt, range), { startAt: 1_030_000, endAt: 1_060_000 });
+  assert.equal(clampReplayTime(NaN, range), range.startAt);
+  assert.equal(clampReplayTime(0, range), range.startAt);
+  assert.equal(clampReplayTime(Infinity, range), range.startAt);
+});
+
+test("sparse and multi-capability frames preserve the most recent past image independently", () => {
+  const frames = [frame("a", 10), frame("future", 50), frame("b", 12, "depth"), frame("a2", 10, "vision", 11)];
+  assert.deepEqual(replayFramesAt(frames, 20).map(f => f.id), ["b", "a2"]);
+  assert.deepEqual(replayFramesAt(frames, 9), []);
+  assert.deepEqual(replayStageFramesAt(frames, 9).map(f => f.id), ["b", "a"]);
+  assert.deepEqual(replayStageFramesAt(frames, 11).map(f => f.id), ["b", "a2"]);
+  assert.deepEqual(replayFramesAt(frames, 20, "vision").map(f => f.id), ["a2"]);
+  assert.equal(adjacentReplayFrame(frames, 10, 1, "vision")?.id, "future");
+  assert.equal(adjacentReplayFrame(frames, 12, -1)?.at, 10);
+});
+
+test("a single-point recording has a queryable window and displays its exact frame", () => {
+  const range = { startAt: 1_000, endAt: 1_000 };
+  const bounds = replayWindowBounds(0, range);
+  assert.deepEqual(bounds, range);
+  const record = frame("only", 1_000);
+  const page = mergeReplayPages([{ ...bounds, frames: [record], items: [] }]);
+  assert.deepEqual(replayFramesAt(page.frames, clampReplayTime(0, range)), [record]);
+  assert.equal(adjacentReplayFrame(page.frames, 1_000, -1), undefined);
+  assert.equal(adjacentReplayFrame(page.frames, 1_000, 1), undefined);
+});
+
+test("window pages deduplicate overlap and the browser retains no more than two windows", () => {
+  const a = window(0, [frame("prior", -1), frame("one", 1)]);
+  const b = window(0, [frame("one", 1), frame("two", 2)]);
+  assert.deepEqual(mergeReplayPages([a, b]).frames.map(f => f.id), ["prior", "one", "two"]);
+});
+
+test("active spans include crossed windows and open ends without claiming a completion", () => {
+  const item: ReplayItem = { id: "a", track: "action", startAt: 10, endAt: 50, label: "move", source: { seq: 1 } };
+  assert.equal(replayItemActive(item, 9), false);
+  assert.equal(replayItemActive(item, 30), true);
+  assert.equal(replayItemActive(item, 51), false);
+  assert.equal(replayItemActive({ ...item, endAt: null }, 100), true);
+});
+
+test("dense perception frames coalesce into bounded timeline ticks without losing counts or order", () => {
+  const sparse = [frame("a", 1_000), frame("b", 2_000), frame("c", 3_000)];
+  assert.equal(coalesceReplayFrameTicks(sparse, 0, 30_000, 120).length, 3);
+
+  const dense = Array.from({ length: 900 }, (_, index) => frame(`f-${index}`, index * 33));
+  const coalesced = coalesceReplayFrameTicks(dense, 0, 30_000, 120);
+  assert.ok(coalesced.length <= 120);
+  assert.equal(coalesced[0].frame.id, "f-0");
+  assert.equal(coalesced.reduce((sum, tick) => sum + tick.count, 0), 900);
+});

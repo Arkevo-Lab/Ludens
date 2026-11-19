@@ -1,0 +1,34 @@
+{
+  "appId": "dev.ludens.app",
+  "productName": "Ludens",
+  "directories": {
+    "output": "release"
+  },
+  "files": [
+    "dist/electron/**/*",
+    "package.json"
+  ],
+  "extraResources": [
+    {
+      "from": "../client/out",
+      "to": "out"
+    },
+    {
+      "from": "../client/public",
+      "to": "public"
+    }
+  ],
+  "mac": {
+    "target": [
+      "dmg",
+      "zip"
+    ],
+    "icon": "../client/public/brand/ludens-app-icon.png"
+  },
+  "win": {
+    "target": [
+      "nsis"
+    ],
+    "icon": "../client/public/brand/ludens-app-icon.png"
+  }
+}
