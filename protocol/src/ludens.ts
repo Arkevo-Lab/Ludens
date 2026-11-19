@@ -64,32 +64,30 @@ import {
   type MachinesRegistryFile,
 } from "./machines";
 
-export const OMP_SERVICE_TIERS = ["priority", "ultrafast"] as const;
-export type OmpServiceTier = (typeof OMP_SERVICE_TIERS)[number];
-export function isOmpServiceTier(value: unknown): value is OmpServiceTier {
-  return typeof value === "string" && (OMP_SERVICE_TIERS as readonly string[]).includes(value);
-}
-
-export const OMP_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
-export type OmpEffort = (typeof OMP_EFFORTS)[number];
-export function isOmpEffort(value: unknown): value is OmpEffort {
-  return typeof value === "string" && (OMP_EFFORTS as readonly string[]).includes(value);
-}
-
-export interface WorkspaceDefaults {
-  model?: string;
-  serviceTier?: OmpServiceTier;
-  effort?: OmpEffort;
-  seconds?: number;
-  requests?: number;
-  compactionThreshold?: number;
-  pet?: boolean;
-  connection?: ModelConnectionConfig;
-}
-export interface LudensConfig { version: 1; workspaceRoot: string; defaults: WorkspaceDefaults }
-export interface WorkspaceIdentity { version: 1; id: string; historyIds?: string[] }
-export interface WorkspaceRegistration { id: string; workspace: string; name: string; updatedAt: string }
-export interface RegisteredWorkspace extends WorkspaceRegistration { available: boolean }
+export {
+  OMP_SERVICE_TIERS,
+  OMP_EFFORTS,
+  isOmpServiceTier,
+  isOmpEffort,
+  validWorkspaceId,
+  type OmpServiceTier,
+  type OmpEffort,
+  type WorkspaceDefaults,
+  type LudensConfig,
+  type WorkspaceIdentity,
+  type WorkspaceRegistration,
+  type RegisteredWorkspace,
+} from "./workspaces.ts";
+import {
+  isOmpServiceTier,
+  isOmpEffort,
+  validWorkspaceId,
+  type WorkspaceDefaults,
+  type LudensConfig,
+  type WorkspaceIdentity,
+  type WorkspaceRegistration,
+  type RegisteredWorkspace,
+} from "./workspaces.ts";
 
 export function ludensHome(environment: NodeJS.ProcessEnv = process.env): string {
   if (environment.LUDENS_HOME && !isAbsolute(environment.LUDENS_HOME)) throw new Error("LUDENS_HOME must be an absolute directory");
@@ -97,9 +95,6 @@ export function ludensHome(environment: NodeJS.ProcessEnv = process.env): string
 }
 function object(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
-}
-export function validWorkspaceId(id: unknown): id is string {
-  return typeof id === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/.test(id);
 }
 function identity(value: unknown): WorkspaceIdentity {
   if (!object(value) || value.version !== 1 || !validWorkspaceId(value.id)) throw new Error("Invalid .ludens/workspace.json identity");

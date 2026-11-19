@@ -57,7 +57,7 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
     return runtime.status();
   }
   if (kind === "timeline") {
-    if (!runtime.perception) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
+    if (!runtime.perception) throw new Error("Timeline recorder is unavailable; run ludens-core perception reload.");
     if (request.action === "derive") {
       if (!request.media) throw new Error("Timeline derive requires encoded media and its recorded source");
       const modelMedia = await runtime.perception.deriveMedia(request.media, signal, request.id);
@@ -81,13 +81,13 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       if (argv.length === 1) return { perceptionInjection: runtime.perceptionInjectionEnabled() };
       if (argv.length === 2 && (argv[1] === "on" || argv[1] === "off"))
         return runtime.setPerceptionInjection(argv[1] === "on", trace);
-      throw new Error("Usage: ludens perception inject [on|off] (automatic context only; recording continues)");
+      throw new Error("Usage: ludens-core perception inject [on|off] (automatic context only; recording continues)");
     }
     if (!runtime.perception) throw new Error("Perception is not configured");
     if (argv[0] === "maintain" && argv.length === 2 && (argv[1] === "sync" || argv[1] === "prune" || argv[1] === "clear_cache")) {
       return runtime.perception.maintainStorage(argv[1], signal);
     }
-    const usage = "Usage: ludens perception status|state|reload|stop|observe | transition <target> [--args '<JSON object>' | --file <arguments.json>] | inject [on|off]; stop ends recording, inject off only disables automatic context";
+    const usage = "Usage: ludens-core perception status|state|reload|stop|observe | transition <target> [--args '<JSON object>' | --file <arguments.json>] | inject [on|off]; stop ends recording, inject off only disables automatic context";
     if (argv[0] === "transition") {
       if (argv.length !== 2 || !argv[1]) throw new Error(usage);
       const args = (request.arguments ?? {}) as Record<string, unknown>;
@@ -117,10 +117,10 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
   if (kind === "machine") {
     const action = argv[0];
     if (!action || !["list", "use", "connect", "disconnect"].includes(action))
-      throw new Error("Usage: ludens machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>");
+      throw new Error("Usage: ludens-core machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>");
     if ((action === "list" && argv.length !== 1) || ((action === "use" || action === "disconnect") && argv.length !== 2)
       || (action === "connect" && argv.length < 2))
-      throw new Error("Usage: ludens machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>");
+      throw new Error("Usage: ludens-core machine list | use <id> | connect <id> [<id2> ...] | disconnect <id>");
     return runtime.manageMachines(action as "list" | "use" | "connect" | "disconnect", { id: argv[1], ids: argv.slice(1) }, process.cwd());
   }
   if (kind === "controller") {
@@ -140,10 +140,10 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
       let value: unknown;
       if (request.action === "list") value = await runtime.controller.list(signal, trace);
       else {
-        if (!request.id) throw new Error("Missing capability ID; see ludens controller --help");
+        if (!request.id) throw new Error("Missing capability ID; see ludens-core controller --help");
         if (request.action === "help") value = await runtime.controller.help(request.id, signal, trace);
         else if (request.action === "call") value = await runtime.callController(request.id, request.arguments, epoch, signal, trace);
-        else throw new Error("Unknown controller action; see ludens controller --help");
+        else throw new Error("Unknown controller action; see ludens-core controller --help");
       }
       // Driver failures are successful RPC replies with a nonzero exitCode.
       const execution = request.action === "call" && request.id?.startsWith("controller/")

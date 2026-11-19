@@ -1,0 +1,429 @@
+/** Pure, browser-safe run, telemetry, observation, and model catalog DTO types. */
+
+import type { EventPoolSummary } from "./event-pool.ts";
+import type { VideoFrameReference } from "./timeline-types.ts";
+import type { OmpEffort, OmpServiceTier } from "./workspaces.ts";
+
+export type RecordingPurpose = "continuous-perception" | "loop";
+
+export interface Event {
+  /** Present on canonical device files; mirrored historical Ludens rows keep their local sequence. */
+  serviceId?: string;
+  source?: {
+    component: string;
+    implementation?: string;
+    implementationVersion?: string;
+  };
+  origin?: {
+    eventId: string;
+    clockId: string;
+    seq: number;
+    at: string;
+    atMs: number;
+  };
+  seq: number;
+  at: string;
+  atMs: number;
+  type: string;
+  trace: Record<string, string>;
+  data: Record<string, any>;
+}
+
+export interface Manifest {
+  kind?: string;
+  parentRunId?: string;
+  shiori?: { implementation: string; implementationVersion: string } | null;
+  runId: string;
+  workspace: string;
+  workspaceId?: string;
+  socket: string;
+  drivers: { id: string; version: string }[];
+  model: string | null;
+  seconds: number;
+  maxRequests: number;
+  compactionThreshold: number | null;
+}
+
+export interface RunInfo {
+  kind?: string;
+  id: string;
+  model: string | null;
+  seconds: number;
+  drivers: { id: string; version: string }[];
+  startedAt?: string;
+  endedAt?: string;
+}
+
+export type ServiceLaunchOrigin = "app" | "cli";
+
+export interface DeviceContentionConflict {
+  holderProjectId: string;
+  holderWorkspaceName?: string;
+  deviceKey: string;
+  deviceLabel?: string;
+  holderMode: string;
+  holderOrigin?: ServiceLaunchOrigin;
+}
+
+export interface ProjectCoreSummary {
+  online: boolean;
+  pid?: number;
+  mode?: string;
+  consolidating?: boolean;
+  launchedBy?: ServiceLaunchOrigin;
+  appInstanceId?: string;
+  pendingOutbound?: number;
+  runId?: string;
+  model?: string | null;
+}
+
+export interface ProjectWorkspaceDefaults {
+  model?: string | null;
+  serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
+  maxSeconds?: number | null;
+}
+
+export interface Project {
+  id: string;
+  name?: string;
+  available?: boolean;
+  workspace?: string;
+  runs: RunInfo[];
+  core?: ProjectCoreSummary;
+  defaults?: ProjectWorkspaceDefaults;
+}
+
+export interface Observation {
+  id: string;
+  at: string;
+  controller: string;
+  origin: string;
+  mediaType: string;
+  mediaStorage?: "timeline" | "run" | "unrecorded";
+  timeline?: { recordId?: string; sequence?: number; asset: string; video?: VideoFrameReference };
+  text?: string;
+  hook?: { id: string; codeSHA: string; path: string };
+  perception?: PerceptionRead;
+  sourceSequence?: number;
+  sourceSequenceDelta?: number;
+  afterExecutionMs?: number;
+  captureMs?: number;
+  encodeMs?: number;
+  modelCallId?: string;
+  request?: { controllerId: string; arguments?: Record<string, unknown>; argv?: string[] };
+}
+
+export interface PerceptionStatus {
+  state: "unimplemented" | "loading" | "ready" | "stopped" | "error";
+  generation: string | null;
+  pid?: number;
+  codeSHA?: string;
+  error?: string;
+}
+
+export interface PerceptionRead {
+  at: string;
+  queryId?: string;
+  ok?: boolean;
+  /** A successful query can still fail while preparing its model input. */
+  deliveryError?: string;
+  /** Only historical events attach sampler health to a query. */
+  status?: PerceptionStatus;
+  snapshot?: PerceptionSnapshot;
+  records?: { snapshot: PerceptionSnapshot; text: string; observations: { id: string }[] }[];
+  query?: { at?: string; start?: string; end?: string; limit?: number; after?: number; capability?: string; id?: string };
+  hasMore?: boolean;
+  nextAfter?: number;
+  legacyRepeated?: boolean;
+  availability?: Record<string, unknown>;
+  durationMs?: number;
+  error?: string;
+  deliveredPayload?: unknown;
+  injectionMode?: "structured" | "custom_json" | "custom_text" | "none";
+  attachImages?: boolean;
+}
+
+export interface PerceptionSnapshot {
+  id: string;
+  sequence: number;
+  timeline?: { recordId: string; sequence: number };
+  capability?: string;
+  generation?: string | null;
+  recordedAt: string;
+  sampling?: { clock: string; startedAtMs: number; finishedAtMs: number };
+  sampledAt?: string;
+  sources?: unknown[];
+  data?: unknown;
+  space?: unknown;
+  effect?: unknown;
+  transition?: unknown;
+}
+
+export interface Tool {
+  id: string;
+  name: string;
+  intent: string;
+  args: Record<string, any>;
+  argsRef?: { encoding: "ludens-json-v1"; path: string; sha256: string; bytes: number };
+  at: string;
+  ok: boolean | null;
+  commandMs: number | null;
+  durationMs: number | null;
+}
+
+export interface Call {
+  id: string;
+  index: number;
+  at: string;
+  atMs: number;
+  durationMs: number | null;
+  headersMs: number | null;
+  firstStreamMs: number | null;
+  wireBytes: number | null;
+  transport: "websocket" | "sse" | null;
+  transportDetails: {
+    sizeBlockedUntilCompaction?: boolean;
+    retryWebsocketAt?: number;
+    websocketDisabled?: boolean;
+  } | null;
+  frameBytes: number | null;
+  incremental: boolean | null;
+  wsFrames: number;
+  inputTokens: number;
+  cachedTokens: number;
+  cacheHit: number | null;
+  attempts: number;
+  status: string;
+  error?: string;
+  tools: Tool[];
+  observations: string[];
+  inputObservations: string[];
+  inputText?: string;
+  perceptionReads?: PerceptionRead[];
+  perception?: PerceptionRead;
+  actions: number;
+  phases: Record<string, number | null>;
+  outputTokens?: number;
+  outputTokensPerSecond?: number | null;
+  toolCallCount?: number;
+}
+
+export interface Notice {
+  seq: number;
+  at: string;
+  type: string;
+  text: string;
+  modelCallId?: string;
+  details?: { label: string; value: string }[];
+  failed?: boolean;
+}
+
+export interface SkillEvidence {
+  seq: number;
+  at: string;
+  action: string;
+  path: string;
+  hash?: string;
+  modelCallId?: string;
+  ok: boolean | null;
+}
+
+export interface LiveStatus {
+  runId: string;
+  mode: string;
+  epoch: string | null;
+  connected: boolean;
+  reason: string;
+  agent: boolean;
+  model?: string | null;
+  serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
+  thinking: boolean;
+  maxSeconds?: number | null;
+  remainingSeconds?: number | null;
+  launchedBy?: ServiceLaunchOrigin;
+  coreOffline?: boolean;
+  spawned?: boolean;
+}
+
+export interface LivePhase {
+  kind:
+    | "prepare"
+    | "headers"
+    | "first-stream"
+    | "ws-first-event"
+    | "stream"
+    | "command"
+    | "tool"
+    | "capture"
+    | "observation"
+    | "perception"
+    | "compaction"
+    | "idle";
+  label: string;
+  startedAt: string | null;
+  elapsedMs: number | null;
+  sourceSeq: number;
+}
+
+export type SpanOutcome = "success" | "error" | "cancelled" | "pending" | "unknown";
+
+export interface TraceSpan {
+  id: string;
+  kind:
+    | "shiori"
+    | "capability"
+    | "python"
+    | "python-local"
+    | "discovery"
+    | "device"
+    | "perception"
+    | "compaction"
+    | "compaction-http";
+  traceId: string;
+  spanId: string;
+  parentSpanId?: string;
+  modelCallId?: string;
+  toolCallId?: string;
+  operationId?: string;
+  source?: Event["source"];
+  name: string;
+  operation?: string;
+  startedAt: string;
+  endedAt: string | null;
+  startSeq: number;
+  endSeq: number | null;
+  outcome: SpanOutcome;
+  durationMs: number | null;
+  rpc?: { calls: number; errors: number; durationMs: number; controllerCalls: number; observeCalls: number };
+  timing?: { importDurationMs?: number; executionDurationMs?: number };
+  codeSHA?: string;
+  error?: string;
+}
+
+export interface SpanStats {
+  started: number;
+  outcomes: Record<SpanOutcome, number>;
+  durationMs: { median: number | null; p95: number | null };
+}
+
+export interface PerceptionSamplerSummary {
+  windows: number;
+  attemptedSamples: number;
+  completedSamples: number;
+  failedSamples: number;
+  recordedSamples: number;
+  sleepStarvedTicks: number;
+  latestRealizedHz: number | null;
+  latestUtilization: number | null;
+  peakHotBytes: number | null;
+  startupDurationMs: number | null;
+}
+
+export interface RunEfficiencySummary {
+  modelTimeRatio: number | null;
+  deviceActionDutyCycle: number | null;
+  localPythonTimeRatio: number | null;
+  medianDecodeMs: number | null;
+  medianOutputTokensPerSecond: number | null;
+  totalOutputTokens: number;
+  localPythonRpcCalls: number;
+  autonomyActionRatio: number | null;
+}
+
+export interface NativeLoop {
+  traceId: string;
+  spanId: string;
+  at: string;
+  source?: Event["source"];
+  summary: Record<string, unknown>;
+  coverage: Record<string, unknown>;
+}
+
+export interface RunTelemetry {
+  sources: { component: string; count: number }[];
+  spans: TraceSpan[];
+  shiori: { stats: SpanStats; nativeLoops: NativeLoop[] };
+  capabilities: { stats: SpanStats; python: SpanStats; localPython: SpanStats; discovery: SpanStats };
+  devices: SpanStats;
+  perception: SpanStats & { sampler?: PerceptionSamplerSummary };
+  efficiency?: RunEfficiencySummary;
+}
+
+export interface RunData {
+  project: string;
+  run: string;
+  manifest: Manifest;
+  cycles: { epoch: string; startedAt: string; endedAt?: string; reason?: string; maxSeconds?: number | null }[];
+  selectedEpoch: string | null;
+  calls: Call[];
+  selectedCall?: Call;
+  paging: { totalCalls: number; beforeCall: number | null; hasMore: boolean; firstIndex: number; lastIndex: number };
+  observations: Observation[];
+  perception: PerceptionStatus | null;
+  notices: Notice[];
+  skills: SkillEvidence[];
+  telemetry: RunTelemetry;
+  lastControl: Record<string, any> | null;
+  activeCompaction: {
+    startedAt: string;
+    elapsedMs: number;
+    reason: string;
+  } | null;
+  live: LiveStatus | null;
+  livePhase: LivePhase | null;
+  controlAllowed: boolean;
+  controlReason: string;
+  updatedAt: string;
+  summary: {
+    completed: number;
+    actions: number;
+    explicitObserves: number;
+    errors: number;
+    compactions: number;
+    medianMs: number | null;
+    p95Ms: number | null;
+    medianHeadersMs: number | null;
+    medianHttpHeadersMs: number | null;
+    medianWsWaitMs: number | null;
+    cacheHit: number | null;
+    warmCacheHit: number | null;
+    elapsedSeconds: number;
+  };
+}
+
+export interface AvailableModelItem {
+  fullId: string;
+  provider: string;
+  id: string;
+  name: string;
+  reasoning: boolean;
+  contextWindow: number;
+  maxTokens: number;
+  authenticated: boolean;
+  supportedServiceTiers: OmpServiceTier[];
+  supportedEfforts: OmpEffort[];
+  defaultEffort: OmpEffort | null;
+}
+
+export interface AvailableModelsCatalog {
+  models: AvailableModelItem[];
+  providers: { id: string; count: number; authenticated: boolean }[];
+  currentModel?: string | null;
+  currentServiceTier?: OmpServiceTier | null;
+  currentEffort?: OmpEffort | null;
+}
+
+export interface HostControlStatus {
+  runId: string;
+  epoch: string | null;
+  mode: string;
+  model?: string | null;
+  serviceTier?: OmpServiceTier | null;
+  effort?: OmpEffort | null;
+  queue: { steering: number };
+  eventPool?: EventPoolSummary;
+  spawned?: boolean;
+  [key: string]: unknown;
+}

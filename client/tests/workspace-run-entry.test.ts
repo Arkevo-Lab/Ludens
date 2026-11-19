@@ -1,0 +1,75 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { initialSelection, latestGameRun } from "@ludens/protocol/initial-selection";
+import { workspaceRunEntry, workspaceRunLinks } from "../lib/workspace-run-entry";
+import { isPlainNavigationClick } from "../lib/dashboard-navigation";
+import { WorkspaceRunEmpty } from "../features/workspaces/workspace-run-empty";
+import type { Project } from "@ludens/protocol/types";
+
+test("directory loading, failed reads and a genuinely empty directory have distinct recovery states", () => {
+  const empty = { catalogReady: false, catalogError: "", run: "" };
+  assert.equal(workspaceRunEntry(empty), "loading-catalog");
+  assert.equal(workspaceRunEntry({ ...empty, catalogReady: true, catalogError: "offline" }), "catalog-error");
+  assert.equal(workspaceRunEntry({ ...empty, catalogReady: true }), "no-workspaces");
+});
+
+test("empty workspaces reach the no-game-run state instead of loading forever", () => {
+  const project: Project = { id: "workspace", runs: [] };
+  const selection = initialSelection("?view=live&project=workspace", [project]);
+  const run = selection.run || latestGameRun(project)?.id || "";
+  assert.equal(workspaceRunEntry({ project, run, catalogReady: true, catalogError: "" }), "no-run");
+});
+
+test("historical recordings remain loadable, including during a catalog retry", () => {
+  const project: Project = { id: "workspace", runs: [
+    { id: "evaluation", model: null, seconds: 60, drivers: [] },
+    { id: "older", model: null, seconds: 60, drivers: [] },
+  ] };
+  for (const id of ["evaluation", "older"]) {
+    const selection = initialSelection(`?view=replay&project=workspace&run=${id}&epoch=all`, [project]);
+    assert.equal(selection.run, id);
+    assert.equal(selection.epoch, "all");
+    assert.equal(workspaceRunEntry({ project, run: selection.run, catalogReady: true, catalogError: "offline" }), "ready");
+  }
+});
+
+test("unavailable workspace folders get recovery instead of a no-run prompt", () => {
+  assert.equal(workspaceRunEntry({ project: { id: "missing", available: false, runs: [] }, run: "", catalogReady: true, catalogError: "" }), "workspace-unavailable");
+});
+
+test("empty-state actions have clean destinations", () => {
+  const links = workspaceRunLinks("my workspace", "zh");
+  const params = (url: string) => Object.fromEntries(new URL(url, "http://localhost").searchParams);
+  assert.deepEqual(params(links.workspaces), { view: "workspaces" });
+  assert.deepEqual(params(links.createWorkspace), { view: "workspaces", create: "1" });
+  assert.deepEqual(params(links.capabilities!), { view: "caps", project: "my workspace" });
+  assert.deepEqual(params(links.quickstart), { view: "docs", doc: "tutorials/quickstart", docLang: "zh" });
+  assert.equal(workspaceRunLinks(undefined, "en").capabilities, undefined);
+
+  const emptyHtml = renderToStaticMarkup(createElement(WorkspaceRunEmpty, {
+    state: "no-workspaces",
+    error: "",
+    retrying: false,
+    onRetry() {},
+    onNavigate() {},
+  }));
+  assert.match(emptyHtml, /view=workspaces&amp;create=1/);
+});
+
+test("no-run guidance renders App-native Start Workspace CTA without legacy terminal CLI command clutter", () => {
+  const html = renderToStaticMarkup(createElement(WorkspaceRunEmpty, { state: "no-run", project: "my workspace",
+    workspacePath: "/tmp/my-ws", error: "", retrying: false, onRetry() {}, onNavigate() {} }));
+  assert.match(html, /data-empty-start-workspace=""/);
+  assert.doesNotMatch(html, /ludens --workspace/);
+  assert.doesNotMatch(html, /<details\b/);
+});
+
+test("only an unhandled primary click is intercepted for client navigation", () => {
+  const click = { button: 0, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, defaultPrevented: false };
+  assert.equal(isPlainNavigationClick(click), true);
+  for (const key of ["metaKey", "ctrlKey", "shiftKey", "altKey", "defaultPrevented"])
+    assert.equal(isPlainNavigationClick({ ...click, [key]: true }), false, key);
+  for (const button of [1, 2]) assert.equal(isPlainNavigationClick({ ...click, button }), false);
+});

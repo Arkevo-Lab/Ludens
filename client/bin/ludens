@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+SCRIPT=$0
+while [ -L "$SCRIPT" ]; do
+  DIRECTORY=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")" && pwd)
+  SCRIPT=$(readlink "$SCRIPT")
+  case "$SCRIPT" in /*) ;; *) SCRIPT=$DIRECTORY/$SCRIPT ;; esac
+done
+CLIENT_ROOT=$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT")/.." && pwd)
+if command -v bun >/dev/null 2>&1; then
+  exec bun "$CLIENT_ROOT/cli/main.ts" "$@"
+fi
+if [ -x "$CLIENT_ROOT/node_modules/.bin/tsx" ]; then
+  exec "$CLIENT_ROOT/node_modules/.bin/tsx" "$CLIENT_ROOT/cli/main.ts" "$@"
+fi
+if [ -x "$CLIENT_ROOT/../node_modules/.bin/tsx" ]; then
+  exec "$CLIENT_ROOT/../node_modules/.bin/tsx" "$CLIENT_ROOT/cli/main.ts" "$@"
+fi
+exec node --import tsx "$CLIENT_ROOT/cli/main.ts" "$@"

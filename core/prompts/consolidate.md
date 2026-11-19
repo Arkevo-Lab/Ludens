@@ -12,7 +12,7 @@ file-only turn; record needed changes, `adapting` counterexample records, any
 sim-to-real gaps or 30 Hz `.ludens/timeline/` replay slices (`record_window` /
 `around=<record-id>`) needed to upgrade the Critic (`@eval_env` surrogate
 environment or test set) before iterating the Actor (`@capability`), and
-`ludens eval run <id>` commands in `memory/current.md` for the next execution
+`ludens-core eval run <id>` commands in `memory/current.md` for the next execution
 turn. Environments are first-class: reusable surrogate envs are declared with
 `@eval_env` (docstring required, used as `with MyEnv(...) as env:` or
 `with eval_env(env):`) and bound with `@eval_capability(fn, env=MyEnv)` or

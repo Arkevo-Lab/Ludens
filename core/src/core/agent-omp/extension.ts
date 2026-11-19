@@ -154,7 +154,7 @@ export function createLudensExtension(options: {
 
   const observe: CustomTool<typeof observeParameters> = {
     name: "observe", label: "Observe", loadMode: "essential", approval: "read",
-    description: "Read the workspace timeline: latest main perception by default, a record by id, at a timestamp, or a start/end range. Media follow records in order. Select another recorded capability when needed. Mark the main perception capability with @observe, @capability, and @record, then ludens perception reload. Capabilities may emit optional effect and transition fields in their return envelope, and you can inspect or switch active states live with ludens perception state / ludens perception transition <target> [--args '<JSON>'] (or Client().state() / Client().transition()). Use ludens perception inject off/on to disable/enable automatic context attachment while keeping recording and explicit observe available; stop ends recording. Discover devices through ludens controller.",
+    description: "Read the workspace timeline: latest main perception by default, a record by id, at a timestamp, or a start/end range. Media follow records in order. Select another recorded capability when needed. Mark the main perception capability with @observe, @capability, and @record, then ludens-core perception reload. Capabilities may emit optional effect and transition fields in their return envelope, and you can inspect or switch active states live with ludens-core perception state / ludens-core perception transition <target> [--args '<JSON>'] (or Client().state() / Client().transition()). Use ludens-core perception inject off/on to disable/enable automatic context attachment while keeping recording and explicit observe available; stop ends recording. Discover devices through ludens-core controller.",
     parameters: observeParameters,
     async execute(id, params, _onUpdate, _ctx, signal) {
       const cycle = options.cycle();
@@ -268,7 +268,7 @@ export function createLudensExtension(options: {
   async function readPerception(signal: AbortSignal, parent: EventTrace, query: ObservationQuery = {}): Promise<PerceptionRead> {
     signal.throwIfAborted();
     if (runtime.perception) return runtime.perception.observe(signal, parent, query);
-    const text = "Perception is not configured. Implement perception.py and run ludens perception reload.";
+    const text = "Perception is not configured. Implement perception.py and run ludens-core perception reload.";
     const identity = childTrace(parent);
     const read: PerceptionRead = { queryId: identity.spanId!, ok: false, query, records: [], hasMore: false,
       error: { code: "UNAVAILABLE", message: text } };

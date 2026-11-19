@@ -1,0 +1,44 @@
+{
+  "name": "@ludens/desktop",
+  "version": "0.1.0",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "main": "dist/electron/main.js",
+  "bin": {
+    "ludens-app": "./bin/ludens-app"
+  },
+  "scripts": {
+    "build": "node scripts/build-electron.mjs",
+    "dev": "npm run build && node ../client/scripts/dev.mjs --real-home --desktop",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "start": "electron dist/electron/main.js",
+    "pack": "npm --prefix ../client run build && npm run build && npx electron-builder --dir",
+    "dist": "npm --prefix ../client run build && npm run build && npx electron-builder",
+    "desktop:build": "node scripts/build-electron.mjs",
+    "desktop:dev": "npm run desktop:build && node ../client/scripts/dev.mjs --real-home --desktop",
+    "desktop:typecheck": "tsc --noEmit",
+    "desktop:test": "vitest run",
+    "desktop:pack": "npm --prefix ../client run build && npm run desktop:build && npx electron-builder --dir",
+    "desktop:dist": "npm --prefix ../client run build && npm run desktop:build && npx electron-builder",
+    "pet:preview": "npm run build && electron dist/electron/companion-preview.js",
+    "pet:smoke": "npm run build && electron dist/electron/companion-preview.js --smoke"
+  },
+  "dependencies": {
+    "@ludens/protocol": "workspace:*",
+    "@ludens/client": "workspace:*",
+    "@ludens/server": "workspace:*",
+    "@ludens/core": "workspace:*",
+    "@ludens/baseware": "workspace:*",
+    "zod": "4.3.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.11",
+    "electron": "39.8.10",
+    "esbuild": "0.25.12",
+    "jsdom": "29.0.0",
+    "typescript": "^5.9.0",
+    "vitest": "4.1.5"
+  }
+}

@@ -163,7 +163,7 @@ export class PerceptionRuntime {
   async stateMachine(signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
     if (this.active) await this.ensureFresh({}, signal);
     const worker = this.worker;
-    if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
+    if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens-core perception reload.");
     const reply = await this.request(worker, { action: "state" }, 5000, signal);
     if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
     return reply.result as { state: string; arguments: Record<string, unknown>; epoch: string | null };
@@ -172,7 +172,7 @@ export class PerceptionRuntime {
   async transitionState(to: string, args: Record<string, unknown> = {}, signal?: AbortSignal): Promise<{ state: string; arguments: Record<string, unknown>; epoch: string | null }> {
     if (this.active) await this.ensureFresh({}, signal);
     const worker = this.worker;
-    if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens perception reload.");
+    if (!worker || worker.expectedExit) throw new Error("Perception state machine is unavailable; run ludens-core perception reload.");
     const reply = await this.request(worker, { action: "transition", to, arguments: args }, 5000, signal);
     if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
     return reply.result as { state: string; arguments: Record<string, unknown>; epoch: string | null };
@@ -241,7 +241,7 @@ export class PerceptionRuntime {
 
   async append(input: TimelineAppend, signal: AbortSignal): Promise<unknown> {
     const worker = this.worker;
-    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
+    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run ludens-core perception reload.");
     const reply = await this.request(worker, { ...input, action: "append" }, 30_000, signal);
     if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
     return reply.result;
@@ -249,7 +249,7 @@ export class PerceptionRuntime {
 
   async deriveMedia(input: TimelineDerive, signal: AbortSignal, observationId?: string): Promise<TimelineMedia> {
     const worker = this.worker;
-    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run ludens perception reload.");
+    if (!worker || worker.expectedExit) throw new Error("Timeline recorder is unavailable; run ludens-core perception reload.");
     const reply = await this.request(worker, { ...input, action: "derive" }, 30_000, signal);
     if (!reply.ok) throw new Error(`${reply.error?.type}: ${reply.error?.message}`);
     const media = reply.result as TimelineMedia;

@@ -45,7 +45,14 @@ async function fixture() {
     records, reply, setResponse(value: PerceptionRead) { response = value; },
     async run(args: string[]) {
       const entry = resolve(import.meta.dir, "../src/cli/control-cli.ts");
-      const child = Bun.spawn([process.execPath, "-e", `import { cli } from ${JSON.stringify(entry)}; await cli(${JSON.stringify(["observe", ...args])}, ${JSON.stringify(socket)});`],
+      const child = Bun.spawn([process.execPath, "-e", `import { cli } from ${JSON.stringify(entry)}; await cli(${JSON.stringify(["perception", "observe", ...args])}, ${JSON.stringify(socket)});`],
+        { cwd: root, env: { ...process.env, BASEWARE_EPOCH: undefined, BASEWARE_TRACE: undefined }, stdout: "pipe", stderr: "pipe" });
+      const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+      return { code, stdout, stderr };
+    },
+    async runRaw(argv: string[]) {
+      const entry = resolve(import.meta.dir, "../src/cli/control-cli.ts");
+      const child = Bun.spawn([process.execPath, "-e", `import { cli } from ${JSON.stringify(entry)}; await cli(${JSON.stringify(argv)}, ${JSON.stringify(socket)});`],
         { cwd: root, env: { ...process.env, BASEWARE_EPOCH: undefined, BASEWARE_TRACE: undefined }, stdout: "pipe", stderr: "pipe" });
       const [code, stdout, stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
       return { code, stdout, stderr };
@@ -115,5 +122,9 @@ test("observe CLI propagates failed reads and emits no partial image page on ren
     expect(oversized.stdout).toBe("");
     expect(oversized.stderr).toContain("at most 32");
     expect(oversized.stderr).toContain("smaller --limit");
+
+    const removedAlias = await f.runRaw(["observe"]);
+    expect(removedAlias.code).not.toBe(0);
+    expect(removedAlias.stderr).toContain("perception observe");
   } finally { await f.close(); }
 });
