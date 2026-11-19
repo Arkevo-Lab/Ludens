@@ -1,4 +1,5 @@
-import { realpath } from "node:fs/promises";
+import { createReadStream } from "node:fs";
+import { readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import type {
   LogsEventsParams,
@@ -6,7 +7,13 @@ import type {
   LogsReadParams,
   LogsReadResult,
 } from "@ludens/protocol/app-rpc";
-import { readRunEvents } from "@ludens/protocol/event-sources";
+import {
+  listEventSourceFiles,
+  matchesSourceEvent,
+  type EventChannel,
+  type EventSourceFile,
+  type SourceDependency,
+} from "@ludens/protocol/event-sources";
 import { readRunLogArtifact } from "@ludens/core/cli/log-archive";
 import { globalHome, workspaceForProject } from "./data";
 
@@ -75,6 +82,184 @@ async function resolveLogRunDir(
 export const DEFAULT_LOG_EVENTS_LIMIT = 200;
 export const MAX_LOG_EVENTS_LIMIT = 1000;
 
+interface LogHorizonGroup {
+  files: { name: string; path: string; size: number }[];
+  dependencies: SourceDependency[];
+}
+
+interface LogEventHorizon {
+  localPath: string;
+  localSize: number | null;
+  groups: LogHorizonGroup[];
+  expiresAt: number;
+}
+
+const HORIZON_TTL_MS = 60_000;
+const MAX_HORIZON_ENTRIES = 32;
+const horizonCache = new Map<string, LogEventHorizon>();
+
+export function clearLogEventHorizons(): void {
+  horizonCache.clear();
+}
+
+async function* readEventFileBounded(
+  path: string,
+  size: number,
+  signal?: AbortSignal,
+): AsyncGenerator<Record<string, unknown>> {
+  signal?.throwIfAborted();
+  if (size <= 0) return;
+  const stream = createReadStream(path, { encoding: "utf8", end: size - 1, signal });
+  let pending = "";
+  try {
+    for await (const chunk of stream) {
+      pending += chunk;
+      let start = 0;
+      let newline: number;
+      while ((newline = pending.indexOf("\n", start)) !== -1) {
+        signal?.throwIfAborted();
+        const line = pending.slice(start, newline);
+        start = newline + 1;
+        if (line.trim()) yield JSON.parse(line) as Record<string, unknown>;
+      }
+      pending = pending.slice(start);
+    }
+  } finally {
+    stream.destroy();
+  }
+}
+
+async function captureLogHorizon(
+  runDir: string,
+  channel: EventChannel,
+  signal?: AbortSignal,
+): Promise<LogEventHorizon> {
+  signal?.throwIfAborted();
+  let manifest: { eventSources?: SourceDependency[] } = {};
+  try {
+    manifest = JSON.parse(await readFile(join(runDir, "manifest.json"), { encoding: "utf8", signal }));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  const dependencies: SourceDependency[] = manifest.eventSources ?? [];
+  if (!Array.isArray(dependencies)) {
+    throw Object.assign(new Error("Invalid eventSources manifest"), { code: "EVENT_SOURCE_UNAVAILABLE" });
+  }
+  const sources = await Promise.all(dependencies.map(dependency => listEventSourceFiles(dependency, channel)));
+  signal?.throwIfAborted();
+
+  const localPath = join(runDir, channel === "events" ? "events.jsonl" : "diagnostics.jsonl");
+  let localSize: number | null = null;
+  try {
+    localSize = (await stat(localPath)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+
+  const groupMap = new Map<string, { files: Map<string, EventSourceFile>; dependencies: SourceDependency[] }>();
+  for (const [index, files] of sources.entries()) {
+    const dependency = dependencies[index]!;
+    const key = JSON.stringify([dependency.sourceId, dependency.root]);
+    let group = groupMap.get(key);
+    if (!group) {
+      group = { files: new Map(), dependencies: [] };
+      groupMap.set(key, group);
+    }
+    group.dependencies.push(dependency);
+    for (const file of files) group.files.set(file.name, file);
+  }
+
+  const groups: LogHorizonGroup[] = [];
+  for (const group of groupMap.values()) {
+    const sortedFiles = [...group.files.values()]
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(file => ({ name: file.name, path: file.path, size: file.size }));
+    groups.push({ files: sortedFiles, dependencies: group.dependencies });
+  }
+
+  return {
+    localPath,
+    localSize,
+    groups,
+    expiresAt: Date.now() + HORIZON_TTL_MS,
+  };
+}
+
+async function isHorizonIntact(horizon: LogEventHorizon): Promise<boolean> {
+  if (horizon.localSize !== null) {
+    const info = await stat(horizon.localPath).catch(() => null);
+    if (!info || info.size < horizon.localSize) return false;
+  }
+  for (const group of horizon.groups) {
+    for (const file of group.files) {
+      const info = await stat(file.path).catch(() => null);
+      if (!info || info.size < file.size) return false;
+    }
+  }
+  return true;
+}
+
+async function* readHorizonEvents(
+  horizon: LogEventHorizon,
+  signal?: AbortSignal,
+): AsyncGenerator<Record<string, unknown>> {
+  signal?.throwIfAborted();
+  const iterators: AsyncGenerator<Record<string, unknown>>[] = [];
+  if (horizon.localSize !== null) {
+    iterators.push(readEventFileBounded(horizon.localPath, horizon.localSize, signal));
+  }
+  for (const group of horizon.groups) {
+    iterators.push(
+      (async function* () {
+        for (const file of group.files) {
+          for await (const event of readEventFileBounded(file.path, file.size, signal)) {
+            signal?.throwIfAborted();
+            if (group.dependencies.some(dependency => matchesSourceEvent(event, dependency))) {
+              yield event;
+            }
+          }
+        }
+      })(),
+    );
+  }
+  const timestamp = (event: Record<string, unknown>) => {
+    const origin = event.origin as { at?: string } | undefined;
+    const raw = (typeof event.at === "string" ? event.at : undefined) ?? origin?.at;
+    const value = raw ? Date.parse(raw) : Number.NaN;
+    return Number.isFinite(value) ? value : 0;
+  };
+  try {
+    const heads = await Promise.all(iterators.map(iterator => iterator.next()));
+    while (true) {
+      signal?.throwIfAborted();
+      let selected = -1;
+      for (let index = 0; index < heads.length; index++) {
+        if (
+          !heads[index]!.done &&
+          (selected === -1 || timestamp(heads[index]!.value!) < timestamp(heads[selected]!.value!))
+        ) {
+          selected = index;
+        }
+      }
+      if (selected === -1) break;
+      yield heads[selected]!.value!;
+      heads[selected] = await iterators[selected]!.next();
+    }
+  } finally {
+    await Promise.all(iterators.map(iterator => iterator.return(undefined)));
+  }
+}
+
+function storeHorizon(key: string, horizon: LogEventHorizon): void {
+  horizonCache.delete(key);
+  horizonCache.set(key, horizon);
+  while (horizonCache.size > MAX_HORIZON_ENTRIES) {
+    const oldest = horizonCache.keys().next().value;
+    if (oldest === undefined) break;
+    horizonCache.delete(oldest);
+  }
+}
+
 export async function queryRunLogEvents(
   params: LogsEventsParams,
   options: { allowHostPath: boolean; root?: string; signal?: AbortSignal } = { allowHostPath: true },
@@ -82,7 +267,7 @@ export async function queryRunLogEvents(
   options.signal?.throwIfAborted();
   const runDir = await resolveLogRunDir(params, options);
   options.signal?.throwIfAborted();
-  const channel = params.channel === "diagnostics" ? "diagnostics" : "events";
+  const channel: EventChannel = params.channel === "diagnostics" ? "diagnostics" : "events";
   const cursor =
     typeof params.cursor === "number" && Number.isSafeInteger(params.cursor) && params.cursor >= 0
       ? params.cursor
@@ -103,11 +288,27 @@ export async function queryRunLogEvents(
     limit = params.limit;
   }
 
+  const cacheKey = `${runDir}\0${channel}`;
+  const now = Date.now();
+  let horizon: LogEventHorizon | undefined;
+  if (cursor > 0) {
+    const cached = horizonCache.get(cacheKey);
+    if (cached && cached.expiresAt > now && (await isHorizonIntact(cached))) {
+      cached.expiresAt = now + HORIZON_TTL_MS;
+      horizon = cached;
+    } else if (cached) {
+      horizonCache.delete(cacheKey);
+    }
+  }
+  if (!horizon) {
+    horizon = await captureLogHorizon(runDir, channel, options.signal);
+  }
+
   const events: Record<string, unknown>[] = [];
   let index = 0;
   let hasMore = false;
 
-  for await (const event of readRunEvents(runDir, { channel, signal: options.signal })) {
+  for await (const event of readHorizonEvents(horizon, options.signal)) {
     options.signal?.throwIfAborted();
     if (index < cursor) {
       index += 1;
@@ -117,8 +318,14 @@ export async function queryRunLogEvents(
       hasMore = true;
       break;
     }
-    events.push(event as Record<string, unknown>);
+    events.push(event);
     index += 1;
+  }
+
+  if (hasMore) {
+    storeHorizon(cacheKey, horizon);
+  } else {
+    horizonCache.delete(cacheKey);
   }
 
   return {

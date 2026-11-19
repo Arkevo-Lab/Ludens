@@ -373,7 +373,12 @@ export async function controlState(project: string, run: string, epoch: string |
   // Human takeover cannot wait for a cold/obsolete archive index to rebuild.
   const path = await resolveRun(project, run, root);
   const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as Manifest;
-  const latest = latestGameRun((await catalog(root)).find(item => item.id === project))?.id;
+  let latest = latestGameRun((await catalog(root)).find(item => item.id === project))?.id;
+  if (latest !== run) {
+    // Bypass the 3s catalog cache so a newly started run can be stopped immediately.
+    const fresh = await scanCatalog(root, true);
+    latest = latestGameRun(fresh.find(item => item.id === project))?.id;
+  }
   const live = latest === run && manifest.workspaceId === project
     ? await hostRequest(manifest.socket, { kind: "status", argv: [] }).catch(() => null) : null;
   const resolvedEpoch = typeof epoch === "string" && epoch.trim() ? epoch.trim() : (live?.epoch ?? null);

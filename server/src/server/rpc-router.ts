@@ -539,6 +539,14 @@ export class RpcRouter {
         const params = asObject(rawParams, "run/stop requires { project, run }");
         const project = requireNonEmptyString(params.project, "project");
         const run = requireNonEmptyString(params.run, "run");
+        if (
+          "epoch" in params &&
+          params.epoch !== undefined &&
+          params.epoch !== null &&
+          typeof params.epoch !== "string"
+        ) {
+          throw invalidParams("run/stop requires optional string epoch");
+        }
         const epoch = typeof params.epoch === "string" && params.epoch.trim() ? params.epoch.trim() : null;
         const result = await this.ctx.worker.call("stop", [project, run, epoch], signal);
         await this.ctx.worker.call("clearCatalogCache", []).catch(() => null);

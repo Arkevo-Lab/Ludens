@@ -27,6 +27,7 @@ export const PRESERVED_ENV_KEYS = [
   "PATHEXT",
   "XDG_STATE_HOME",
   "LUDENS_PYTHON",
+  "LUDENS_BUN",
   "LUDENS_HOME",
   "SSH_AUTH_SOCK",
   "LUDENS_PERCEPTION_HOT_SECONDS",
@@ -349,7 +350,10 @@ async function supervisorSpawnCommand(searchPath: string, cwd: string): Promise<
     if (hasSelfFile) return [process.execPath, selfPath, "--supervise"];
     return [process.execPath, "__supervise-job"];
   }
-  const bunExe = await resolveExecutable("bun", searchPath, cwd);
+  const explicitBun = process.env.LUDENS_BUN?.trim();
+  const bunExe =
+    (explicitBun ? await resolveExecutable(explicitBun, searchPath, cwd) : null) ??
+    (await resolveExecutable("bun", searchPath, cwd));
   if (bunExe && hasSelfFile) return [bunExe, selfPath, "--supervise"];
   if (process.platform !== "win32") {
     const serverBin = resolve(dirname(selfPath), "../../bin/ludens-server");
@@ -439,6 +443,9 @@ export async function startBackgroundJob(options: StartBackgroundJobOptions): Pr
       if (typeof val === "string") jobEnv[key] = val;
     }
     Object.assign(jobEnv, extraEnv);
+    if (!jobEnv.LUDENS_BUN && typeof process.env.LUDENS_BUN === "string" && process.env.LUDENS_BUN.trim()) {
+      jobEnv.LUDENS_BUN = process.env.LUDENS_BUN;
+    }
     for (const key of Object.keys(jobEnv)) {
       if (key.startsWith("BASEWARE_") || key === "LUDENS_WORKSPACE" || key === "LUDENS_SOCKET") {
         delete jobEnv[key];
@@ -587,9 +594,13 @@ export async function runJobSupervisorFromStdin(): Promise<number> {
   let child: ReturnType<typeof spawn>;
   try {
     logFd = openSync(spec.log, "a");
+    const childEnv =
+      typeof process.env.LUDENS_BUN === "string" && process.env.LUDENS_BUN.trim() && !spec.env.LUDENS_BUN
+        ? { ...spec.env, LUDENS_BUN: process.env.LUDENS_BUN }
+        : spec.env;
     child = spawn(spec.command[0]!, spec.command.slice(1), {
       cwd: spec.workspace,
-      env: spec.env as unknown as NodeJS.ProcessEnv,
+      env: childEnv as unknown as NodeJS.ProcessEnv,
       detached: true,
       windowsHide: true,
       stdio: ["ignore", logFd, logFd],

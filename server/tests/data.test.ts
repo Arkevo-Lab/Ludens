@@ -764,3 +764,51 @@ test("catalog extracts startedAt and endedAt from run events.jsonl when present"
     assert.equal(projects[0].runs[0].endedAt, "2026-11-05T12:03:26.660Z");
   } finally { clearCatalogCache(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("controlState bypasses stale 3s catalog cache for a newly started run and resolves active epoch", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-stop-fresh-")));
+  const sockPath = join(root, "core.sock");
+  const srv = createServer((conn) => {
+    let buf = "";
+    conn.setEncoding("utf8");
+    conn.on("data", (chunk) => {
+      buf += chunk;
+      const nl = buf.indexOf("\n");
+      if (nl < 0) return;
+      conn.end(
+        JSON.stringify({
+          ok: true,
+          value: { runId: "2026-11-19T02-00-00Z", connected: true, mode: "auto", epoch: "ep-live" },
+        }) + "\n",
+      );
+    });
+  });
+  await new Promise<void>((resolve) => srv.listen(sockPath, resolve));
+  try {
+    const workspace = join(root, "workspace");
+    await registerFixture(root, "game", workspace);
+    const run1 = join(workspace, "logs", "2026-11-19T01-00-00Z");
+    await mkdir(run1, { recursive: true });
+    await writeFile(join(run1, "manifest.json"), JSON.stringify({ runId: "2026-11-19T01-00-00Z", workspaceId: "game", drivers: [] }));
+    clearCatalogCache();
+    // Warm the 3-second catalog cache while only run1 exists.
+    const cached = await catalog(root);
+    assert.equal(cached[0].runs.map((r) => r.id).join(","), "2026-11-19T01-00-00Z");
+
+    // Immediately create run2 within the 3-second TTL window.
+    const run2 = join(workspace, "logs", "2026-11-19T02-00-00Z");
+    await mkdir(run2, { recursive: true });
+    await writeFile(
+      join(run2, "manifest.json"),
+      JSON.stringify({ runId: "2026-11-19T02-00-00Z", workspaceId: "game", socket: sockPath, drivers: [] }),
+    );
+    const state = await controlState("game", "2026-11-19T02-00-00Z", null, root);
+    assert.equal(state.controlAllowed, true);
+    assert.equal(state.selectedEpoch, "ep-live");
+    assert.equal(state.live?.epoch, "ep-live");
+  } finally {
+    srv.close();
+    clearCatalogCache();
+    await rm(root, { recursive: true, force: true });
+  }
+});
