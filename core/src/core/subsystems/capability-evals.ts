@@ -255,12 +255,15 @@ export async function runCapabilityEvals(workspace: string, options: { capabilit
 export async function adaptCapabilityEval(workspace: string, options: {
   capabilityId: string; reason: string; records?: string[]; signal?: AbortSignal;
 }): Promise<CapabilityEvalRunResult> {
+  options.signal?.throwIfAborted();
   const reason = options.reason.trim();
   if (!reason) throw new Error("Adaptation reason must be non-empty");
   const discovered = await new PythonCapabilities(workspace).discover(options.signal);
+  options.signal?.throwIfAborted();
   const capability = discovered.capabilities.find(item => capabilityEvalId(item) === options.capabilityId);
   if (!capability) throw new Error(`Unknown Python capability: ${options.capabilityId}; use ludens-core eval list`);
   const latest = await readLatestEvals(workspace);
+  options.signal?.throwIfAborted();
   const now = new Date().toISOString();
   const records = (options.records ?? []).map(item => item.trim()).filter(Boolean);
   const evalCodeSHA = capability.eval?.codeSHA ?? "";
@@ -274,6 +277,7 @@ export async function adaptCapabilityEval(workspace: string, options: {
     ...(records.length ? { details: { adaptationRecords: records } } : {}),
     error: { type: "EvalAdapting", message: reason }, adaptation,
   };
+  options.signal?.throwIfAborted();
   await writeEvalRecord(workspace, record);
   return { ...record, evalStatus: resolveCapabilityEval(capability, record).evalStatus };
 }

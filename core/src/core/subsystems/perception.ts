@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { watch, type FSWatcher } from "node:fs";
 import { basename, delimiter, join, resolve } from "node:path";
 import type { Clock, Observation } from "@ludens/baseware/contracts";
@@ -89,8 +89,11 @@ export class PerceptionRuntime {
   private lease: { epoch: string | null; inputGeneration: string | null } = { epoch: null, inputGeneration: null };
   private active = false;
   private loadedSources = new Map<string, string | null>();
+  private loadedSourceStats = new Map<string, string | null>();
   private watcher?: FSWatcher;
   private watcherTimer?: NodeJS.Timeout;
+  private sourcePollTimer?: NodeJS.Timeout;
+  private sourcePollInFlight = false;
   private lifecycle = 0;
   private leaseRevision = 0;
   private leaseSignal?: AbortSignal;
@@ -483,6 +486,19 @@ export class PerceptionRuntime {
       if (!next.has(relPath) && await this.digestSource(relPath) === null) next.set(relPath, null);
     }
     this.loadedSources = next;
+    const nextStats = new Map<string, string | null>();
+    for (const relPath of next.keys()) nextStats.set(relPath, await this.statSource(relPath));
+    this.loadedSourceStats = nextStats;
+  }
+
+  private async statSource(relPath: string): Promise<string | null> {
+    try {
+      const info = await stat(join(this.workspace, relPath), { bigint: true });
+      return `${info.mtimeNs}:${info.ctimeNs}:${info.size}:${info.ino}`;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
   }
 
   private async digestSource(relPath: string): Promise<string | null> {
@@ -495,6 +511,28 @@ export class PerceptionRuntime {
     }
   }
 
+  private async hasSourceStatChanges(): Promise<boolean> {
+    if (!this.active) return false;
+    const generation = this.current.generation;
+    if (generation) {
+      try {
+        const raw = await readFile(join(this.options.runDir, "perception", generation, "sources.json"), "utf8");
+        const manifest = JSON.parse(raw) as Record<string, string>;
+        for (const [relPath, sha] of Object.entries(manifest)) {
+          if (relPath.endsWith(".py") && typeof sha === "string" && !this.loadedSources.has(relPath)) {
+            this.loadedSources.set(relPath, sha);
+            this.loadedSourceStats.set(relPath, await this.statSource(relPath));
+          }
+        }
+      } catch { /* sources.json not yet written */ }
+    }
+    for (const relPath of this.loadedSources.keys()) {
+      const actual = await this.statSource(relPath);
+      if (!this.loadedSourceStats.has(relPath) || this.loadedSourceStats.get(relPath) !== actual) return true;
+    }
+    return false;
+  }
+
   private async hasSourceChanges(): Promise<boolean> {
     if (!this.active) return false;
     const generation = this.current.generation;
@@ -503,8 +541,10 @@ export class PerceptionRuntime {
         const raw = await readFile(join(this.options.runDir, "perception", generation, "sources.json"), "utf8");
         const manifest = JSON.parse(raw) as Record<string, string>;
         for (const [relPath, sha] of Object.entries(manifest)) {
-          if (relPath.endsWith(".py") && typeof sha === "string" && !this.loadedSources.has(relPath))
+          if (relPath.endsWith(".py") && typeof sha === "string" && !this.loadedSources.has(relPath)) {
             this.loadedSources.set(relPath, sha);
+            this.loadedSourceStats.set(relPath, await this.statSource(relPath));
+          }
         }
       } catch { /* sources.json not yet written */ }
     }
@@ -525,7 +565,12 @@ export class PerceptionRuntime {
         if (await this.hasSourceChanges()) {
           if (!this.active || lifecycle !== this.lifecycle) return;
           await this.replace(trace);
-        } else if (this.current.state !== "loading") return;
+        } else if (this.current.state !== "loading") {
+          for (const relPath of this.loadedSources.keys()) {
+            this.loadedSourceStats.set(relPath, await this.statSource(relPath));
+          }
+          return;
+        }
         if (Date.now() >= deadline) throw new Error("Perception freshness timed out while sources or the sampler were loading.");
         await new Promise<void>(resolve => setTimeout(resolve, 10));
       }
@@ -533,33 +578,51 @@ export class PerceptionRuntime {
   }
 
   private startWatcher(): void {
-    if (this.watcher || !this.active) return;
+    if (!this.active) return;
     const lifecycle = this.lifecycle;
-    try {
-      const watcher = this.watcher = watch(this.workspace, { recursive: true }, (_event, filename) => {
-        if (!this.active || lifecycle !== this.lifecycle) return;
-        const name = String(filename ?? "").replaceAll("\\", "/");
-        if (filename != null && !name.endsWith(".py")) return;
-        if (name.split("/").some(part => [".ludens", "logs", ".git", "__pycache__", "node_modules"].includes(part))) return;
-        clearTimeout(this.watcherTimer);
-        this.watcherTimer = setTimeout(() => {
-          this.watcherTimer = undefined;
-          void this.ensureFresh().catch(error => this.record("perception_reload_error", { error: String(error) }));
-        }, 25);
-      });
-      watcher.on("error", error => {
-        if (this.watcher !== watcher) return;
-        this.closeWatcher();
+    if (!this.watcher) {
+      try {
+        const watcher = this.watcher = watch(this.workspace, { recursive: true }, (_event, filename) => {
+          if (!this.active || lifecycle !== this.lifecycle) return;
+          const name = String(filename ?? "").replaceAll("\\", "/");
+          if (filename != null && !name.endsWith(".py")) return;
+          if (name.split("/").some(part => [".ludens", "logs", ".git", "__pycache__", "node_modules"].includes(part))) return;
+          clearTimeout(this.watcherTimer);
+          this.watcherTimer = setTimeout(() => {
+            this.watcherTimer = undefined;
+            void this.ensureFresh().catch(error => this.record("perception_reload_error", { error: String(error) }));
+          }, 25);
+        });
+        watcher.on("error", error => {
+          if (this.watcher !== watcher) return;
+          try { watcher.close(); } catch { /* already closed */ }
+          this.watcher = undefined;
+          this.record("perception_reload_error", { error: String(error) });
+        });
+      } catch (error) {
+        this.watcher = undefined;
         this.record("perception_reload_error", { error: String(error) });
-      });
-    } catch (error) {
-      this.watcher = undefined;
-      this.record("perception_reload_error", { error: String(error) });
+      }
+    }
+    if (!this.sourcePollTimer) {
+      this.sourcePollTimer = setInterval(() => {
+        if (!this.active || lifecycle !== this.lifecycle || this.sourcePollInFlight || this.current.state === "loading") return;
+        this.sourcePollInFlight = true;
+        void this.hasSourceStatChanges()
+          .then(changed => {
+            if (!changed || !this.active || lifecycle !== this.lifecycle) return;
+            return this.ensureFresh();
+          })
+          .catch(error => this.record("perception_reload_error", { error: String(error) }))
+          .finally(() => { this.sourcePollInFlight = false; });
+      }, 200);
+      this.sourcePollTimer.unref?.();
     }
   }
 
   private closeWatcher(): void {
     if (this.watcherTimer) { clearTimeout(this.watcherTimer); this.watcherTimer = undefined; }
+    if (this.sourcePollTimer) { clearInterval(this.sourcePollTimer); this.sourcePollTimer = undefined; }
     try { this.watcher?.close(); } catch { /* already closed */ }
     this.watcher = undefined;
   }

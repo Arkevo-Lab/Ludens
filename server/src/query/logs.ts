@@ -72,31 +72,48 @@ async function resolveLogRunDir(
   });
 }
 
+export const DEFAULT_LOG_EVENTS_LIMIT = 200;
+export const MAX_LOG_EVENTS_LIMIT = 1000;
+
 export async function queryRunLogEvents(
   params: LogsEventsParams,
-  options: { allowHostPath: boolean; root?: string } = { allowHostPath: true },
+  options: { allowHostPath: boolean; root?: string; signal?: AbortSignal } = { allowHostPath: true },
 ): Promise<LogsEventsResult> {
+  options.signal?.throwIfAborted();
   const runDir = await resolveLogRunDir(params, options);
+  options.signal?.throwIfAborted();
   const channel = params.channel === "diagnostics" ? "diagnostics" : "events";
   const cursor =
     typeof params.cursor === "number" && Number.isSafeInteger(params.cursor) && params.cursor >= 0
       ? params.cursor
       : 0;
-  const limit =
-    typeof params.limit === "number" && Number.isSafeInteger(params.limit) && params.limit > 0
-      ? params.limit
-      : undefined;
+  let limit = DEFAULT_LOG_EVENTS_LIMIT;
+  if (params.limit !== undefined) {
+    if (
+      typeof params.limit !== "number" ||
+      !Number.isSafeInteger(params.limit) ||
+      params.limit < 1 ||
+      params.limit > MAX_LOG_EVENTS_LIMIT
+    ) {
+      throw Object.assign(
+        new Error(`limit must be an integer between 1 and ${MAX_LOG_EVENTS_LIMIT}`),
+        { status: 400 },
+      );
+    }
+    limit = params.limit;
+  }
 
   const events: Record<string, unknown>[] = [];
   let index = 0;
   let hasMore = false;
 
-  for await (const event of readRunEvents(runDir, { channel })) {
+  for await (const event of readRunEvents(runDir, { channel, signal: options.signal })) {
+    options.signal?.throwIfAborted();
     if (index < cursor) {
       index += 1;
       continue;
     }
-    if (limit !== undefined && events.length >= limit) {
+    if (events.length >= limit) {
       hasMore = true;
       break;
     }

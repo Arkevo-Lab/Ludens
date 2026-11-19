@@ -370,9 +370,11 @@ export async function adaptWorkspaceCapabilityEval(
 ) {
   signal?.throwIfAborted();
   const workspace = await capabilityWorkspace(project, expectedWorkspace, root);
+  signal?.throwIfAborted();
   return adaptCapabilityEval(workspace, {
     capabilityId: options.capabilityId,
     reason: options.reason,
     ...(options.records?.length ? { records: options.records } : {}),
+    signal,
   });
 }

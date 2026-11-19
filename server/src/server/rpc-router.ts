@@ -539,7 +539,7 @@ export class RpcRouter {
         const params = asObject(rawParams, "run/stop requires { project, run }");
         const project = requireNonEmptyString(params.project, "project");
         const run = requireNonEmptyString(params.run, "run");
-        const epoch = typeof params.epoch === "string" ? params.epoch : null;
+        const epoch = typeof params.epoch === "string" && params.epoch.trim() ? params.epoch.trim() : null;
         const result = await this.ctx.worker.call("stop", [project, run, epoch], signal);
         await this.ctx.worker.call("clearCatalogCache", []).catch(() => null);
         this.ctx.eventHub.publish({ topic: "core", workspaceId: project, runId: run, payload: { action: "stop" } });
@@ -626,9 +626,9 @@ export class RpcRouter {
         const limit =
           params.limit === undefined
             ? undefined
-            : typeof params.limit === "number" && Number.isSafeInteger(params.limit) && params.limit > 0
+            : typeof params.limit === "number" && Number.isSafeInteger(params.limit) && params.limit >= 1 && params.limit <= 1000
               ? params.limit
-              : (() => { throw invalidParams("limit must be a positive integer"); })();
+              : (() => { throw invalidParams("limit must be an integer between 1 and 1000"); })();
         const { capabilities: caps } = this.getSessionCapabilities(session);
         const isSafeId = /^[a-zA-Z0-9._-]+$/.test(run) && run !== "." && run !== "..";
         if ((!project || !isSafeId) && !caps.localFsPaths) {
@@ -845,9 +845,9 @@ export class RpcRouter {
         const limit =
           params.limit === undefined
             ? undefined
-            : typeof params.limit === "number" && Number.isSafeInteger(params.limit) && params.limit > 0
+            : typeof params.limit === "number" && Number.isSafeInteger(params.limit) && params.limit >= 1 && params.limit <= 500
               ? params.limit
-              : (() => { throw invalidParams("limit must be a positive integer"); })();
+              : (() => { throw invalidParams("limit must be an integer between 1 and 500"); })();
         return this.ctx.worker.call(
           "workspaceCapabilityEvalHistory",
           [project, workspace, { ...(capabilityId ? { capabilityId } : {}), ...(limit !== undefined ? { limit } : {}) }],

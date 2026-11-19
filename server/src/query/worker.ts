@@ -90,8 +90,11 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   runWorkspaceCapabilityEval: ([project, workspace, options], signal) => runWorkspaceCapabilityEval(project, workspace, options, undefined, signal),
   workspaceCapabilityEvalHistory: ([project, workspace, options]) => workspaceCapabilityEvalHistory(project, workspace, options),
   adaptWorkspaceCapabilityEval: ([project, workspace, options], signal) => adaptWorkspaceCapabilityEval(project, workspace, options, undefined, signal),
-  logsEvents: ([params, allowHostPath]) => queryRunLogEvents(params, { allowHostPath }),
-  logsRead: ([params, allowHostPath]) => queryRunLogArtifact(params, { allowHostPath }),
+  logsEvents: ([params, allowHostPath], signal) => queryRunLogEvents(params, { allowHostPath, signal }),
+  logsRead: ([params, allowHostPath], signal) => {
+    signal.throwIfAborted();
+    return queryRunLogArtifact(params, { allowHostPath });
+  },
   capabilityRuntime: ([project, workspace]) => capabilityRuntime(project, workspace),
   runtimeControl: ([project, workspace, command]) => controlWorkspaceRuntime(project, workspace, command),
   eventPoolRead: ([project, workspace, filter]) => readWorkspaceEventPool(project, workspace, filter),
