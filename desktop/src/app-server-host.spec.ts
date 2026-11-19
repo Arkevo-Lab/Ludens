@@ -154,6 +154,17 @@ describe('app-server-host', () => {
         }),
       ).toBe(posix.join(resourcesPath, 'docs'))
 
+      expect(
+        resolveDaemonLaunch({
+          platform: 'darwin',
+          env: { LUDENS_SERVER_BIN: '/opt/custom/ludens-server', LUDENS_HOME: '/tmp/ludens-bin' },
+          exists: () => false,
+        }).spawnCommand,
+      ).toEqual({
+        command: '/opt/custom/ludens-server',
+        argsPrefix: [],
+      })
+
       const repoLaunch = resolveDaemonLaunch({
         here: '/repo/desktop/dist/electron',
         platform: 'darwin',
@@ -298,10 +309,15 @@ describe('app-server-host', () => {
       await expect(host.start()).rejects.toThrow(/stopped/i)
     })
 
-    it('resolves and runs the prebuilt packaged server bundle from an isolated resourcesPath without node_modules', () => {
+    it('resolves and runs prebuilt server, core, and baseware bundles from an isolated resourcesPath without node_modules', () => {
       const builtServerDir = resolve('dist/server')
-      if (!existsSync(join(builtServerDir, 'main.js'))) {
-        // Build step produces dist/server; skip only if test is invoked without prior build.
+      const builtCoreDir = resolve('dist/core')
+      const builtBasewareDir = resolve('dist/baseware')
+      if (
+        !existsSync(join(builtServerDir, 'main.js')) ||
+        !existsSync(join(builtCoreDir, 'bin', 'ludens-core')) ||
+        !existsSync(join(builtBasewareDir, 'bin', 'baseware'))
+      ) {
         return
       }
       const isolatedRoot = mkdtempSync(join(tmpdir(), 'ludens-packaged-resources-'))
@@ -309,6 +325,8 @@ describe('app-server-host', () => {
         const resourcesPath = join(isolatedRoot, 'Resources')
         mkdirSync(join(resourcesPath, 'out'), { recursive: true })
         cpSync(builtServerDir, join(resourcesPath, 'server'), { recursive: true })
+        cpSync(builtCoreDir, join(resourcesPath, 'core'), { recursive: true })
+        cpSync(builtBasewareDir, join(resourcesPath, 'baseware'), { recursive: true })
 
         const launch = resolveDaemonLaunch({
           here: join(isolatedRoot, 'app', 'dist', 'electron'),
@@ -318,14 +336,40 @@ describe('app-server-host', () => {
         expect(launch.spawnCommand.argsPrefix).toEqual([join(resourcesPath, 'server', 'main.js')])
         expect(launch.repo).toBe(resourcesPath)
 
-        const result = spawnSync(
+        const isolatedEnv = {
+          PATH: process.env.PATH ?? '',
+          LUDENS_BUN: launch.spawnCommand.command,
+          LUDENS_REPO_ROOT: resourcesPath,
+        }
+
+        const serverRes = spawnSync(
           launch.spawnCommand.command,
           [...launch.spawnCommand.argsPrefix, '--help'],
-          { cwd: isolatedRoot, encoding: 'utf8', env: { PATH: process.env.PATH ?? '' } },
+          { cwd: isolatedRoot, encoding: 'utf8', env: isolatedEnv },
         )
-        expect(result.error).toBeUndefined()
-        expect(result.status).toBe(0)
-        expect(result.stdout).toContain('ludens-server — Ludens Control Plane Server')
+        expect(serverRes.error).toBeUndefined()
+        expect(serverRes.status).toBe(0)
+        expect(serverRes.stdout).toContain('ludens-server — Ludens Control Plane Server')
+
+        const coreBin = join(resourcesPath, 'core', 'bin', process.platform === 'win32' ? 'ludens-core.cmd' : 'ludens-core')
+        const coreRes = spawnSync(coreBin, ['--help'], {
+          cwd: isolatedRoot,
+          encoding: 'utf8',
+          env: isolatedEnv,
+        })
+        expect(coreRes.error).toBeUndefined()
+        expect(coreRes.status).toBe(0)
+        expect(coreRes.stdout).toContain('ludens-core')
+
+        const basewareBin = join(resourcesPath, 'baseware', 'bin', process.platform === 'win32' ? 'baseware.cmd' : 'baseware')
+        const basewareRes = spawnSync(basewareBin, ['--help'], {
+          cwd: isolatedRoot,
+          encoding: 'utf8',
+          env: isolatedEnv,
+        })
+        expect(basewareRes.error).toBeUndefined()
+        expect(basewareRes.status).toBe(0)
+        expect(basewareRes.stdout).toContain('baseware serve')
       } finally {
         rmSync(isolatedRoot, { recursive: true, force: true })
       }

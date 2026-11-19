@@ -484,6 +484,17 @@ test("ludens top-level remote control shortcuts route over runtime/control and r
     method: "run/stop",
     params: { project: "ws-alpha", run: "run-9" },
   });
+
+  // LUDENS_WORKSPACE pointing to an unregistered workspace must fail strictly (never silently fall back to ws-alpha)
+  await assert.rejects(
+    () =>
+      runCli(["stop"], {
+        env: { ...env, LUDENS_WORKSPACE: "unregistered" },
+        rpcOptions,
+        out: () => {},
+      }),
+    /Workspace 'unregistered' was not found on the server/,
+  );
 });
 
 test("ludens logs events paginates over logs/events RPC and logs read supports --file and --event over logs/read RPC", async () => {
@@ -707,10 +718,10 @@ test("withOperatorRpc uses WS directly when --remote is set and resolves monorep
     { command: "/custom/ludens-server", argsPrefix: [] },
   );
 
-  // Windows .cmd/.bat shims with spaces are wrapped via cmd.exe /d /s /c with outer quotes & windowsVerbatimArguments
+  // Windows .cmd/.bat shims with spaces & trailing backslashes are wrapped via cmd.exe /d /s /c with outer quotes & windowsVerbatimArguments
   const winCmdInvocation = buildServerSpawnInvocation(
     { command: "C:\\Program Files\\Ludens\\ludens-server.cmd", argsPrefix: [] },
-    ["start", "--static-dir", "C:\\My App\\out"],
+    ["start", "--static-dir", "C:\\My App\\"],
     "win32",
     { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
   );
@@ -720,7 +731,7 @@ test("withOperatorRpc uses WS directly when --remote is set and resolves monorep
       "/d",
       "/s",
       "/c",
-      `""C:\\Program Files\\Ludens\\ludens-server.cmd" start --static-dir "C:\\My App\\out""`,
+      `""C:\\Program Files\\Ludens\\ludens-server.cmd" start --static-dir "C:\\My App\\\\""`,
     ],
     windowsVerbatimArguments: true,
   });

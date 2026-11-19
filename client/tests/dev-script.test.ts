@@ -157,7 +157,7 @@ test("resolveLudensServerCommand prefers bun + server/src/cli/main.ts over .cmd 
 
   const wrapped = buildServerSpawn(
     "C:\\Program Files\\Ludens\\ludens-server.cmd",
-    ["serve", "--dev", "--static-dir", "C:\\My App\\out"],
+    ["serve", "--dev", "--static-dir", "C:\\My App\\"],
     "win32",
     { ComSpec: "C:\\Windows\\System32\\cmd.exe" },
   );
@@ -167,7 +167,7 @@ test("resolveLudensServerCommand prefers bun + server/src/cli/main.ts over .cmd 
       "/d",
       "/s",
       "/c",
-      `""C:\\Program Files\\Ludens\\ludens-server.cmd" serve --dev --static-dir "C:\\My App\\out""`,
+      `""C:\\Program Files\\Ludens\\ludens-server.cmd" serve --dev --static-dir "C:\\My App\\\\""`,
     ],
     windowsVerbatimArguments: true,
   });
