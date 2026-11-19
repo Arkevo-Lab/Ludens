@@ -173,16 +173,15 @@ function makeStudioSnapshot(
       model: "openai-codex/gpt-6.1-sol",
       seconds: 1800,
       requests: 1000,
-      dashboard: true,
       pet: false,
       diagnostics: "normal",
       ...(storage ? { storage } : {}),
+      ...({} as any),
     },
     defaults: {
       model: "openai-codex/gpt-6.1-sol",
       seconds: 1800,
       requests: 1000,
-      dashboard: true,
       pet: false,
     },
     services: {

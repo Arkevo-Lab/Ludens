@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useRef } from "react";
-import { ChevronRight, Folder, HardDrive, Play, Plus, RefreshCw, SlidersHorizontal, X } from "lucide-react";
+import { Folder, HardDrive, Play, Plus, RefreshCw, SlidersHorizontal, X } from "lucide-react";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -10,13 +10,11 @@ import { useLocale, useTranslations } from "@/lib/locale";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { workspaceRunLinks, type WorkspaceRunEntry } from "@/lib/workspace-run-entry";
-import { workspaceUpCommand } from "@/features/workspaces/workspace-create-model";
 
 export function WorkspaceRunEmpty({
   state,
   project,
   workspaceName,
-  workspacePath,
   error,
   retrying,
   onRetry,
@@ -218,18 +216,6 @@ export function WorkspaceRunEmpty({
               {state !== "catalog-error" && action(links.quickstart, t("quickstart"))}
               {isNoRun && action(links.workspaces, t("switchWorkspace"))}
             </div>
-          )}
-
-          {isNoRun && workspacePath && (
-            <details className="settings-disclosure border-y-0 pt-0.5 text-xs text-muted-foreground">
-              <summary className="settings-disclosure-summary min-h-0 py-1 font-medium text-muted-foreground hover:text-foreground">
-                <ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />
-                {t("cliCommandSummary")}
-              </summary>
-              <pre className="mt-2 overflow-x-auto rounded-md border bg-background px-3 py-2 font-mono text-xs text-foreground">
-                {workspaceUpCommand(workspacePath)}
-              </pre>
-            </details>
           )}
         </div>
       </CardContent>

@@ -255,7 +255,6 @@ export class WorkspaceSupervisor {
     const cacheRoot = join(this.home, "cache", "drivers");
     let manifest = await resolveDriver(String(raw.driver ?? ""), raw.driverPackage as string | undefined, cacheRoot || defaultDriverCacheRoot());
     const config = parseConfig(raw, manifest);
-    config.dashboard = false;
     config.pet = false;
 
     let activeMachine: BasewareMachineSpec | undefined;
@@ -296,7 +295,7 @@ export class WorkspaceSupervisor {
 
   private async buildDownPlan(workspace: string): Promise<LaunchPlan> {
     const manifest = await resolveDriver("cua", undefined, join(this.home, "cache", "drivers"));
-    const config = parseConfig({ driver: "cua", dashboard: false, pet: false }, manifest);
+    const config = parseConfig({ driver: "cua", pet: false }, manifest);
     return launchPlan(config, workspace, this.repo, undefined, manifest);
   }
 
@@ -381,7 +380,6 @@ export class WorkspaceSupervisor {
 
     try {
       const status = await launcher.up({
-        includeDashboard: false,
         includePet: false,
         launchedBy,
         ...(appInstanceId ? { appInstanceId } : {}),
@@ -425,7 +423,7 @@ export class WorkspaceSupervisor {
     const plan = await this.buildDownPlan(workspace);
     const notes: string[] = [];
     const launcher = this.makeLauncher(plan, notes);
-    const status = await launcher.down(false, Boolean(options.keepEmulator), false);
+    const status = await launcher.down(Boolean(options.keepEmulator), false);
 
     const record = this.owned.get(workspace);
     if (record) {

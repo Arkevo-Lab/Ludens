@@ -27,7 +27,7 @@ import { ArchiveBuild } from "@/shell/archive-build";
 import { WorkspacesView } from "@/features/workspaces/workspaces-view";
 import { Metric, ObservationPanel, seconds, compactDuration, percent, bytes, clockTime } from "@/features/live/run-visuals";
 import { useLocale, useTranslations } from "@/lib/locale";
-import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { formatConnectionBannerMessage, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { ConnectionTargetDialog } from "@/components/connection-target-dialog";
 import type { Project, RunData } from "@/lib/types";
 import { useActiveCores } from "@/shell/use-active-cores";
@@ -435,13 +435,7 @@ export default function ConsoleShell() {
             >
               <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
                 <span className="min-w-0 break-words">
-                  {rpcCtx.snapshot.needsAuth
-                    ? connT("bannerAuthRequired")
-                    : rpcCtx.snapshot.status === "unconfigured"
-                      ? connT("bannerUnconfigured")
-                      : rpcCtx.snapshot.error
-                        ? connT("bannerDisconnected").replace("{reason}", rpcCtx.snapshot.error)
-                        : connT("bannerDisconnectedNoReason")}
+                  {formatConnectionBannerMessage(rpcCtx.snapshot, connT)}
                 </span>
                 <div className="flex flex-wrap items-center gap-2">
                   {!rpcCtx.snapshot.needsAuth && rpcCtx.snapshot.status !== "unconfigured" && (
@@ -978,6 +972,7 @@ export default function ConsoleShell() {
         companionAvailable={desktop.companionAvailable}
         companionVisible={desktop.companionVisible}
         onToggleCompanion={() => void desktop.toggleCompanion()}
+        onOpenConnectionDialog={() => setConnectionDialogOpen(true)}
       />
       {rpcCtx && (
         <ConnectionTargetDialog

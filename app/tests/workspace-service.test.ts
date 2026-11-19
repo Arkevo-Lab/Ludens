@@ -28,9 +28,9 @@ function makeStudioSnapshot(id = "ws-demo"): WorkspaceStudioSnapshot {
       model: "openai-codex/gpt-6.1-sol",
       seconds: 1800,
       requests: 1000,
-      dashboard: true,
       pet: false,
       diagnostics: "normal",
+      ...({} as any),
     },
     defaults: {},
     services: {
@@ -487,7 +487,7 @@ test("Live ShioriWorkbench and WorkspaceRunEmpty render first-class Start Worksp
     ),
   );
   assert.match(emptyRunHtml, /data-empty-start-workspace=""/);
-  assert.match(emptyRunHtml, /ludens --workspace &#x27;\/tmp\/demo-ws&#x27; up/);
+  assert.doesNotMatch(emptyRunHtml, /ludens --workspace/);
 });
 
 test("app/messages/en.json and app/messages/zh.json maintain 1:1 leaf key parity", () => {

@@ -7,14 +7,15 @@ import {
 } from "../server/app-server.ts";
 
 export const APP_SERVER_HELP = `App server:
-ludens app-server [--listen <unix://PATH | ws://HOST:PORT>]... [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>] [--parent-watchdog]
-ludens serve [--listen <unix://PATH | ws://HOST:PORT>]... [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>] [--parent-watchdog]
+ludens app-server [--dev] [--listen <unix://PATH | ws://HOST:PORT>]... [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>] [--parent-watchdog]
+ludens serve [--dev] [--listen <unix://PATH | ws://HOST:PORT>]... [--auth <none|token>] [--token <secret> | --token-env <VAR>] [--static-dir <dir>] [--trusted-origin <origin>] [--parent-watchdog]
 
 Starts the unified @ludens/core JSON-RPC 2.0 App Server and optional static frontend server.
 Default with no --listen binds Unix Domain Socket only (0 TCP ports).
 Prints a single-line JSON readiness handshake to stdout once listening.
+--dev enables the local loopback web-dev runtime profile (127.0.0.1 / ::1 / localhost only).
 --listen unix://PATH overrides the UDS socket path; ws://HOST:PORT enables HTTP + WebSocket /rpc (repeatable).
---auth <none|token> selects WebSocket authentication mode (required when ws:// binds a non-loopback host).
+--auth <none|token> selects WebSocket authentication mode (required on ludens serve ws:// without --dev, and whenever ws:// binds a non-loopback host).
 --token / --token-env <VAR> supplies the authentication secret.
 --static-dir serves exported static UI assets (e.g. app/out) with SPA fallback.
 --trusted-origin allows browser Origin access in none auth mode (repeatable).
@@ -108,7 +109,11 @@ export function resolveAuthOptions(values: {
   return token !== undefined ? { mode, token } : { mode };
 }
 
-export async function appServerCommand(args: string[], defaultHome = ludensHome()): Promise<void> {
+export async function appServerCommand(
+  args: string[],
+  defaultHome = ludensHome(),
+  commandName = "app-server",
+): Promise<void> {
   if (args.includes("--help") || args.includes("-h")) {
     console.log(APP_SERVER_HELP);
     return;
@@ -117,6 +122,7 @@ export async function appServerCommand(args: string[], defaultHome = ludensHome(
   const { values } = parseArgs({
     args,
     options: {
+      dev: { type: "boolean", default: false },
       listen: { type: "string", multiple: true },
       auth: { type: "string" },
       token: { type: "string" },
@@ -130,6 +136,13 @@ export async function appServerCommand(args: string[], defaultHome = ludensHome(
 
   const { unixSocketPath, wsListen } = parseListenSpecs(values.listen ?? []);
   const auth = resolveAuthOptions(values);
+  const devMode = Boolean(values.dev);
+
+  if (commandName === "serve" && wsListen && !devMode && auth.mode !== "token") {
+    throw new Error(
+      "ludens serve with --listen ws://... requires token authentication: pass --auth token --token-env <VAR> (or --token <secret>) for remote/cloud serving, or pass --dev for local loopback preview.",
+    );
+  }
 
   let shuttingDown = false;
   const server = await startAppServer({
@@ -137,6 +150,7 @@ export async function appServerCommand(args: string[], defaultHome = ludensHome(
     ...(unixSocketPath !== undefined ? { unixSocketPath } : {}),
     ...(wsListen !== undefined ? { wsListen } : { wsListen: null }),
     auth,
+    devMode,
     ...(values["static-dir"] ? { staticDir: values["static-dir"] } : {}),
     ...(values["trusted-origin"]?.length ? { trustedOrigins: values["trusted-origin"] } : {}),
     parentWatchdog: false,
@@ -182,6 +196,7 @@ export async function appServerCommand(args: string[], defaultHome = ludensHome(
     host: server.host,
     port: server.port,
     authMode: server.authMode,
+    devMode: Boolean(server.devMode),
   });
   await new Promise<void>(resolveWrite => {
     process.stdout.write(`${handshake}\n`, () => resolveWrite());

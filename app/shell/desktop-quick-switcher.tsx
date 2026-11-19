@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Compass,
   FolderIcon,
+  Link2,
   PanelLeft,
   Plus,
   RotateCw,
@@ -57,7 +58,8 @@ export interface QuickSwitcherItem {
     | "back"
     | "forward"
     | "reload"
-    | "pet";
+    | "pet"
+    | "connection";
   onSelect(): void;
 }
 
@@ -98,6 +100,7 @@ export interface DesktopQuickSwitcherProps {
   companionAvailable?: boolean;
   companionVisible?: boolean;
   onToggleCompanion?(): void;
+  onOpenConnectionDialog?(): void;
 }
 
 function ItemIcon({ kind }: { kind: QuickSwitcherItem["icon"] }) {
@@ -117,6 +120,8 @@ function ItemIcon({ kind }: { kind: QuickSwitcherItem["icon"] }) {
       return <RotateCw className={`${cls} desktop-qs-item-icon-reload`} aria-hidden="true" />;
     case "pet":
       return <Sparkles className={cls} aria-hidden="true" />;
+    case "connection":
+      return <Link2 className={cls} aria-hidden="true" />;
     default:
       return <Compass className={cls} aria-hidden="true" />;
   }
@@ -142,6 +147,7 @@ export function DesktopQuickSwitcher({
   companionAvailable = false,
   companionVisible = false,
   onToggleCompanion,
+  onOpenConnectionDialog,
 }: DesktopQuickSwitcherProps) {
   const { t: rootT } = useLocale();
   const t = useTranslations("desktopChrome");
@@ -235,6 +241,16 @@ export function DesktopQuickSwitcher({
     });
 
     items.push({
+      id: "action:connection-target",
+      group: "actions",
+      title: t("actionSwitchConnectionTarget"),
+      subtitle: t("actionSwitchConnectionTargetSubtitle"),
+      keywords: "connection target remote server token rpc daemon 连接 目标 远端 远程 服务器 守护进程 令牌",
+      icon: "connection",
+      onSelect: () => onOpenConnectionDialog?.(),
+    });
+
+    items.push({
       id: "action:toggle-sidebar",
       group: "actions",
       title: sidebarCollapsed
@@ -314,6 +330,7 @@ export function DesktopQuickSwitcher({
     companionAvailable,
     companionVisible,
     onToggleCompanion,
+    onOpenConnectionDialog,
     onReload,
   ]);
 

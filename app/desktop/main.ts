@@ -59,7 +59,6 @@ const { values } = parseArgs({
   options: {
     workspace: { type: 'string' },
     server: { type: 'string' },
-    dashboard: { type: 'string' },
     profile: { type: 'string' },
     background: { type: 'boolean' },
     'show-window': { type: 'boolean' },
@@ -74,7 +73,6 @@ if (values.help) {
       '',
       '--workspace PATH   Initial workspace to register/select on launch',
       '--server URL       Load an explicit local dev server URL instead of ludens-app://console/',
-      '--dashboard URL    Alias for --server',
       '--profile PATH     Custom desktop profile directory (default: ~/.ludens/desktop/profile)',
       '--background       Start hidden in the system tray + Desktop Pet without opening the main window',
       '--show-window      Open the main window on launch (default unless --background is passed)',
@@ -90,7 +88,6 @@ if (values.help) {
   const workspace = initialWorkspace ? realpathSync(resolve(initialWorkspace)) : undefined
   const explicitDevArg =
     values.server ??
-    values.dashboard ??
     process.env.LUDENS_APP_DEV_URL?.trim() ??
     process.env.LUDENS_DEV_URL?.trim()
 

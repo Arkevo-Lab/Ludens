@@ -55,6 +55,36 @@ export interface HashBootstrapResult {
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
+export function isLoopbackHost(rawHostOrUrl: string | null | undefined): boolean {
+  if (typeof rawHostOrUrl !== "string") return false;
+  const trimmed = rawHostOrUrl.trim();
+  if (!trimmed) return false;
+
+  if (/^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed);
+      return LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase());
+    } catch {
+      return false;
+    }
+  }
+
+  const authority = (trimmed.split("/")[0] ?? "").trim();
+  if (!authority) return false;
+  if (authority.startsWith("[")) {
+    const endIdx = authority.indexOf("]");
+    if (endIdx < 0) return false;
+    return LOOPBACK_HOSTS.has(authority.slice(0, endIdx + 1).toLowerCase());
+  }
+  const firstColon = authority.indexOf(":");
+  const lastColon = authority.lastIndexOf(":");
+  if (firstColon !== -1 && firstColon !== lastColon) {
+    return LOOPBACK_HOSTS.has(authority.toLowerCase());
+  }
+  const hostOnly = firstColon === -1 ? authority : authority.slice(0, firstColon);
+  return LOOPBACK_HOSTS.has(hostOnly.toLowerCase());
+}
+
 export function hasDesktopRpcBridge(
   win: Window | undefined = typeof window !== "undefined" ? window : undefined,
 ): boolean {

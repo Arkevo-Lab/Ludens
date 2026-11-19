@@ -28,6 +28,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ModelPickerDialog, shortModelLabel } from "@/components/model-picker-dialog";
 import { useTranslations } from "@/lib/locale";
 import { useNativePathPicker } from "@/lib/use-native-path-picker";
+import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 import type { DiscoveredDriver } from "@/lib/drivers";
 import type {
   BasewareDriverOverviewItem,
@@ -127,6 +128,7 @@ export function WorkspaceCreateForm({
 
   const catalog = useWorkspaceCreationCatalog({ enabled: true });
   const nativePicker = useNativePathPicker();
+  const { capabilities: hostCapabilities } = useRuntimeCapabilities();
 
   const availableMachines = useMemo<BasewareMachineRuntimeStatus[]>(() => {
     if (catalog.machines.length > 0) return catalog.machines;
@@ -208,6 +210,20 @@ export function WorkspaceCreateForm({
     active?.abort();
   }, []);
 
+  useEffect(() => {
+    if (!hostCapabilities.localFsPaths) {
+      setShowCustomLocation(false);
+      setDraft(prev => (prev.targetDirectory ? { ...prev, targetDirectory: "" } : prev));
+    }
+  }, [hostCapabilities.localFsPaths]);
+
+  useEffect(() => {
+    if (!hostCapabilities.hostProcessOverrides) {
+      setAdvanced(false);
+      setDraft(prev => (prev.cuaCommand ? { ...prev, cuaCommand: "" } : prev));
+    }
+  }, [hostCapabilities.hostProcessOverrides]);
+
   const mode = effectiveTargetMode(draft);
   const selectedCatalogDriver = useMemo(
     () =>
@@ -284,6 +300,16 @@ export function WorkspaceCreateForm({
     : !location.custom && !draft.name.trim()
       ? `${location.path.replace(/\/$/, "")}/${t("folderPlaceholder")}`
       : location.path;
+
+  const managedSlug =
+    draft.name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || draft.name.trim();
+  const managedLocationPreview = draft.name.trim()
+    ? `workspaces/${managedSlug}`
+    : `workspaces/${t("folderPlaceholder")}`;
 
   const activeModel = draft.model?.trim() || resolvedModelDefaults.model;
   const modelAuthState = isSelectedModelAuthenticated(activeModel, catalog.modelsCatalog);
@@ -432,9 +458,11 @@ export function WorkspaceCreateForm({
               <p className="text-xs leading-relaxed text-muted-foreground">
                 {t("launchRecoverySubtitle")}
               </p>
-              <p className="break-all pt-1 font-mono text-[11px] text-muted-foreground">
-                {launchRecovery.entry.workspace}
-              </p>
+              {hostCapabilities.localFsPaths && (
+                <p className="break-all pt-1 font-mono text-[11px] text-muted-foreground">
+                  {launchRecovery.entry.workspace}
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -495,7 +523,7 @@ export function WorkspaceCreateForm({
       ? t("modeMachineHint")
       : mode === "driver"
         ? t("modeDriverHint")
-        : t("modePackageHint");
+        : t(hostCapabilities.localFileDrivers ? "modePackageHint" : "modePackageHintManaged");
 
   const statusText = pending
     ? pendingStep === "launching"
@@ -521,41 +549,45 @@ export function WorkspaceCreateForm({
           {/* 1. Project Name & Storage Location */}
           <div className="grid gap-2">
             <div className="flex items-center justify-between gap-2">
-              <Label htmlFor={`${id}-name`}>{t("folderName")}</Label>
-              {!showCustomLocation && !location.custom ? (
-                <div className="flex items-center gap-1.5">
-                  {nativePicker.supported ? (
-                    <Button
+              <Label htmlFor={`${id}-name`}>
+                {t(hostCapabilities.localFsPaths ? "folderName" : "workspaceNameManaged")}
+              </Label>
+              {hostCapabilities.localFsPaths ? (
+                !showCustomLocation && !location.custom ? (
+                  <div className="flex items-center gap-1.5">
+                    {nativePicker.supported ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        disabled={nativePicker.picking}
+                        onClick={() => void handleBrowseCustomFolder()}
+                      >
+                        <FolderOpenIcon className="size-3.5" aria-hidden="true" />
+                        {t("browseFolder")}
+                      </Button>
+                    ) : null}
+                    <button
                       type="button"
-                      variant="ghost"
-                      size="xs"
-                      disabled={nativePicker.picking}
-                      onClick={() => void handleBrowseCustomFolder()}
+                      className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                      onClick={() => setShowCustomLocation(true)}
                     >
-                      <FolderOpenIcon className="size-3.5" aria-hidden="true" />
-                      {t("browseFolder")}
-                    </Button>
-                  ) : null}
+                      {t("customizeLocation")}
+                    </button>
+                  </div>
+                ) : (
                   <button
                     type="button"
                     className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                    onClick={() => setShowCustomLocation(true)}
+                    onClick={() => {
+                      setShowCustomLocation(false);
+                      changeField("targetDirectory", "");
+                    }}
                   >
-                    {t("customizeLocation")}
+                    {t("resetDefaultLocation")}
                   </button>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                  onClick={() => {
-                    setShowCustomLocation(false);
-                    changeField("targetDirectory", "");
-                  }}
-                >
-                  {t("resetDefaultLocation")}
-                </button>
-              )}
+                )
+              ) : null}
             </div>
 
             <Input
@@ -593,7 +625,7 @@ export function WorkspaceCreateForm({
               </p>
             ) : null}
 
-            {(showCustomLocation || location.custom) ? (
+            {hostCapabilities.localFsPaths && (showCustomLocation || location.custom) ? (
               <div className="mt-1 grid gap-2 rounded-md border bg-muted/20 p-3">
                 <Label htmlFor={`${id}-directory`} className="text-xs">
                   {t("customDirectory")}
@@ -634,13 +666,24 @@ export function WorkspaceCreateForm({
                   </p>
                 ) : null}
               </div>
-            ) : (
+            ) : hostCapabilities.localFsPaths ? (
               <div
                 className="flex min-w-0 items-center gap-2 rounded-md border bg-muted/25 px-3 py-2 text-xs text-muted-foreground"
                 aria-label={t("workspaceLocation")}
               >
                 <FolderIcon className="size-3.5 shrink-0" aria-hidden="true" />
                 <output className="min-w-0 truncate font-mono text-[11px]">{locationPreview}</output>
+              </div>
+            ) : (
+              <div
+                className="flex min-w-0 items-center gap-2 rounded-md border bg-muted/25 px-3 py-2 text-xs text-muted-foreground"
+                aria-label={t("workspaceLocation")}
+                data-managed-workspace-slug=""
+              >
+                <FolderIcon className="size-3.5 shrink-0" aria-hidden="true" />
+                <output className="min-w-0 truncate font-mono text-[11px]">
+                  {managedLocationPreview}
+                </output>
               </div>
             )}
 
@@ -696,7 +739,11 @@ export function WorkspaceCreateForm({
                     value: "package" as const,
                     icon: PlugIcon,
                     title: t("modePackage"),
-                    subtitle: t("modePackageSubtitle"),
+                    subtitle: t(
+                      hostCapabilities.localFileDrivers
+                        ? "modePackageSubtitle"
+                        : "modePackageSubtitleManaged",
+                    ),
                   },
                 ] as const
               ).map(option => {
@@ -909,7 +956,7 @@ export function WorkspaceCreateForm({
 
                 {!capabilities.stdio ? (
                   <div className="grid gap-3 border-t pt-3 sm:grid-cols-3">
-                    {capabilities.supportsGame ? (
+                    {capabilities.supportsGame && hostCapabilities.localFsPaths ? (
                       <div className="grid gap-1.5 sm:col-span-2">
                         <Label htmlFor={`${id}-driver-game`} className="text-xs">
                           {t("gamePath")}
@@ -945,7 +992,7 @@ export function WorkspaceCreateForm({
                       </div>
                     ) : null}
 
-                    <div className={`grid gap-1.5 ${capabilities.supportsGame ? "" : "sm:col-span-3"}`}>
+                    <div className={`grid gap-1.5 ${capabilities.supportsGame && hostCapabilities.localFsPaths ? "" : "sm:col-span-3"}`}>
                       <Label htmlFor={`${id}-driver-port`} className="text-xs">
                         {t("bridgePortLabel")}
                       </Label>
@@ -996,7 +1043,11 @@ export function WorkspaceCreateForm({
                     autoCorrect="off"
                     autoCapitalize="none"
                     spellCheck={false}
-                    placeholder={t("packagePlaceholder")}
+                    placeholder={t(
+                      hostCapabilities.localFileDrivers
+                        ? "packagePlaceholder"
+                        : "packagePlaceholderManaged",
+                    )}
                     aria-invalid={!!discoveryError || issue?.field === "driverPackage"}
                     aria-describedby={`${id}-package-hint${
                       discoveryError || issue?.field === "driverPackage" ? ` ${id}-package-error` : ""
@@ -1013,7 +1064,7 @@ export function WorkspaceCreateForm({
                       }));
                     }}
                   />
-                  {nativePicker.supported ? (
+                  {nativePicker.supported && hostCapabilities.localFileDrivers ? (
                     <Button
                       type="button"
                       variant="outline"
@@ -1036,7 +1087,7 @@ export function WorkspaceCreateForm({
                   </Button>
                 </div>
                 <p id={`${id}-package-hint`} className="text-xs leading-relaxed text-muted-foreground">
-                  {t("packageHint")}
+                  {t(hostCapabilities.localFileDrivers ? "packageHint" : "packageHintManaged")}
                 </p>
                 {discoveryError || issue?.field === "driverPackage" ? (
                   <p
@@ -1064,7 +1115,7 @@ export function WorkspaceCreateForm({
 
                     {!capabilities.stdio ? (
                       <div className="grid gap-3 sm:grid-cols-3">
-                        {capabilities.supportsGame ? (
+                        {capabilities.supportsGame && hostCapabilities.localFsPaths ? (
                           <div className="grid gap-1.5 sm:col-span-2">
                             <Label htmlFor={`${id}-pkg-game`} className="text-xs">
                               {t("gamePath")}
@@ -1096,7 +1147,7 @@ export function WorkspaceCreateForm({
                             </div>
                           </div>
                         ) : null}
-                        <div className={`grid gap-1.5 ${capabilities.supportsGame ? "" : "sm:col-span-3"}`}>
+                        <div className={`grid gap-1.5 ${capabilities.supportsGame && hostCapabilities.localFsPaths ? "" : "sm:col-span-3"}`}>
                           <Label htmlFor={`${id}-pkg-port`} className="text-xs">
                             {t("bridgePortLabel")}
                           </Label>
@@ -1191,7 +1242,7 @@ export function WorkspaceCreateForm({
           </div>
 
           {/* 4. Optional stdio command override (only shown for non-machine stdio targets) */}
-          {mode !== "machine" && capabilities.stdio ? (
+          {hostCapabilities.hostProcessOverrides && mode !== "machine" && capabilities.stdio ? (
             <details
               open={advanced}
               onToggle={event => setAdvanced(event.currentTarget.open)}

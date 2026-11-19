@@ -300,7 +300,7 @@ test("worker reads and updates global and workspace model connection transport c
     const studioInitial = await worker.call("workspaceStudio", [entry.id]);
     assert.equal(studioInitial.id, entry.id);
     assert.equal(studioInitial.config?.driver, "cua");
-    assert.equal(studioInitial.services.jobs.length, 5);
+    assert.equal(studioInitial.services.jobs.length, 4);
     assert.equal(studioInitial.shiori.sessions.length, 1);
 
     const studioUpdated = await worker.call("updateWorkspaceStudioConfig", [entry.id, {

@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { PixelMark, type PixelMarkState } from "@/components/ui/pixel-mark";
 import { useAnimatedPresence } from "@/components/use-motion-preferences";
 import { useLocale, useTranslations } from "@/lib/locale";
-import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { useOptionalLudensRpc, type RpcConnectionStatus } from "@/lib/ludens-rpc";
+import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 import { isPlainNavigationClick } from "@/lib/dashboard-navigation";
 import type { ActiveCoreItem } from "@/shell/use-active-cores";
 
@@ -136,6 +137,7 @@ export function ConsoleSidebar({
   const ct = useTranslations("desktopChrome");
   const connT = useTranslations("connectionTarget");
   const rpcCtx = useOptionalLudensRpc();
+  const runtimeCaps = useRuntimeCapabilities();
   const id = useId();
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
@@ -501,22 +503,86 @@ export function ConsoleSidebar({
         {workspaceSlot && <div className="sidebar-workspace-slot">{workspaceSlot}</div>}
         {rpcCtx && onOpenConnectionDialog && (() => {
           const snap = rpcCtx.snapshot;
+          const isWebDev =
+            runtimeCaps.actualProfile === "web-dev" || runtimeCaps.runtimeProfile === "web-dev";
+          if (snap.target.kind === "electron-local" && snap.status === "connected" && !isWebDev) {
+            return null;
+          }
+          const statusKey = (status: RpcConnectionStatus): string => {
+            switch (status) {
+              case "connected":
+                return "statusConnected";
+              case "connecting":
+                return "statusConnecting";
+              case "reconnecting":
+                return "statusReconnecting";
+              case "auth-required":
+                return "statusAuthRequired";
+              case "unconfigured":
+                return "statusUnconfigured";
+              default:
+                return "statusDisconnected";
+            }
+          };
           const dotClass =
             snap.status === "connected"
               ? "is-connected"
               : snap.status === "connecting" || snap.status === "reconnecting"
                 ? "is-connecting"
                 : "is-disconnected";
+
+          if (isWebDev) {
+            const targetText = snap.resolved.displayTarget || "127.0.0.1";
+            const homeDisplay = runtimeCaps.serverHome ?? "~/.ludens-dev";
+            const suffix =
+              snap.status !== "connected"
+                ? ` · ${connT(statusKey(snap.status))}`
+                : runtimeCaps.devSimulatedProfile === "remote"
+                  ? ` · ${connT("devPreviewSaasBadge")}`
+                  : "";
+            const summaryLabel = `${targetText}${suffix}`;
+            const tooltip = connT("devPreviewTooltip")
+              .replace("{target}", targetText)
+              .replace("{home}", homeDisplay);
+            return (
+              <button
+                type="button"
+                className="sidebar-connection-pill border-amber-500/35 bg-amber-500/10 text-amber-200 hover:border-amber-500/55"
+                data-connection-pill="web-dev"
+                aria-label={tooltip}
+                title={tooltip}
+                onClick={() => {
+                  if (expanded) closeMenu();
+                  onOpenConnectionDialog();
+                }}
+              >
+                <span className={`connection-status-dot ${dotClass}`} aria-hidden="true" />
+                <span
+                  data-dev-preview-badge=""
+                  className="shrink-0 rounded border border-amber-500/45 bg-amber-500/20 px-1.5 py-0.5 font-mono text-[10px] font-semibold tracking-wide text-amber-300"
+                >
+                  DEV PREVIEW
+                </span>
+                <span>{summaryLabel}</span>
+              </button>
+            );
+          }
+
           const label =
             snap.status === "auth-required"
               ? connT("statusAuthRequired")
               : snap.status === "unconfigured"
                 ? connT("statusUnconfigured")
-                : snap.resolved.displayTarget;
+                : snap.target.kind === "electron-local"
+                  ? connT(statusKey(snap.status))
+                  : snap.status === "connected"
+                    ? snap.resolved.displayTarget
+                    : `${snap.resolved.displayTarget} · ${connT(statusKey(snap.status))}`;
           return (
             <button
               type="button"
               className="sidebar-connection-pill"
+              data-connection-pill={snap.target.kind}
               aria-label={connT("sidebarTriggerLabel").replace("{target}", label)}
               title={connT("sidebarTriggerLabel").replace("{target}", label)}
               onClick={() => {

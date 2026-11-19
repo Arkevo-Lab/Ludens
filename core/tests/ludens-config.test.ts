@@ -62,6 +62,19 @@ test("invalid global settings never overwrite the saved configuration", async ()
       expect((await f.run("config", "set", key!, value!)).code).toBe(1);
       expect(await readFile(join(f.home, "config.json"), "utf8")).toBe(before);
     }
+    // Legacy `defaults.dashboard` on disk is silently stripped and never written back out.
+    await writeFile(
+      join(f.home, "config.json"),
+      JSON.stringify({ version: 1, workspaceRoot: f.cwd, defaults: { model: "fixture/model", dashboard: true, pet: false } }, null, 2),
+      "utf8",
+    );
+    const loadedLegacy = await readGlobalConfig(f.home);
+    expect(loadedLegacy.defaults).toEqual({ model: "fixture/model", pet: false });
+    expect("dashboard" in loadedLegacy.defaults).toBe(false);
+    await updateGlobalConfig(cfg => ({ ...cfg, defaults: { ...cfg.defaults, requests: 12 } }), f.home);
+    const savedRaw = JSON.parse(await readFile(join(f.home, "config.json"), "utf8")) as { defaults: Record<string, unknown> };
+    expect("dashboard" in savedRaw.defaults).toBe(false);
+    expect(savedRaw.defaults).toEqual({ model: "fixture/model", pet: false, requests: 12 });
   } finally { await f.close(); }
 });
 

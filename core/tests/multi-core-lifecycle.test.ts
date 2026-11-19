@@ -300,7 +300,6 @@ function makeStubSupervisorIO(
         }
         return { code: 0, stdout: "", stderr: "" };
       },
-      dashboardReady: async () => false,
       petReady: async () => false,
       sleep: () => Bun.sleep(25),
       now: () => Date.now(),

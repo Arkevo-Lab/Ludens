@@ -632,7 +632,7 @@ test("Workspace Studio and Global Settings both reuse ModelPickerDialog via Brow
       requests: 1000,
       diagnostics: "normal",
       pet: false,
-      dashboard: true,
+      ...({} as any),
     },
     defaults: {},
     services: {

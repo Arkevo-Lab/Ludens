@@ -28,6 +28,7 @@ export interface EnsureLocalAppDaemonOptions {
   repo?: string;
   wsListen?: { host: string; port: number } | null;
   auth?: { mode: "none" | "token"; token?: string };
+  devMode?: boolean;
   staticDir?: string;
   trustedOrigins?: string[];
   spawnCommand?: { command: string; argsPrefix: string[] };
@@ -280,6 +281,9 @@ export async function ensureLocalAppDaemon(
 
       const spawnCmd = options.spawnCommand ?? resolveDefaultSpawnCommand(options.repo);
       const args = [...spawnCmd.argsPrefix, "app-server"];
+      if (options.devMode) {
+        args.push("--dev");
+      }
       if (options.wsListen) {
         args.push("--listen", `ws://${options.wsListen.host}:${options.wsListen.port}`);
       }

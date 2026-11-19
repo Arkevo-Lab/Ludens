@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, Check, CheckCircle2, ChevronRight, Copy, Folder, FolderOpen, Play, Plus, RefreshCw, Search, X } from "lucide-react";
+import { ArrowRight, CheckCircle2, ChevronRight, Folder, FolderOpen, Play, Plus, RefreshCw, Search, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import type { CreateWorkspaceInputDto } from "@ludens/protocol/app-rpc";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import { useNativePathPicker } from "@/lib/use-native-path-picker";
+import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
 import { useRetryFocus } from "@/components/use-retry-focus";
 
@@ -107,6 +108,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
   const t = useTranslations("workspaceLibrary");
   const { locale } = useLocale();
   const rpc = useOptionalLudensRpc();
+  const { capabilities } = useRuntimeCapabilities();
   const rpcRef = useRef(rpc);
   rpcRef.current = rpc;
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
@@ -132,7 +134,6 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
   const [alreadyRemoved, setAlreadyRemoved] = useState(false);
   const [savedRoot, setSavedRoot] = useState<string | null>(null);
   const [removalBlocked, setRemovalBlocked] = useState(false);
-  const [copied, setCopied] = useState<"idle" | "done" | "error">("idle");
   const trigger = useRef<HTMLElement | null>(null);
   const [lastDialog, setLastDialog] = useState<DialogKind>("create");
   const focusCompletion = useRef(false);
@@ -179,11 +180,6 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
   useLudensEvent(["workspace", "catalog"], () => {
     if (!busy.current) setLoadRevision(value => value + 1);
   });
-  useEffect(() => {
-    if (copied === "idle") return;
-    const timer = setTimeout(() => setCopied("idle"), 2500);
-    return () => clearTimeout(timer);
-  }, [copied]);
 
   const requestedPackage = createIntent?.driverPackage;
   const verifiedDriver = createIntent?.driver;
@@ -212,6 +208,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
   };
 
   const openDialog = (kind: DialogKind, element: HTMLElement, path = "") => {
+    if (!capabilities.localFsPaths && (kind === "register" || kind === "root")) return;
     trigger.current = element;
     setLastDialog(kind);
     focusCompletion.current = false;
@@ -265,7 +262,6 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
     setRemoved(null);
     setAlreadyRemoved(false);
     setSavedRoot(null);
-    setCopied("idle");
     setCompletion({ kind, entry });
     focusCompletion.current = true;
     closeDialog();
@@ -302,7 +298,6 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
     setRemoved(null);
     setAlreadyRemoved(false);
     setSavedRoot(null);
-    setCopied("idle");
   };
 
   const createWorkspace = (input: CreateWorkspaceInput, launchAfterCreate = true) => {
@@ -386,11 +381,6 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
       }
     })();
   };
-  const command = completion ? `ludens --workspace '${completion.entry.workspace.replace(/'/g, "'\\''")}' up` : "";
-  const copyCommand = async () => {
-    try { await navigator.clipboard.writeText(command); setCopied("done"); }
-    catch { setCopied("error"); }
-  };
   const matches = settings?.workspaces.filter(entry => `${entry.name}\n${entry.workspace}`.toLocaleLowerCase().includes(filter.trim().toLocaleLowerCase())) ?? [];
   const hasEntries = !!settings?.workspaces.length;
   const committed = !!(savedRoot || removed || alreadyRemoved || completion);
@@ -407,7 +397,9 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
               if (loading || busy.current) return;
               setLoadRevision(value => value + 1); onRetryCatalog?.();
             }}><RefreshCw className={loading ? "motion-safe:animate-spin" : undefined} aria-hidden="true" /><span className="hidden sm:inline">{t(loading ? "refreshing" : "refreshList")}</span></Button>
-            <Button type="button" variant="outline" disabled={!settings || !!pending} onClick={event => openDialog("register", event.currentTarget)}><FolderOpen />{t("addExisting")}</Button>
+            {capabilities.localFsPaths && (
+              <Button type="button" variant="outline" disabled={!settings || !!pending} onClick={event => openDialog("register", event.currentTarget)}><FolderOpen />{t("addExisting")}</Button>
+            )}
             <Button ref={createTrigger} type="button" disabled={!settings || !!pending} onClick={event => openDialog("create", event.currentTarget)}><Plus />{t("newWorkspace")}</Button>
           </div>
         </header>
@@ -443,7 +435,9 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
             <Button type="button" size="icon-xs" variant="ghost" aria-label={t("dismiss")} onClick={() => setCompletion(null)}><X /></Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="break-all font-mono text-xs text-muted-foreground">{completion.entry.workspace}</p>
+            {capabilities.localFsPaths && (
+              <p className="break-all font-mono text-xs text-muted-foreground">{completion.entry.workspace}</p>
+            )}
             <div className="flex flex-wrap gap-2">
               <WorkspaceInlineStartButton
                 workspaceId={completion.entry.id}
@@ -457,20 +451,6 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                 }}
               />
               <Button type="button" size="sm" variant="outline" onClick={() => onOpen(completion.entry.id)}>{t("openWorkspace")}<ArrowRight /></Button>
-              <Button type="button" size="sm" variant="outline" onClick={() => void copyCommand()}>
-                <span className="relative inline-flex size-3.5 items-center justify-center">
-                  <Copy className={`size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-75 opacity-0" : "scale-100 opacity-100"}`} aria-hidden="true" />
-                  <Check className={`text-success absolute inset-0 size-3.5 transition-[transform,opacity] duration-150 ease-[var(--ease-out-expo)] motion-reduce:transition-none ${copied === "done" ? "scale-100 opacity-100" : "scale-75 opacity-0"}`} aria-hidden="true" />
-                </span>
-                <span className="inline-grid items-center justify-items-center">
-                  <span className={`col-start-1 row-start-1 transition-opacity duration-150 motion-reduce:transition-none ${copied === "done" ? "opacity-0" : "opacity-100"}`} aria-hidden={copied === "done"}>
-                    {t("copyStart")}
-                  </span>
-                  <span className={`col-start-1 row-start-1 transition-opacity duration-150 motion-reduce:transition-none ${copied === "done" ? "opacity-100" : "opacity-0"}`} aria-hidden={copied !== "done"}>
-                    {t("copied")}
-                  </span>
-                </span>
-              </Button>
               <Button asChild size="sm" variant="ghost"><a href={`?view=docs&doc=tutorials%2Fquickstart&docLang=${locale}`}>{t("setupGuide")}</a></Button>
             </div>
             <WorkspaceInlineServiceError
@@ -478,16 +458,16 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
               title={t("serviceFailedTitle")}
               dismissLabel={t("dismiss")}
             />
-            {copied === "error" && <p role="alert" className="text-xs text-destructive">{t("copyFailed")}</p>}
-            <details className="settings-disclosure border-y-0 text-xs text-muted-foreground"><summary className="settings-disclosure-summary min-h-0 py-1 text-xs"><ChevronRight className="settings-disclosure-chevron size-3.5" aria-hidden="true" />{t("viewCommand")}</summary><code className="mt-2 block select-all break-all rounded-md bg-background p-3">{command}</code></details>
           </CardContent>
         </Card>}
         {removed && <Alert ref={removedNotice} tabIndex={-1} role="status"><AlertDescription className="flex w-full flex-wrap items-center justify-between gap-3">
           <span><strong className="font-medium text-foreground">{removed.name}</strong> · {t("removedHint")}</span>
-          <Button ref={undoButton} type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => void mutate("undo", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: removed.workspace }), entry => {
-            acceptEntry(entry, "registered");
-            requestAnimationFrame(() => { resultCard.current?.focus(); resultCard.current?.scrollIntoView({ block: "nearest" }); focusCompletion.current = false; });
-          })}>{pending === "undo" ? t("restoring") : t("undo")}</Button>
+          {capabilities.localFsPaths && (
+            <Button ref={undoButton} type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => void mutate("undo", () => callWorkspaceMutate<WorkspaceRegistration>({ action: "open", workspace: removed.workspace }), entry => {
+              acceptEntry(entry, "registered");
+              requestAnimationFrame(() => { resultCard.current?.focus(); resultCard.current?.scrollIntoView({ block: "nearest" }); focusCompletion.current = false; });
+            })}>{pending === "undo" ? t("restoring") : t("undo")}</Button>
+          )}
         </AlertDescription></Alert>}
         {alreadyRemoved && <Alert ref={removedNotice} tabIndex={-1} role="status"><AlertDescription>{t("alreadyRemoved")}</AlertDescription></Alert>}
 
@@ -526,7 +506,9 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                               )}
                             </>}
                           </div>
-                          <p className="break-all font-mono text-xs leading-relaxed text-muted-foreground">{entry.workspace}</p>
+                          {capabilities.localFsPaths && (
+                            <p className="break-all font-mono text-xs leading-relaxed text-muted-foreground">{entry.workspace}</p>
+                          )}
                         </div>
                         <Badge variant="outline" className={entry.available ? "border-success/25 bg-success/5 text-success" : "text-muted-foreground"}><span aria-hidden="true" className="size-1.5 rounded-full bg-current" />{entry.available ? t("available") : t("unavailable")}</Badge>
                         <div className="flex w-full flex-wrap items-center gap-2 min-[1200px]:w-auto">
@@ -548,7 +530,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                           {onConfigure && entry.available && (
                             <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={() => onConfigure(entry.id)}>{t("configure")}</Button>
                           )}
-                          {!entry.available && <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget, entry.workspace)}>{t("reconnect")}</Button>}
+                          {!entry.available && capabilities.localFsPaths && <Button type="button" variant="outline" size="sm" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget, entry.workspace)}>{t("reconnect")}</Button>}
                           <Button type="button" size="sm" variant="ghost" className="text-muted-foreground" disabled={!!pending} onClick={() => void mutate(entry.id, () => callWorkspaceMutate<WorkspaceRemovalResult>({ action: "remove", id: entry.id }), value => {
                             setSettings(previous => previous && ({ ...previous, workspaces: previous.workspaces.filter(item => item.id !== entry.id) }));
                             setRemoved(value.removed); setAlreadyRemoved(!value.removed); setCompletion(null); setSavedRoot(null);
@@ -570,14 +552,21 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
               </CardContent>
             </> : <CardContent className="flex flex-col items-center py-10 text-center sm:py-16">
               <div aria-hidden="true" className="mb-5 grid size-12 place-items-center rounded-md border border-primary/25 bg-primary/10 text-primary"><FolderOpen className="size-6" /></div>
-              <h2 className="mb-2 text-xl font-semibold">{t("emptyTitle")}</h2><p className="max-w-md text-sm leading-relaxed text-muted-foreground">{t("emptyHint")}</p>
-              <div className="mt-6 flex flex-wrap justify-center gap-2"><Button type="button" disabled={!!pending} onClick={event => openDialog("create", event.currentTarget)}><Plus />{t("newWorkspace")}</Button><Button type="button" variant="outline" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget)}>{t("addExisting")}</Button></div>
+              <h2 className="mb-2 text-xl font-semibold">{t("emptyTitle")}</h2><p className="max-w-md text-sm leading-relaxed text-muted-foreground">{t(capabilities.localFsPaths ? "emptyHint" : "emptyHintManaged")}</p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2">
+                <Button type="button" disabled={!!pending} onClick={event => openDialog("create", event.currentTarget)}><Plus />{t("newWorkspace")}</Button>
+                {capabilities.localFsPaths && (
+                  <Button type="button" variant="outline" disabled={!!pending} onClick={event => openDialog("register", event.currentTarget)}>{t("addExisting")}</Button>
+                )}
+              </div>
             </CardContent>}
           </Card>
-          <Card className="gap-0"><CardContent className="flex flex-wrap items-center gap-4">
-            <Folder aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1 basis-48 space-y-1.5"><h2 className="text-sm font-semibold">{t("locationTitle")}</h2><p className="break-all font-mono text-xs text-muted-foreground">{settings.config.workspaceRoot}</p><p className="text-xs leading-relaxed text-muted-foreground">{t("locationHint")}</p></div>
-            <Button type="button" size="sm" variant="outline" disabled={!!pending} onClick={event => openDialog("root", event.currentTarget)}>{t("change")}</Button>
-          </CardContent></Card>
+          {capabilities.localFsPaths && (
+            <Card className="gap-0"><CardContent className="flex flex-wrap items-center gap-4">
+              <Folder aria-hidden="true" className="size-5 shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1 basis-48 space-y-1.5"><h2 className="text-sm font-semibold">{t("locationTitle")}</h2><p className="break-all font-mono text-xs text-muted-foreground">{settings.config.workspaceRoot}</p><p className="text-xs leading-relaxed text-muted-foreground">{t("locationHint")}</p></div>
+              <Button type="button" size="sm" variant="outline" disabled={!!pending} onClick={event => openDialog("root", event.currentTarget)}>{t("change")}</Button>
+            </CardContent></Card>
+          )}
         </>}
       </section>
       <DialogContent className={`max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-md bg-card ${activeDialog === "create" ? "sm:max-w-2xl" : "sm:max-w-xl"}`} showCloseButton={false}

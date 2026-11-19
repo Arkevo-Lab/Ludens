@@ -61,15 +61,14 @@ function makeStudioSnapshot(): WorkspaceStudioSnapshot {
       seconds: 1800,
       requests: 1000,
       compactionThreshold: 48000,
-      dashboard: true,
       pet: false,
       diagnostics: "normal",
+      ...({} as any),
     },
     defaults: {
       model: "openai-codex/gpt-6.1-sol",
       seconds: 1800,
       requests: 1000,
-      dashboard: true,
       pet: false,
     },
     services: {
@@ -242,6 +241,7 @@ test("WorkspaceStudioView renders all 6 categories including Target Device, keep
     ),
   );
   assert.match(modelHtml, /data-browse-models="workspace-studio"/);
+  assert.doesNotMatch(modelHtml, /studio-dashboard-switch/);
   assert.doesNotMatch(modelHtml, /data-slot="card"/);
 
   const servicesHtml = renderToStaticMarkup(
