@@ -85,7 +85,7 @@ git clone https://github.com/Arkevo-Lab/Ludens.git && cd Ludens
 bun install --frozen-lockfile
 uv sync --project core/python --frozen
 (cd client && npm run build)
-export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/server/bin:$PWD/client/bin:$PATH"
+export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/server/bin:$PWD/client/bin:$PWD/desktop/bin:$PATH"
 ```
 
 ### 2. 四种启动方式
@@ -93,7 +93,7 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/server/bin:$PWD/client/bin:$PA
 Ludens 基于同构的 React 19 + Vite 静态 SPA（`@ludens/client`，`client/out`）、纯 RPC 命令行客户端（`ludens`）、All-in-One Electron 桌面壳（`@ludens/desktop`，`ludens-app`）与统一 JSON-RPC 2.0 控制面服务端（`@ludens/server`，`ludens-server`）提供四种运行工况：
 
 - **桌面端应用（`ludens-app` —— All-in-One 零 TCP 端口本地模式）**：执行一次 `(cd desktop && npm run desktop:build)` 后运行 `ludens-app --show-window`（或执行 `npm --prefix desktop run desktop:dist` 打包原生 macOS `.dmg` / Windows `.exe` 安装包）。桌面壳自包含 `client + server + core + baseware` 本地开箱即用，按 `LUDENS_HOME` 通过 Unix Domain Socket（`app-server.sock`）通信（**0 个监听 TCP 端口**，`ludens-app://console/`、`ludens-media://local/media?...`、`window.ludens.rpc`），也支持一键切连远程 `ludens-server`。关闭主窗口（`×`）时最小化至托盘与可选桌宠；退出（`⌘Q` / 托盘 **Quit**）时，若无活跃 Core 则直接退出并保留后台服务，若有活跃 Core 则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。
-- **托管 Web / 远端服务端（`ludens-server`）**：开源控制面服务端，支持本地、自托管或云端部署。单进程同时提供静态 SPA 控制台、WebSocket JSON-RPC `/rpc` 与 HMAC capability ticket 鉴权的 `/media` 端点：执行 `ludens-server start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN`（或前台执行 `ludens-server serve ...`；非回环地址必须启用 `--auth token`；页面加载 `http(s)://host:port/#token=...` 后会立即通过 `history.replaceState` 擦除 URL 中的 token）。使用 `ludens-server <start|stop|restart|status>` 监管后台服务。前端 HMR 开发可执行 `(cd client && npm run dev)`（Vite 默认 `127.0.0.1:3015` 代理 `/rpc`、`/media` 与 `/health`）。
+- **托管 Web / 远端服务端（`ludens-server`）**：开源控制面服务端，支持本地、自托管或云端部署。单进程同时提供静态 SPA 控制台、WebSocket JSON-RPC `/rpc` 与 HMAC capability ticket 鉴权的 `/media` 端点：执行 `ludens-server start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir "$PWD/client/out"`（或前台执行 `ludens-server serve --static-dir "$PWD/client/out" ...`；非回环地址必须启用 `--auth token`；页面加载 `http(s)://host:port/#token=...` 后会立即通过 `history.replaceState` 擦除 URL 中的 token）。使用 `ludens-server <start|stop|restart|status>` 监管后台服务。前端 HMR 开发可执行 `(cd client && npm run dev)`（Vite 默认 `127.0.0.1:3015` 代理 `/rpc`、`/media` 与 `/health`）。
 - **纯 RPC CLI（`ludens` —— 本地 UDS 与 `--remote`）**：面向人的纯 RPC 操作者 CLI（`@ludens/client`，零 Core/Server/Baseware 运行时依赖）。既可直连本地 `app-server.sock`，也可传入 `--remote ws(s)://... [--token ...]` 统一接入远端 `ludens-server`（接入外部驱动包 `--driver-package` 或远程 SSH / 桥接节点详见[设备与驱动准备](docs/zh/tutorials/devices.md)）：
 
 ```sh
