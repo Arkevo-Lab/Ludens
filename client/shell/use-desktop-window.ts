@@ -169,7 +169,7 @@ export function resolveDesktopChromeState(input: {
     hasNativeMacTrafficLights: false,
     platform: fallbackWebPlatform,
     captionStyle: "custom",
-    titlebarHeight: 0,
+    titlebarHeight: DEFAULT_DESKTOP_TITLEBAR_HEIGHT,
     maximized: false,
     fullScreen: false,
     focused: windowFocused,
@@ -194,15 +194,14 @@ export function computeTitlebarLayout(input: {
   fullScreen: boolean;
   titlebarHeight?: number;
 }): DesktopTitlebarLayout {
-  const height = input.active
-    ? (input.titlebarHeight ?? DEFAULT_DESKTOP_TITLEBAR_HEIGHT)
-    : 0;
+  const height = input.titlebarHeight || DEFAULT_DESKTOP_TITLEBAR_HEIGHT;
   const isMac = input.platform === "darwin";
+  const isMacDesktop = input.active && isMac;
   return {
     topbarHeightPx: height,
-    leftInsetPx: isMac ? (input.fullScreen ? 10 : 74) : 12,
-    showTrafficLightZone: isMac && !input.fullScreen,
-    showLeadingBrandMark: !isMac,
+    leftInsetPx: isMacDesktop ? (input.fullScreen ? 10 : 74) : 12,
+    showTrafficLightZone: isMacDesktop && !input.fullScreen,
+    showLeadingBrandMark: !isMacDesktop,
     showCustomWindowControls:
       input.active && input.captionStyle === "custom" && !isMac,
     reserveWin32Overlay:

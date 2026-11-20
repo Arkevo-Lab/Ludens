@@ -46,6 +46,11 @@
     border-color var(--duration-fast) var(--ease-out-expo);
 }
 
+.desktop-titlebar[data-desktop-window="false"] .desktop-titlebar-left,
+.desktop-titlebar[data-desktop-window="false"] .desktop-titlebar-main {
+  -webkit-app-region: no-drag;
+}
+
 /* Collapsed sidebar or <=680px narrow drawer: left cell melts seamlessly into main titlebar,
    keeping identical left padding so icon buttons NEVER jump even 1px! */
 .desktop-titlebar[data-sidebar-collapsed="true"] .desktop-titlebar-left {
@@ -134,6 +139,7 @@
 }
 
 .desktop-chrome-icon-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -149,6 +155,29 @@
     color var(--duration-fast) var(--ease-out-expo),
     opacity var(--duration-fast) var(--ease-out-expo);
   -webkit-app-region: no-drag;
+}
+
+.desktop-chrome-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--gold);
+  color: #0b0d12;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+  pointer-events: none;
+  box-shadow: 0 0 0 1.5px var(--bg);
+}
+
+.desktop-chrome-badge[data-tone="outbound"] {
+  background: #f59e0b;
+  color: #0b0d12;
 }
 
 .desktop-chrome-icon-btn:hover:not(:disabled) {
@@ -187,40 +216,67 @@
   -webkit-app-region: drag;
 }
 
-.desktop-titlebar-breadcrumb {
+.desktop-titlebar-primary {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
   padding-left: 12px;
   font-size: 12.5px;
   line-height: 1;
   letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
-  pointer-events: none;
   transition: opacity var(--duration-fast) var(--ease-out-expo);
 }
 
-.desktop-breadcrumb-product {
-  color: var(--muted-foreground);
-  font-weight: 500;
-  flex-shrink: 0;
-}
-
-.desktop-breadcrumb-sep {
-  color: var(--subtle);
-  font-size: 11.5px;
-  flex-shrink: 0;
-}
-
-.desktop-breadcrumb-workspace {
-  color: var(--muted-foreground);
-  font-weight: 500;
+.desktop-titlebar-slot-primary {
+  display: none;
+  align-items: center;
+  gap: 8px;
   min-width: 0;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 100%;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-titlebar-slot-primary[data-occupied="true"] {
+  display: inline-flex;
+}
+
+.desktop-titlebar-slot-primary .context-picker-trigger {
+  height: 25px;
+  min-height: 25px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  border-color: color-mix(in srgb, var(--line) 85%, transparent);
+  background: color-mix(in srgb, var(--surface-inset) 70%, transparent);
+}
+
+.desktop-titlebar-slot-primary .context-picker-trigger:hover {
+  border-color: #2f3646;
+  background: #10141c;
+}
+
+.desktop-titlebar-slot-primary .perf-run-status {
+  margin-left: 0;
+  height: 25px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+
+.desktop-titlebar-slot-actions,
+.desktop-titlebar-slot-dock-toggle {
+  display: none;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-titlebar-slot-actions[data-occupied="true"],
+.desktop-titlebar-slot-dock-toggle[data-occupied="true"] {
+  display: inline-flex;
 }
 
 .desktop-breadcrumb-view {
@@ -229,11 +285,48 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+/* Compact status indicator inside the unified top bar (Live / Perf) */
+.topbar-status-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.topbar-status-chip[data-tone="auto"] {
+  color: var(--sage);
+  background: color-mix(in srgb, var(--sage) 10%, transparent);
+}
+
+.topbar-status-chip[data-tone="manual"] {
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+}
+
+.topbar-status-chip[data-tone="standby"] {
+  color: var(--muted-foreground);
+}
+
+.topbar-status-chip[data-spawning-core="true"] {
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
 }
 
 /* Native macOS Sequoia / Windows 11 unfocused titlebar dimming */
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-nav-group,
-.desktop-titlebar[data-focused="false"] .desktop-titlebar-breadcrumb,
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-primary,
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-tools,
 .desktop-titlebar[data-focused="false"] .desktop-win-controls,
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-app-icon {

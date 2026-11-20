@@ -322,7 +322,7 @@ function sampleWorkbenchFeed(historical = true): ActivityFeedData {
   };
 }
 
-test("ShioriWorkbench renders 46px header slots, scroll-stage anchor above composer, and aligned Right Dock header", async () => {
+test("ShioriWorkbench delegates topbar controls to unified TopbarSlot, keeps floating scroll-bottom pill above composer, and removes redundant dock close button", async () => {
   const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
 
   const html = renderToStaticMarkup(
@@ -343,32 +343,18 @@ test("ShioriWorkbench renders 46px header slots, scroll-stage anchor above compo
         onOpenCaps() {},
         onReturnLatest() {},
         observationSlot: createElement("div", { "data-test-viewport": "true" }, "viewport"),
-        mobileNavSlot: createElement("button", { type: "button", "data-test-mobile-nav": "true" }, "nav"),
         runPicker: createElement("div", { "data-test-run-picker": "true" }, "run-picker"),
       }),
     ),
   );
 
-  const mobileNavPos = html.indexOf("data-test-mobile-nav");
-  const brandPos = html.indexOf("codex-thread-brand");
-  assert.ok(mobileNavPos > -1 && brandPos > mobileNavPos, "mobileNavSlot renders at the start of .codex-thread-header");
-  assert.match(html, /class="codex-thread-brand">Shiori<\/span>/);
-  assert.match(html, /class="codex-thread-workspace"> · Demo Workspace<\/span>/);
-
-  const runPickerPos = html.indexOf("data-test-run-picker");
-  const expandBtnPos = html.indexOf("codex-expand-all-btn");
-  const poolTriggerPos = html.indexOf("codex-pool-trigger-btn");
-  const dockTogglePos = html.indexOf("codex-dock-toggle-btn");
-  assert.ok(
-    runPickerPos > -1 && expandBtnPos > runPickerPos && dockTogglePos > expandBtnPos,
-    "runPicker renders inside .codex-thread-actions before expand-steps and right-dock toggle",
-  );
-  assert.ok(
-    poolTriggerPos > expandBtnPos && dockTogglePos > poolTriggerPos,
-    "Event Pool quick trigger sits between expand-steps and right-dock toggle (runPicker < expandAll < poolTrigger < dockToggle)",
-  );
-  assert.match(html, /class="codex-pool-trigger-label"/);
-  assert.doesNotMatch(html, /codex-pool-header-pill/, "legacy dual inline header pills are gone");
+  // Secondary stacked cockpit header and noisy inline buttons are removed in favor of unified single-row topbar
+  assert.doesNotMatch(html, /codex-cockpit-header/);
+  assert.doesNotMatch(html, /codex-thread-brand/);
+  assert.doesNotMatch(html, /codex-expand-all-btn/);
+  assert.doesNotMatch(html, /codex-pool-trigger-btn/);
+  assert.doesNotMatch(html, /codex-follow-toggle-btn/);
+  assert.doesNotMatch(html, /codex-dock-close-btn/);
 
   const scrollStagePos = html.indexOf("codex-chat-scroll-stage");
   const scrollBtnPos = html.indexOf("codex-scroll-bottom-btn");
@@ -380,7 +366,6 @@ test("ShioriWorkbench renders 46px header slots, scroll-stage anchor above compo
 
   assert.match(html, /class="codex-dock-header"/);
   assert.match(html, /class="codex-dock-header-title"/);
-  assert.match(html, /codex-dock-close-btn/);
 
   const dockHeader = html.slice(html.indexOf('class="codex-dock-header"'), html.indexOf("codex-dock-close-btn"));
   assert.match(dockHeader, /class="codex-dock-seg" role="tablist"/);
