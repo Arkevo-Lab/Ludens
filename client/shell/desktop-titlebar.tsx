@@ -1,16 +1,18 @@
 "use client";
 
 import type { MouseEvent } from "react";
-import { ArrowLeft, ArrowRight, PanelLeft, RotateCw, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, PanelLeft, Search } from "lucide-react";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import type { DesktopCaptionStyle, DesktopPlatform } from "@/lib/desktop";
 import { useTranslations } from "@/lib/locale";
+import { useTopbarSlotHost } from "@/shell/topbar-slots";
 import {
   computeTitlebarLayout,
   formatDesktopShortcut,
 } from "@/shell/use-desktop-window";
 
 export interface DesktopTitlebarProps {
+  /** Whether native desktop window chrome (drag region, traffic lights / WCO) is active. */
   active: boolean;
   platform: DesktopPlatform;
   captionStyle: DesktopCaptionStyle;
@@ -22,7 +24,6 @@ export interface DesktopTitlebarProps {
   hasNativeMacTrafficLights?: boolean;
   sidebarCollapsed: boolean;
   mobileNavOpen?: boolean;
-  workspaceTitle?: string;
   viewTitle: string;
   canGoBack: boolean;
   canGoForward: boolean;
@@ -32,7 +33,6 @@ export interface DesktopTitlebarProps {
   onGoBack(): void;
   onGoForward(): void;
   onOpenQuickSwitcher(): void;
-  onReload(): void;
   onToggleCompanion?(): void;
   onMinimize(): void;
   onToggleMaximize(): void;
@@ -54,7 +54,6 @@ export function DesktopTitlebar({
   hasNativeMacTrafficLights = false,
   sidebarCollapsed,
   mobileNavOpen = false,
-  workspaceTitle,
   viewTitle,
   canGoBack,
   canGoForward,
@@ -64,7 +63,6 @@ export function DesktopTitlebar({
   onGoBack,
   onGoForward,
   onOpenQuickSwitcher,
-  onReload,
   onToggleCompanion,
   onMinimize,
   onToggleMaximize,
@@ -74,7 +72,7 @@ export function DesktopTitlebar({
   onSelectPreviewPlatform,
 }: DesktopTitlebarProps) {
   const t = useTranslations("desktopChrome");
-  if (!active) return null;
+  const slotHost = useTopbarSlotHost();
 
   const layout = computeTitlebarLayout({
     active,
@@ -105,8 +103,9 @@ export function DesktopTitlebar({
   );
 
   const handleSurfaceDoubleClick = (event: MouseEvent<HTMLElement>) => {
+    if (!active) return;
     const target = event.target as HTMLElement | null;
-    if (target?.closest("button, [data-no-drag]")) return;
+    if (target?.closest("button, select, input, a, [data-no-drag]")) return;
     onTitlebarDoubleClick();
   };
 
@@ -115,6 +114,7 @@ export function DesktopTitlebar({
       className="desktop-titlebar"
       aria-label={t("titlebarAria")}
       data-desktop-titlebar=""
+      data-desktop-window={active ? "true" : "false"}
       data-platform={platform}
       data-caption-style={captionStyle}
       data-sidebar-collapsed={String(sidebarCollapsed)}
@@ -224,24 +224,31 @@ export function DesktopTitlebar({
         className="desktop-titlebar-main"
         onDoubleClick={handleSurfaceDoubleClick}
       >
-        <div className="desktop-titlebar-breadcrumb" data-titlebar-breadcrumb="">
-          <span className="desktop-breadcrumb-product">Ludens</span>
-          <span className="desktop-breadcrumb-sep" aria-hidden="true">/</span>
-          {workspaceTitle ? (
-            <>
-              <span className="desktop-breadcrumb-workspace">
-                {workspaceTitle}
-              </span>
-              <span className="desktop-breadcrumb-sep" aria-hidden="true">
-                ·
-              </span>
-            </>
-          ) : null}
-          <strong className="desktop-breadcrumb-view">{viewTitle}</strong>
+        <div className="desktop-titlebar-primary" data-titlebar-primary="">
+          <div
+            ref={slotHost.bindPrimary}
+            className="desktop-titlebar-slot-primary"
+            data-no-drag=""
+            data-occupied={slotHost.hasPrimary ? "true" : undefined}
+          />
+          {!slotHost.hasPrimary && (
+            <strong
+              className="desktop-breadcrumb-view"
+              data-titlebar-view-title=""
+            >
+              {viewTitle}
+            </strong>
+          )}
         </div>
 
         <div className="desktop-titlebar-right" data-no-drag="">
           <div className="desktop-titlebar-tools">
+            <div
+              ref={slotHost.bindActions}
+              className="desktop-titlebar-slot-actions"
+              data-occupied={slotHost.hasActions ? "true" : undefined}
+            />
+
             {isPreview && onSelectPreviewPlatform && (
               <div
                 className="desktop-preview-switcher"
@@ -300,16 +307,11 @@ export function DesktopTitlebar({
               </button>
             )}
 
-            <button
-              type="button"
-              className="desktop-chrome-icon-btn"
-              data-action="reload"
-              aria-label={t("reload")}
-              title={t("reload")}
-              onClick={onReload}
-            >
-              <RotateCw className="size-[13.5px]" strokeWidth={1.75} aria-hidden="true" />
-            </button>
+            <div
+              ref={slotHost.bindDockToggle}
+              className="desktop-titlebar-slot-dock-toggle"
+              data-occupied={slotHost.hasDockToggle ? "true" : undefined}
+            />
           </div>
 
           {layout.reserveWin32Overlay && (

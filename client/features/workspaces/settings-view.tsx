@@ -25,6 +25,11 @@ import {
 } from "@/components/ui/settings-primitives";
 import { Switch } from "@/components/ui/switch";
 import { useLocale, useTranslations } from "@/lib/locale";
+import {
+  INFO_VERBOSITY_LEVELS,
+  useInfoVerbosity,
+  type InfoVerbosityLevel,
+} from "@/lib/use-info-verbosity";
 import { useOptionalLudensRpc } from "@/lib/ludens-rpc";
 import type { Project } from "@ludens/protocol/types";
 import type { GlobalDefaultsResult, WorkspaceSettings } from "@ludens/protocol/workspaces";
@@ -43,9 +48,11 @@ export function SettingsView({
   initialCategory?: SettingsCategoryId;
 }) {
   const { locale, setLocale } = useLocale();
+  const { level: verbosity, setLevel: setVerbosity } = useInfoVerbosity();
   const t = useTranslations("settings");
   const vt = useTranslations("views.settings");
   const languageId = useId();
+  const verbosityId = useId();
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(initialCategory);
 
   const categories: SettingsCategoryItem[] = [
@@ -86,6 +93,50 @@ export function SettingsView({
                 <NativeSelectOption value="en">{t("languageEnglish")}</NativeSelectOption>
                 <NativeSelectOption value="zh">{t("languageChinese")}</NativeSelectOption>
               </NativeSelect>
+            }
+          />
+          <SettingsRow
+            label={t("infoVerbosity")}
+            description={t("infoVerbosityDescription")}
+            descriptionId={`${verbosityId}-hint`}
+            control={
+              <div className="flex w-full flex-col gap-2 sm:w-80">
+                <div
+                  id={verbosityId}
+                  role="radiogroup"
+                  aria-label={t("infoVerbosity")}
+                  aria-describedby={`${verbosityId}-hint`}
+                  data-info-verbosity-picker=""
+                  className="grid grid-cols-5 gap-1 rounded-md border border-border/70 bg-muted/30 p-1"
+                >
+                  {INFO_VERBOSITY_LEVELS.map(item => {
+                    const selected = verbosity === item;
+                    return (
+                      <button
+                        key={item}
+                        type="button"
+                        role="radio"
+                        aria-checked={selected}
+                        data-verbosity-level={item}
+                        data-active={selected ? "true" : undefined}
+                        onClick={() => setVerbosity(item as InfoVerbosityLevel)}
+                        className={
+                          "flex flex-col items-center justify-center rounded px-1.5 py-1 text-[11px] font-medium transition-colors " +
+                          (selected
+                            ? "bg-primary text-primary-foreground shadow-xs"
+                            : "text-muted-foreground hover:bg-muted/70 hover:text-foreground")
+                        }
+                      >
+                        <span className="font-mono text-[10px] opacity-80">L{item}</span>
+                        <span className="truncate">{t(`infoVerbosityLevel${item}Label`)}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11.5px] leading-snug text-muted-foreground" data-info-verbosity-detail="">
+                  {t(`infoVerbosityLevel${verbosity}Detail`)}
+                </p>
+              </div>
             }
           />
         </SettingsSection>

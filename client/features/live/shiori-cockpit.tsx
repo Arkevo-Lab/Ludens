@@ -13,16 +13,13 @@ import {
 import {
   AlertCircle,
   ArrowDown,
-  ArrowDownToLine,
   Bot,
   Check,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown,
   Clock,
   CornerUpLeft,
   Cpu,
-  FileText,
   Inbox,
   Infinity as InfinityIcon,
   Lock,
@@ -50,8 +47,10 @@ import {
   type ModelServiceTier,
 } from "@/components/model-picker-dialog";
 import { useLocale, useTranslations, type Locale } from "@/lib/locale";
+import { useInfoVerbosity, type LiveVerbosityFlags } from "@/lib/use-info-verbosity";
 import { useMediaResolver } from "@/lib/ludens-rpc";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
+import { TopbarSlot } from "@/shell/topbar-slots";
 import type { ActivityBlock } from "@/features/live/activity-feed-model";
 import { activityContentView, printable } from "@/features/live/activity-feed-model";
 import { CachedObservationImg } from "@/features/live/live-media-cache";
@@ -716,6 +715,7 @@ const CodexInputCard = memo(function CodexInputCard({
   bgBlock,
   at,
   isSelected,
+  expandPayloadByDefault,
   streamEnter,
   onInspectInput,
   onOpenReplayAt,
@@ -728,12 +728,17 @@ const CodexInputCard = memo(function CodexInputCard({
   bgBlock?: ActivityBlock;
   at: string;
   isSelected: boolean;
+  expandPayloadByDefault?: boolean;
   streamEnter?: boolean;
   onInspectInput: (runId: string, segId: string, call?: Call, imageId?: string, at?: string) => void;
   onOpenReplayAt?: (frame: { run?: string; at?: number; record: string; sequence: number }) => void;
 }) {
   const t = useTranslations("shioriCockpit");
   const mediaResolver = useMediaResolver();
+  const [payloadOpen, setPayloadOpen] = useState(Boolean(expandPayloadByDefault));
+  useEffect(() => {
+    setPayloadOpen(Boolean(expandPayloadByDefault));
+  }, [expandPayloadByDefault]);
 
   const perception = call?.perception;
   const recordSnapshot =
@@ -947,6 +952,8 @@ const CodexInputCard = memo(function CodexInputCard({
 
           <details
             className="codex-input-payload-details"
+            open={payloadOpen}
+            onToggle={event => setPayloadOpen(event.currentTarget.open)}
             onClick={event => event.stopPropagation()}
           >
             <summary className="codex-input-payload-toggle" data-input-payload-toggle="">
@@ -966,7 +973,7 @@ const CodexInputCard = memo(function CodexInputCard({
 const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
   segment,
   fallbackRunId,
-  showAllSteps,
+  verbosityFlags,
   isLastSegment,
   selectedStepId,
   streamEnter,
@@ -974,7 +981,7 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
 }: {
   segment: Extract<StreamSegment, { kind: "turn" }>;
   fallbackRunId: string;
-  showAllSteps: boolean;
+  verbosityFlags: LiveVerbosityFlags;
   isLastSegment: boolean;
   selectedStepId?: string;
   streamEnter?: boolean;
@@ -990,6 +997,18 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
   const isSystemOnly =
     !isLoopGroup && segment.steps.length > 0 && segment.steps.every(s => s.kind === "system");
 
+  const showStepGroup = isSystemOnly
+    ? verbosityFlags.showSystemEvents
+    : verbosityFlags.showSteps || Boolean(segment.loopFault);
+
+  if (!showStepGroup && paragraphs.length === 0) {
+    return null;
+  }
+
+  const forceExpanded = isSystemOnly
+    ? verbosityFlags.expandSystemEventsByDefault
+    : verbosityFlags.expandStepsByDefault;
+
   return (
     <article
       id={segment.responseBlock?.id}
@@ -999,20 +1018,22 @@ const CodexTurnAssistantRow = memo(function CodexTurnAssistantRow({
       data-loop-fault={segment.loopFault || undefined}
       data-stream-enter={streamEnter ? "true" : undefined}
     >
-      <CodexStepGroup
-        steps={segment.steps}
-        variant={isLoopGroup ? "loop" : undefined}
-        hasFault={Boolean(segment.loopFault)}
-        forceExpanded={showAllSteps}
-        standby={Boolean(segment.standby)}
-        defaultOpen={
-          isLoopGroup
-            ? Boolean(segment.loopFault)
-            : isStandalone && isLastSegment && !isSystemOnly
-        }
-        selectedBlock={selectedStepId}
-        onSelect={step => onInspectBlock(ownerRunId, step, segment.steps)}
-      />
+      {showStepGroup && (
+        <CodexStepGroup
+          steps={segment.steps}
+          variant={isLoopGroup ? "loop" : undefined}
+          hasFault={Boolean(segment.loopFault)}
+          forceExpanded={forceExpanded}
+          standby={Boolean(segment.standby)}
+          defaultOpen={
+            isLoopGroup
+              ? Boolean(segment.loopFault)
+              : isStandalone && isLastSegment && !isSystemOnly
+          }
+          selectedBlock={selectedStepId}
+          onSelect={step => onInspectBlock(ownerRunId, step, segment.steps)}
+        />
+      )}
 
       {paragraphs.length > 0 && (
         <div className="codex-assistant-prose">
@@ -2651,7 +2672,7 @@ export function ShioriWorkbench({
 
   const scrollRafRef = useRef<number | null>(null);
   const lastReportedSegmentRef = useRef("");
-  const [showAllSteps, setShowAllSteps] = useState(false);
+  const { flags: verbosityFlags } = useInfoVerbosity();
   const [desktopDockOpen, setDesktopDockOpen] = useState(true);
   const [drawerDockOpen, setDrawerDockOpen] = useState(false);
   const [isOverlayDock, setIsOverlayDock] = useState(false);
@@ -3340,6 +3361,19 @@ export function ShioriWorkbench({
               ? t("stateAutoThinking")
               : t("stateAutoIdle")
             : t("stateManual");
+  const compactStateTitle = !isLiveRun
+    ? t("stateCompactSnapshot")
+    : isSpawningCore
+      ? t("stateCompactSpawning")
+      : !hostOnline
+        ? t("stateCompactStandby")
+        : consolidating
+          ? t("stateCompactConsolidating")
+          : isAuto
+            ? thinking
+              ? t("stateCompactThinking")
+              : t("stateCompactAuto")
+            : t("stateCompactManual");
   const statePillTitle =
     hostOnline && live?.launchedBy
       ? `${stateTitle} · ${t(live.launchedBy === "cli" ? "coreOriginCli" : "coreOriginApp")}`
@@ -3438,121 +3472,60 @@ export function ShioriWorkbench({
 
   return (
     <div className="codex-workbench" data-dock-open={dockOpen || undefined}>
+      {/* Unified Single-Row Topbar Slots */}
+      <TopbarSlot slot="primary">
+        {runPicker && <div className="codex-thread-run-picker">{runPicker}</div>}
+        <span
+          className="topbar-status-chip"
+          data-live-status-chip=""
+          data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}
+          data-spawning-core={isSpawningCore ? "true" : undefined}
+          title={statePillTitle}
+        >
+          <PixelMark
+            size={13}
+            className="codex-status-mark"
+            state={!isLiveRun ? "idle" : isSpawningCore || consolidating || (isAuto && thinking) ? "reasoning" : !hostOnline ? "waiting" : "idle"}
+            filled={hostOnline && !isAuto}
+          />
+          <span>{compactStateTitle}</span>
+        </span>
+        {phaseLabel && (
+          <LivePhaseInlineBadge
+            phaseLabel={phaseLabel}
+            phaseElapsedMs={phaseElapsedMs}
+            tickEnabled={timerTickEnabled}
+            statusAnchorMs={statusAnchorMs}
+          />
+        )}
+      </TopbarSlot>
+
+      <TopbarSlot slot="dockToggle">
+        <button
+          type="button"
+          className="desktop-chrome-icon-btn codex-dock-toggle-btn"
+          data-action="toggle-dock"
+          data-active={String(dockOpen)}
+          aria-pressed={dockOpen}
+          title={t("toggleDockHint")}
+          aria-label={t("toggleDockHint")}
+          onClick={toggleDock}
+        >
+          <PanelRight className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
+          {!dockOpen && pendingPoolCount > 0 && (
+            <span
+              className="desktop-chrome-badge"
+              data-tone={pendingOutboundCount > 0 ? "outbound" : undefined}
+              aria-hidden="true"
+            >
+              {pendingPoolCount > 99 ? "99+" : pendingPoolCount}
+            </span>
+          )}
+        </button>
+      </TopbarSlot>
+
       {/* ── LEFT / CENTER MAIN PANE: CODEX CHAT STREAM + FLOATING PILL COMPOSER ── */}
       <section className="codex-chat-pane" aria-label={t("ariaLabel")}>
-        {/* 1-Line Clean Thread Header (just like ChatGPT/Codex desktop window bar) */}
-        <header className="codex-thread-header codex-cockpit-header">
-          <div className="codex-thread-title">
-            {mobileNavSlot}
-            <FileText className="codex-thread-doc-icon size-4 text-muted-foreground shrink-0" aria-hidden="true" />
-            <strong className="codex-thread-heading" title={`Shiori · ${workspaceTitle || project}`}>
-              <span className="codex-thread-brand">Shiori</span>
-              <span className="codex-thread-workspace"> · {workspaceTitle || project}</span>
-            </strong>
-            <span
-              className="codex-status-pill"
-              data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}
-              data-spawning-core={isSpawningCore ? "true" : undefined}
-              title={statePillTitle}
-            >
-              <PixelMark
-                size={14}
-                className="codex-status-mark"
-                state={!isLiveRun ? "idle" : isSpawningCore || consolidating || (isAuto && thinking) ? "reasoning" : !hostOnline ? "waiting" : "idle"}
-                filled={hostOnline && !isAuto}
-              />
-              <span className="codex-status-text">{stateTitle}</span>
-            </span>
-            {phaseLabel && (
-              <LivePhaseInlineBadge
-                phaseLabel={phaseLabel}
-                phaseElapsedMs={phaseElapsedMs}
-                tickEnabled={timerTickEnabled}
-                statusAnchorMs={statusAnchorMs}
-              />
-            )}
-          </div>
-
-          <div className="codex-thread-actions">
-            {runPicker && <div className="codex-thread-run-picker">{runPicker}</div>}
-            <button
-              type="button"
-              className="codex-header-btn codex-follow-toggle-btn"
-              data-live-follow-toggle=""
-              data-active={(isFollowing && !feed.historical) || undefined}
-              data-paused={(!isFollowing || feed.historical) || undefined}
-              aria-pressed={isFollowing && !feed.historical}
-              title={
-                isFollowing && !feed.historical
-                  ? t("autoFollowOnHint")
-                  : t("autoFollowPausedHint")
-              }
-              aria-label={
-                isFollowing && !feed.historical
-                  ? t("autoFollowOnHint")
-                  : t("autoFollowPausedHint")
-              }
-              onClick={() =>
-                toggleFollow(() => {
-                  if (feed.historical) feed.latest();
-                  onClearJumpTarget?.();
-                })
-              }
-            >
-              <ArrowDownToLine className="size-3.5 shrink-0" aria-hidden="true" />
-              {(!isFollowing || feed.historical) && unreadCount > 0 && (
-                <span className="codex-follow-unread-count">
-                  {unreadCount > 99 ? "99+" : unreadCount}
-                </span>
-              )}
-              <span className="codex-follow-toggle-label">
-                {isFollowing && !feed.historical ? t("autoFollowOn") : t("autoFollowPaused")}
-              </span>
-            </button>
-            <button
-              type="button"
-              className="codex-header-btn codex-expand-all-btn"
-              data-active={showAllSteps || undefined}
-              title={showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
-              aria-label={showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
-              onClick={() => setShowAllSteps(prev => !prev)}
-            >
-              <ChevronsUpDown className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="codex-expand-all-label">
-                {showAllSteps ? t("collapseStepsBtn") : t("expandAllStepsBtn")}
-              </span>
-            </button>
-            <button
-              type="button"
-              className="codex-header-btn codex-pool-trigger-btn"
-              data-tone={pendingOutboundCount > 0 ? "outbound" : pendingInboundCount > 0 ? "inbound" : undefined}
-              data-active={(dockOpen && dockTab === "pool") || undefined}
-              aria-pressed={dockOpen && dockTab === "pool"}
-              title={t("poolHeaderTriggerHint")}
-              aria-label={t("poolHeaderTriggerHint")}
-              onClick={togglePoolOverview}
-            >
-              {pendingOutboundCount > 0 ? (
-                <span className="codex-pool-trigger-icon" aria-hidden="true">🆘</span>
-              ) : (
-                <Inbox className="size-3.5 shrink-0" aria-hidden="true" />
-              )}
-              {pendingPoolCount > 0 && <span className="codex-pool-trigger-count">{pendingPoolCount}</span>}
-              <span className="codex-pool-trigger-label">{t("poolHeaderTrigger")}</span>
-            </button>
-            <button
-              type="button"
-              className="codex-header-btn codex-dock-toggle-btn"
-              data-active={dockOpen || undefined}
-              aria-pressed={dockOpen}
-              title={t("toggleDockHint")}
-              aria-label={t("toggleDockHint")}
-              onClick={toggleDock}
-            >
-              <PanelRight className="size-4" aria-hidden="true" />
-            </button>
-          </div>
-        </header>
 
         {/* Workspace Service Error Alert (Codex-style clean header when Core is idle/offline without errors) */}
         {serviceErrorPresence.mounted && displayedServiceError && (
@@ -3926,6 +3899,7 @@ export function ShioriWorkbench({
                 }
 
                 if (seg.kind === "input") {
+                  if (!verbosityFlags.showModelInputs) return null;
                   const segRunId = seg.runId || data.run;
                   const isInputSelected = Boolean(
                     activeBlockId === seg.id ||
@@ -3942,6 +3916,7 @@ export function ShioriWorkbench({
                       bgBlock={seg.bgBlock}
                       at={seg.at}
                       isSelected={isInputSelected}
+                      expandPayloadByDefault={verbosityFlags.expandModelInputsByDefault}
                       streamEnter={streamEnter}
                       onInspectInput={handleInspectInput}
                       onOpenReplayAt={onOpenReplayAt}
@@ -3954,7 +3929,7 @@ export function ShioriWorkbench({
                     key={seg.id}
                     segment={seg}
                     fallbackRunId={data.run}
-                    showAllSteps={showAllSteps}
+                    verbosityFlags={verbosityFlags}
                     isLastSegment={segIdx === segments.length - 1}
                     selectedStepId={activeBlockId}
                     streamEnter={streamEnter}
@@ -3991,7 +3966,11 @@ export function ShioriWorkbench({
                     )
                   : t("scrollToBottomAria")
               }
-              onClick={() => scrollToBottom(prefersSmoothScrollBehavior())}
+              onClick={() => {
+                if (feed.historical) feed.latest();
+                onClearJumpTarget?.();
+                scrollToBottom(prefersSmoothScrollBehavior());
+              }}
             >
               {unreadCount > 0 ? (
                 <>
@@ -4098,15 +4077,6 @@ export function ShioriWorkbench({
                 )}
               </button>
             </div>
-            <button
-              type="button"
-              className="codex-header-btn codex-dock-close-btn"
-              title={t("closeDock")}
-              aria-label={t("closeDock")}
-              onClick={closeDock}
-            >
-              <X className="size-4" aria-hidden="true" />
-            </button>
           </header>
           {dockTab === "pool" && (
             <div className="codex-dock-body codex-dock-scroll" data-dock-tab="pool" role="tabpanel">
