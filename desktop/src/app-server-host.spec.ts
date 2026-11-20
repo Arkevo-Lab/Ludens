@@ -438,4 +438,120 @@ describe('app-server-host', () => {
       }
     })
   })
+
+  describe('owned daemon auto-reclaim on stop', () => {
+    function makeStatus(overrides: Partial<{ pid: number; wsUrl: string | null; activeCores: string[] }> = {}) {
+      return {
+        protocolVersion: '1.0' as const,
+        pid: overrides.pid ?? 4242,
+        home: '/tmp/ludens-reclaim',
+        socketPath: '/tmp/ludens-reclaim/run/app-server.sock',
+        wsUrl: overrides.wsUrl ?? null,
+        authMode: 'none' as const,
+        serverSeq: 1,
+        activeCores: overrides.activeCores ?? [],
+        managedWorkspaces: overrides.activeCores ?? [],
+      }
+    }
+
+    function makeEnsureResult(started: boolean, overrides: Partial<{ pid: number; wsUrl: string | null; activeCores: string[] }> = {}) {
+      const status = makeStatus(overrides)
+      return {
+        started,
+        runtime: {
+          pid: status.pid,
+          home: status.home,
+          socketPath: status.socketPath,
+          wsUrl: status.wsUrl,
+          authMode: status.authMode,
+          startedAt: '2026-11-20T00:00:00.000Z',
+        },
+        status,
+      }
+    }
+
+    it('reclaims local UDS-only daemon spawned by Electron when stop({ stopOwnedDaemon: true }) runs with 0 active Cores', async () => {
+      const stopDaemon = vi.fn(async () => ({ stopped: true, pid: 4242, stoppedCores: [] }))
+      const host = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon: vi.fn(async () => makeEnsureResult(true, { pid: 4242 })),
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 4242, activeCores: [] })),
+        stopDaemon,
+      })
+
+      await host.start()
+      expect(host.isOwnedDaemon()).toBe(true)
+
+      // ensureOnline hitting the same PID preserves ownership
+      await host.ensureOnline()
+      expect(host.isOwnedDaemon()).toBe(true)
+
+      await host.stop({ stopOwnedDaemon: true })
+      expect(host.isOwnedDaemon()).toBe(false)
+      expect(stopDaemon).toHaveBeenCalledTimes(1)
+      expect(stopDaemon).toHaveBeenCalledWith('/tmp/ludens-reclaim', { stopCores: false, timeoutMs: 3_000 })
+    })
+
+    it('does NOT stop an external daemon that was already running before Electron attached', async () => {
+      const stopDaemon = vi.fn(async () => ({ stopped: true, pid: 4242, stoppedCores: [] }))
+      const host = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon: vi.fn(async () => makeEnsureResult(false, { pid: 4242 })),
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 4242, activeCores: [] })),
+        stopDaemon,
+      })
+
+      await host.start()
+      expect(host.isOwnedDaemon()).toBe(false)
+
+      await host.stop({ stopOwnedDaemon: true })
+      expect(stopDaemon).not.toHaveBeenCalled()
+    })
+
+    it('does NOT stop owned daemon when keep-background is chosen (stopOwnedDaemon: false) or when active Cores remain', async () => {
+      const stopDaemon = vi.fn(async () => ({ stopped: true, pid: 4242, stoppedCores: [] }))
+      const host1 = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon: vi.fn(async () => makeEnsureResult(true, { pid: 4242 })),
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 4242, activeCores: [] })),
+        stopDaemon,
+      })
+      await host1.start()
+      await host1.stop({ stopOwnedDaemon: false })
+      expect(stopDaemon).not.toHaveBeenCalled()
+
+      const host2 = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon: vi.fn(async () => makeEnsureResult(true, { pid: 4242 })),
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 4242, activeCores: ['ws-live'] })),
+        stopDaemon,
+      })
+      await host2.start()
+      await host2.stop({ stopOwnedDaemon: true })
+      expect(stopDaemon).not.toHaveBeenCalled()
+    })
+
+    it('does NOT stop daemon if PID changed externally or a TCP/WS listener is active', async () => {
+      const stopDaemon = vi.fn(async () => ({ stopped: true, pid: 4242, stoppedCores: [] }))
+      const hostPidChanged = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon: vi.fn(async () => makeEnsureResult(true, { pid: 4242 })),
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 9999, activeCores: [] })),
+        stopDaemon,
+      })
+      await hostPidChanged.start()
+      await hostPidChanged.stop({ stopOwnedDaemon: true })
+      expect(stopDaemon).not.toHaveBeenCalled()
+
+      const hostWithWs = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon: vi.fn(async () => makeEnsureResult(true, { pid: 4242 })),
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 4242, wsUrl: 'ws://127.0.0.1:43115/rpc', activeCores: [] })),
+        stopDaemon,
+      })
+      await hostWithWs.start()
+      await hostWithWs.stop({ stopOwnedDaemon: true })
+      expect(stopDaemon).not.toHaveBeenCalled()
+    })
+  })
 })
