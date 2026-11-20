@@ -189,6 +189,7 @@ const ALLOWED_CREATE_KEYS = new Set([
   "serviceTier",
   "effort",
   "pet",
+  "storage",
   "registerDriver",
 ]);
 
@@ -253,6 +254,17 @@ function normalizePositiveInt(value: unknown, fieldLabel: string, min = 1, max?:
   return value;
 }
 
+function isDefaultInheritStorage(storage: WorkspaceStorageOverride): boolean {
+  return (
+    storage.mode === "inherit" &&
+    storage.profileId === undefined &&
+    storage.maxBytes === undefined &&
+    storage.maxAgeHours === undefined &&
+    storage.localCacheBytes === undefined &&
+    storage.videoQuality === undefined
+  );
+}
+
 export function validateCreateWorkspacePayload(
   input: unknown,
   options?: { allowUnnamedDirectory?: boolean },
@@ -307,6 +319,13 @@ export function validateCreateWorkspacePayload(
   if (value.pet !== undefined && typeof value.pet !== "boolean") {
     throw new Error("无效的工作区字段：pet");
   }
+  let storage: WorkspaceStorageOverride | undefined;
+  if (value.storage !== undefined) {
+    const validatedStorage = validateWorkspaceStorageOverride(value.storage, "storage");
+    if (!isDefaultInheritStorage(validatedStorage)) {
+      storage = validatedStorage;
+    }
+  }
   if (value.registerDriver !== undefined && typeof value.registerDriver !== "boolean") {
     throw new Error("无效的工作区字段：registerDriver");
   }
@@ -330,6 +349,7 @@ export function validateCreateWorkspacePayload(
     ...(serviceTier !== undefined ? { serviceTier } : {}),
     ...(effort !== undefined ? { effort } : {}),
     ...(value.pet !== undefined ? { pet: value.pet } : {}),
+    ...(storage !== undefined ? { storage } : {}),
     ...(value.registerDriver !== undefined ? { registerDriver: value.registerDriver } : {}),
   };
 }
@@ -470,6 +490,7 @@ export async function initializeWorkspace(
   if (parsed.cuaCommand !== undefined) rawConfig.cuaCommand = parsed.cuaCommand;
   if (parsed.model !== undefined) rawConfig.model = parsed.model;
   if (parsed.pet !== undefined) rawConfig.pet = parsed.pet;
+  if (parsed.storage !== undefined) rawConfig.storage = parsed.storage;
   if (parsed.serviceTier === null) {
     delete rawConfig.serviceTier;
   } else if (parsed.serviceTier !== undefined) {

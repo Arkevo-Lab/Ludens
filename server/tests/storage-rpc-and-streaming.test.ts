@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { APP_RPC_ERROR_CODES, type LudensServerEvent } from "@ludens/protocol/app-rpc";
 import { ensureWorkspaceIdentity, registerWorkspace } from "@ludens/protocol/ludens";
-import { SECRET_MASK } from "@ludens/protocol/storage";
+import { resolveEffectiveWorkspaceStorage, SECRET_MASK } from "@ludens/protocol/storage";
 import { AppRpcClientError, NodeUdsRpcClient, WsAppRpcClient } from "../src/daemon/app-rpc-client.ts";
 import { mediaFile } from "../src/query/data.ts";
 import { getReplay } from "../src/query/replay.ts";
@@ -1013,6 +1013,81 @@ test("storage/maintain RPC executes offline Python _storage CLI end-to-end (sync
     await udsClient?.close();
     await appServer?.close({ emergency: true }).catch(() => {});
     mockS3.stop();
+    await rm(rootDir, { recursive: true, force: true });
+  }
+}, 20_000);
+
+test("workspaces/mutate create persists storage preset override and resolves compact 720p / 5 GiB", async () => {
+  const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-create-storage-rpc-")));
+  const home = join(rootDir, "home");
+  const fiveGiB = 5 * 1024 ** 3;
+  let appServer: Awaited<ReturnType<typeof startAppServer>> | undefined;
+  let udsClient: NodeUdsRpcClient | undefined;
+
+  try {
+    appServer = await startAppServer({ home });
+    udsClient = new NodeUdsRpcClient({ socketPath: appServer.socketPath! });
+    await udsClient.initialize({ clientInfo: { name: "create-storage-rpc", version: "1.0.0" } });
+
+    const created = (await udsClient.call("workspaces/mutate", {
+      action: "create",
+      input: {
+        name: "compact-rpc-ws",
+        driver: "cua",
+        storage: {
+          mode: "local",
+          videoQuality: "compact",
+          maxBytes: fiveGiB,
+        },
+      },
+    })) as { id: string; workspace: string };
+
+    const rawLudensJson = JSON.parse(await readFile(join(created.workspace, "ludens.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect(rawLudensJson.storage).toEqual({
+      mode: "local",
+      videoQuality: "compact",
+      maxBytes: fiveGiB,
+    });
+
+    const effective = await resolveEffectiveWorkspaceStorage(created.workspace, home);
+    expect(effective.videoQuality).toBe("compact");
+    expect(effective.crf).toBe(28);
+    expect(effective.maxLongEdge).toBe(720);
+    expect(effective.maxBytes).toBe(fiveGiB);
+
+    const studioSnap = (await udsClient.call("workspaces/getStudio", { workspaceId: created.id })) as {
+      config?: { storage?: unknown } | null;
+    };
+    expect(studioSnap.config?.storage).toEqual({
+      mode: "local",
+      videoQuality: "compact",
+      maxBytes: fiveGiB,
+    });
+
+    const overview = await udsClient.call("storage/get", {});
+    const usage = overview.usage.find(item => item.workspaceId === created.id);
+    expect(usage?.effectiveKind).toBe("local");
+    expect(usage?.maxBytes).toBe(fiveGiB);
+
+    const inheritCreated = (await udsClient.call("workspaces/mutate", {
+      action: "create",
+      input: {
+        name: "inherit-rpc-ws",
+        driver: "cua",
+        storage: { mode: "inherit" },
+      },
+    })) as { id: string; workspace: string };
+    const inheritRaw = JSON.parse(await readFile(join(inheritCreated.workspace, "ludens.json"), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    expect("storage" in inheritRaw).toBe(false);
+  } finally {
+    await udsClient?.close();
+    await appServer?.close({ emergency: true }).catch(() => {});
     await rm(rootDir, { recursive: true, force: true });
   }
 }, 20_000);

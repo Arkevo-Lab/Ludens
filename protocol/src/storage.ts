@@ -9,6 +9,30 @@ export type StorageBackendKind = (typeof STORAGE_BACKEND_KINDS)[number];
 export const VIDEO_QUALITY_PRESETS = ["high", "balanced", "compact"] as const;
 export type VideoQualityPreset = (typeof VIDEO_QUALITY_PRESETS)[number];
 
+export interface VideoQualitySpec {
+  readonly crf: number;
+  readonly maxLongEdge: number | null;
+  readonly recommendedMaxBytes: number;
+}
+
+export const VIDEO_QUALITY_SPECS: Readonly<Record<VideoQualityPreset, VideoQualitySpec>> = {
+  compact: {
+    crf: 28,
+    maxLongEdge: 720,
+    recommendedMaxBytes: 5 * 1024 * 1024 * 1024, // 5 GiB
+  },
+  balanced: {
+    crf: 23,
+    maxLongEdge: 1080,
+    recommendedMaxBytes: 20 * 1024 * 1024 * 1024, // 20 GiB
+  },
+  high: {
+    crf: 18,
+    maxLongEdge: null,
+    recommendedMaxBytes: 50 * 1024 * 1024 * 1024, // 50 GiB
+  },
+};
+
 export const WORKSPACE_STORAGE_MODES = ["inherit", "ephemeral", "local", "profile"] as const;
 export type WorkspaceStorageMode = (typeof WORKSPACE_STORAGE_MODES)[number];
 
@@ -100,6 +124,7 @@ export interface EffectiveWorkspaceStorage {
   kind: StorageBackendKind;
   videoQuality: VideoQualityPreset;
   crf: number;
+  maxLongEdge: number | null;
   protectReferenced: boolean;
   maxBytes: number | null;
   maxAgeHours: number | null;
@@ -199,17 +224,23 @@ export function isWorkspaceStorageMode(value: unknown): value is WorkspaceStorag
   return typeof value === "string" && (WORKSPACE_STORAGE_MODES as readonly string[]).includes(value);
 }
 
-export function crfForVideoQuality(quality: VideoQualityPreset): number {
-  switch (quality) {
-    case "high":
-      return 18;
-    case "balanced":
-      return 23;
-    case "compact":
-      return 28;
-    default:
-      throw new Error(`Invalid video quality preset: ${String(quality)}`);
+export function resolveVideoQualitySpec(quality: VideoQualityPreset): VideoQualitySpec {
+  if (!isVideoQualityPreset(quality)) {
+    throw new Error(`Invalid video quality preset: ${String(quality)}`);
   }
+  return VIDEO_QUALITY_SPECS[quality];
+}
+
+export function crfForVideoQuality(quality: VideoQualityPreset): number {
+  return resolveVideoQualitySpec(quality).crf;
+}
+
+export function maxLongEdgeForVideoQuality(quality: VideoQualityPreset): number | null {
+  return resolveVideoQualitySpec(quality).maxLongEdge;
+}
+
+export function recommendedMaxBytesForVideoQuality(quality: VideoQualityPreset): number {
+  return resolveVideoQualitySpec(quality).recommendedMaxBytes;
 }
 
 function builtinLocalProfile(): StorageProfile {
@@ -678,6 +709,7 @@ export async function resolveEffectiveWorkspaceStorage(
 
   const videoQuality = override.videoQuality ?? globalConfig.videoQuality;
   const crf = resolveEffectiveCrf(videoQuality);
+  const maxLongEdge = resolveVideoQualitySpec(videoQuality).maxLongEdge;
   const protectReferenced = globalConfig.protectReferenced;
 
   const persistEnv = process.env.LUDENS_PERCEPTION_PERSIST?.trim().toLowerCase();
@@ -691,6 +723,7 @@ export async function resolveEffectiveWorkspaceStorage(
       kind: "ephemeral",
       videoQuality,
       crf,
+      maxLongEdge,
       protectReferenced,
       maxBytes: null,
       maxAgeHours: null,
@@ -708,6 +741,7 @@ export async function resolveEffectiveWorkspaceStorage(
       kind: "ephemeral",
       videoQuality,
       crf,
+      maxLongEdge,
       protectReferenced,
       maxBytes: null,
       maxAgeHours: null,
@@ -728,6 +762,7 @@ export async function resolveEffectiveWorkspaceStorage(
       kind: "local",
       videoQuality,
       crf,
+      maxLongEdge,
       protectReferenced,
       maxBytes: override.maxBytes !== undefined ? override.maxBytes : defaultMaxBytes,
       maxAgeHours: override.maxAgeHours !== undefined ? override.maxAgeHours : defaultMaxAgeHours,
@@ -776,6 +811,7 @@ export async function resolveEffectiveWorkspaceStorage(
     kind,
     videoQuality,
     crf,
+    maxLongEdge,
     protectReferenced,
     maxBytes,
     maxAgeHours,

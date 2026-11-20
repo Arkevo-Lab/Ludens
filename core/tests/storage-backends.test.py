@@ -24,8 +24,11 @@ from ludens_tools._observation_history import ObservationHistory
 from ludens_tools._storage import (
     DEFAULT_LOCAL_CACHE_BYTES,
     DEFAULT_LOCAL_MAX_BYTES,
+    VIDEO_QUALITY_MAX_EDGE,
+    VIDEO_QUALITY_RECOMMENDED_MAX_BYTES,
     TimelineStorageManager,
     build_s3_object_url,
+    max_long_edge_for_video_quality,
     resolve_storage_config,
     sha256_file,
 )
@@ -221,6 +224,7 @@ class StorageBackendTests(unittest.TestCase):
                 self.assertEqual(cfg["localCacheBytes"], DEFAULT_LOCAL_CACHE_BYTES)
                 self.assertEqual(cfg["videoQuality"], "balanced")
                 self.assertEqual(cfg["crf"], 23)
+                self.assertEqual(cfg["maxLongEdge"], 1080)
                 self.assertTrue(cfg["protectReferenced"])
 
                 # Global storage.json + workspace ludens.json overrides
@@ -250,6 +254,7 @@ class StorageBackendTests(unittest.TestCase):
                 self.assertEqual(inherited["kind"], "directory")
                 self.assertEqual(inherited["profileId"], "nas-1")
                 self.assertEqual(inherited["crf"], 28)
+                self.assertEqual(inherited["maxLongEdge"], 720)
                 self.assertFalse(inherited["protectReferenced"])
                 self.assertEqual(inherited["localCacheBytes"], 1048576)
 
@@ -265,6 +270,7 @@ class StorageBackendTests(unittest.TestCase):
                 self.assertEqual(ws_local["kind"], "local")
                 self.assertEqual(ws_local["maxBytes"], 50_000_000)
                 self.assertEqual(ws_local["crf"], 18)
+                self.assertIsNone(ws_local["maxLongEdge"])
 
                 # LUDENS_VIDEO_CRF env overrides preset
                 with patch.dict(os.environ, {"LUDENS_VIDEO_CRF": "25"}):
@@ -854,6 +860,73 @@ class StorageBackendTests(unittest.TestCase):
                     proc.stdin.close()
                     proc.stdout.close()
                     reader.join(timeout=1)
+
+    def test_video_quality_presets_scale_long_edge_without_altering_live_frames(self) -> None:
+        import av
+        from PIL import Image
+
+        self.assertEqual(VIDEO_QUALITY_MAX_EDGE, {"high": None, "balanced": 1080, "compact": 720})
+        self.assertEqual(
+            VIDEO_QUALITY_RECOMMENDED_MAX_BYTES,
+            {"compact": 5 * 1024**3, "balanced": 20 * 1024**3, "high": 50 * 1024**3},
+        )
+        self.assertEqual(max_long_edge_for_video_quality("compact"), 720)
+        self.assertEqual(max_long_edge_for_video_quality("balanced"), 1080)
+        self.assertIsNone(max_long_edge_for_video_quality("high"))
+
+        cases = [
+            ("compact", (1920, 1080), (720, 404), (210, 60, 40)),
+            ("compact", (1080, 1920), (404, 720), (60, 180, 90)),
+            ("balanced", (2560, 1440), (1080, 608), (40, 110, 220)),
+            ("high", (1920, 1080), (1920, 1080), (180, 150, 50)),
+        ]
+        for idx, (preset, input_size, expected_size, color) in enumerate(cases):
+            with self.subTest(preset=preset, input_size=input_size):
+                with TemporaryDirectory() as tmp:
+                    root = Path(tmp).resolve()
+                    home = root / "home"
+                    ws = root / f"ws-{idx}"
+                    home.mkdir()
+                    ws.mkdir()
+                    self._write_workspace_id(ws, f"ws-preset-{idx}")
+                    (ws / "ludens.json").write_text(
+                        json.dumps({"storage": {"mode": "local", "videoQuality": preset}}),
+                        encoding="utf-8",
+                    )
+
+                    with patch.dict(os.environ, {"LUDENS_HOME": str(home)}, clear=False):
+                        os.environ.pop("LUDENS_PERCEPTION_PERSIST", None)
+                        os.environ.pop("LUDENS_VIDEO_CRF", None)
+
+                        mgr = TimelineStorageManager(ws, ws / ".ludens" / "timeline", start_worker=False)
+                        self.assertEqual(mgr.effective_policy()["maxLongEdge"], VIDEO_QUALITY_MAX_EDGE[preset])
+
+                        history = ObservationHistory(ws)
+                        try:
+                            rec = history.append(
+                                sample(png(color, input_size)),
+                                f"gen-{idx}",
+                                SAMPLING,
+                                "2026-11-20T10:00:00.000Z",
+                            )
+                            # Live delivered perception frame must remain untouched at native input resolution.
+                            live_raw = base64.b64decode(rec["media"][0]["data"])
+                            with Image.open(BytesIO(live_raw)) as live_img:
+                                self.assertEqual(live_img.size, input_size)
+                        finally:
+                            history.close()
+
+                        ref = rec["media"][0]["timeline"]
+                        timeline_dir = ws / ".ludens" / "timeline"
+                        mp4_path = timeline_dir / ref["asset"]
+                        with av.open(str(mp4_path), mode="r") as container:
+                            stream = container.streams.video[0]
+                            self.assertEqual((stream.width, stream.height), expected_size)
+                            self.assertEqual(stream.width % 2, 0)
+                            self.assertEqual(stream.height % 2, 0)
+
+                        decoded = decode_frame(timeline_dir, ref["asset"], ref["video"])
+                        self.assert_picture(decoded, color, expected_size)
 
 
 if __name__ == "__main__":

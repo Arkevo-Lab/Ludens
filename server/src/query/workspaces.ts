@@ -67,6 +67,7 @@ export interface CreateWorkspaceInput {
   serviceTier?: OmpServiceTier | null;
   effort?: OmpEffort | null;
   pet?: boolean;
+  storage?: WorkspaceStorageOverride;
   registerDriver?: boolean;
 }
 

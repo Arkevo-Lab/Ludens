@@ -448,14 +448,15 @@ class ObservationHistory:
                     if self._video is None:
                         from ludens_tools._video import VideoRecorder
                         video_dir = (self.directory if self.persistent else self._temporary) / "video"
-                        storage_crf = (storage.effective_policy()["crf"]
-                                       if storage is not None else resolve_storage_config(self.root)["crf"])
+                        storage_policy = (storage.effective_policy()
+                                          if storage is not None else resolve_storage_config(self.root))
                         self._video = VideoRecorder(
                             self.directory,
                             video_dir,
                             segment_seconds=self.video_segment_seconds,
                             idle_seconds=self.video_idle_seconds,
-                            crf=storage_crf,
+                            crf=storage_policy["crf"],
+                            max_long_edge=storage_policy["maxLongEdge"],
                             on_sealed=storage.notify_sealed if storage is not None else None,
                         )
                     channel = json.dumps([identity["id"], identity.get("codeSHA"), index, generation, item["mediaType"]])

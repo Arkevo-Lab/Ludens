@@ -165,6 +165,25 @@ def decode_frame(root: Path, asset: str, video: dict[str, Any], *, workspace: Pa
             return output.getvalue()
     raise ValueError("Recorded image is unavailable: exact frame is missing")
 
+def _compute_encoded_dimensions(
+    width: int,
+    height: int,
+    max_long_edge: int | None,
+) -> tuple[int, int, int, int]:
+    """Return (logical_w, logical_h, stream_w, stream_h) for a segment.
+
+    When max_long_edge is set and max(width, height) > max_long_edge, scale
+    proportionally and round to even integers >= 2. Otherwise keep original
+    logical dimensions and round stream dimensions up to even for yuv420p.
+    """
+    if max_long_edge is not None and max(width, height) > max_long_edge:
+        scale = max_long_edge / max(width, height)
+        out_w = max(2, round(width * scale / 2) * 2)
+        out_h = max(2, round(height * scale / 2) * 2)
+        return out_w, out_h, out_w, out_h
+    return width, height, width + width % 2, height + height % 2
+
+
 @dataclass
 class _Segment:
     asset: str
@@ -176,6 +195,9 @@ class _Segment:
     last_at: float
     sample_hz: float = DEFAULT_SAMPLE_HZ
     idle_seconds: float | None = None
+    max_long_edge: int | None = None
+    encoded_width: int = 0
+    encoded_height: int = 0
     last_pts: int = -1
     queued: int = 0
     frames: int = 0
@@ -191,6 +213,12 @@ class _Segment:
     container: Any = None
     stream: Any = None
 
+    def __post_init__(self) -> None:
+        if self.encoded_width <= 0 or self.encoded_height <= 0:
+            self.encoded_width, self.encoded_height, _, _ = _compute_encoded_dimensions(
+                self.width, self.height, self.max_long_edge,
+            )
+
 
 class VideoRecorder:
     """A bounded producer queue and one encoding thread inside the writer."""
@@ -203,6 +231,7 @@ class VideoRecorder:
         segment_seconds: int | None = None,
         idle_seconds: int | None = None,
         crf: int | None = None,
+        max_long_edge: int | None = None,
         on_sealed: Callable[[str], None] | None = None,
     ) -> None:
         self.root, self.directory = root, directory
@@ -216,6 +245,10 @@ class VideoRecorder:
             if isinstance(crf, bool) or not isinstance(crf, int) or not 0 <= crf <= 51:
                 raise ValueError("crf must be an integer between 0 and 51")
             self.crf = crf
+        if max_long_edge is not None:
+            if isinstance(max_long_edge, bool) or not isinstance(max_long_edge, int) or max_long_edge < 2:
+                raise ValueError("max_long_edge must be an integer >= 2 or None")
+        self.max_long_edge = max_long_edge
         self.on_sealed = on_sealed
         self.queue_limit = _positive("LUDENS_VIDEO_QUEUE_BYTES", 32 * 1024 * 1024)
         self.queue_count = _positive("LUDENS_VIDEO_QUEUE_FRAMES", 64)
@@ -241,7 +274,7 @@ class VideoRecorder:
         return {"status": status, "format": "fmp4", "startedAt": _iso(segment.started),
                 "durationSeconds": segment.readable_duration, "readableBytes": segment.readable_bytes,
                 "lastReadablePts": segment.last_readable_pts,
-                "width": segment.width, "height": segment.height, "frames": segment.readable_frames, "sample_hz": segment.sample_hz,
+                "width": segment.encoded_width, "height": segment.encoded_height, "frames": segment.readable_frames, "sample_hz": segment.sample_hz,
                 **({"error": segment.error} if segment.error else {})}
 
     def _publish(self, segment: _Segment, status: str, *, duration: float | None = None) -> None:
@@ -255,7 +288,18 @@ class VideoRecorder:
 
     def _new_segment(self, width: int, height: int, at: float, sample_hz: float, idle_seconds: float | None = None) -> _Segment:
         path = self.directory / (uuid.uuid4().hex + ".mp4")
-        segment = _Segment(path.relative_to(self.root).as_posix(), path, width, height, at, time.monotonic(), at, sample_hz, idle_seconds)
+        segment = _Segment(
+            path.relative_to(self.root).as_posix(),
+            path,
+            width,
+            height,
+            at,
+            time.monotonic(),
+            at,
+            sample_hz,
+            idle_seconds,
+            max_long_edge=self.max_long_edge,
+        )
         _state(path.with_suffix(".mp4.json"), self._metadata(segment, "pending"))
         self.segments[segment.asset] = segment
         return segment
@@ -335,8 +379,9 @@ class VideoRecorder:
                 options={"movflags": "+frag_keyframe+empty_moov", "flush_packets": "1"})
             keyint = max(1, round(segment.sample_hz * KEYFRAME_SECONDS))
             stream = segment.container.add_stream("libx264", rate=Fraction(str(segment.sample_hz)).limit_denominator(1_000_000))
-            stream.width = segment.width + segment.width % 2
-            stream.height = segment.height + segment.height % 2
+            _, _, out_w, out_h = _compute_encoded_dimensions(segment.width, segment.height, segment.max_long_edge)
+            stream.width = out_w
+            stream.height = out_h
             stream.pix_fmt = "yuv420p"
             stream.codec_context.time_base = Fraction(*TIME_BASE)
             stream.time_base = Fraction(*TIME_BASE)
@@ -345,10 +390,22 @@ class VideoRecorder:
             segment.stream = stream
         with Image.open(BytesIO(raw)) as source:
             image = source.convert("RGB")
-            if image.size != (segment.stream.width, segment.stream.height):
-                padded = Image.new("RGB", (segment.stream.width, segment.stream.height))
-                padded.paste(image, (0, 0))
-                image = padded
+            target_w, target_h = segment.stream.width, segment.stream.height
+            if image.size != (target_w, target_h):
+                if (segment.max_long_edge is not None and max(image.size) > segment.max_long_edge) or (
+                    image.width > target_w or image.height > target_h
+                ):
+                    if image.size == (segment.width, segment.height):
+                        image = image.resize((target_w, target_h), Image.Resampling.BILINEAR)
+                    else:
+                        scale = min(target_w / image.width, target_h / image.height)
+                        scaled_w = max(1, min(target_w, round(image.width * scale)))
+                        scaled_h = max(1, min(target_h, round(image.height * scale)))
+                        image = image.resize((scaled_w, scaled_h), Image.Resampling.BILINEAR)
+                if image.size != (target_w, target_h):
+                    padded = Image.new("RGB", (target_w, target_h))
+                    padded.paste(image, (0, 0))
+                    image = padded
             frame = av.VideoFrame.from_image(image)
         frame.pts = pts
         frame.time_base = Fraction(*TIME_BASE)

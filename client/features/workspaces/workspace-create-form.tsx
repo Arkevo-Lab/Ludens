@@ -26,7 +26,13 @@ import { Label } from "@/components/ui/label";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { ModelPickerDialog, shortModelLabel } from "@/components/model-picker-dialog";
+import { RecordingQualityPresets } from "@/features/workspaces/recording-quality-presets";
 import { useTranslations } from "@/lib/locale";
+import {
+  formatVideoQualitySpecBadge,
+  useStorageOverview,
+  type VideoQualityPreset,
+} from "@/lib/storage";
 import { useNativePathPicker } from "@/lib/use-native-path-picker";
 import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 import type { DiscoveredDriver } from "@ludens/protocol/drivers";
@@ -94,6 +100,7 @@ function formatMachineTransportSummary(machine: BasewareMachineRuntimeStatus): s
 export function WorkspaceCreateForm({
   defaultRoot,
   globalDefaults,
+  globalVideoQuality,
   existingWorkspaces,
   initialIntent,
   pending,
@@ -108,6 +115,7 @@ export function WorkspaceCreateForm({
 }: {
   defaultRoot: string;
   globalDefaults?: WorkspaceDefaults;
+  globalVideoQuality?: VideoQualityPreset;
   existingWorkspaces?: readonly (WorkspaceRegistration & { available?: boolean })[];
   initialIntent?: WorkspaceCreationIntent | null;
   pending: boolean;
@@ -121,12 +129,18 @@ export function WorkspaceCreateForm({
   onCancel(): void;
 }) {
   const t = useTranslations("workspaceSetup");
+  const tQuality = useTranslations("recordingQualityPresets");
   const id = useId();
   const form = useRef<HTMLFormElement>(null);
   const request = useRef<AbortController | null>(null);
   const submitModeRef = useRef<"create-only" | "create-and-launch">("create-and-launch");
 
   const catalog = useWorkspaceCreationCatalog({ enabled: true });
+  const fallbackStorageOverview = useStorageOverview({
+    enabled: globalVideoQuality === undefined,
+  });
+  const effectiveGlobalQuality: VideoQualityPreset =
+    globalVideoQuality ?? fallbackStorageOverview.config?.videoQuality ?? "balanced";
   const nativePicker = useNativePathPicker();
   const { capabilities: hostCapabilities } = useRuntimeCapabilities();
 
@@ -415,6 +429,7 @@ export function WorkspaceCreateForm({
     const result = workspaceCreateInput(defaultRoot, draft, activeDiscoveredForCaps, {
       machines: availableMachines,
       catalogDriver: mode === "driver" ? selectedCatalogDriver : null,
+      globalVideoQuality: effectiveGlobalQuality,
     });
     if (!result.ok) {
       setIssue(result.issue);
@@ -1241,7 +1256,73 @@ export function WorkspaceCreateForm({
             </div>
           </div>
 
-          {/* 4. Optional stdio command override (only shown for non-machine stdio targets) */}
+          {/* 4. 3-Tier Recording Quality & Storage Preset */}
+          {(() => {
+            const selectedQuality: VideoQualityPreset =
+              draft.videoQuality ?? effectiveGlobalQuality;
+            const isInherited = selectedQuality === effectiveGlobalQuality;
+            const specLabel = formatVideoQualitySpecBadge(selectedQuality, {
+              nativeLabel: tQuality("nativeResolution"),
+              showQuota: true,
+            });
+            return (
+              <div className="grid gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label id={`${id}-recording-quality`}>{t("recordingQualityLabel")}</Label>
+                  {isInherited ? (
+                    <Badge
+                      variant="secondary"
+                      className="text-[10px]"
+                      data-create-quality-inherited=""
+                    >
+                      {t("recordingQualityInheritedBadge")}
+                    </Badge>
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <Badge
+                        variant="outline"
+                        className="border-[var(--gold)]/45 bg-[var(--gold)]/10 text-[10px] text-[var(--gold)]"
+                        data-create-quality-override=""
+                      >
+                        {t("recordingQualityCustomBadge")}
+                      </Badge>
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => setDraft(prev => ({ ...prev, videoQuality: undefined }))}
+                        className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                      >
+                        {t("recordingQualityResetGlobal")}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <RecordingQualityPresets
+                  compact
+                  value={selectedQuality}
+                  defaultBadgeTier={effectiveGlobalQuality}
+                  showQuota={true}
+                  disabled={pending}
+                  ariaLabelledBy={`${id}-recording-quality`}
+                  ariaDescribedBy={`${id}-recording-quality-hint`}
+                  data-create-video-quality=""
+                  onChange={nextQuality =>
+                    setDraft(prev => ({ ...prev, videoQuality: nextQuality }))
+                  }
+                />
+                <p
+                  id={`${id}-recording-quality-hint`}
+                  className="text-xs leading-relaxed text-muted-foreground"
+                >
+                  {isInherited
+                    ? t("recordingQualityHintInherited")
+                    : t("recordingQualityHintOverride").replace("{spec}", specLabel)}
+                </p>
+              </div>
+            );
+          })()}
+
+          {/* 5. Optional stdio command override (only shown for non-machine stdio targets) */}
           {hostCapabilities.hostProcessOverrides && mode !== "machine" && capabilities.stdio ? (
             <details
               open={advanced}

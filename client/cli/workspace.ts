@@ -5,6 +5,11 @@ import type {
   CreateWorkspaceInputDto,
   ManagedServiceTarget,
 } from "@ludens/protocol/app-rpc";
+import {
+  VIDEO_QUALITY_SPECS,
+  isVideoQualityPreset,
+  type VideoQualityPreset,
+} from "@ludens/protocol/storage";
 import type { WorkspaceServiceControlResult } from "@ludens/protocol/workspaces";
 import type { AppRpcClient } from "./app-rpc-client.ts";
 import {
@@ -14,7 +19,7 @@ import {
 } from "./operator-rpc.ts";
 
 export const WORKSPACE_HELP = `Ludens workspace management & evaluations (RPC):
-ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--register-driver] [--pet | --no-pet]
+ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--video-quality <compact|balanced|high>] [--register-driver] [--pet | --no-pet]
 ludens workspace list
 ludens workspace open <directory> [--new-id]
 ludens workspace forget <id>
@@ -281,6 +286,7 @@ export async function runWorkspaceWithClient(
         model: { type: "string" },
         effort: { type: "string" },
         "service-tier": { type: "string" },
+        "video-quality": { type: "string" },
         name: { type: "string" },
         workspace: { type: "string" },
         "register-driver": { type: "boolean" },
@@ -291,6 +297,16 @@ export async function runWorkspaceWithClient(
     });
     if (values.pet && values["no-pet"]) {
       throw new Error("Choose either --pet or --no-pet");
+    }
+    let videoQualityArg: VideoQualityPreset | undefined;
+    if (values["video-quality"] !== undefined) {
+      const trimmedQuality = values["video-quality"].trim();
+      if (!isVideoQualityPreset(trimmedQuality)) {
+        throw new Error(
+          `Invalid --video-quality '${values["video-quality"]}'; expected compact, balanced, or high`,
+        );
+      }
+      videoQualityArg = trimmedQuality;
     }
     if (
       values.name !== undefined &&
@@ -346,6 +362,15 @@ export async function runWorkspaceWithClient(
         : {}),
       ...(typeof values["service-tier"] === "string"
         ? { serviceTier: values["service-tier"] as CreateWorkspaceInputDto["serviceTier"] }
+        : {}),
+      ...(videoQualityArg
+        ? {
+            storage: {
+              mode: "local",
+              videoQuality: videoQualityArg,
+              maxBytes: VIDEO_QUALITY_SPECS[videoQualityArg].recommendedMaxBytes,
+            },
+          }
         : {}),
       ...(values["register-driver"] ? { registerDriver: true } : {}),
       ...(values.pet || values["no-pet"] ? { pet: Boolean(values.pet) } : {}),

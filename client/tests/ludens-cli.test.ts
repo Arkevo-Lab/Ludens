@@ -183,6 +183,44 @@ test("ludens workspace lifecycle & import route through pure RPC", async () => {
     params: { action: "create", input: { name: "demo", driver: "cua" } },
   });
 
+  // init --video-quality <compact|balanced|high> sets local storage preset + recommendedMaxBytes
+  for (const [tier, gib] of [
+    ["compact", 5],
+    ["balanced", 20],
+    ["high", 50],
+  ] as const) {
+    await runCli(
+      ["workspace", "init", "--name", `demo-${tier}`, "--driver", "cua", "--video-quality", tier],
+      { env, rpcOptions, out: () => {} },
+    );
+    assert.deepEqual(calls.at(-1), {
+      method: "workspaces/mutate",
+      params: {
+        action: "create",
+        input: {
+          name: `demo-${tier}`,
+          driver: "cua",
+          storage: {
+            mode: "local",
+            videoQuality: tier,
+            maxBytes: gib * 1024 * 1024 * 1024,
+          },
+        },
+      },
+    });
+  }
+
+  const callsBeforeBadQuality = calls.length;
+  await assert.rejects(
+    () =>
+      runCli(
+        ["workspace", "init", "--name", "bad-quality", "--driver", "cua", "--video-quality", "ultra"],
+        { env, rpcOptions, out: () => {} },
+      ),
+    /Invalid --video-quality/,
+  );
+  assert.equal(calls.length, callsBeforeBadQuality);
+
   // LUDENS_WORKSPACE env var must NOT conflict with `ludens workspace init --workspace <new-dir>`
   await runCli(["workspace", "init", "--workspace", "/tmp/workspaces/brand-new", "--driver", "cua"], {
     env: { ...env, LUDENS_WORKSPACE: "/tmp/workspaces/alpha" },

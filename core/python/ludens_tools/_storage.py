@@ -30,6 +30,12 @@ DEFAULT_LOCAL_MAX_BYTES = 20 * 1024 * 1024 * 1024  # 20 GiB
 DEFAULT_LOCAL_CACHE_BYTES = 4 * 1024 * 1024 * 1024  # 4 GiB
 BUILTIN_LOCAL_PROFILE_ID = "local-default"
 VIDEO_QUALITY_CRF: dict[str, int] = {"high": 18, "balanced": 23, "compact": 28}
+VIDEO_QUALITY_MAX_EDGE: dict[str, int | None] = {"high": None, "balanced": 1080, "compact": 720}
+VIDEO_QUALITY_RECOMMENDED_MAX_BYTES: dict[str, int] = {
+    "compact": 5 * 1024**3,
+    "balanced": 20 * 1024**3,
+    "high": 50 * 1024**3,
+}
 EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 STREAM_CHUNK_BYTES = 1024 * 1024  # 1 MiB
 
@@ -156,6 +162,10 @@ def crf_for_video_quality(quality: str) -> int:
     return VIDEO_QUALITY_CRF.get(quality, VIDEO_QUALITY_CRF["balanced"])
 
 
+def max_long_edge_for_video_quality(quality: str) -> int | None:
+    return VIDEO_QUALITY_MAX_EDGE.get(quality, VIDEO_QUALITY_MAX_EDGE["balanced"])
+
+
 def _resolve_crf(video_quality: str) -> int:
     env_raw = os.environ.get("LUDENS_VIDEO_CRF", "").strip()
     if env_raw:
@@ -257,6 +267,7 @@ def resolve_storage_config(workspace: Path | str, home: Path | str | None = None
     override_quality = override_raw.get("videoQuality")
     video_quality = override_quality if override_quality in VIDEO_QUALITY_CRF else str(global_quality)
     crf = _resolve_crf(video_quality)
+    max_long_edge = max_long_edge_for_video_quality(video_quality)
 
     profile: dict[str, Any] | None = None
     if force_ephemeral or override_mode == "ephemeral":
@@ -320,6 +331,7 @@ def resolve_storage_config(workspace: Path | str, home: Path | str | None = None
         "kind": kind,
         "videoQuality": video_quality,
         "crf": crf,
+        "maxLongEdge": max_long_edge,
         "protectReferenced": protect_referenced,
         "maxBytes": max_bytes,
         "maxAgeHours": max_age_hours,
@@ -694,6 +706,7 @@ class TimelineStorageManager:
             "profileId": cfg["profileId"],
             "videoQuality": cfg["videoQuality"],
             "crf": cfg["crf"],
+            "maxLongEdge": cfg["maxLongEdge"],
             "maxBytes": cfg["maxBytes"],
             "maxAgeHours": cfg["maxAgeHours"],
             "localCacheBytes": cfg["localCacheBytes"],

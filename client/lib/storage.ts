@@ -21,6 +21,7 @@ import type {
   StorageTestResult,
   TimelineArchiveLocation,
   VideoQualityPreset,
+  VideoQualitySpec,
   WorkspaceStorageMode,
   WorkspaceStorageOverride,
   WorkspaceStorageUsageSummary,
@@ -47,6 +48,7 @@ export type {
   StorageTestResult,
   TimelineArchiveLocation,
   VideoQualityPreset,
+  VideoQualitySpec,
   WorkspaceStorageMode,
   WorkspaceStorageOverride,
   WorkspaceStorageUsageSummary,
@@ -57,6 +59,30 @@ export const DEFAULT_LOCAL_MAX_BYTES = 20 * GIB_BYTES;
 export const DEFAULT_LOCAL_CACHE_BYTES = 4 * GIB_BYTES;
 export const BUILTIN_LOCAL_PROFILE_ID = "local-default";
 export const SECRET_MASK = "••••••••";
+
+export const RECORDING_QUALITY_TIERS: readonly VideoQualityPreset[] = [
+  "compact",
+  "balanced",
+  "high",
+] as const;
+
+export const VIDEO_QUALITY_SPECS: Readonly<Record<VideoQualityPreset, VideoQualitySpec>> = {
+  compact: {
+    crf: 28,
+    maxLongEdge: 720,
+    recommendedMaxBytes: 5 * GIB_BYTES,
+  },
+  balanced: {
+    crf: 23,
+    maxLongEdge: 1080,
+    recommendedMaxBytes: 20 * GIB_BYTES,
+  },
+  high: {
+    crf: 18,
+    maxLongEdge: null,
+    recommendedMaxBytes: 50 * GIB_BYTES,
+  },
+};
 
 function trimTrailingZeros(formatted: string): string {
   if (!formatted.includes(".")) return formatted;
@@ -597,6 +623,113 @@ export function sameWorkspaceStorageOverride(
   b: WorkspaceStorageOverride | null | undefined,
 ): boolean {
   return JSON.stringify(normalizeWorkspaceStorageOverride(a)) === JSON.stringify(normalizeWorkspaceStorageOverride(b));
+}
+
+export function formatVideoQualitySpecBadge(
+  quality: VideoQualityPreset,
+  options?: { nativeLabel?: string; showQuota?: boolean },
+): string {
+  const spec = VIDEO_QUALITY_SPECS[quality];
+  const resLabel =
+    spec.maxLongEdge !== null ? `${spec.maxLongEdge}p` : (options?.nativeLabel ?? "Native");
+  const crfLabel = `CRF ${spec.crf}`;
+  if (options?.showQuota === false) {
+    return `${resLabel} · ${crfLabel}`;
+  }
+  const gibLabel = `${bytesToGibInput(spec.recommendedMaxBytes)} GiB`;
+  return `${resLabel} · ${crfLabel} · ${gibLabel}`;
+}
+
+export interface GlobalStorageDefaultsDraft {
+  defaultProfileId: string;
+  videoQuality: VideoQualityPreset;
+  protectReferenced: boolean;
+  syncedLocalMaxBytes?: number;
+}
+
+export function createGlobalStorageDefaultsDraft(
+  config: RedactedGlobalStorageConfig,
+): GlobalStorageDefaultsDraft {
+  return {
+    defaultProfileId: config.defaultProfileId,
+    videoQuality: config.videoQuality,
+    protectReferenced: config.protectReferenced,
+  };
+}
+
+export function applyGlobalQualityPreset(
+  draft: GlobalStorageDefaultsDraft,
+  preset: VideoQualityPreset,
+): GlobalStorageDefaultsDraft {
+  return {
+    ...draft,
+    videoQuality: preset,
+    syncedLocalMaxBytes: VIDEO_QUALITY_SPECS[preset].recommendedMaxBytes,
+  };
+}
+
+export function isGlobalStorageDefaultsDirty(
+  config: RedactedGlobalStorageConfig,
+  draft: GlobalStorageDefaultsDraft,
+): boolean {
+  const builtinProfile = config.profiles.find(p => p.id === BUILTIN_LOCAL_PROFILE_ID);
+  const currentBuiltinMaxBytes =
+    builtinProfile?.maxBytes !== undefined ? builtinProfile.maxBytes : DEFAULT_LOCAL_MAX_BYTES;
+  const localQuotaChanged =
+    draft.syncedLocalMaxBytes !== undefined &&
+    draft.syncedLocalMaxBytes !== currentBuiltinMaxBytes;
+  return (
+    draft.defaultProfileId !== config.defaultProfileId ||
+    draft.videoQuality !== config.videoQuality ||
+    draft.protectReferenced !== config.protectReferenced ||
+    localQuotaChanged
+  );
+}
+
+export function buildGlobalDefaultsUpdateInput(
+  config: RedactedGlobalStorageConfig,
+  draft: GlobalStorageDefaultsDraft,
+): GlobalStorageUpdateInput {
+  const shouldSyncProfiles = draft.syncedLocalMaxBytes !== undefined;
+  return {
+    defaultProfileId: draft.defaultProfileId,
+    videoQuality: draft.videoQuality,
+    protectReferenced: draft.protectReferenced,
+    ...(shouldSyncProfiles
+      ? {
+          profiles: config.profiles.map(profile =>
+            profile.id === BUILTIN_LOCAL_PROFILE_ID
+              ? {
+                  ...redactedProfileToInput(profile),
+                  maxBytes: draft.syncedLocalMaxBytes!,
+                }
+              : redactedProfileToInput(profile),
+          ),
+        }
+      : {}),
+  };
+}
+
+export function shouldShowStudioPresetQuota(draft: WorkspaceStorageDraft): boolean {
+  return draft.mode === "local" || draft.mode === "inherit";
+}
+
+export function applyStudioQualityPreset(
+  draft: WorkspaceStorageDraft,
+  preset: VideoQualityPreset,
+): WorkspaceStorageDraft {
+  if (draft.mode === "profile" || draft.mode === "ephemeral") {
+    return {
+      ...draft,
+      videoQuality: preset,
+    };
+  }
+  return {
+    ...draft,
+    mode: "local",
+    videoQuality: preset,
+    maxGib: bytesToGibInput(VIDEO_QUALITY_SPECS[preset].recommendedMaxBytes),
+  };
 }
 
 export interface StorageOverviewSnapshot {

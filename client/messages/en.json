@@ -1761,7 +1761,13 @@
     "retryLaunchBtn": "Retry launch & enter",
     "retryingLaunchBtn": "Retrying launch…",
     "openStudioAfterCreate": "Workspace config",
-    "enterLiveStandbyBtn": "Enter Live (standby)"
+    "enterLiveStandbyBtn": "Enter Live (standby)",
+    "recordingQualityLabel": "Recording quality & storage",
+    "recordingQualityInheritedBadge": "Follows global",
+    "recordingQualityCustomBadge": "Workspace override",
+    "recordingQualityResetGlobal": "Follow global",
+    "recordingQualityHintInherited": "Matches your global preset — workspace will inherit ~/.ludens/storage.json.",
+    "recordingQualityHintOverride": "Sets workspace local ring buffer to {spec} in ludens.json."
   },
   "runPicker": {
     "description": "Choose a recorded run by its full ID. Timestamp summaries use the Asia/Shanghai time zone.",
@@ -2351,6 +2357,12 @@
       "title": "Timeline Storage Policy (ludens.json · storage)",
       "description": "Override the timeline media backend, rolling byte quota, and encoding quality for this workspace; S3 credentials and mount paths stay in global ~/.ludens/storage.json.",
       "openGlobalStorage": "Global Storage Pool",
+      "presetRowLabel": "Recording quality & storage preset",
+      "presetRowHintLocal": "Click a tier to set both H.264 encoding quality and local ring-buffer cap (5 / 20 / 50 GiB).",
+      "presetRowHintProfile": "Bound to storage profile \"{profile}\" — clicking a tier updates H.264 quality only without changing profile or remote quota.",
+      "presetRowHintEphemeral": "Ephemeral mode keeps frames in memory only — no persistent video segments are written to disk.",
+      "inheritedBadge": "Inherited from global",
+      "resetToInheritBtn": "Reset to global default",
       "modeLabel": "Persistence mode (storage.mode)",
       "modeHint": "Inherit the global default profile, or isolate this workspace with an ephemeral hot window, dedicated local ring quota, or named storage profile.",
       "modeInherit": "Inherit global default (inherit)",
@@ -2775,11 +2787,12 @@
     "defaultsDesc": "Configure the default storage profile, H.264 encoding quality preset, and LLM-referenced frame retention priority for workspaces inheriting global settings.",
     "defaultProfileLabel": "Default storage profile (defaultProfileId)",
     "defaultProfileHint": "Used by every workspace whose storage mode is set to inherit.",
-    "videoQualityLabel": "Video encoding quality (videoQuality)",
-    "videoQualityHint": "Controls the H.264 CRF encoding preset for newly recorded 30 Hz fMP4 video segments.",
-    "qualityBalanced": "Balanced · CRF 23 (Recommended space/quality balance)",
-    "qualityCompact": "Compact · CRF 28 (Low bitrate for long horizons)",
-    "qualityHigh": "High · CRF 18 (High-fidelity detail)",
+    "videoQualityLabel": "Recording quality & local quota preset (videoQuality)",
+    "videoQualityHint": "Selects the default H.264 resolution/CRF tier (live model vision stays untouched) and syncs the built-in local-default quota (5 / 20 / 50 GiB).",
+    "qualityBalanced": "Balanced · 1080p · CRF 23 · 20 GiB",
+    "qualityCompact": "Space Saver · 720p · CRF 28 · 5 GiB",
+    "qualityHigh": "High Quality · Native · CRF 18 · 50 GiB",
+    "localDefaultSyncPendingHint": "Saving will also update local-default cap to {quota} (editable independently below).",
     "protectReferencedLabel": "Protect model-referenced frames (protectReferenced)",
     "protectReferencedHint": "Evict frames delivered to LLM turns (.ludens/archive/media/) last when enforcing quotas; segments listed in pins.json are never auto-evicted.",
     "unsavedDefaults": "Unsaved global storage policy changes.",
@@ -2861,5 +2874,25 @@
     "errInvalidEndpointUrl": "Enter a valid endpoint URL starting with http:// or https://.",
     "loadFailed": "Failed to read storage configuration",
     "saveFailed": "Failed to save storage configuration"
+  },
+  "recordingQualityPresets": {
+    "groupLabel": "Recording quality & storage preset",
+    "nativeResolution": "Native",
+    "defaultBadge": "Default",
+    "quotaMutedNote": "Bound profile quota stays untouched — preset only updates encoding quality.",
+    "tiers": {
+      "compact": {
+        "title": "Space Saver",
+        "hint": "Mac mini & long autonomous sessions"
+      },
+      "balanced": {
+        "title": "Balanced",
+        "hint": "Daily play, debugging & timeline replay"
+      },
+      "high": {
+        "title": "High Quality",
+        "hint": "High-res evaluation & RL capture"
+      }
+    }
   }
 }

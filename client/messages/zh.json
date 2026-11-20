@@ -1761,7 +1761,13 @@
     "retryLaunchBtn": "重试启动并进入",
     "retryingLaunchBtn": "正在重试启动…",
     "openStudioAfterCreate": "前往工作区配置",
-    "enterLiveStandbyBtn": "先进入运行台（待命态）"
+    "enterLiveStandbyBtn": "先进入运行台（待命态）",
+    "recordingQualityLabel": "录制质量与存储",
+    "recordingQualityInheritedBadge": "跟随全局默认",
+    "recordingQualityCustomBadge": "工作区独立覆盖",
+    "recordingQualityResetGlobal": "恢复跟随全局",
+    "recordingQualityHintInherited": "与当前全局档位一致，创建后将直接继承 ~/.ludens/storage.json 默认策略。",
+    "recordingQualityHintOverride": "将在工作区 ludens.json 中写入本机独立录制策略（{spec}）。"
   },
   "runPicker": {
     "description": "根据完整 ID 选择已记录的运行。时间摘要使用 Asia/Shanghai 时区。",
@@ -2351,6 +2357,12 @@
       "title": "录像持久化策略 (ludens.json · storage)",
       "description": "按工作区覆盖时空轴录像存储后端、滚动容量配额与编码画质；S3 密钥与外置挂载路径统一保存在全局 ~/.ludens/storage.json 中。",
       "openGlobalStorage": "管理全局存储池",
+      "presetRowLabel": "录制质量与存储档位",
+      "presetRowHintLocal": "点击档位可同时设置 H.264 录制画质与本机环形盘容量上限（5 / 20 / 50 GiB）。",
+      "presetRowHintProfile": "当前已绑定存储配置「{profile}」，点击档位仅更新 H.264 录制画质，不会改动绑定配置或远端配额。",
+      "presetRowHintEphemeral": "当前为纯内存热窗模式（ephemeral），退出后不留存磁盘视频分段。",
+      "inheritedBadge": "继承全局默认",
+      "resetToInheritBtn": "恢复继承全局",
       "modeLabel": "持久化模式 (storage.mode)",
       "modeHint": "选择继承全局默认存储配置，或为此工作区单独指定纯内存热窗、本机独立环形配额或指定存储配置。",
       "modeInherit": "继承全局默认 (inherit)",
@@ -2775,11 +2787,12 @@
     "defaultsDesc": "控制未单独覆盖存储策略的工作区默认使用的后端、H.264 视频编码质量与模型输入帧优先保留规则。",
     "defaultProfileLabel": "默认存储后端配置 (defaultProfileId)",
     "defaultProfileHint": "所有处于继承全局默认（inherit）模式的工作区均使用此存储配置。",
-    "videoQualityLabel": "默认视频编码质量 (videoQuality)",
-    "videoQualityHint": "控制 30 Hz fMP4 视频分段编码的 H.264 CRF 档位，对新建分段生效。",
-    "qualityBalanced": "均衡省空间 · CRF 23（推荐均衡省空间）",
-    "qualityCompact": "极简长程 · CRF 28（低码率长程留档）",
-    "qualityHigh": "原画高码率 · CRF 18（高保真画面细节）",
+    "videoQualityLabel": "默认录制质量与本机配额档位 (videoQuality)",
+    "videoQualityHint": "设置新分段的默认 H.264 分辨率与 CRF 编码档位（不影响实时模型视觉帧），并联动同步内置 local-default 配额上限（5 / 20 / 50 GiB）。",
+    "qualityBalanced": "正常质量 · 1080p · CRF 23 · 20 GiB",
+    "qualityCompact": "省存储 · 720p · CRF 28 · 5 GiB",
+    "qualityHigh": "高质量 · 原画 · CRF 18 · 50 GiB",
+    "localDefaultSyncPendingHint": "保存时将同步更新内置 local-default 容量上限为 {quota}（仍可在下方单独修改）。",
     "protectReferencedLabel": "优先保护模型观测帧 (protectReferenced)",
     "protectReferencedHint": "开启后，曾传入模型回合（.ludens/archive/media/）的观测帧仅在普通分段全部回收仍超配额时最后淘汰；pins.json 显式锁定的分段永不自动淘汰。",
     "unsavedDefaults": "当前有未保存的全局存储策略修改。",
@@ -2861,5 +2874,25 @@
     "errInvalidEndpointUrl": "请输入以 http:// 或 https:// 开头的有效端点地址。",
     "loadFailed": "读取存储配置失败",
     "saveFailed": "保存存储配置失败"
+  },
+  "recordingQualityPresets": {
+    "groupLabel": "录制质量与存储档位",
+    "nativeResolution": "原画",
+    "defaultBadge": "默认",
+    "quotaMutedNote": "已绑定存储配置，切换档位仅更新编码画质，不改动该配置的容量配额。",
+    "tiers": {
+      "compact": {
+        "title": "省存储",
+        "hint": "适合 Mac mini 与长程挂机录制"
+      },
+      "balanced": {
+        "title": "正常质量",
+        "hint": "日常运行、调试与时间轴回放"
+      },
+      "high": {
+        "title": "高质量",
+        "hint": "高清评测采样与强化学习留档"
+      }
+    }
   }
 }

@@ -36,21 +36,27 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { useTranslations } from "@/lib/locale";
 import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
+import { RecordingQualityPresets } from "@/features/workspaces/recording-quality-presets";
 import {
   BUILTIN_LOCAL_PROFILE_ID,
   DEFAULT_LOCAL_CACHE_BYTES,
   DEFAULT_LOCAL_MAX_BYTES,
+  applyGlobalQualityPreset,
+  buildGlobalDefaultsUpdateInput,
   buildStorageTestParamsFromDraft,
   createEmptyStorageProfileDraft,
+  createGlobalStorageDefaultsDraft,
   draftToStorageProfileInput,
   fallbackGlobalStorageConfig,
   formatStorageBytes,
+  isGlobalStorageDefaultsDirty,
   maintainActionKey,
   redactedProfileToInput,
   slugifyStorageProfileId,
   storageProfileToDraft,
   useStorageOverview,
   validateStorageProfileDraft,
+  type GlobalStorageDefaultsDraft,
   type RedactedStorageProfile,
   type StorageBackendKind,
   type StorageOverviewSnapshot,
@@ -60,7 +66,6 @@ import {
   type StorageProfileInput,
   type StorageTestParams,
   type StorageTestResult,
-  type VideoQualityPreset,
 } from "@/lib/storage";
 
 const BACKEND_KINDS: readonly StorageBackendKind[] = ["local", "directory", "s3", "ephemeral"];
@@ -110,17 +115,11 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
   const effectiveConfig = overview.config ?? fallbackGlobalStorageConfig();
 
   const defaultProfileSelectId = useId();
-  const videoQualitySelectId = useId();
+  const videoQualityHintId = useId();
 
-  const [defaultsDraft, setDefaultsDraft] = useState<{
-    defaultProfileId: string;
-    videoQuality: VideoQualityPreset;
-    protectReferenced: boolean;
-  }>({
-    defaultProfileId: effectiveConfig.defaultProfileId,
-    videoQuality: effectiveConfig.videoQuality,
-    protectReferenced: effectiveConfig.protectReferenced,
-  });
+  const [defaultsDraft, setDefaultsDraft] = useState<GlobalStorageDefaultsDraft>(() =>
+    createGlobalStorageDefaultsDraft(effectiveConfig),
+  );
   const [defaultsSavedNotice, setDefaultsSavedNotice] = useState(false);
 
   const [editorState, setEditorState] = useState<{
@@ -134,27 +133,25 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
 
   useEffect(() => {
     if (!overview.config) return;
-    setDefaultsDraft({
-      defaultProfileId: overview.config.defaultProfileId,
-      videoQuality: overview.config.videoQuality,
-      protectReferenced: overview.config.protectReferenced,
-    });
+    setDefaultsDraft(createGlobalStorageDefaultsDraft(overview.config));
   }, [overview.config]);
 
-  const defaultsDirty =
-    defaultsDraft.defaultProfileId !== effectiveConfig.defaultProfileId ||
-    defaultsDraft.videoQuality !== effectiveConfig.videoQuality ||
-    defaultsDraft.protectReferenced !== effectiveConfig.protectReferenced;
+  const builtinProfile = effectiveConfig.profiles.find(p => p.id === BUILTIN_LOCAL_PROFILE_ID);
+  const currentBuiltinMaxBytes =
+    builtinProfile?.maxBytes !== undefined ? builtinProfile.maxBytes : DEFAULT_LOCAL_MAX_BYTES;
+  const pendingLocalQuotaSync =
+    defaultsDraft.syncedLocalMaxBytes !== undefined &&
+    defaultsDraft.syncedLocalMaxBytes !== currentBuiltinMaxBytes
+      ? defaultsDraft.syncedLocalMaxBytes
+      : null;
+
+  const defaultsDirty = isGlobalStorageDefaultsDirty(effectiveConfig, defaultsDraft);
 
   const saveGlobalDefaults = async () => {
     if (overview.saving || !defaultsDirty) return;
     setDefaultsSavedNotice(false);
     try {
-      await overview.updateStorage({
-        defaultProfileId: defaultsDraft.defaultProfileId,
-        videoQuality: defaultsDraft.videoQuality,
-        protectReferenced: defaultsDraft.protectReferenced,
-      });
+      await overview.updateStorage(buildGlobalDefaultsUpdateInput(effectiveConfig, defaultsDraft));
       setDefaultsSavedNotice(true);
     } catch {
       // Error surfaced via overview.actionError
@@ -578,32 +575,37 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
         />
 
         <SettingsRow
+          stacked
           label={t("videoQualityLabel")}
-          htmlFor={videoQualitySelectId}
           description={t("videoQualityHint")}
+          descriptionId={videoQualityHintId}
           control={
-            <NativeSelect
-              id={videoQualitySelectId}
-              disabled={overview.loading || overview.saving}
-              value={defaultsDraft.videoQuality}
-              onChange={event => {
-                const val = event.target.value;
-                const nextQuality: VideoQualityPreset =
-                  val === "high" || val === "compact" ? val : "balanced";
-                setDefaultsDraft(prev => ({
-                  ...prev,
-                  videoQuality: nextQuality,
-                }));
-                setDefaultsSavedNotice(false);
-              }}
-              wrapperClassName="w-full sm:w-80"
-              className="w-full"
-              data-storage-video-quality
-            >
-              <NativeSelectOption value="balanced">{t("qualityBalanced")}</NativeSelectOption>
-              <NativeSelectOption value="compact">{t("qualityCompact")}</NativeSelectOption>
-              <NativeSelectOption value="high">{t("qualityHigh")}</NativeSelectOption>
-            </NativeSelect>
+            <div className="grid w-full gap-2">
+              <RecordingQualityPresets
+                value={defaultsDraft.videoQuality}
+                defaultBadgeTier="balanced"
+                showQuota={true}
+                disabled={overview.loading || overview.saving}
+                ariaLabel={t("videoQualityLabel")}
+                ariaDescribedBy={videoQualityHintId}
+                data-storage-video-quality=""
+                onChange={nextQuality => {
+                  setDefaultsDraft(prev => applyGlobalQualityPreset(prev, nextQuality));
+                  setDefaultsSavedNotice(false);
+                }}
+              />
+              {pendingLocalQuotaSync !== null && (
+                <p
+                  data-storage-local-sync-hint=""
+                  className="text-xs text-[var(--gold)]"
+                >
+                  {t("localDefaultSyncPendingHint").replace(
+                    "{quota}",
+                    formatStorageBytes(pendingLocalQuotaSync),
+                  )}
+                </p>
+              )}
+            </div>
           }
         />
 
@@ -641,11 +643,7 @@ export function StorageSettings({ initialData }: StorageSettingsProps) {
         }
         discardLabel={t("discardDefaults")}
         onDiscard={() => {
-          setDefaultsDraft({
-            defaultProfileId: effectiveConfig.defaultProfileId,
-            videoQuality: effectiveConfig.videoQuality,
-            protectReferenced: effectiveConfig.protectReferenced,
-          });
+          setDefaultsDraft(createGlobalStorageDefaultsDraft(effectiveConfig));
           setDefaultsSavedNotice(false);
         }}
         saveLabel={t("saveDefaults")}

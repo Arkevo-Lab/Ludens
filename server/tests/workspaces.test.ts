@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { workspaceSettings, updateWorkspaceRoot, openWorkspace, removeWorkspace, createWorkspace } from "../src/query/workspaces";
 import { readGlobalConfig, writeGlobalConfig, registeredWorkspace, registerWorkspace, forgetWorkspace,
   withPetTargetLock } from "@ludens/protocol/ludens";
+import { resolveEffectiveWorkspaceStorage } from "@ludens/protocol/storage";
 import { setPetTarget, petState } from "../src/query/pet-state";
 import { registerFixture } from "./fixtures/registry";
 import { DashboardWorker } from "../src/query/dashboard-worker";
@@ -327,4 +328,64 @@ test("worker reads and updates global and workspace model connection transport c
     }]);
     assert.equal(afterReset.currentSessionFile, null);
   } finally { await worker.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+test("createWorkspace persists explicit storage preset override and omits bare inherit", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-create-storage-")));
+  const home = join(root, "home");
+  const fiveGiB = 5 * 1024 ** 3;
+  try {
+    const compactWs = await createWorkspace(
+      {
+        name: "compact-ws",
+        driver: "cua",
+        storage: {
+          mode: "local",
+          videoQuality: "compact",
+          maxBytes: fiveGiB,
+        },
+      },
+      undefined,
+      home,
+    );
+    const compactConfig = JSON.parse(await readFile(join(compactWs.workspace, "ludens.json"), "utf8"));
+    assert.deepEqual(compactConfig.storage, {
+      mode: "local",
+      videoQuality: "compact",
+      maxBytes: fiveGiB,
+    });
+    const effective = await resolveEffectiveWorkspaceStorage(compactWs.workspace, home);
+    assert.equal(effective.kind, "local");
+    assert.equal(effective.videoQuality, "compact");
+    assert.equal(effective.crf, 28);
+    assert.equal(effective.maxLongEdge, 720);
+    assert.equal(effective.maxBytes, fiveGiB);
+
+    const inheritWs = await createWorkspace(
+      {
+        name: "inherit-ws",
+        driver: "cua",
+        storage: { mode: "inherit" },
+      },
+      undefined,
+      home,
+    );
+    const inheritConfig = JSON.parse(await readFile(join(inheritWs.workspace, "ludens.json"), "utf8"));
+    assert.equal("storage" in inheritConfig, false);
+
+    await assert.rejects(
+      createWorkspace(
+        {
+          name: "invalid-storage-ws",
+          driver: "cua",
+          storage: { mode: "local", videoQuality: "ultra" as never },
+        },
+        undefined,
+        home,
+      ),
+      /videoQuality/,
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

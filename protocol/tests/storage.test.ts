@@ -23,13 +23,17 @@ import {
   DEFAULT_LOCAL_CACHE_BYTES,
   DEFAULT_LOCAL_MAX_BYTES,
   SECRET_MASK,
+  VIDEO_QUALITY_SPECS,
   crfForVideoQuality,
   defaultGlobalStorageConfig,
+  maxLongEdgeForVideoQuality,
   mergeGlobalStorageUpdate,
   readGlobalStorageConfig,
   readTimelinePins,
+  recommendedMaxBytesForVideoQuality,
   redactGlobalStorageConfig,
   resolveEffectiveWorkspaceStorage,
+  resolveVideoQualitySpec,
   updateGlobalStorageConfig,
   validTimelinePinAsset,
   validateGlobalStorageConfig,
@@ -38,6 +42,7 @@ import {
   writeTimelinePins,
   type S3BackendConfig,
 } from "../src/storage.ts";
+import type { CreateWorkspaceInput } from "../src/workspaces.ts";
 import { EVICTED_VIDEO_MESSAGE, decodeTimelineFrame } from "../src/timeline-media.ts";
 
 function verifyIncomingSigV4(
@@ -311,6 +316,35 @@ test("resolveEffectiveWorkspaceStorage, validateWorkspaceStorageOverride, and pi
     expect(crfForVideoQuality("high")).toBe(18);
     expect(crfForVideoQuality("balanced")).toBe(23);
     expect(crfForVideoQuality("compact")).toBe(28);
+    expect(VIDEO_QUALITY_SPECS.compact).toEqual({
+      crf: 28,
+      maxLongEdge: 720,
+      recommendedMaxBytes: 5 * 1024 ** 3,
+    });
+    expect(VIDEO_QUALITY_SPECS.balanced).toEqual({
+      crf: 23,
+      maxLongEdge: 1080,
+      recommendedMaxBytes: 20 * 1024 ** 3,
+    });
+    expect(VIDEO_QUALITY_SPECS.high).toEqual({
+      crf: 18,
+      maxLongEdge: null,
+      recommendedMaxBytes: 50 * 1024 ** 3,
+    });
+    expect(resolveVideoQualitySpec("compact")).toEqual(VIDEO_QUALITY_SPECS.compact);
+    expect(maxLongEdgeForVideoQuality("compact")).toBe(720);
+    expect(maxLongEdgeForVideoQuality("balanced")).toBe(1080);
+    expect(maxLongEdgeForVideoQuality("high")).toBeNull();
+    expect(recommendedMaxBytesForVideoQuality("compact")).toBe(5 * 1024 ** 3);
+    expect(recommendedMaxBytesForVideoQuality("balanced")).toBe(20 * 1024 ** 3);
+    expect(recommendedMaxBytesForVideoQuality("high")).toBe(50 * 1024 ** 3);
+
+    const _createInputCheck: CreateWorkspaceInput = {
+      name: "demo",
+      driver: "mock",
+      storage: { mode: "local", videoQuality: "compact", maxBytes: recommendedMaxBytesForVideoQuality("compact") },
+    };
+    expect(_createInputCheck.storage?.videoQuality).toBe("compact");
 
     // Fallback to basename before .ludens/workspace.json exists
     delete process.env.LUDENS_PERCEPTION_PERSIST;
@@ -321,6 +355,7 @@ test("resolveEffectiveWorkspaceStorage, validateWorkspaceStorageOverride, and pi
     expect(uninitEff.maxBytes).toBe(DEFAULT_LOCAL_MAX_BYTES);
     expect(uninitEff.localCacheBytes).toBe(DEFAULT_LOCAL_CACHE_BYTES);
     expect(uninitEff.crf).toBe(23);
+    expect(uninitEff.maxLongEdge).toBe(1080);
 
     const identity = await ensureWorkspaceIdentity(wsInit);
     await writeGlobalStorageConfig(
@@ -390,6 +425,7 @@ test("resolveEffectiveWorkspaceStorage, validateWorkspaceStorageOverride, and pi
     expect(profileOverride.maxBytes).toBe(50 * 1024 * 1024 * 1024);
     expect(profileOverride.videoQuality).toBe("high");
     expect(profileOverride.crf).toBe(18);
+    expect(profileOverride.maxLongEdge).toBeNull();
     expect(profileOverride.s3?.secretAccessKey).toBe("minio123");
 
     // LUDENS_PERCEPTION_PERSIST=0 forces ephemeral regardless of ludens.json / storage.json

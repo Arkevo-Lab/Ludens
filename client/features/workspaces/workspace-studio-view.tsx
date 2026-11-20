@@ -27,9 +27,11 @@ import type {
 } from "@ludens/protocol/workspaces";
 import {
   BUILTIN_LOCAL_PROFILE_ID,
+  applyStudioQualityPreset,
   draftToWorkspaceStorageOverride,
   fallbackGlobalStorageConfig,
   sameWorkspaceStorageOverride,
+  shouldShowStudioPresetQuota,
   useStorageOverview,
   workspaceStorageToDraft,
   type RedactedGlobalStorageConfig,
@@ -37,6 +39,7 @@ import {
   type WorkspaceStorageDraft,
   type WorkspaceStorageMode,
 } from "@/lib/storage";
+import { RecordingQualityPresets } from "@/features/workspaces/recording-quality-presets";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -1177,14 +1180,90 @@ export function WorkspaceModelPanel({
         title={t("storageSection.title")}
         description={t("storageSection.description")}
         actions={
-          onOpenGlobalStorage ? (
-            <Button type="button" variant="outline" size="sm" onClick={onOpenGlobalStorage}>
-              <HardDrive className="size-3.5" aria-hidden="true" />
-              {t("storageSection.openGlobalStorage")}
-            </Button>
-          ) : undefined
+          <>
+            {(storageDraft.mode !== "inherit" ||
+              storageDraft.videoQuality !== "" ||
+              storageDraft.maxGib.trim() !== "") && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={saving}
+                data-workspace-storage-reset-inherit=""
+                onClick={() => {
+                  setStorageDraft(
+                    workspaceStorageToDraft(undefined, effectiveStorageConfig.defaultProfileId),
+                  );
+                  setSavedNotice(false);
+                }}
+              >
+                <RotateCcw className="size-3.5" aria-hidden="true" />
+                {t("storageSection.resetToInheritBtn")}
+              </Button>
+            )}
+            {onOpenGlobalStorage ? (
+              <Button type="button" variant="outline" size="sm" onClick={onOpenGlobalStorage}>
+                <HardDrive className="size-3.5" aria-hidden="true" />
+                {t("storageSection.openGlobalStorage")}
+              </Button>
+            ) : null}
+          </>
         }
       >
+        {(() => {
+          const effectiveQuality: VideoQualityPreset =
+            storageDraft.videoQuality || effectiveStorageConfig.videoQuality;
+          const isQualityInherited = storageDraft.videoQuality === "";
+          const selectedProfile =
+            storageDraft.mode === "profile"
+              ? effectiveStorageConfig.profiles.find(p => p.id === storageDraft.profileId)
+              : null;
+          const profileLabel =
+            selectedProfile?.name || storageDraft.profileId || effectiveStorageConfig.defaultProfileId;
+          const presetHint =
+            storageDraft.mode === "profile"
+              ? t("storageSection.presetRowHintProfile").replace("{profile}", profileLabel)
+              : storageDraft.mode === "ephemeral"
+                ? t("storageSection.presetRowHintEphemeral")
+                : t("storageSection.presetRowHintLocal");
+
+          return (
+            <SettingsRow
+              stacked
+              label={t("storageSection.presetRowLabel")}
+              badge={
+                isQualityInherited ? (
+                  <Badge
+                    variant="secondary"
+                    className="text-[11px]"
+                    data-storage-quality-inherited=""
+                  >
+                    {t("storageSection.inheritedBadge")}
+                  </Badge>
+                ) : undefined
+              }
+              description={presetHint}
+              descriptionId={storageQualityId}
+              control={
+                <RecordingQualityPresets
+                  value={effectiveQuality}
+                  defaultBadgeTier={effectiveStorageConfig.videoQuality}
+                  showQuota={shouldShowStudioPresetQuota(storageDraft)}
+                  disabled={saving}
+                  ariaLabel={t("storageSection.presetRowLabel")}
+                  ariaDescribedBy={storageQualityId}
+                  data-workspace-storage-quality=""
+                  className="w-full"
+                  onChange={nextQuality => {
+                    setStorageDraft(prev => applyStudioQualityPreset(prev, nextQuality));
+                    setSavedNotice(false);
+                  }}
+                />
+              }
+            />
+          );
+        })()}
+
         <SettingsRow
           label={t("storageSection.modeLabel")}
           htmlFor={storageModeId}
@@ -1200,6 +1279,9 @@ export function WorkspaceModelPanel({
                 setStorageDraft(prev => ({
                   ...prev,
                   mode: nextMode,
+                  ...(nextMode === "inherit"
+                    ? { maxGib: "", videoQuality: "" as const }
+                    : {}),
                   profileId:
                     nextMode === "profile"
                       ? prev.profileId ||
@@ -1259,94 +1341,61 @@ export function WorkspaceModelPanel({
         )}
 
         {storageDraft.mode !== "ephemeral" && (
-          <>
-            <SettingsRow
-              className="items-start"
-              label={t("storageSection.maxGibLabel")}
-              htmlFor={storageMaxGibId}
-              description={t("storageSection.maxGibHint")}
-              control={
-                <div className="flex flex-col items-end gap-2">
-                  <Input
-                    id={storageMaxGibId}
-                    type="number"
-                    min="0.1"
-                    step="0.5"
-                    value={storageDraft.maxGib}
-                    onChange={event => {
-                      setStorageDraft(prev => ({ ...prev, maxGib: event.target.value }));
+          <SettingsRow
+            className="items-start"
+            label={t("storageSection.maxGibLabel")}
+            htmlFor={storageMaxGibId}
+            description={t("storageSection.maxGibHint")}
+            control={
+              <div className="flex flex-col items-end gap-2">
+                <Input
+                  id={storageMaxGibId}
+                  type="number"
+                  min="0.1"
+                  step="0.5"
+                  value={storageDraft.maxGib}
+                  onChange={event => {
+                    setStorageDraft(prev => ({ ...prev, maxGib: event.target.value }));
+                    setSavedNotice(false);
+                  }}
+                  placeholder={t("storageSection.maxGibPlaceholder")}
+                  className="w-48 font-mono tabular-nums"
+                  data-workspace-storage-max-gib
+                />
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  <Button
+                    type="button"
+                    size="xs"
+                    variant={storageDraft.maxGib.trim() === "" ? "secondary" : "outline"}
+                    onClick={() => {
+                      setStorageDraft(prev => ({ ...prev, maxGib: "" }));
                       setSavedNotice(false);
                     }}
-                    placeholder={t("storageSection.maxGibPlaceholder")}
-                    className="w-48 font-mono tabular-nums"
-                    data-workspace-storage-max-gib
-                  />
-                  <div className="flex flex-wrap justify-end gap-1.5">
+                  >
+                    {t("storageSection.presetInherit")}
+                  </Button>
+                  {[5, 20, 50, 100].map(presetGib => (
                     <Button
+                      key={presetGib}
                       type="button"
                       size="xs"
-                      variant={storageDraft.maxGib.trim() === "" ? "secondary" : "outline"}
+                      variant={Number(storageDraft.maxGib) === presetGib ? "secondary" : "outline"}
                       onClick={() => {
-                        setStorageDraft(prev => ({ ...prev, maxGib: "" }));
+                        setStorageDraft(prev => ({
+                          ...prev,
+                          mode: prev.mode === "inherit" ? "local" : prev.mode,
+                          maxGib: String(presetGib),
+                        }));
                         setSavedNotice(false);
                       }}
                     >
-                      {t("storageSection.presetInherit")}
+                      {presetGib} GB
                     </Button>
-                    {[5, 20, 50, 100].map(presetGib => (
-                      <Button
-                        key={presetGib}
-                        type="button"
-                        size="xs"
-                        variant={Number(storageDraft.maxGib) === presetGib ? "secondary" : "outline"}
-                        onClick={() => {
-                          setStorageDraft(prev => ({ ...prev, maxGib: String(presetGib) }));
-                          setSavedNotice(false);
-                        }}
-                      >
-                        {presetGib} GB
-                      </Button>
-                    ))}
-                  </div>
+                  ))}
                 </div>
-              }
-            />
-
-            <SettingsRow
-              label={t("storageSection.videoQualityLabel")}
-              htmlFor={storageQualityId}
-              description={t("storageSection.videoQualityHint")}
-              control={
-                <NativeSelect
-                  id={storageQualityId}
-                  value={storageDraft.videoQuality}
-                  onChange={event => {
-                    const val = event.target.value;
-                    const nextQuality: "" | VideoQualityPreset =
-                      val === "high" || val === "balanced" || val === "compact" ? val : "";
-                    setStorageDraft(prev => ({ ...prev, videoQuality: nextQuality }));
-                    setSavedNotice(false);
-                  }}
-                  wrapperClassName="w-full sm:w-72"
-                  className="w-full"
-                  data-workspace-storage-quality
-                >
-                  <NativeSelectOption value="">
-                    {t("storageSection.videoQualityInherit")}
-                  </NativeSelectOption>
-                  <NativeSelectOption value="balanced">
-                    {t("storageSection.videoQualityBalanced")}
-                  </NativeSelectOption>
-                  <NativeSelectOption value="compact">
-                    {t("storageSection.videoQualityCompact")}
-                  </NativeSelectOption>
-                  <NativeSelectOption value="high">
-                    {t("storageSection.videoQualityHigh")}
-                  </NativeSelectOption>
-                </NativeSelect>
-              }
-            />
-          </>
+              </div>
+            }
+          />
         )}
       </SettingsSection>
 
