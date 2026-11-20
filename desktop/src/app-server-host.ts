@@ -6,6 +6,7 @@ import {
   ensureLocalAppDaemon,
   probeAppDaemon,
   resolveAppServerSocketPath,
+  stopLocalAppDaemon,
   type EnsureLocalAppDaemonResult,
 } from '@ludens/server/daemon/app-daemon'
 import type { DaemonStatusResult } from '@ludens/protocol/app-rpc'
@@ -52,6 +53,7 @@ export interface AppServerHostOptions extends PathResolutionOptions {
   startupTimeoutMs?: number
   ensureDaemon?: typeof ensureLocalAppDaemon
   probeDaemon?: typeof probeAppDaemon
+  stopDaemon?: typeof stopLocalAppDaemon
 }
 
 const DEFAULT_HERE = dirname(fileURLToPath(import.meta.url))
@@ -318,7 +320,9 @@ function toStartedFromStatus(status: DaemonStatusResult): StartedAppDaemon {
 
 /**
  * Ensures the singleton zero-port UDS `app-server` daemon is running for `LUDENS_HOME`.
- * Reuses any existing daemon on `app-server.sock` and leaves the shared daemon running on Electron quit.
+ * Reuses any existing daemon on `app-server.sock`. When this Electron host spawned a
+ * local UDS-only daemon itself, `stop({ stopOwnedDaemon: true })` reclaims it on quit
+ * as long as it has no active Cores and no external TCP/WS listener.
  */
 export class AppServerHost {
   readonly home: string
@@ -326,8 +330,10 @@ export class AppServerHost {
   private readonly startupTimeoutMs: number
   private readonly ensureDaemon: typeof ensureLocalAppDaemon
   private readonly probeDaemon: typeof probeAppDaemon
+  private readonly stopDaemon: typeof stopLocalAppDaemon
 
   private daemonInfo: StartedAppDaemon | undefined
+  private ownedDaemonPid: number | null = null
   private startPromise: Promise<StartedAppDaemon> | undefined
   private stopped = false
 
@@ -337,10 +343,15 @@ export class AppServerHost {
     this.startupTimeoutMs = options.startupTimeoutMs ?? 15_000
     this.ensureDaemon = options.ensureDaemon ?? ensureLocalAppDaemon
     this.probeDaemon = options.probeDaemon ?? probeAppDaemon
+    this.stopDaemon = options.stopDaemon ?? stopLocalAppDaemon
   }
 
   current(): StartedAppDaemon | undefined {
     return this.daemonInfo
+  }
+
+  isOwnedDaemon(): boolean {
+    return this.ownedDaemonPid !== null
   }
 
   socketPath(): string {
@@ -367,10 +378,13 @@ export class AppServerHost {
     }
     const status = await this.probeStatus(timeoutMs)
     if (status) {
-      this.daemonInfo = toStartedFromStatus(status)
+      const stillOwned = this.ownedDaemonPid !== null && status.pid === this.ownedDaemonPid && !status.wsUrl
+      this.ownedDaemonPid = stillOwned ? status.pid : null
+      this.daemonInfo = { ...toStartedFromStatus(status), started: stillOwned }
       return this.daemonInfo
     }
     this.daemonInfo = undefined
+    this.ownedDaemonPid = null
     return this.start()
   }
 
@@ -381,10 +395,26 @@ export class AppServerHost {
     })
   }
 
-  /** Releases host tracking without stopping the shared background daemon. */
-  async stop(): Promise<void> {
+  /**
+   * Releases host tracking. When `stopOwnedDaemon` is true and this host spawned the
+   * current local UDS-only daemon (no external TCP/WS listener and 0 active Cores),
+   * cleanly shuts down that owned daemon via `daemon/shutdown`.
+   */
+  async stop(options: { stopOwnedDaemon?: boolean } = {}): Promise<void> {
+    const ownedPid = this.ownedDaemonPid
+    const socketPath = this.socketPath()
     this.stopped = true
     this.daemonInfo = undefined
+    this.ownedDaemonPid = null
+
+    if (!options.stopOwnedDaemon || ownedPid === null) {
+      return
+    }
+    const status = await this.probeDaemon(this.home, { timeoutMs: 1_200, socketPath }).catch(() => null)
+    if (!status || status.pid !== ownedPid || status.wsUrl || status.activeCores.length > 0) {
+      return
+    }
+    await this.stopDaemon(this.home, { stopCores: false, timeoutMs: 3_000 }).catch(() => {})
   }
 
   private async performStart(): Promise<StartedAppDaemon> {
@@ -414,6 +444,7 @@ export class AppServerHost {
     const started = toStartedDaemon(result, this.home)
     if (!this.stopped) {
       this.daemonInfo = started
+      this.ownedDaemonPid = started.started && started.pid > 0 && !started.wsUrl ? started.pid : null
     }
     return started
   }

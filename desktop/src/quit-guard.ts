@@ -4,6 +4,10 @@ export const DEFAULT_QUIT_STATUS_TIMEOUT_MS = 1_200
 
 export type QuitDialogAction = 'keep-background' | 'stop-all' | 'cancel'
 
+export interface QuitConfirmContext {
+  keepDaemonAlive: boolean
+}
+
 export interface QuitGuardLabels {
   title: string
   message: string
@@ -18,7 +22,7 @@ export interface QuitGuardOptions {
   queryStatus: (timeoutMs: number) => Promise<DaemonStatusResult | null>
   stopAllCores: () => Promise<CoresStopAllResult | void>
   promptUser: (labels: QuitGuardLabels, activeCores: readonly string[]) => Promise<QuitDialogAction>
-  onConfirmQuit: () => Promise<void> | void
+  onConfirmQuit: (context: QuitConfirmContext) => Promise<void> | void
   triggerQuit: () => void
   statusTimeoutMs?: number
 }
@@ -107,8 +111,8 @@ export class ActiveCoreQuitGuard {
     return this.checkPromise
   }
 
-  private async confirmAndQuit(): Promise<void> {
-    await this.options.onConfirmQuit()
+  private async confirmAndQuit(context: QuitConfirmContext): Promise<void> {
+    await this.options.onConfirmQuit(context)
     this.quitConfirmed = true
     this.options.triggerQuit()
   }
@@ -121,7 +125,7 @@ export class ActiveCoreQuitGuard {
     )
     const activeCores = status?.activeCores ?? []
     if (activeCores.length === 0) {
-      await this.confirmAndQuit()
+      await this.confirmAndQuit({ keepDaemonAlive: false })
       return
     }
 
@@ -141,6 +145,6 @@ export class ActiveCoreQuitGuard {
       await this.options.stopAllCores().catch(() => {})
     }
 
-    await this.confirmAndQuit()
+    await this.confirmAndQuit({ keepDaemonAlive: action === 'keep-background' })
   }
 }

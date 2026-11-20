@@ -208,7 +208,7 @@ if (values.help) {
           : await dialog.showMessageBox(dialogOptions)
         return mapDialogButtonToQuitAction(result.response)
       },
-      onConfirmQuit: async () => {
+      onConfirmQuit: async ({ keepDaemonAlive }) => {
         quitting = true
         clearInterval(dashboardTimer)
         clearTimeout(saveStateTimer)
@@ -223,7 +223,7 @@ if (values.help) {
         rpcRelay?.dispose()
         await mainMediaClient?.close().catch(() => {})
         mainMediaClient = undefined
-        await appServerHost.stop().catch(() => {})
+        await appServerHost.stop({ stopOwnedDaemon: !keepDaemonAlive }).catch(() => {})
       },
       triggerQuit: () => {
         app.quit()
@@ -730,7 +730,7 @@ if (values.help) {
       console.error(error)
       rpcRelay?.dispose()
       await mainMediaClient?.close().catch(() => {})
-      await appServerHost.stop().catch(() => {})
+      await appServerHost.stop({ stopOwnedDaemon: true }).catch(() => {})
       app.exit(1)
     })
   }

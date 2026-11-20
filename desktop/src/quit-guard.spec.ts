@@ -62,6 +62,7 @@ describe('ActiveCoreQuitGuard', () => {
     expect(promptUser).not.toHaveBeenCalled()
     expect(stopAllCores).not.toHaveBeenCalled()
     expect(onConfirmQuit).toHaveBeenCalledTimes(1)
+    expect(onConfirmQuit).toHaveBeenCalledWith({ keepDaemonAlive: false })
     expect(triggerQuit).toHaveBeenCalledTimes(1)
     expect(guard.isQuitConfirmed()).toBe(true)
 
@@ -116,6 +117,7 @@ describe('ActiveCoreQuitGuard', () => {
     expect(promptUser).toHaveBeenCalledTimes(1)
     expect(stopAllCores).not.toHaveBeenCalled()
     expect(onConfirmQuit).toHaveBeenCalledTimes(1)
+    expect(onConfirmQuit).toHaveBeenCalledWith({ keepDaemonAlive: true })
     expect(triggerQuit).toHaveBeenCalledTimes(1)
   })
 
@@ -129,8 +131,8 @@ describe('ActiveCoreQuitGuard', () => {
         return { stopped: ['ws-1', 'ws-2'] }
       },
       promptUser: async () => 'stop-all',
-      onConfirmQuit: () => {
-        order.push('confirm-quit')
+      onConfirmQuit: context => {
+        order.push(`confirm-quit:${context.keepDaemonAlive ? 'keep' : 'reclaim'}`)
       },
       triggerQuit: () => {
         order.push('trigger-quit')
@@ -140,7 +142,7 @@ describe('ActiveCoreQuitGuard', () => {
     guard.handleBeforeQuit({ preventDefault: vi.fn() })
     await guard.pendingCheck()
 
-    expect(order).toEqual(['stop-all', 'confirm-quit', 'trigger-quit'])
+    expect(order).toEqual(['stop-all', 'confirm-quit:reclaim', 'trigger-quit'])
     expect(guard.isQuitConfirmed()).toBe(true)
   })
 
