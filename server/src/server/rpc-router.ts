@@ -1399,6 +1399,15 @@ export class RpcRouter {
             "Host process executable overrides (cuaCommand) are restricted in remote sessions",
           );
         }
+        if (
+          !caps.hostStorageConfig &&
+          isPlainObject(inputObj.storage) &&
+          (inputObj.storage.mode === "directory" ||
+            inputObj.storage.kind === "directory" ||
+            inputObj.storage.directory !== undefined)
+        ) {
+          throw capabilityRestricted("Host directory storage configuration is restricted in remote sessions");
+        }
         result = await this.ctx.worker.call("createWorkspace", [input], signal);
         workspaceId = (result as { id?: string } | null)?.id;
         break;

@@ -60,6 +60,7 @@ ludens workspace init --driver <id> \
   [--model <id>] \
   [--effort <level>] \
   [--service-tier <tier>] \
+  [--video-quality <compact|balanced|high>] \
   [--register-driver] \
   [--pet | --no-pet] \
   [--remote <url>] [--token <secret>]
@@ -73,6 +74,8 @@ ludens workspace import <directory> [--legacy-state <directory>] [--previous-wor
 ```
 
 当 `ludens.json` 缺省相关字段时，启动器使用的默认值：`model` = `openai-codex/gpt-6.2-sol`、`dashboard` = `true`、`pet` = `false`、`logging.diagnostics` = `"normal"`。
+
+`--video-quality <compact|balanced|high>` 用于指定工作区的三档录像质量与存储预设（未指定时默认继承全局档位）：`compact`（省存储：`CRF 28`、长边上限 `720p`、推荐本地配额 `5 GiB`，适合 Mac mini / 长时间运行会话）、`balanced`（正常质量，默认：`CRF 23`、长边上限 `1080p`、推荐本地配额 `20 GiB`）、`high`（高质量：`CRF 18`、原生分辨率不缩放、推荐本地配额 `50 GiB`）。录像缩放仅作用于落盘的时间轴视频，实时送入模型的感知帧保持原样不受影响。
 
 ### `ludens workspace <up|services|down>`
 

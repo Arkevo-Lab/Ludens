@@ -16,6 +16,7 @@ import type { WorkspaceRegistration } from "@ludens/protocol/workspaces";
 import type { CreateWorkspaceInputDto } from "@ludens/protocol/app-rpc";
 import { useLocale, useTranslations } from "@/lib/locale";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
+import { useStorageOverview } from "@/lib/storage";
 import { useNativePathPicker } from "@/lib/use-native-path-picker";
 import { useRuntimeCapabilities } from "@/lib/use-runtime-capabilities";
 import { useWorkspaceService } from "@/lib/use-workspace-service";
@@ -109,6 +110,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
   const { locale } = useLocale();
   const rpc = useOptionalLudensRpc();
   const { capabilities } = useRuntimeCapabilities();
+  const storageOverview = useStorageOverview();
   const rpcRef = useRef(rpc);
   rpcRef.current = rpc;
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
@@ -580,6 +582,7 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
           key={`${initialIntent?.driverPackage ?? "default"}:${initialIntent?.machineId ?? ""}`}
           defaultRoot={settings.config.workspaceRoot}
           globalDefaults={settings.config.defaults}
+          globalVideoQuality={storageOverview.config?.videoQuality}
           existingWorkspaces={settings.workspaces}
           initialIntent={initialIntent}
           pending={pending === "create"}

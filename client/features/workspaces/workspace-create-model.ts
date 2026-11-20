@@ -6,6 +6,7 @@ import type {
 } from "@ludens/protocol/workspaces";
 import type { OmpEffort, OmpServiceTier, WorkspaceRegistration } from "@ludens/protocol/workspaces";
 import { BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
+import { VIDEO_QUALITY_SPECS, type VideoQualityPreset } from "@/lib/storage";
 
 export type WorkspaceEnvironment = "desktop" | "community";
 export type WorkspaceTargetMode = "machine" | "driver" | "package";
@@ -24,6 +25,7 @@ export interface WorkspaceDraft {
   model?: string;
   serviceTier?: OmpServiceTier | null;
   effort?: OmpEffort | null;
+  videoQuality?: VideoQualityPreset;
   registerDriver?: boolean;
 }
 
@@ -218,6 +220,7 @@ export type WorkspaceSetupIssue = {
 export interface WorkspaceCreateResolutionContext {
   machines?: readonly BasewareMachineRuntimeStatus[];
   catalogDriver?: BasewareDriverOverviewItem | null;
+  globalVideoQuality?: VideoQualityPreset;
 }
 
 export function workspaceCreateInput(
@@ -255,6 +258,18 @@ export function workspaceCreateInput(
     ...(draft.effort !== undefined ? { effort: draft.effort } : {}),
   };
 
+  const effectiveGlobalQuality: VideoQualityPreset = context?.globalVideoQuality ?? "balanced";
+  const storageFields: Partial<CreateWorkspaceInput> =
+    draft.videoQuality && draft.videoQuality !== effectiveGlobalQuality
+      ? {
+          storage: {
+            mode: "local",
+            videoQuality: draft.videoQuality,
+            maxBytes: VIDEO_QUALITY_SPECS[draft.videoQuality].recommendedMaxBytes,
+          },
+        }
+      : {};
+
   const mode = effectiveTargetMode(draft);
 
   // Mode 1: Registered Baseware Machine node
@@ -275,6 +290,7 @@ export function workspaceCreateInput(
         ...(location.custom ? { workspace: location.path! } : {}),
         ...(resolvedPkg && resolvedPkg !== BUILTIN_CUA_DRIVER_SPEC ? { driverPackage: resolvedPkg } : {}),
         ...modelFields,
+        ...storageFields,
       },
     };
   }
@@ -297,6 +313,7 @@ export function workspaceCreateInput(
         ...(!capabilities.stdio && parsedPort !== undefined ? { port: parsedPort } : {}),
         ...(capabilities.stdio && draft.cuaCommand.trim() ? { cuaCommand: draft.cuaCommand.trim() } : {}),
         ...modelFields,
+        ...storageFields,
       },
     };
   }
@@ -326,6 +343,7 @@ export function workspaceCreateInput(
       ...(capabilities.stdio && draft.cuaCommand.trim() ? { cuaCommand: draft.cuaCommand.trim() } : {}),
       ...(draft.environment === "community" && draft.registerDriver ? { registerDriver: true } : {}),
       ...modelFields,
+      ...storageFields,
     },
   };
 }

@@ -227,8 +227,16 @@ Continuous 30 Hz perception recording can produce substantial fMP4 video over mu
 
 ### Global Secret Store (`~/.ludens/storage.json`) vs Per-Workspace Override (`ludens.json`)
 
-- **Global `~/.ludens/storage.json` (`mode 0600`)**: Stores named `profiles` (including S3 credentials and mount paths), `defaultProfileId`, `videoQuality` (`balanced` CRF 23 recommended default, `compact` CRF 28 low-bitrate long horizon, `high` CRF 18 high-fidelity detail), and `protectReferenced` (`true`).
+- **Global `~/.ludens/storage.json` (`mode 0600`)**: Stores named `profiles` (including S3 credentials and mount paths), `defaultProfileId`, `videoQuality` (3-tier Recording Quality & Storage presets below, defaulting to `balanced`), and `protectReferenced` (`true`).
 - **Workspace `<workspace>/ludens.json` (never credentials)**: Optionally sets `storage` (`mode: "inherit" | "ephemeral" | "local" | "profile"`, `profileId?`, `maxBytes?`, `maxAgeHours?`, `localCacheBytes?`, `videoQuality?`):
+
+| Preset (`videoQuality`) | Label | H.264 `CRF` | Max Long Edge | Recommended Local Quota | Best For |
+| --- | --- | --- | --- | --- | --- |
+| `compact` | Space Saver | `28` | `720p` | `5 GiB` | Mac mini / long-running sessions |
+| `balanced` (default) | Balanced | `23` | `1080p` | `20 GiB` | General daily runs |
+| `high` | High Quality | `18` | Native (no scaling) | `50 GiB` | High-fidelity visual inspection |
+
+> Recording scaling only affects persisted timeline video; live model perception frames remain untouched.
 
 ```json
 {
@@ -250,8 +258,8 @@ Continuous 30 Hz perception recording can produce substantial fMP4 video over mu
 
 - **Live (`?view=live`)**: Expand **View model input details** on any model turn card to inspect the post-`Loop.inject` `deliveredPayload` 1:1, and open **Loop steps** to review inter-turn `loop_step` / `loop_fault` events and model-free `@capability` calls (auto-expanded on fault).
 - **Capabilities (`?view=caps`)**: Visualize the **Capability – Eval – Env** triad, filter by verification status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), inspect **Workspace sources** (`baseware.json` vs static Python `@capability`), verify **Core connection check** and **Community driver verification**, and trigger **Run All Evals** with one click.
-- **Config (`?view=perception`)**: Configure per-workspace **Timeline Storage Policy (`ludens.json · storage`)** in **Model**, and open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
-- **Global Settings → Recording & Storage (`?view=settings`)**: Inspect aggregate and per-workspace video, cache, index, and log footprints, run **Prune All Workspaces**, **Sync Archive**, or per-workspace **Prune / Sync / Clear Cache**, and manage global storage profiles with live directory / S3 connectivity probes.
+- **Config (`?view=perception`)**: In **Workspace Studio** (**Model** tab), configure per-workspace **Timeline Storage Policy (`ludens.json · storage`)** and pick a 3-tier Recording Quality & Storage preset (updating both quality and quota in local mode, or quality-only in remote S3/directory profile mode); open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
+- **Global Settings → Recording & Storage (`?view=settings`)**: Select the global 3-tier Recording Quality & Storage preset (syncing the `local-default` quota; the **Create Workspace** dialog also defaults to this global tier), inspect aggregate and per-workspace video, cache, index, and log footprints, run **Prune All Workspaces**, **Sync Archive**, or per-workspace **Prune / Sync / Clear Cache**, and manage global storage profiles with live directory / S3 connectivity probes.
 - **Consolidation (`ludens consolidate` or Live UI)**: Runs a file-only turn (with device actuation disabled) that promotes `verified` capabilities into `skills/` SKILL cards, drops `unverified`/`stale`/`adapting`/`failed` entries from `skills/`, and refreshes `memory/current.md`.
 
 Continue to [Perception, Action & Performance Tuning](perception-and-action.md) to build your resident `perception.py` state machine and configure 30 Hz multimodal transport.

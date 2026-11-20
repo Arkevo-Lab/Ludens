@@ -60,6 +60,7 @@ ludens workspace init --driver <id> \
   [--model <id>] \
   [--effort <level>] \
   [--service-tier <tier>] \
+  [--video-quality <compact|balanced|high>] \
   [--register-driver] \
   [--pet | --no-pet] \
   [--remote <url>] [--token <secret>]
@@ -73,6 +74,8 @@ ludens workspace import <directory> [--legacy-state <directory>] [--previous-wor
 ```
 
 Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `openai-codex/gpt-6.2-sol`, `dashboard` = `true`, `pet` = `false`, `logging.diagnostics` = `"normal"`.
+
+`--video-quality <compact|balanced|high>` sets the workspace's Recording Quality & Storage preset (otherwise defaulting to the global tier): `compact` (Space Saver: `CRF 28`, max long edge `720p`, recommended local quota `5 GiB`, ideal for Mac mini / long-running sessions), `balanced` (Balanced, default: `CRF 23`, max long edge `1080p`, recommended local quota `20 GiB`), and `high` (High Quality: `CRF 18`, native resolution / no scaling, recommended local quota `50 GiB`). Recording scaling only affects persisted timeline video; live model perception frames remain untouched.
 
 ### `ludens workspace <up|services|down>`
 

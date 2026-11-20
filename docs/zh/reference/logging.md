@@ -55,7 +55,11 @@
 | `directory` | 索引 + `pending` 活跃分段 + 不超过 `localCacheBytes`（默认 `4 GiB`）的热缓冲/`cache/` | 异步复制至 `<directory.path>/<workspaceId>/<asset>`；回放直连外部文件 `206 Range` 流 |
 | `s3` | 索引 + `pending` 活跃分段 + 不超过 `localCacheBytes`（默认 `4 GiB`）的热缓冲/`cache/` | 零依赖 SigV4（`HMAC-SHA256`）上传至 `<prefix>/<workspaceId>/<asset>`；Python 回放按需拉入 `cache/`，Web `/media` 与 Electron `ludens-media://local/media` 通过预签名 URL 服务端流式代理 `GET/HEAD` + `Range`（零存储桶 CORS 配置） |
 
-- **编码画质档位（`videoQuality`）**：`high`（`crf=18`）、`balanced`（默认，`crf=23`）、`compact`（`crf=28`），支持在 `storage.json` 全局设定或在工作区 `ludens.json` 的 `storage.videoQuality` 按工作区覆盖。
+- **三档录像质量与存储预设（`videoQuality`）**：
+  - `compact`（省存储）：`CRF 28`，长边上限 `720p`，推荐本地配额 `5 GiB`（适合 Mac mini / 长时间运行会话）。
+  - `balanced`（正常质量，默认）：`CRF 23`，长边上限 `1080p`，推荐本地配额 `20 GiB`。
+  - `high`（高质量）：`CRF 18`，原生分辨率（不缩放），推荐本地配额 `50 GiB`。
+  - 录像缩放仅作用于落盘的时间轴视频；实时送入模型的感知帧保持原样不受影响。可在全局设置（同步 `local-default` 配额）、新建工作区弹窗（默认继承全局档位）、Workspace Studio（本地模式下更新画质与配额，远端 S3/目录 Profile 模式下仅更新画质）以及 `ludens workspace init --video-quality <compact|balanced|high>` 中选择，或在 `storage.json` / `ludens.json` 的 `storage.videoQuality` 中覆盖。
 - **三级淘汰保护（`pins.json` + `protectReferenced`）**：当 `local` 超出 `maxBytes / maxAgeHours` 或远端后端自身超出配额时，清理器遵循严格顺序：**(1)** `.ludens/timeline/pins.json`（`{"version": 1, "assets": [...]}`）中的资产永不自动淘汰；**(2)** 优先淘汰未被 `.ludens/archive/media/*.json` 引用的普通采样分段；**(3)** 当 `protectReferenced !== false`（默认开启）时，实际交付给 LLM 回合的观测帧排在最后，仅在普通分段耗尽仍超配额时才淘汰。已淘汰分段删除 `.mp4` 实体并原子更新 `<uuid>.mp4.json` 为 `{ status: "evicted", evictedAt, evictedReason: "quota" | "ttl" | "manual" }`，媒体端点对此返回 HTTP `410`。
 - **App-RPC 管理与实时推送**：`ludens-server` 暴露 `storage/get`、`storage/update`（编辑已有 S3 配置留空密钥时自动保留原密钥）、`storage/test`（目录读写与 S3 探针写入/读取/删除校验）、`storage/maintain`（`prune`、`sync`、`clear_cache`，离线工作区获取 `writer.lock` 直接执行，在线工作区经活跃感知进程无损转发）与 `storage/pin`，并通过 `"storage"` 事件主题向控制台广播变更。
 

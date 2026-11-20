@@ -227,8 +227,16 @@ class Loop(Loop):
 
 ### 全局密钥池（`~/.ludens/storage.json`）与工作区轻量覆盖（`ludens.json`）
 
-- **全局存储配置 `~/.ludens/storage.json`（权限 `0600`）**：集中保存命名存储后端池（含 S3 密钥与本机挂载路径）、全局默认后端 `defaultProfileId`、H.264 视频编码质量档位 `videoQuality`（`balanced` CRF 23 推荐均衡省空间、`compact` CRF 28 极简长程、`high` CRF 18 原画高码率）以及模型引用保护开关 `protectReferenced`（默认 `true`）。
+- **全局存储配置 `~/.ludens/storage.json`（权限 `0600`）**：集中保存命名存储后端池（含 S3 密钥与本机挂载路径）、全局默认后端 `defaultProfileId`、三档 H.264 录像质量与存储预设 `videoQuality`（见下表，默认 `balanced`）以及模型引用保护开关 `protectReferenced`（默认 `true`）。
 - **工作区覆盖 `<workspace>/ludens.json`（不含任何密钥）**：每个工作区仅按需通过 `storage` 字段选择 `inherit`（继承全局默认）、`ephemeral`、`local` 或 `profile`（绑定全局配置 ID），并可覆盖配额与编码画质：
+
+| 预设档位（`videoQuality`） | 名称 | H.264 `CRF` | 长边上限 | 推荐本地配额 | 适用场景 |
+| --- | --- | --- | --- | --- | --- |
+| `compact` | 省存储 | `28` | `720p` | `5 GiB` | Mac mini / 长时间运行会话 |
+| `balanced`（默认） | 正常质量 | `23` | `1080p` | `20 GiB` | 日常通用运行 |
+| `high` | 高质量 | `18` | 原生分辨率（不缩放） | `50 GiB` | 高保真视觉细节排查 |
+
+> 录像缩放仅作用于落盘的时间轴视频；实时送入模型的感知帧保持原样不受影响。
 
 ```json
 {
@@ -250,8 +258,8 @@ class Loop(Loop):
 
 - **运行（Live，`?view=live`）**：在模型卡片中展开 **查看传入模型的 Input 详情** 即可 1:1 检视 `Loop.inject` 交付的真实 `deliveredPayload`；轮间 `loop_step` / `loop_fault` 事件与不经模型的 `@capability` 调用会折叠在 **Loop 调度步骤** 分组内（异常时自动展开）。
 - **能力（Capabilities，`?view=caps`）**：直观检视 **Capability – Eval – Env** 拓扑关系，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）筛选，查看 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**Core 连接检查** 与 **社区驱动验证** 结果，并可一键点击运行全部或单项评测。
-- **配置（Config，`?view=perception`）**：在 **模型（Model）** 页签配置当前工作区的 **录像持久化策略（`ludens.json · storage`）**；在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
-- **全局设置 → 录像与存储（Settings → Recording & Storage，`?view=settings`）**：汇总全部工作区的视频、缓存、索引与日志占用，支持 **一键按配额清理全部工作区**、**立即同步归档** 与单工作区 **清理 / 归档 / 清缓存**，并集中管理全局存储配置池与目录读写 / S3 连接延迟探测。
+- **配置（Config，`?view=perception`）**：在 **Workspace Studio**（**模型（Model）** 页签）配置当前工作区的 **录像持久化策略（`ludens.json · storage`）** 并切换三档录像质量与存储预设（本地模式下同步更新画质与配额，远端 S3/目录 Profile 模式下仅更新画质）；在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
+- **全局设置 → 录像与存储（Settings → Recording & Storage，`?view=settings`）**：选择全局三档录像质量与存储预设（同步更新 `local-default` 配额；**新建工作区**弹窗也会默认继承该全局档位），汇总全部工作区的视频、缓存、索引与日志占用，支持 **一键按配额清理全部工作区**、**立即同步归档** 与单工作区 **清理 / 归档 / 清缓存**，并集中管理全局存储配置池与目录读写 / S3 连接延迟探测。
 - **记忆与技能沉淀（`ludens consolidate` 或运行页按钮）**：开启一次禁用所有设备访问的纯文件整理轮次，自动把 `verified` 能力晋升或保留到 `skills/` 技能卡片中，清除 `unverified`/`stale`/`adapting`/`failed` 条目，并刷新 `memory/current.md`。
 
 继续阅读 [感知、执行与性能调优](perception-and-action.md)，学习编写可热重载的常驻 `perception.py` 状态机并配置 30 Hz 多模态传输链路。

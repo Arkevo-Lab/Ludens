@@ -68,6 +68,7 @@ export interface CreateWorkspaceInput {
   effort?: OmpEffort | null;
   pet?: boolean;
   registerDriver?: boolean;
+  storage?: WorkspaceStorageOverride;
 }
 
 export interface WorkspaceConfigSummary {

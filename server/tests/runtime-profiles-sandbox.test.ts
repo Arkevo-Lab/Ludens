@@ -273,6 +273,17 @@ test("remote WS sessions enforce managed-sandbox capability restrictions across 
 
     await expectCapabilityRestricted(() =>
       remoteClient.call("workspaces/mutate", {
+        action: "create",
+        input: {
+          name: "escape-dir-storage",
+          driver: "cua",
+          storage: { mode: "directory" as never },
+        },
+      }),
+    );
+
+    await expectCapabilityRestricted(() =>
+      remoteClient.call("workspaces/mutate", {
         action: "updateStudioConfig",
         workspaceId: createdManaged.id,
         patch: { cuaCommand: "/usr/local/bin/evil" },
