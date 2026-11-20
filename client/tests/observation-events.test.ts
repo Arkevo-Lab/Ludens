@@ -44,7 +44,6 @@ function makeRunData(overrides: Partial<RunData> = {}): RunData {
       mode: "manual",
       cycle: 1,
       requests: 1,
-      maxRequests: 10,
       model: "test-model",
       drivers: [],
       auto: false,

@@ -67,7 +67,7 @@ async function fixture(seconds: number | null = 60, acquisition?: Promise<void>,
     record: (type, data, trace, metadata) => deviceEvents.push({ type, data, trace, ...metadata }) });
   const closeServer = await listen(socket, core);
   const adapter = await connectBaseware({ socket, seconds, runDir, record: (type, data, trace, metadata) => events.push({ type, data, trace, ...metadata }) });
-  const runtime = new Runtime(adapter, () => {}, seconds);
+  const runtime = new Runtime(adapter, () => {});
   runtime.attach({ controller: new WorkspaceController({ workspace: directory, devices: adapter, record: () => {}, env: {} }) });
   adapter.onHandback(reason => { void runtime.stop(reason); });
   adapter.onDisconnect(error => { void runtime.disconnected(error); });
@@ -130,11 +130,11 @@ test("Ludens off cancels a pending acquire RPC and waits for bounded remote clea
   } finally { gate.resolve(); release.mockRestore(); await f.close(); }
 });
 
-test("remote lease matches the configured budget and human revoke cancels a separate caller", async () => {
+test("remote lease matches the configured timer and human revoke cancels a separate caller", async () => {
   const f = await fixture(7);
   try {
-    const state = await f.runtime.start();
-    expect(state).toMatchObject({ mode: "auto", maxSeconds: 7, remainingSeconds: 7 });
+    const state = await f.runtime.start(undefined, undefined, 7);
+    expect(state).toMatchObject({ mode: "auto", timerSeconds: 7, remainingSeconds: 7 });
     expect(await f.external.request({ kind: "status" })).toMatchObject({ mode: "auto", epoch: state.epoch, remainingSeconds: 7 });
     const action = f.external.request({ kind: "controller", id: "motor", arguments: {}, epoch: state.epoch! });
     await f.acting;
@@ -150,13 +150,13 @@ test("an unbounded session default keeps the lease until explicit handback", asy
   const f = await fixture(null);
   try {
     const state = await f.runtime.start();
-    expect(state).toMatchObject({ mode: "auto", maxSeconds: null, remainingSeconds: null });
+    expect(state).toMatchObject({ mode: "auto", timerSeconds: null, remainingSeconds: null });
     expect(await f.external.request({ kind: "status" })).toMatchObject({ mode: "auto", epoch: state.epoch, remainingSeconds: null });
     await Bun.sleep(30); // No expiry timer: the remote lease survives.
     expect(f.core.status()).toMatchObject({ mode: "auto", remainingSeconds: null });
     await f.runtime.stop("human");
     expect(f.core.status()).toMatchObject({ mode: "manual", remainingSeconds: null });
-    expect(f.runtime.status()).toMatchObject({ mode: "manual", maxSeconds: null, remainingSeconds: null });
+    expect(f.runtime.status()).toMatchObject({ mode: "manual", timerSeconds: null, remainingSeconds: null });
   } finally { await f.close(); }
 });
 

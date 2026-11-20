@@ -4,7 +4,7 @@ import { finished } from "node:stream/promises";
 import type { EventMetadata, EventTrace, RecordEvent } from "../storage/events.ts";
 import { taskkillExecutable } from "../subsystems/python-worker.ts";
 
-/** A local execution mode of Shiori. No trial, score, lease or budget ownership lives here. */
+/** A local execution mode of Shiori. No trial, score, lease or timer ownership lives here. */
 export interface Program {
   argv: string[]; cwd: string; env: NodeJS.ProcessEnv;
   stdout: string; stderr: string;
@@ -15,8 +15,8 @@ export type ProgramMessage =
   | { kind: "event"; type: string; data: unknown; trace?: EventTrace; metadata?: EventMetadata }
   | { kind: "flush" | "flushed"; id: string }
   | { kind: "ready" }
-  | { kind: "budget"; deadlineMs: number }
-  | { kind: "stop"; reason: "time budget" };
+  | { kind: "timer"; deadlineMs: number }
+  | { kind: "stop"; reason: "timer expired" };
 export async function executeProgram(program: Program, signal: AbortSignal, record: RecordEvent, deadlineMs: number, cancellation?: AbortSignal): Promise<void> {
   signal.throwIfAborted();
   if (!program.argv.length || program.argv.some(value => typeof value !== "string" || !value)) throw new Error("Program argv must contain nonempty strings");
@@ -30,7 +30,7 @@ export async function executeProgram(program: Program, signal: AbortSignal, reco
   child.stdout!.pipe(stdout); child.stderr!.pipe(stderr);
   let forced: ReturnType<typeof setTimeout> | undefined, released: ReturnType<typeof setTimeout> | undefined;
   let outputError: Error | undefined;
-  let exited = false, settled = false, terminating = false, interrupted = false, budgetStopped = false;
+  let exited = false, settled = false, terminating = false, interrupted = false, timerStopped = false;
   const childExited = () => child.exitCode !== null || child.signalCode !== null;
   // Windows has no process groups: kill the tree by PID, then fall back to the direct child.
   const killTree = (done?: () => void) => {
@@ -68,9 +68,9 @@ export async function executeProgram(program: Program, signal: AbortSignal, reco
   const stop = () => {
     if (exited) return;
     interrupted = true;
-    if (program.events && signal.reason instanceof DOMException && signal.reason.message === "time budget" && !cancellation?.aborted) {
-      budgetStopped = true;
-      send({ kind: "stop", reason: "time budget" });
+    if (program.events && signal.reason instanceof DOMException && signal.reason.message === "timer expired" && !cancellation?.aborted) {
+      timerStopped = true;
+      send({ kind: "stop", reason: "timer expired" });
       forced ??= setTimeout(() => kill("SIGKILL"), 2000);
     } else abort();
   };
@@ -81,8 +81,8 @@ export async function executeProgram(program: Program, signal: AbortSignal, reco
       if (program.events && message?.kind === "event" && typeof message.type === "string") record(message.type, message.data, message.trace, message.metadata);
       if (program.events && message?.kind === "flush") send({ kind: "flushed", id: message.id });
       if (program.events && message?.kind === "ready") {
-        send({ kind: "budget", deadlineMs });
-        if (budgetStopped) send({ kind: "stop", reason: "time budget" });
+        send({ kind: "timer", deadlineMs });
+        if (timerStopped) send({ kind: "stop", reason: "timer expired" });
       }
     } catch (error) { outputError = error instanceof Error ? error : new Error(String(error)); abort(); }
   });
@@ -104,7 +104,7 @@ export async function executeProgram(program: Program, signal: AbortSignal, reco
     await writes;
     if (outputError) throw outputError;
     cancellation?.throwIfAborted();
-    if (interrupted && !budgetStopped) signal.throwIfAborted();
+    if (interrupted && !timerStopped) signal.throwIfAborted();
     if (code !== 0) throw new Error(`Program exited with code ${code}; see ${program.stderr}`);
   } finally {
     settled = true;

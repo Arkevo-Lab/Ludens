@@ -51,8 +51,6 @@ function makeOfflineRunData(overrides: Partial<RunData> = {}): RunData {
       socket: "",
       drivers: [],
       model: "openai-codex/gpt-6.2-sol",
-      seconds: 1800,
-      maxRequests: 0,
       compactionThreshold: null,
     },
     cycles: [],
@@ -165,7 +163,6 @@ test("synthesizeEmptyRunData builds valid 0-run RunData from project.defaults fo
       model: "anthropic/claude-opus-4-6",
       serviceTier: "priority",
       effort: "high",
-      maxSeconds: 2400,
     },
   };
 
@@ -173,12 +170,12 @@ test("synthesizeEmptyRunData builds valid 0-run RunData from project.defaults fo
   assert.equal(enRun.project, "elden-ring");
   assert.equal(enRun.run, "");
   assert.equal(enRun.manifest.model, "anthropic/claude-opus-4-6");
-  assert.equal(enRun.manifest.seconds, 2400);
   assert.equal(enRun.lastControl?.model, "anthropic/claude-opus-4-6");
   assert.equal(enRun.lastControl?.serviceTier, "priority");
   assert.equal(enRun.lastControl?.effort, "high");
   assert.equal(enRun.live?.coreOffline, true);
-  assert.equal(enRun.live?.maxSeconds, 2400);
+  assert.equal(enRun.live?.timerSeconds, null);
+  assert.equal(enRun.live?.remainingSeconds, null);
   assert.equal(enRun.live?.launchedBy, "app");
   assert.equal(enRun.controlAllowed, false);
   assert.match(enRun.live?.reason ?? "", /Core offline/);

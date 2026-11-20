@@ -37,7 +37,7 @@ print(json.dumps(records))`, workspace], {env: {...process.env, PYTHONPATH: join
   try {
     await runtime.perception!.reload();
     const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(workspace, "versions")),
-      runDir, basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 1,
+      runDir, basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
       cycle: () => ({ epoch: "offline", signal }),
     });
     const tool = customToolToDefinition(extension.tools[0]);

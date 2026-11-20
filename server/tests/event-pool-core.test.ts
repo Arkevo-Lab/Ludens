@@ -169,7 +169,6 @@ test("createLudensExtension injects the Event Pool digest and exposes the event_
       workspace: new Workspace(workspace, join(workspace, "versions")),
       basewareSocket: "/tmp/unused.sock",
       binDir: "/tmp",
-      maxRequests: 5,
       cycle: () => ({ epoch, signal }),
     });
 

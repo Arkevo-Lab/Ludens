@@ -486,7 +486,7 @@ export function WorkspaceStudioView({
               {loading ? t("loading") : t("loadFailed")}
             </p>
           ) : (
-            <ModelAndBudgetPanel
+            <WorkspaceModelPanel
               studio={studio}
               isZh={isZh}
               workspaceRunning={workspaceRunning}
@@ -726,7 +726,7 @@ function WorkspaceTargetDevicePanel({
   );
 }
 
-export function ModelAndBudgetPanel({
+export function WorkspaceModelPanel({
   studio,
   isZh,
   workspaceRunning,
@@ -763,8 +763,6 @@ export function ModelAndBudgetPanel({
     onStudioSnapshot: next => onSaved(next),
   });
   const modelInputId = useId();
-  const secondsInputId = useId();
-  const requestsInputId = useId();
   const compactionInputId = useId();
   const diagnosticsId = useId();
   const portInputId = useId();
@@ -779,8 +777,6 @@ export function ModelAndBudgetPanel({
     model: studio.defaults.model ?? "openai-codex/gpt-6.2-sol",
     serviceTier: studio.defaults.serviceTier,
     effort: studio.defaults.effort,
-    seconds: studio.defaults.seconds ?? 1800,
-    requests: studio.defaults.requests ?? 1000,
     compactionThreshold: studio.defaults.compactionThreshold,
     pet: studio.defaults.pet ?? false,
     diagnostics: "normal",
@@ -789,8 +785,6 @@ export function ModelAndBudgetPanel({
   const [model, setModel] = useState(initial.model);
   const [serviceTier, setServiceTier] = useState<ModelServiceTier | null>(initial.serviceTier ?? null);
   const [effort, setEffort] = useState<ModelEffort | null>(initial.effort ?? null);
-  const [seconds, setSeconds] = useState(String(initial.seconds));
-  const [requests, setRequests] = useState(String(initial.requests));
   const [compaction, setCompaction] = useState(
     initial.compactionThreshold !== undefined ? String(initial.compactionThreshold) : "",
   );
@@ -812,8 +806,6 @@ export function ModelAndBudgetPanel({
     setModel(cfg.model);
     setServiceTier(cfg.serviceTier ?? null);
     setEffort(cfg.effort ?? null);
-    setSeconds(String(cfg.seconds));
-    setRequests(String(cfg.requests));
     setCompaction(cfg.compactionThreshold !== undefined ? String(cfg.compactionThreshold) : "");
     setDiagnostics(cfg.diagnostics);
     setPet(cfg.pet);
@@ -824,8 +816,6 @@ export function ModelAndBudgetPanel({
     );
   }, [studio.config, effectiveStorageConfig.defaultProfileId]);
 
-  const parsedSeconds = Number(seconds.trim());
-  const parsedRequests = Number(requests.trim());
   const parsedCompaction = compaction.trim() === "" ? null : Number(compaction.trim());
   const parsedPort = port.trim() === "" ? null : Number(port.trim());
   const storageDraftOutcome = useMemo(
@@ -840,8 +830,6 @@ export function ModelAndBudgetPanel({
     model.trim() !== initial.model ||
     serviceTier !== (initial.serviceTier ?? null) ||
     effort !== (initial.effort ?? null) ||
-    seconds.trim() !== String(initial.seconds) ||
-    requests.trim() !== String(initial.requests) ||
     (compaction.trim() === "" ? undefined : Number(compaction.trim())) !== initial.compactionThreshold ||
     diagnostics !== initial.diagnostics ||
     pet !== initial.pet ||
@@ -853,8 +841,6 @@ export function ModelAndBudgetPanel({
     setModel(initial.model);
     setServiceTier(initial.serviceTier ?? null);
     setEffort(initial.effort ?? null);
-    setSeconds(String(initial.seconds));
-    setRequests(String(initial.requests));
     setCompaction(initial.compactionThreshold !== undefined ? String(initial.compactionThreshold) : "");
     setDiagnostics(initial.diagnostics);
     setPet(initial.pet);
@@ -891,8 +877,6 @@ export function ModelAndBudgetPanel({
         model: model.trim(),
         serviceTier,
         effort,
-        seconds: parsedSeconds,
-        requests: parsedRequests,
         compactionThreshold: parsedCompaction,
         diagnostics,
         pet,
@@ -1044,84 +1028,6 @@ export function ModelAndBudgetPanel({
                   setSavedNotice(false);
                 }}
               />
-            </div>
-          }
-        />
-
-        <SettingsRow
-          className="items-start"
-          label={t("modelSection.secondsLabel")}
-          htmlFor={secondsInputId}
-          description={t("modelSection.secondsHint")}
-          control={
-            <div className="flex flex-col items-end gap-2">
-              <Input
-                id={secondsInputId}
-                type="number"
-                min={1}
-                step={60}
-                value={seconds}
-                onChange={event => {
-                  setSeconds(event.target.value);
-                  setSavedNotice(false);
-                }}
-                className="w-36 font-mono tabular-nums"
-              />
-              <div className="flex flex-wrap justify-end gap-1.5">
-                {[900, 1800, 3600, 7200].map(preset => (
-                  <Button
-                    key={preset}
-                    type="button"
-                    size="xs"
-                    variant={Number(seconds) === preset ? "secondary" : "outline"}
-                    onClick={() => {
-                      setSeconds(String(preset));
-                      setSavedNotice(false);
-                    }}
-                  >
-                    {preset / 60}m ({preset}s)
-                  </Button>
-                ))}
-              </div>
-            </div>
-          }
-        />
-
-        <SettingsRow
-          className="items-start"
-          label={t("modelSection.requestsLabel")}
-          htmlFor={requestsInputId}
-          description={t("modelSection.requestsHint")}
-          control={
-            <div className="flex flex-col items-end gap-2">
-              <Input
-                id={requestsInputId}
-                type="number"
-                min={1}
-                step={50}
-                value={requests}
-                onChange={event => {
-                  setRequests(event.target.value);
-                  setSavedNotice(false);
-                }}
-                className="w-36 font-mono tabular-nums"
-              />
-              <div className="flex flex-wrap justify-end gap-1.5">
-                {[200, 500, 1000, 2000].map(preset => (
-                  <Button
-                    key={preset}
-                    type="button"
-                    size="xs"
-                    variant={Number(requests) === preset ? "secondary" : "outline"}
-                    onClick={() => {
-                      setRequests(String(preset));
-                      setSavedNotice(false);
-                    }}
-                  >
-                    {preset} {t("modelSection.requestsUnit")}
-                  </Button>
-                ))}
-              </div>
             </div>
           }
         />

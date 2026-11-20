@@ -91,6 +91,6 @@ The suite covers **13 scenario classes** (including the R3 `Agent.prompt` end-to
 | Single frame `> 15 MiB` or remote `1009` | Single outbound frame over limit | Switch to SSE and flag size-blocked (no repeated handshakes while blocked); only a completed native context compaction clears the block and restores WS. |
 | Cumulative history `> 15 MiB` but small round delta | Large history, small current increment | Evaluated by actual outbound frame size — continues using incremental WS. |
 | `1009` after a tool was delivered | Size over-limit hit after tool submission | Current request does not replay the tool, and records the size block; SSE continues until compaction completes, then WS recovers. |
-| Reclaim Control or budget-expiry cancellation | `AbortSignal` fires mid-handshake / mid-output / mid-error | Exit immediately as `aborted` — no extra SSE requests, no pollution of the next round's transport state machine. |
+| Reclaim Control or timer-expiry cancellation | `AbortSignal` fires mid-handshake / mid-output / mid-error | Exit immediately as `aborted` — no extra SSE requests, no pollution of the next round's transport state machine. |
 
 Before every planned OMP upgrade, run `bun run omp:test:transport` and `cd core && bun test tests/ws-recovery.test.ts` first, and check whether upstream changes broke any of these controlled recovery behaviors. The virtual clock and transport fixtures do not measure real reconnect latency and do not prove production never drops; for long runs, scheduling, and throughput, consult actual run logs.

@@ -88,7 +88,7 @@ async function fixture(reconnectAttempts: number, reconnectSucceedsOn = 0) {
   await listening.promise;
   const devices = await connectBaseware({ socket: socketPath, seconds: 60, runDir: join(directory, "run"), record,
     reconnectAttempts, reconnectDelayMs: 10 });
-  const runtime = new Runtime(devices, record, 60);
+  const runtime = new Runtime(devices, record);
   runtime.attach({ controller: new WorkspaceController({ workspace: directory, devices, env: {}, record }) });
   devices.onDisconnect(error => { void runtime.disconnected(error); });
   const emit = (type: string, data: unknown) => {

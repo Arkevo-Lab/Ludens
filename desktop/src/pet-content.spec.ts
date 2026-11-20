@@ -129,10 +129,10 @@ describe('pet log content', () => {
   })
 
   it('labels manual control clearly while preserving its raw event fields', () => {
-    render(target, notification('system', { title: 'control', data: { mode: 'manual', reason: 'budget', elapsedMs: 1800000 } }))
+    render(target, notification('system', { title: 'control', data: { mode: 'manual', reason: 'timer expired', elapsedMs: 1800000 } }))
     expect(target.querySelector('.log-event')?.textContent).toBe('控制权已收回')
     const fields = Object.fromEntries([...target.querySelectorAll('dt')].map(term => [term.textContent, term.nextElementSibling?.textContent]))
-    expect(fields).toEqual({ mode: 'manual', reason: 'budget', elapsedMs: '1800000' })
+    expect(fields).toEqual({ mode: 'manual', reason: 'timer expired', elapsedMs: '1800000' })
   })
 
   it('renders English status, tool and control chrome while preserving source content', () => {

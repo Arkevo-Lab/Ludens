@@ -44,7 +44,7 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
   const state = await resolveWorkspaceState(workspace, home);
   const log = new EventLog(runDir, { id: "run-1", now: () => performance.now() }, workspace);
   const { devices } = createTestDeviceSession({ controllers: [] }, () => {});
-  const runtime = new Runtime(devices, log.record, 300, "run-1");
+  const runtime = new Runtime(devices, log.record, "run-1");
 
   try {
     const agent = await createOmpAgent({
@@ -57,7 +57,6 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       ludensSocket: state.socket,
       basewareSocket: "/tmp/unused-baseware.sock",
       model: "openai-codex/gpt-6.2-sol",
-      maxRequests: 10,
       authStorage: auth,
     });
     runtime.attach({ agent });
@@ -118,7 +117,6 @@ test("createOmpAgent + Runtime.setModel switches model in manual mode, preserves
       ludensSocket: state.socket,
       basewareSocket: "/tmp/unused-baseware.sock",
       model: "openai/gpt-6.2-sol",
-      maxRequests: 10,
       authStorage: auth,
     });
     runtime.attach({ agent: resumedAgent });

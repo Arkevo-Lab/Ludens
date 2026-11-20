@@ -34,7 +34,7 @@ Ludens 通过把高频连续感知与较慢的多模态模型推理拆分开来�
 | --- | --- |
 | `Prompt(prompt=None, injection=...)` | 进入下一轮模型推理（传 `prompt` 可覆盖 `ctx.default_prompt`；省略 `injection` 时自动调用 `self.inject(ctx)`） |
 | `Consolidate(prompt=None)` | 在当前控制周期内插入一次纯文件整理轮次（仅开放 `read` / `write` / `edit`，无设备权限），整理完毕后继续外层循环 |
-| `Wait(seconds=1.0, reason=None)` | 确定性休眠等待而不消耗模型请求预算；收到**收回控制权**或人工 `steer` 时立即唤醒 |
+| `Wait(seconds=1.0, reason=None)` | 确定性休眠等待而不消耗模型 Token 与轮次；收到**收回控制权**或人工 `steer` 时立即唤醒 |
 | `Stop(reason="completed")` | 主动正常结束当前控制周期（停止原因记为 `loop: <reason>`），有序释放 `epoch` 租约并退回**手动待命** |
 
 - **轮间热重载与故障隔离（`loop_fault`）**：`LoopRuntime` 自动追踪 `loop.py` 及其导入的工作区 `.py` 模块哈希，修改后在轮间无缝热重载。若加载、`step` 或 `inject` 抛出语法或运行时异常，常驻进程不会崩溃，控制周期也不会死锁——宿主会记录 `loop_fault` 事件（`fallback: "default_loop"`），自动回退到内置默认 `Prompt` 轮次，并在下一轮观测注入载荷（`observation_context`）中附带 `loopFault` 字段供 Shiori 或开发者即时修复；修复保存后 `loopFault` 自动清除。
@@ -56,7 +56,7 @@ stateDiagram-v2
     manual --> acquiring : "启动自主运行 (ludens auto on)"
     acquiring --> auto : "Baseware 授予 epoch 租约"
     acquiring --> manual : "取消或获取失败"
-    auto --> releasing : "收回控制权 / 预算耗尽 / Loop Stop / 暂停求助"
+    auto --> releasing : "收回控制权 / 计时器到期 / Loop Stop / 暂停求助"
     releasing --> manual : "输入归零且视频封口"
 ```
 
@@ -66,23 +66,22 @@ stateDiagram-v2
 
 为确保每个控制周期内的模型来源完全一致，切换模型、服务档位或推理强度（`ludens model` 或控制台模型选择器）仅允许在**手动待命**且无进行中轮次或整理任务时执行。
 
-## 控制租约（`epoch`）与双维度预算
+## 控制租约（`epoch`）与可选周期计时器
 
-硬件安全与推理开销上限由 Baseware 和 Shiori 在运行时层强制执行，而不依赖模型自觉遵守提示词。
+硬件安全与周期边界由 Baseware 和 Shiori 在运行时层强制执行，而不依赖模型自觉遵守提示词。
 
 ### 单调控制租约（`epoch`）
 
 每次**启动自主运行**都会生成一个新的 UUID **`epoch`**，由 Shiori 通过持久连接向 Baseware 持有，并作为环境变量 `BASEWARE_EPOCH` 注入工作区子进程与终端命令：
 
 - **租约校验**：所有声明了 `requiresControl` 的 Baseware `Controller` 能力、通过 CLI 调用的工作区 `python/...` 能力以及 `loop.py:Loop.step` 中的 `Client().call(...)` 调用，都会校验当前 `epoch`。缺少租约或携带过期租约的调用会被直接拒绝（`STALE_EPOCH`），彻底杜绝**收回控制权**后残留后台脚本误触设备。
-- **周期内热重载**：在**自主运行**期间编辑 `perception.py` 或其导入模块（或手动执行 `ludens-core perception reload`），宿主会递进 `inputGeneration`、立刻取消并归零当前残留输入，然后热替换常驻感知进程；编辑 `loop.py` 或其导入模块则会在轮间自动重载调度逻辑——两者均完整保留当前 `epoch`、剩余预算与 Shiori 会话。
+- **周期内热重载**：在**自主运行**期间编辑 `perception.py` 或其导入模块（或手动执行 `ludens-core perception reload`），宿主会递进 `inputGeneration`、立刻取消并归零当前残留输入，然后热替换常驻感知进程；编辑 `loop.py` 或其导入模块则会在轮间自动重载调度逻辑——两者均完整保留当前 `epoch`、活动计时器与 Shiori 会话。
 
-### 时间与请求双预算
+### 可选周期计时器
 
-每个控制周期同时受两项独立预算约束：
+默认情况下，每个控制周期不设静态上限（`null`），持续运行直至人工**收回控制权**，除非显式设置计时器：
 
-- **时间预算（`--seconds <n>`）**：可选的周期墙钟时长上限。若执行 `ludens auto on` 时省略 `--seconds`（或在控制台设为不限时），控制周期不设倒计时（`null`），一直运行到人工**收回控制权**或请求预算耗尽。在**自主运行**期间，可通过 `ludens auto timer <seconds|off>`（或控制台计时器菜单）就地修改或取消倒计时，不会生成新的 `epoch`，也不会打断当前推理。
-- **请求预算（`--requests <n>`）**：限制单次控制周期内允许发起的模型请求总次数（`ludens-core run` 默认为 `50`）。预算耗尽时，请求门禁立即阻断下一轮调用并有序退回**手动待命**。
+- **周期计时器（`--seconds <n>`）**：可选的周期墙钟时长上限。若执行 `ludens auto on` 时省略 `--seconds`（或在控制台设为不限时），控制周期不设倒计时（`null`），一直运行到人工**收回控制权**或 `Loop.step` 返回 `Stop`。在**自主运行**期间，可通过 `ludens auto timer <seconds|off>`（或控制台计时器菜单）就地设置、修改或取消倒计时，不会生成新的 `epoch`，也不会打断当前推理；计时器到期时，请求门禁立即阻断下一轮调用并有序退回**手动待命**。
 
 ## 人机双工协作：事件池与即时插话
 

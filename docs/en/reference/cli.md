@@ -35,8 +35,6 @@ Allowed `defaults.<field>` keys:
 | `defaults.model` | Default `<provider/model>` identifier |
 | `defaults.serviceTier` | `priority`, `ultrafast`, or `none` (clears setting) |
 | `defaults.effort` | `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `none` (clears setting) |
-| `defaults.seconds` | Positive integer Auto Run cycle duration (seconds) |
-| `defaults.requests` | Positive integer request budget per cycle |
 | `defaults.compactionThreshold` | Positive integer token threshold for Shiori compaction |
 | `defaults.pet` | `true` \| `false` — whether newly created workspaces enable the optional Desktop Pet by default |
 | `defaults.connection.openaiWebsockets` | OpenAI WebSocket transport toggle (`auto` \| `on` \| `off`) |
@@ -62,8 +60,6 @@ ludens workspace init --driver <id> \
   [--model <id>] \
   [--effort <level>] \
   [--service-tier <tier>] \
-  [--seconds <n>] \
-  [--requests <n>] \
   [--register-driver] \
   [--pet | --no-pet] \
   [--remote <url>] [--token <secret>]
@@ -76,7 +72,7 @@ ludens workspace import <directory> [--legacy-state <directory>] [--previous-wor
   [--remote <url>] [--token <secret>]
 ```
 
-Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `openai-codex/gpt-6.2-sol`, `seconds` = `1800`, `requests` = `1000`, `dashboard` = `true`, `pet` = `false`, `logging.diagnostics` = `"normal"`.
+Launcher defaults written/resolved when omitted in `ludens.json`: `model` = `openai-codex/gpt-6.2-sol`, `dashboard` = `true`, `pet` = `false`, `logging.diagnostics` = `"normal"`.
 
 ### `ludens workspace <up|services|down>`
 
@@ -191,14 +187,12 @@ ludens-core [--workspace <path>] run \
   [--device-only] \
   [--model <provider/model>] \
   [--resume <session.jsonl> | --new-session] \
-  [--seconds <n>] \
-  [--requests <n>] \
   [--compaction-threshold <tokens>] \
   [--diagnostics normal|full] \
   [--launched-by app|cli]
 ```
 
-Direct-invocation defaults: `--seconds 300`, `--requests 50`, `--diagnostics normal`, and `--launched-by` (with `LUDENS_LAUNCHED_BY` env fallback) defaults to `cli` (`app` is passed by `ludens-server` for on-demand spawns); `--model` falls back to `ludens.json` or `openai-codex/gpt-6.2-sol`.
+Direct-invocation defaults: `--diagnostics normal`, and `--launched-by` (with `LUDENS_LAUNCHED_BY` env fallback) defaults to `cli` (`app` is passed by `ludens-server` for on-demand spawns); `--model` falls back to `ludens.json` or `openai-codex/gpt-6.2-sol`.
 
 ### `ludens-core controller` & `ludens-core machine`
 

@@ -9,7 +9,7 @@ export type RuntimeControlCommand =
   | { action: "status" }
   | { action: "auto_on"; message?: string; seconds?: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "auto_off"; runId?: string; expectedEpoch?: string | null }
-  | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
+  | { action: "auto_timer"; seconds: number | null; runId?: string; expectedEpoch?: string | null }
   | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null }
   | {
@@ -87,7 +87,7 @@ export async function controlWorkspaceRuntime(project: string, workspace: string
       return await scoped({ kind: "auto", argv, runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "auto_off":
       return await scoped({ kind: "auto", argv: ["off"], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
-    case "auto_budget":
+    case "auto_timer":
       return await scoped({ kind: "auto", argv: ["timer", command.seconds == null ? "off" : String(command.seconds)], runId: command.runId, expectedEpoch: command.expectedEpoch ?? undefined });
     case "steer":
       return await scoped({ kind: "steer",

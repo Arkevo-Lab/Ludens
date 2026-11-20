@@ -132,25 +132,25 @@ test("longer or non-system pre-cycle blocks emit post:pre before #1 in ascending
   }
 });
 
-test("control_budget blocks render a timer badge and stay inside step groups without extra dividers", () => {
-  const budget = block({
-    id: "budget-1",
+test("control_timer blocks render a timer badge and stay inside step groups without extra dividers", () => {
+  const timerBlock = block({
+    id: "timer-1",
     kind: "system",
     at: "2026-01-01T00:00:10.000Z",
-    title: "control_budget",
-    data: { requestedSeconds: 900, maxSeconds: 900, remainingSeconds: 900 },
+    title: "control_timer",
+    data: { requestedSeconds: 900, timerSeconds: 900, remainingSeconds: 900 },
     trace: { epoch: "epoch-1" },
   });
-  assert.deepEqual(summarizeStepBlock(budget), {
+  assert.deepEqual(summarizeStepBlock(timerBlock), {
     badge: "⏱ timer",
     detail: "Stop in 15m (900s)",
   });
   assert.deepEqual(
     summarizeStepBlock(block({
-      id: "budget-2",
+      id: "timer-2",
       kind: "system",
       at: "2026-01-01T00:00:11.000Z",
-      title: "control_budget",
+      title: "control_timer",
       data: { requestedSeconds: null },
     })),
     { badge: "⏱ timer", detail: "∞ Continuous (timer cleared)" },
@@ -165,7 +165,7 @@ test("control_budget blocks render a timer badge and stay inside step groups wit
       data: { mode: "auto" },
       trace: { epoch: "epoch-1" },
     }),
-    budget,
+    timerBlock,
     block({
       id: "tool-1",
       kind: "tool",
@@ -194,7 +194,7 @@ test("control_budget blocks render a timer badge and stay inside step groups wit
   assert.equal(segments.filter(item => item.kind === "session_divider").length, 1);
   const turn = segments.find(item => item.kind === "turn");
   if (turn?.kind !== "turn") throw new Error("expected a turn segment");
-  assert.ok(turn.steps.some(step => step.id === "budget-1"), "control_budget stays in the step group");
+  assert.ok(turn.steps.some(step => step.id === "timer-1"), "control_timer stays in the step group");
   assert.equal(turn.responseBlock?.id, "reply-1");
 });
 
@@ -242,11 +242,9 @@ function sampleWorkbenchRunData(): RunData {
       socket: "/tmp/demo-ws/.ludens/host.sock",
       drivers: [{ id: "cua", version: "1.0.0" }],
       model: "anthropic/claude-opus-4-6",
-      seconds: 1800,
-      maxRequests: 500,
       compactionThreshold: 120_000,
     },
-    cycles: [{ epoch: "epoch-1", startedAt: "2026-01-01T00:00:00.000Z", maxSeconds: 1800 }],
+    cycles: [{ epoch: "epoch-1", startedAt: "2026-01-01T00:00:00.000Z", timerSeconds: null }],
     selectedEpoch: "epoch-1",
     calls: [],
     paging: { totalCalls: 2, beforeCall: null, hasMore: false, firstIndex: 1, lastIndex: 2 },
@@ -272,7 +270,7 @@ function sampleWorkbenchRunData(): RunData {
       reason: "running",
       agent: true,
       thinking: true,
-      maxSeconds: null,
+      timerSeconds: null,
       remainingSeconds: null,
     },
     livePhase: null,
@@ -507,7 +505,8 @@ test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100p
     activityCss,
     /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(370px,\s*calc\(100vw\s*-\s*48px\)\);/,
   );
-  assert.match(activityCss, /\.codex-runtime-header,\s*\.shiori-budget-header\s*\{[^}]*flex-wrap:\s*nowrap;/);
+  assert.match(activityCss, /\.codex-runtime-header,\s*\.shiori-timer-header\s*\{[^}]*flex-wrap:\s*nowrap;/);
+  assert.match(activityCss, /\.shiori-timer-bar\s*\{[^}]*repeat\(24,/);
   assert.match(activityCss, /\.codex-follow-pill\s*\{[^}]*position:\s*absolute;[^}]*bottom:\s*10px;/);
 
   assert.match(
@@ -588,7 +587,7 @@ test("post-cycle standby system events coalesce into one closed <details> disclo
       epoch: "epoch-1",
       startedAt: "2026-11-07T13:06:03.000Z",
       endedAt: "2026-11-07T13:09:42.000Z",
-      maxSeconds: 1800,
+      timerSeconds: 1800,
       reason: "Device disconnected after 3 reconnect attempts: read ECONNRESET",
     },
   ];
@@ -658,13 +657,13 @@ test("multi-cycle transition renders inline idle metadata inside the single cycl
       epoch: "epoch-1",
       startedAt: "2026-11-07T13:00:00.000Z",
       endedAt: "2026-11-07T13:05:00.000Z",
-      maxSeconds: 1800,
+      timerSeconds: 1800,
       reason: "manual",
     },
     {
       epoch: "epoch-2",
       startedAt: "2026-11-07T13:35:20.000Z",
-      maxSeconds: 1800,
+      timerSeconds: 1800,
     },
   ];
 
@@ -887,7 +886,7 @@ test("CodexInputCard renders 1:1 deliveredPayload (structured, custom_json, cust
         workspaceTitle: "Demo Workspace",
         data: {
           ...sampleWorkbenchRunData(),
-          cycles: [{ epoch: "epoch-1", startedAt: "2026-11-07T13:00:00.000Z", maxSeconds: 1800 }],
+          cycles: [{ epoch: "epoch-1", startedAt: "2026-11-07T13:00:00.000Z", timerSeconds: 1800 }],
           calls,
         },
         feed: { ...sampleWorkbenchFeed(false), blocks },
@@ -930,6 +929,8 @@ test("Loop orchestration blocks and inter-turn python-call items group into coll
   assert.equal(formatCycleReason("loop: completed", tEn), "Loop completed");
   assert.equal(formatCycleReason("loop: completed", tZh), "Loop 正常结束");
   assert.equal(formatCycleReason("loop:", tEn), "Loop completed");
+  assert.equal(formatCycleReason("timer expired", tEn), "Timer expired");
+  assert.equal(formatCycleReason("timer expired", tZh), "达到定时时长");
 
   const blocks: ActivityBlock[] = [
     block({
@@ -1047,7 +1048,7 @@ test("Loop orchestration blocks and inter-turn python-call items group into coll
       epoch: "epoch-1",
       startedAt: "2026-11-07T13:00:00.000Z",
       endedAt: "2026-11-07T13:00:10.000Z",
-      maxSeconds: 1800,
+      timerSeconds: 1800,
       reason: "loop: goal_met",
     },
   ];
@@ -1118,4 +1119,65 @@ test("Loop orchestration blocks and inter-turn python-call items group into coll
   );
   assert.match(html, /Loop fault · 2 steps · fault \/ stop/);
   assert.match(html, /Loop stopped: goal_met/, "session divider humanizes loop: goal_met stop reason");
+});
+
+test("ShioriWorkbench omits shiori-timer-bar when timerSeconds is null (unbounded) and renders 24-block bar when manual timer is active", async () => {
+  const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
+
+  const unboundedHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-unbounded",
+        workspace: "/tmp/demo-unbounded",
+        workspaceTitle: "Demo Unbounded",
+        data: sampleWorkbenchRunData(),
+        feed: sampleWorkbenchFeed(false),
+        isLiveRun: true,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", null, "viewport"),
+      }),
+    ),
+  );
+  assert.match(unboundedHtml, /shiori-timer-header/);
+  assert.match(unboundedHtml, /Ran 5m/);
+  assert.doesNotMatch(unboundedHtml, /shiori-timer-bar/, "unbounded auto run must not render 24-block countdown bar");
+  assert.doesNotMatch(unboundedHtml, /data-timed="true"/, "unbounded auto run shows continuous trigger instead of timed pill");
+
+  const timedRun: RunData = {
+    ...sampleWorkbenchRunData(),
+    cycles: [{ epoch: "epoch-1", startedAt: "2026-01-01T00:00:00.000Z", timerSeconds: 900 }],
+    live: {
+      ...sampleWorkbenchRunData().live!,
+      timerSeconds: 900,
+      remainingSeconds: 600,
+    },
+  };
+  const timedHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ShioriWorkbench, {
+        project: "demo-timed",
+        workspace: "/tmp/demo-timed",
+        workspaceTitle: "Demo Timed",
+        data: timedRun,
+        feed: sampleWorkbenchFeed(false),
+        isLiveRun: true,
+        onUpdated() {},
+        onOpenPerf() {},
+        onOpenCaps() {},
+        onReturnLatest() {},
+        observationSlot: createElement("div", null, "viewport"),
+      }),
+    ),
+  );
+  assert.match(timedHtml, /shiori-timer-bar/);
+  assert.match(timedHtml, /role="progressbar" aria-valuenow="33"/);
+  assert.match(timedHtml, /data-timed="true"/);
+  assert.match(timedHtml, /10m left/);
 });

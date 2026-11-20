@@ -90,7 +90,7 @@ async function createLoopHarness(options: {
   );
 
   const socketPath = testSocketPath("loop");
-  const runtime = new Runtime(devices, record, 300, "run-loop");
+  const runtime = new Runtime(devices, record, "run-loop");
   runtime.attach({
     controller: new WorkspaceController({
       workspace,
@@ -183,7 +183,6 @@ async function createLoopHarness(options: {
     ludensSocket: socketPath,
     binDir: "/tmp",
     runDir,
-    maxRequests: 50,
     cycle: () => {
       if (!currentCycle) throw new Error("No active control cycle");
       return currentCycle;

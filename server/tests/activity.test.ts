@@ -146,13 +146,13 @@ test("system and diagnostic blocks preserve structured event data with the exist
   const root = await realpath(temporary);
   try {
     const blocks = await activityBlocks(root, [
-      event("control", 1, { mode: "manual", reason: "budget" }),
+      event("control", 1, { mode: "manual", reason: "timer expired" }),
       event("model_http_end", 2, { elapsedMs: 123, status: 200, signature: "HIDDEN-SIGNATURE",
         observation: { type: "image", mimeType: "image/png", data: "IMAGE-BASE64" } }),
       event("background_result", 3, { kind: "job", jobId: "job-one", status: "completed", isError: false }),
     ]);
     assert.deepEqual(blocks.map(block => [block.kind, block.data]), [
-      ["system", { mode: "manual", reason: "budget" }],
+      ["system", { mode: "manual", reason: "timer expired" }],
       ["diagnostic", { elapsedMs: 123, status: 200, observation: { type: "image", mimeType: "image/png" } }],
       ["system", { kind: "job", jobId: "job-one", status: "completed", isError: false }],
     ]);

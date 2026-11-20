@@ -21,7 +21,7 @@ import { eventCommand } from "./event-cli.ts";
 const globalHome = ludensHome();
 let exit: (code: number) => void | Promise<void> = code => process.exit(code);
 
-const RUN_HELP = `ludens-core [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--seconds <n>] [--requests <n>] [--compaction-threshold <tokens>] [--diagnostics normal|full] [--launched-by app|cli]
+const RUN_HELP = `ludens-core [--workspace <path>] run [--baseware-socket <path>] [--workspace <path>] [--device-only] [--model <provider/model>] [--resume <session.jsonl> | --new-session] [--compaction-threshold <tokens>] [--diagnostics normal|full] [--launched-by app|cli]
 Each workspace keeps its sessions in .ludens/shiori/; --new-session starts fresh without deleting workspace files.
 The current directory is the default workspace. Run logs go to <workspace>/logs/<run-id>/.
 --resume selects an existing session from the same workspace, then remembers it for future starts.
@@ -74,8 +74,6 @@ async function main() {
     model: { type: "string" },
     resume: { type: "string" },
     "new-session": { type: "boolean", default: false },
-    seconds: { type: "string", default: "300" },
-    requests: { type: "string", default: "50" },
     "compaction-threshold": { type: "string" },
     diagnostics: { type: "string", default: "normal" },
     "launched-by": { type: "string" },
@@ -85,10 +83,6 @@ async function main() {
   const rawLaunchedBy = values["launched-by"] ?? process.env.LUDENS_LAUNCHED_BY ?? "cli";
   if (rawLaunchedBy !== "app" && rawLaunchedBy !== "cli") throw new Error("--launched-by must be app|cli");
   const launchedBy = rawLaunchedBy;
-  const seconds = Number(values.seconds);
-  if (!Number.isFinite(seconds) || seconds <= 0) throw new Error("--seconds must be positive");
-  const maxRequests = Number(values.requests);
-  if (!Number.isInteger(maxRequests) || maxRequests <= 0) throw new Error("--requests must be a positive integer");
   const compactionThreshold = values["compaction-threshold"] === undefined ? undefined : Number(values["compaction-threshold"]);
   if (compactionThreshold !== undefined && (!Number.isInteger(compactionThreshold) || compactionThreshold <= 0)) {
     throw new Error("--compaction-threshold must be a positive integer");
@@ -137,7 +131,7 @@ async function main() {
     const clock = { id: runId, now: () => performance.now() };
     log = new EventLog(runDir, clock, workspace, diagnostics);
     log.record("run_start", { workspace, workspaceId: state.id, diagnostics });
-    devices = await connectBaseware({ socket: basewareSocket, seconds, runDir, record: log.record });
+    devices = await connectBaseware({ socket: basewareSocket, runDir, record: log.record });
     await writeCapabilityDocument(devices.catalog, join(workspace, "baseware.json"));
     const configuredModel = values.model ?? await Bun.file(join(workspace, "ludens.json")).json()
       .then((cfg: Record<string, unknown>) => typeof cfg?.model === "string" && cfg.model.trim() ? cfg.model.trim() : undefined)
@@ -149,8 +143,8 @@ async function main() {
       exit = postmortem.quit;
     }
     runtime = await createHostRuntime({ devices, workspace, state, runDir, log, resume,
-      ludensSocket: socket, basewareSocket, seconds, model: values["device-only"] ? undefined : model,
-      maxRequests, compactionThreshold, launchedBy });
+      ludensSocket: socket, basewareSocket, model: values["device-only"] ? undefined : model,
+      compactionThreshold, launchedBy });
     devices.onHandback(reason => { void runtime!.stop(reason); });
     devices.onDisconnect(error => { void runtime!.disconnected(error); });
     await writeFile(join(runDir, "manifest.json"), JSON.stringify({ runId, workspace, workspaceId: state.id, stateDir: state.dir, socket,
@@ -158,7 +152,7 @@ async function main() {
       logging: { diagnostics, basewareDiagnostics: devices.diagnostics }, eventSources: devices.eventSources,
       shiori: values["device-only"] ? null : { implementation: "omp", implementationVersion: "18.22.2" },
       provenance: await runProvenance(workspace), model: values["device-only"] ? null : model,
-      seconds, maxRequests, resume, perception: { entry: "perception.py:Perception" }, compactionThreshold: compactionThreshold ?? null }, null, 2));
+      resume, perception: { entry: "perception.py:Perception" }, compactionThreshold: compactionThreshold ?? null }, null, 2));
     ready = true;
     await runtime.perception!.reload();
     console.log(JSON.stringify({ ready: true, socket, workspace, stateDir: state.dir, runDir, ...runtime.status() }, null, 2));

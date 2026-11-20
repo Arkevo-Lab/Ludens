@@ -35,8 +35,6 @@ ludens config set defaults.<field> <value> [--remote <url>] [--token <secret>]
 | `defaults.model` | 默认 `<provider/model>` 模型标识 |
 | `defaults.serviceTier` | `priority`、`ultrafast` 或 `none`（清除配置） |
 | `defaults.effort` | `minimal`、`low`、`medium`、`high`、`xhigh`、`max` 或 `none`（清除配置） |
-| `defaults.seconds` | 单次自主运行周期默认时长（秒，正整数） |
-| `defaults.requests` | 单周期默认请求配额（正整数） |
 | `defaults.compactionThreshold` | Shiori 压缩阈值（Token 数，正整数） |
 | `defaults.pet` | `true` \| `false` —— 新建工作区默认是否开启可选桌宠 |
 | `defaults.connection.openaiWebsockets` | OpenAI WebSocket 传输开关（`auto` \| `on` \| `off`） |
@@ -62,8 +60,6 @@ ludens workspace init --driver <id> \
   [--model <id>] \
   [--effort <level>] \
   [--service-tier <tier>] \
-  [--seconds <n>] \
-  [--requests <n>] \
   [--register-driver] \
   [--pet | --no-pet] \
   [--remote <url>] [--token <secret>]
@@ -76,7 +72,7 @@ ludens workspace import <directory> [--legacy-state <directory>] [--previous-wor
   [--remote <url>] [--token <secret>]
 ```
 
-当 `ludens.json` 缺省相关字段时，启动器使用的默认值：`model` = `openai-codex/gpt-6.2-sol`、`seconds` = `1800`、`requests` = `1000`、`dashboard` = `true`、`pet` = `false`、`logging.diagnostics` = `"normal"`。
+当 `ludens.json` 缺省相关字段时，启动器使用的默认值：`model` = `openai-codex/gpt-6.2-sol`、`dashboard` = `true`、`pet` = `false`、`logging.diagnostics` = `"normal"`。
 
 ### `ludens workspace <up|services|down>`
 
@@ -191,14 +187,12 @@ ludens-core [--workspace <path>] run \
   [--device-only] \
   [--model <provider/model>] \
   [--resume <session.jsonl> | --new-session] \
-  [--seconds <n>] \
-  [--requests <n>] \
   [--compaction-threshold <tokens>] \
   [--diagnostics normal|full] \
   [--launched-by app|cli]
 ```
 
-直调默认值：`--seconds 300`、`--requests 50`、`--diagnostics normal`，`--launched-by`（回退读取 `LUDENS_LAUNCHED_BY` 环境变量）默认为 `cli`（`app` 由 `ludens-server` 按需拉起时传入）；`--model` 优先读取 `ludens.json`，缺省时为 `openai-codex/gpt-6.2-sol`。
+直调默认值：`--diagnostics normal`，`--launched-by`（回退读取 `LUDENS_LAUNCHED_BY` 环境变量）默认为 `cli`（`app` 由 `ludens-server` 按需拉起时传入）；`--model` 优先读取 `ludens.json`，缺省时为 `openai-codex/gpt-6.2-sol`。
 
 ### `ludens-core controller` 与 `ludens-core machine`
 

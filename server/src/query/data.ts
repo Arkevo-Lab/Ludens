@@ -153,15 +153,10 @@ async function readWorkspaceDefaults(
     ? raw.serviceTier
     : globalDefaults.serviceTier ?? undefined;
   const effort = isOmpEffort(raw?.effort) ? raw.effort : globalDefaults.effort ?? undefined;
-  const maxSeconds =
-    typeof raw?.seconds === "number" && Number.isInteger(raw.seconds) && raw.seconds > 0
-      ? raw.seconds
-      : undefined;
   const defaults: ProjectWorkspaceDefaults = {
     ...(model !== undefined ? { model } : {}),
     ...(serviceTier !== undefined ? { serviceTier } : {}),
     ...(effort !== undefined ? { effort } : {}),
-    ...(maxSeconds !== undefined ? { maxSeconds } : {}),
   };
   return Object.keys(defaults).length > 0 ? defaults : undefined;
 }
@@ -228,7 +223,7 @@ async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project
           if (manifest.workspaceId && !archiveIds.has(manifest.workspaceId)) throw new Error("运行记录与工作区身份不一致");
           const bounds = await readEventLogBounds(join(path, "events.jsonl"));
           return { id, ...(manifest.kind ? { kind: manifest.kind } : {}), model: manifest.model,
-            seconds: manifest.seconds, drivers: manifest.drivers, ...bounds };
+            drivers: manifest.drivers, ...bounds };
         } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
       })),
       probeCoreSummary(workspace),

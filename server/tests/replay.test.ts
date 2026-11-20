@@ -30,7 +30,7 @@ async function fixture() {
     event(5, 5000, "tool_end", { isError: true }, { toolCallId: "c" }),
     event(6, 8000, "model_end", {}, { modelCallId: "m" }),
     event(7, 12000, "action_end", { actionId: "a", status: "completed" }, { traceId: "t", spanId: "s" }),
-    event(8, 20000, "control", { mode: "manual", reason: "budget" }),
+    event(8, 20000, "control", { mode: "manual", reason: "timer expired" }),
     event(9, 30000, "control", { mode: "auto" }, {}, "two"),
     event(10, 32000, "control", { mode: "manual" }, {}, "two"),
   ];

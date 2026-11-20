@@ -491,9 +491,6 @@ export function WorkspacesView({ onChanged, onOpen, onConfigure, catalogError, c
                             {summary && <>
                               <Badge variant="outline" className="border-primary/35 bg-primary/10 font-mono text-[11px] text-primary">{summary.driver}</Badge>
                               <Badge variant="secondary" className="font-mono text-[11px]">{summary.model}</Badge>
-                              <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground">
-                                {Math.round(summary.seconds / 60)}m · {summary.requests} req
-                              </Badge>
                               {summary.compactionThreshold && (
                                 <Badge variant="outline" className="font-mono text-[11px] text-muted-foreground">
                                   compact {Math.round(summary.compactionThreshold / 1000)}k

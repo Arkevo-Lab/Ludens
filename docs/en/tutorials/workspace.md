@@ -10,7 +10,7 @@ Each workspace follows **1 Workspace = 1 Core** isolation with its own Core runt
 
 | Path | Purpose |
 | --- | --- |
-| `ludens.json` | Workspace configuration (driver, model, cycle budgets, allowed machines, multimodal connection flags, `storage` timeline media policy override, `dashboard` / `pet` toggles, diagnostics mode) |
+| `ludens.json` | Workspace configuration (driver, model, allowed machines, multimodal connection flags, `storage` timeline media policy override, `dashboard` / `pet` toggles, diagnostics mode) |
 | `AGENTS.md` | Engineering and verification conventions followed by Shiori inside this workspace |
 | `MEMORY.md` | Long-term workspace memory documenting durable environment invariants and proven strategies (editable directly or in Console **Config**) |
 | `memory/` | Working session notes (such as `memory/current.md`, updated during `ludens consolidate`) |
@@ -250,7 +250,7 @@ Continuous 30 Hz perception recording can produce substantial fMP4 video over mu
 
 - **Live (`?view=live`)**: Expand **View model input details** on any model turn card to inspect the post-`Loop.inject` `deliveredPayload` 1:1, and open **Loop steps** to review inter-turn `loop_step` / `loop_fault` events and model-free `@capability` calls (auto-expanded on fault).
 - **Capabilities (`?view=caps`)**: Visualize the **Capability – Eval – Env** triad, filter by verification status (`verified`, `adapting`, `stale`, `failed`, `unverified`, `missing`), inspect **Workspace sources** (`baseware.json` vs static Python `@capability`), verify **Core connection check** and **Community driver verification**, and trigger **Run All Evals** with one click.
-- **Config (`?view=perception`)**: Configure per-workspace **Timeline Storage Policy (`ludens.json · storage`)** in **Model & Budget**, and open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
+- **Config (`?view=perception`)**: Configure per-workspace **Timeline Storage Policy (`ludens.json · storage`)** in **Model**, and open **Services & Session** to edit **Workspace Long-Term Memory (`MEMORY.md`)**, inspect the Shiori thread summary, or trigger **Start Workspace** / **Reload Core** / **Stop**.
 - **Global Settings → Recording & Storage (`?view=settings`)**: Inspect aggregate and per-workspace video, cache, index, and log footprints, run **Prune All Workspaces**, **Sync Archive**, or per-workspace **Prune / Sync / Clear Cache**, and manage global storage profiles with live directory / S3 connectivity probes.
 - **Consolidation (`ludens consolidate` or Live UI)**: Runs a file-only turn (with device actuation disabled) that promotes `verified` capabilities into `skills/` SKILL cards, drops `unverified`/`stale`/`adapting`/`failed` entries from `skills/`, and refreshes `memory/current.md`.
 

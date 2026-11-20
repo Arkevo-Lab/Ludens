@@ -12,7 +12,7 @@ import { withOperatorRpc, type OperatorRpcOptions } from "./operator-rpc.ts";
 export const CONFIG_HELP = `Ludens configuration (RPC):
 ludens config [show] [--remote <url> --token <secret>]
 ludens config set workspaceRoot <directory> [--remote <url> --token <secret>]
-ludens config set defaults.<model|serviceTier|effort|seconds|requests|compactionThreshold|dashboard|pet> <value> [--remote <url> --token <secret>]
+ludens config set defaults.<model|serviceTier|effort|compactionThreshold|dashboard|pet> <value> [--remote <url> --token <secret>]
 ludens config set defaults.connection.<openaiWebsockets|cacheRetention|appendOnlyContext|imageUrls.enabled|imageUrls.backends> <value> [--remote <url> --token <secret>]
 
 LUDENS_HOME selects the local daemon directory (default ~/.ludens).
@@ -98,23 +98,6 @@ export function buildConfigUpdate(
         throw new Error(`Invalid value '${value}' for defaults.${key}: expected 'true' or 'false'`);
       }
       return { mode: "defaults", defaults: { [key]: value === "true" } };
-    }
-    if (key === "seconds") {
-      const MAX_TIMEOUT_SECONDS = 2_147_483;
-      const parsed = value.trim() ? Number(value) : Number.NaN;
-      if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > MAX_TIMEOUT_SECONDS) {
-        throw new Error(
-          `Invalid value '${value}' for defaults.seconds: expected an integer between 1 and ${MAX_TIMEOUT_SECONDS}`,
-        );
-      }
-      return { mode: "defaults", defaults: { seconds: parsed } };
-    }
-    if (key === "requests") {
-      const parsed = value.trim() ? Number(value) : Number.NaN;
-      if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-        throw new Error(`Invalid value '${value}' for defaults.requests: expected a positive safe integer`);
-      }
-      return { mode: "defaults", defaults: { requests: parsed } };
     }
     if (key === "compactionThreshold") {
       if (value === "none") {

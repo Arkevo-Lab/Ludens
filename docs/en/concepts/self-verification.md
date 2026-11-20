@@ -8,7 +8,7 @@ Every multimodal model turn (`observe` → inference → tool call) takes second
 
 - **Sub-second windows**: Visual servoing on a robotic rig, catching a transient frame in a security camera feed, dismissing a timed software dialog, or reacting to an action cue in a real-time game all expire faster than a single model round-trip.
 - **Noisy visual baselines**: Sensor jitter, lighting changes, UI animation delays, and background motion fool one-off pixel heuristics unless measured across consecutive frames.
-- **Repetitive workflows**: Multi-step calibration, menu traversal, or data extraction wastes context and request budget if re-predicted every turn instead of encapsulated in code.
+- **Repetitive workflows**: Multi-step calibration, menu traversal, or data extraction wastes context and model turns if re-predicted every turn instead of encapsulated in code.
 
 In Ludens, Shiori treats the workspace as a programmable control surface: fast `observe -> detect -> act` loops execute locally in Python, while the model focuses on strategy, fault diagnosis, and test-driven refinement.
 

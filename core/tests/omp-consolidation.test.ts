@@ -34,7 +34,7 @@ test("consolidation uses the same session with file tools, records memory reads,
   let cycle: Cycle = { epoch: "play-before", signal: control.signal };
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
-    maxRequests: 5, cycle: () => cycle,
+    cycle: () => cycle,
   });
   const settings = Settings.isolated({ "memory.backend": "off", "autolearn.enabled": false,
     "retry.enabled": false, "retry.modelFallback": false, "title.refreshOnReplan": false });

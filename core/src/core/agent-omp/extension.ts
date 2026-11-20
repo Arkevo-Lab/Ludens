@@ -115,7 +115,6 @@ export function createLudensExtension(options: {
   runDir?: string;
   clock?: Clock;
   cycle(): Cycle;
-  maxRequests: number;
   trace?(toolCallId?: string): EventTrace;
 }) {
   const { runtime, workspace } = options;
@@ -698,16 +697,10 @@ export function createLudensExtension(options: {
       }
       // Only the currently pending tail needs receipts, never an all-session set.
       for (const key of deliveredBackground) if (!currentBackground.has(key)) deliveredBackground.delete(key);
-      // A new takeover gets a fresh budget without replacing the OMP session.
+      // A new takeover resets the per-cycle request counter without replacing the OMP session.
       if (requestEpoch !== cycle.epoch) {
         requestEpoch = cycle.epoch;
         requests = 0;
-      }
-      if (requests >= options.maxRequests) {
-        // Entry-level stop aborts the run natively. Attempts after the stop are
-        // gate-blocked and not counted as cycle requests.
-        await runtime.stop("model request budget");
-        return;
       }
       runtime.record("context", { request: ++requests, purpose: cycle.purpose, ...latestContext }, { epoch: cycle.epoch });
     });

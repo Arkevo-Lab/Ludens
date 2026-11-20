@@ -73,7 +73,7 @@ describe("@ludens/protocol browser-safe DTOs, projections, and App-RPC contracts
       {
         id: "alpha",
         workspace: "/ws/alpha",
-        runs: [{ id: "r1", model: "openai-codex/gpt-6.2-sol", seconds: 300, drivers: [] }],
+        runs: [{ id: "r1", model: "openai-codex/gpt-6.2-sol", drivers: [] }],
       },
     ];
     expect(latestGameRun(projects[1])?.id).toBe("r1");

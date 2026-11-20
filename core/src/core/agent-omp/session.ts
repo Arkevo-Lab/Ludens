@@ -482,7 +482,7 @@ export async function createOmpSession(options: Parameters<typeof createAgentSes
 export async function createOmpAgent(options: {
   runtime: ExtensionHost; workspace: string; runDir: string; basewareSocket: string; ludensSocket: string;
   state: WorkspaceState;
-  binDir: string; model: string; maxRequests: number;
+  binDir: string; model: string;
   resume?: string;
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;

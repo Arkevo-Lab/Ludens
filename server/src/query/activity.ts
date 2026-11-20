@@ -263,7 +263,7 @@ function eventHeader(path: string, event: Event): Omit<LogBlock, "text"> {
       && (event.type.endsWith("_error") || event.type === "perception_fault" || (event.type === "event_source_gap" && data.phase === "start") || data.isError === true || data.stopReason === "error")));
     const isInterTurnLoopCapability = event.type === "capability_end" && data?.action === "call"
       && event.trace?.recordingPurpose === "loop" && !event.trace?.modelCallId && data?.outcome !== "cancelled";
-    const system = failed || event.type === "control" || event.type === "control_budget"
+    const system = failed || event.type === "control" || event.type === "control_timer"
       || ["perception_status", "perception_fault", "perception_fault_end", "loop_step", "loop_fault", "loop_status"].includes(event.type)
       || isInterTurnLoopCapability
       || event.type === "device_sampling_recovered" || event.type === "event_source_gap"
@@ -378,10 +378,10 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
         data: { role: "pool_receipt", action: "handled", actor, ids, events: items } });
       continue;
     }
-    if (event.type === "control_budget") {
+    if (event.type === "control_timer") {
       blocks.set(header.id, { ...header,
         text: data?.requestedSeconds == null ? "Timer cleared (continuous run)" : `Timer set: ${data.requestedSeconds}s`,
-        data: { requestedSeconds: data?.requestedSeconds ?? null, maxSeconds: data?.maxSeconds ?? null, remainingSeconds: data?.remainingSeconds ?? null } });
+        data: { requestedSeconds: data?.requestedSeconds ?? null, timerSeconds: data?.timerSeconds ?? null, remainingSeconds: data?.remainingSeconds ?? null } });
       continue;
     }
     if (event.type === "loop_step") {

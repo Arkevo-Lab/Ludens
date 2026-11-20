@@ -117,9 +117,9 @@ export async function runControlWithClient(
         if (!Number.isFinite(parsed) || parsed <= 0) {
           throw new Error("auto timer requires a positive number or 'off'");
         }
-        command = { action: "auto_budget", seconds: parsed };
+        command = { action: "auto_timer", seconds: parsed };
       } else {
-        command = { action: "auto_budget", seconds: null };
+        command = { action: "auto_timer", seconds: null };
       }
     } else {
       throw new Error("Use ludens auto <on|off|timer>");

@@ -126,11 +126,9 @@ function sampleRunData(overrides: Partial<RunData> = {}): RunData {
       socket: "/tmp/demo-ws/.ludens/host.sock",
       drivers: [{ id: "cua", version: "1.0.0" }],
       model: "openai-codex/gpt-5.4-mini",
-      seconds: 1800,
-      maxRequests: 500,
       compactionThreshold: 120_000,
     },
-    cycles: [{ epoch: "epoch-1", startedAt: "2026-11-11T12:00:00.000Z", maxSeconds: 1800 }],
+    cycles: [{ epoch: "epoch-1", startedAt: "2026-11-11T12:00:00.000Z", timerSeconds: 1800 }],
     selectedEpoch: "epoch-1",
     calls: [],
     paging: { totalCalls: 4, beforeCall: null, hasMore: false, firstIndex: 1, lastIndex: 4 },
@@ -156,7 +154,7 @@ function sampleRunData(overrides: Partial<RunData> = {}): RunData {
       reason: "paused",
       agent: true,
       thinking: false,
-      maxSeconds: 1800,
+      timerSeconds: 1800,
       remainingSeconds: 1500,
     },
     livePhase: null,
@@ -499,7 +497,7 @@ test("ShioriComposer removes perception injection toggle and enforces paused-onl
       reason: "running",
       agent: true,
       thinking: true,
-      maxSeconds: 1800,
+      timerSeconds: 1800,
       remainingSeconds: 1200,
     },
   });
@@ -605,7 +603,7 @@ test("ShioriWorkbench prefers live model in both Composer pill and Right Dock pr
   assert.match(workbenchHtml, /codex-cockpit-header/);
   assert.match(workbenchHtml, /codex-live-phase/);
   assert.match(workbenchHtml, /codex-expand-all-btn/);
-  assert.match(workbenchHtml, /shiori-budget-header/);
+  assert.match(workbenchHtml, /shiori-timer-header/);
   assert.match(workbenchHtml, /shiori-stat-card/);
   assert.match(workbenchHtml, /shiori-stat-label/);
 
@@ -618,7 +616,7 @@ test("ShioriWorkbench prefers live model in both Composer pill and Right Dock pr
 });
 
 test("Workspace Studio and Global Settings both reuse ModelPickerDialog via Browse Models triggers", async () => {
-  const { ModelAndBudgetPanel } = await import("../features/workspaces/workspace-studio-view");
+  const { WorkspaceModelPanel } = await import("../features/workspaces/workspace-studio-view");
   const { GlobalDefaultsCard } = await import("../features/workspaces/settings-view");
 
   const studioSnapshot: WorkspaceStudioSnapshot = {
@@ -628,11 +626,8 @@ test("Workspace Studio and Global Settings both reuse ModelPickerDialog via Brow
     config: {
       driver: "cua",
       model: "openai-codex/gpt-6.2-sol",
-      seconds: 1800,
-      requests: 1000,
       diagnostics: "normal",
       pet: false,
-      ...({} as any),
     },
     defaults: {},
     services: {
@@ -656,7 +651,7 @@ test("Workspace Studio and Global Settings both reuse ModelPickerDialog via Brow
     createElement(
       LocaleProvider,
       null,
-      createElement(ModelAndBudgetPanel, {
+      createElement(WorkspaceModelPanel, {
         studio: studioSnapshot,
         isZh: false,
         onSaved() {},

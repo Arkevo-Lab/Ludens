@@ -211,7 +211,7 @@ test("run-index reducers-9 re-projects stale caches and activity projects loop_s
     await mkdir(join(root, "streams"), { recursive: true });
     const e = eventFactory("epoch-loop");
     const rows: Event[] = [
-      e("control", { mode: "auto", epoch: "epoch-loop", maxSeconds: 600 }),
+      e("control", { mode: "auto", epoch: "epoch-loop", timerSeconds: 600 }),
       e("loop_status", { state: "ready", generation: "loop-gen-1", codeSHA: "abc12345" }),
       e("loop_step", { turn: 1, action: "wait", seconds: 2, reason: "cooldown", durationMs: 4 }),
       e(
@@ -267,8 +267,6 @@ test("run-index reducers-9 re-projects stale caches and activity projects loop_s
       socket: join(root, "host.sock"),
       drivers: [],
       model: "openai/gpt-5",
-      seconds: 600,
-      maxRequests: 100,
       compactionThreshold: null,
     };
     const cycleSelection = await selectIndexedCycle(index, manifest, "epoch-loop");

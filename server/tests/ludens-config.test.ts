@@ -38,14 +38,14 @@ test("new workspaces use the configured parent or an explicit path and snapshot 
     expect(await readdir(f.cwd)).toEqual([]);
     const parent = join(f.root, "chosen parent");
     await updateWorkspaceRoot(parent, f.home);
-    await updateGlobalDefaults({ seconds: 701, pet: true }, f.home);
+    await updateGlobalDefaults({ compactionThreshold: 70100, pet: true }, f.home);
     const first = await initializeWorkspace({ name: "first", driver: "cua", pet: false }, { home: f.home });
     expect(first.workspace).toBe(join(parent, "first"));
-    expect(JSON.parse(await readFile(first.configPath, "utf8"))).toMatchObject({ seconds: 701, pet: false });
-    await updateGlobalDefaults({ seconds: 999 }, f.home);
+    expect(JSON.parse(await readFile(first.configPath, "utf8"))).toMatchObject({ compactionThreshold: 70100, pet: false });
+    await updateGlobalDefaults({ compactionThreshold: 99900 }, f.home);
     const second = await initializeWorkspace({ name: "second", driver: "cua" }, { home: f.home });
-    expect(JSON.parse(await readFile(second.configPath, "utf8"))).toMatchObject({ seconds: 999, pet: true });
-    expect(JSON.parse(await readFile(first.configPath, "utf8"))).toMatchObject({ seconds: 701, pet: false });
+    expect(JSON.parse(await readFile(second.configPath, "utf8"))).toMatchObject({ compactionThreshold: 99900, pet: true });
+    expect(JSON.parse(await readFile(first.configPath, "utf8"))).toMatchObject({ compactionThreshold: 70100, pet: false });
     const outside = join(f.root, "external folder");
     const explicit = await initializeWorkspace({ name: "external", workspace: outside, driver: "cua" }, { home: f.home });
     expect(explicit.workspace).toBe(outside);
@@ -61,9 +61,9 @@ test("invalid global settings never overwrite the saved configuration", async ()
   const f = await fixture();
   try {
     expect(await readGlobalConfig(f.home)).toEqual({ version: 1, workspaceRoot: join(f.home, "workspaces"), defaults: {} });
-    await writeGlobalConfig({ version: 1, workspaceRoot: f.cwd, defaults: { model: "fixture/model", requests: 5 } }, f.home);
+    await writeGlobalConfig({ version: 1, workspaceRoot: f.cwd, defaults: { model: "fixture/model", compactionThreshold: 50000 } }, f.home);
     const before = await readFile(join(f.home, "config.json"), "utf8");
-    for (const patch of [{ pet: "yes" }, { seconds: 0 }, { requests: 1.5 }]) {
+    for (const patch of [{ pet: "yes" }, { compactionThreshold: 0 }, { compactionThreshold: 1.5 }, { seconds: 60 }, { requests: 10 }]) {
       await expect(updateGlobalDefaults(patch, f.home)).rejects.toThrow();
       expect(await readFile(join(f.home, "config.json"), "utf8")).toBe(before);
     }
@@ -75,10 +75,10 @@ test("invalid global settings never overwrite the saved configuration", async ()
     const loadedLegacy = await readGlobalConfig(f.home);
     expect(loadedLegacy.defaults).toEqual({ model: "fixture/model", pet: false });
     expect("dashboard" in loadedLegacy.defaults).toBe(false);
-    await updateGlobalConfig(cfg => ({ ...cfg, defaults: { ...cfg.defaults, requests: 12 } }), f.home);
+    await updateGlobalConfig(cfg => ({ ...cfg, defaults: { ...cfg.defaults, compactionThreshold: 12000 } }), f.home);
     const savedRaw = JSON.parse(await readFile(join(f.home, "config.json"), "utf8")) as { defaults: Record<string, unknown> };
     expect("dashboard" in savedRaw.defaults).toBe(false);
-    expect(savedRaw.defaults).toEqual({ model: "fixture/model", pet: false, requests: 12 });
+    expect(savedRaw.defaults).toEqual({ model: "fixture/model", pet: false, compactionThreshold: 12000 });
   } finally { await f.close(); }
 });
 
@@ -90,7 +90,7 @@ test("concurrent config edits keep independently changed fields", async () => {
     await updateGlobalConfig(async config => {
       console.log("locked");
       await Bun.stdin.text();
-      return { ...config, defaults: { ...config.defaults, seconds: 701 } };
+      return { ...config, defaults: { ...config.defaults, compactionThreshold: 70100 } };
     }, ${JSON.stringify(f.home)});
   `], { cwd: f.cwd, env: { ...process.env, LUDENS_HOME: f.home }, stdin: "pipe", stdout: "pipe", stderr: "pipe" });
   const error = new Response(child.stderr).text();
@@ -100,13 +100,13 @@ test("concurrent config edits keep independently changed fields", async () => {
     reader.releaseLock();
     const edits = Promise.all([
       updateGlobalDefaults({ pet: true }, f.home),
-      updateGlobalDefaults({ requests: 73 }, f.home),
+      updateGlobalDefaults({ effort: "high" }, f.home),
     ]);
     await Bun.sleep(150);
     child.stdin.end();
     expect(await child.exited, await error).toBe(0);
     await edits;
-    expect((await readGlobalConfig(f.home)).defaults).toEqual({ seconds: 701, pet: true, requests: 73 });
+    expect((await readGlobalConfig(f.home)).defaults).toEqual({ compactionThreshold: 70100, pet: true, effort: "high" });
     const before = await readFile(join(f.home, "config.json"), "utf8");
     await expect(updateGlobalConfig(() => { throw new Error("cancelled edit"); }, f.home)).rejects.toThrow("cancelled edit");
     expect(await readFile(join(f.home, "config.json"), "utf8")).toBe(before);
@@ -134,14 +134,14 @@ test("exited lock owners are recovered without competing recoverers deleting a n
         import { updateGlobalConfig } from ${JSON.stringify(entry)};
         await updateGlobalConfig(async config => {
           await Bun.sleep(25);
-          return { ...config, defaults: { ...config.defaults, requests: (config.defaults.requests ?? 0) + 1 } };
+          return { ...config, defaults: { ...config.defaults, compactionThreshold: (config.defaults.compactionThreshold ?? 0) + 1 } };
         }, ${JSON.stringify(f.home)});
       `], { cwd: f.cwd, env: { ...process.env, LUDENS_HOME: f.home }, stdout: "pipe", stderr: "pipe" });
       workers.push(child);
       return { code: await child.exited, stderr: await new Response(child.stderr).text() };
     }));
     for (const result of results) expect(result.code, result.stderr).toBe(0);
-    expect((await readGlobalConfig(f.home)).defaults.requests).toBe(8);
+    expect((await readGlobalConfig(f.home)).defaults.compactionThreshold).toBe(8);
     expect((await readdir(f.home)).filter(name => name.includes(".lock"))).toEqual([]);
 
     const workspace = join(f.root, "workspace"); await mkdir(workspace);

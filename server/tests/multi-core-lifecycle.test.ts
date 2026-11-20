@@ -161,7 +161,7 @@ function hostStubCommand(socketPath: string, runId: string, initialMode: "manual
           connected: true,
           thinking: false,
           consolidating: false,
-          maxSeconds: 1800,
+          timerSeconds: null,
           model: "openai-codex/gpt-6.2-sol",
           launchedBy,
           queue: { steering: 0 },
@@ -517,7 +517,6 @@ test("HTTP boundary handles 0-run cold spawn, DEVICE_BUSY preempt, service stop,
     model: "google/gemini-2.5-pro",
     serviceTier: "priority",
     effort: "high",
-    seconds: 900,
   });
   const wsBusy = await createBridgeWorkspace(rootDir, home, "ws-busy", {
     port: sharedPort,
@@ -567,7 +566,7 @@ test("HTTP boundary handles 0-run cold spawn, DEVICE_BUSY preempt, service stop,
         id: string;
         runs: unknown[];
         core?: { online: boolean; launchedBy?: string; mode?: string };
-        defaults?: { model?: string; serviceTier?: string; effort?: string; maxSeconds?: number };
+        defaults?: { model?: string; serviceTier?: string; effort?: string };
       }>
     >("catalog/get", { includeEmpty: true });
     expect(catRes.ok).toBe(true);
@@ -580,7 +579,6 @@ test("HTTP boundary handles 0-run cold spawn, DEVICE_BUSY preempt, service stop,
       model: "google/gemini-2.5-pro",
       serviceTier: "priority",
       effort: "high",
-      maxSeconds: 900,
     });
 
     // 2. runtime/control (auto_on) on offline 0-run workspace cold-spawns Core,

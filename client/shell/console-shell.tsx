@@ -679,10 +679,7 @@ export default function ConsoleShell() {
                         </span>
                         <span className="run-time">
                           {Math.floor(s!.elapsedSeconds / 60)}{dt("min")}{" "}
-                          {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")} <b> / </b>
-                          {data.manifest.seconds != null && data.manifest.seconds > 0
-                            ? `${dt("budget")} ${Math.floor(data.manifest.seconds / 60)}${dt("minLong")}`
-                            : "∞"}
+                          {Math.floor(s!.elapsedSeconds % 60)}{dt("sec")}
                         </span>
                       </div>
                     }

@@ -12,7 +12,7 @@ import { createOmpSession } from "../src/core/agent-omp/session.ts";
 import { Workspace } from "../src/core/storage/workspace.ts";
 import { createTestRuntime } from "./runtime-fixture.ts";
 
-test.each(["request budget", "human handback"] as const)("native OMP retries respect Ludens %s", async mode => {
+test.each(["timer expired", "human handback"] as const)("native OMP retries respect Ludens %s", async mode => {
   const directory = await mkdtemp(join(tmpdir(), "ludens-retry-budget-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), { recursive: true });
@@ -30,7 +30,7 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
   let cycle: Cycle | undefined;
   let cancelTimer: ReturnType<typeof setTimeout> | undefined;
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
-    basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 2,
+    basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     cycle: () => { if (!cycle) throw new Error("No active control cycle"); return cycle; },
   });
   try {
@@ -52,6 +52,7 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
       retryAttempts.push(event.attempt);
       // Let the native handler enter its backoff before reclaiming control.
       if (mode === "human handback") cancelTimer = setTimeout(() => { void runtime.stop("human"); }, 0);
+      else cancelTimer = setTimeout(() => { void runtime.setTimer(0.01); }, 0);
     });
     let calls = 0;
     session.agent.streamFn = async () => {
@@ -84,11 +85,10 @@ test.each(["request budget", "human handback"] as const)("native OMP retries res
       if (performance.now() > deadline) throw new Error("Native retry did not settle after Ludens control ended");
       await Bun.sleep(10);
     }
-    const expectedCalls = mode === "request budget" ? 2 : 1;
-    expect(calls).toBe(expectedCalls);
-    expect(contexts).toEqual(Array.from({ length: expectedCalls }, (_, index) => ({ epoch, request: index + 1 })));
-    expect(retryAttempts).toEqual(mode === "request budget" ? [1, 2] : [1]);
-    expect(runtime.status()).toMatchObject({ mode: "manual", reason: mode === "request budget" ? "model request budget" : "human" });
+    expect(calls).toBe(1);
+    expect(contexts).toEqual([{ epoch, request: 1 }]);
+    expect(retryAttempts).toEqual([1]);
+    expect(runtime.status()).toMatchObject({ mode: "manual", reason: mode === "timer expired" ? "timer expired" : "human" });
     expect(session.isRetrying).toBe(false);
     expect(network).not.toHaveBeenCalled();
   } finally {

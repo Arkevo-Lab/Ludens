@@ -37,7 +37,7 @@ test("OMP bootstraps empty perception and repairs it through the real reload CLI
   const { epoch } = await runtime.start();
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")), runDir,
     basewareSocket: "/tmp/unused.sock", ludensSocket: socket, binDir: resolve(import.meta.dir, "../bin"),
-    maxRequests: 10, cycle: () => ({ epoch: epoch!, signal: abort.signal }),
+    cycle: () => ({ epoch: epoch!, signal: abort.signal }),
   });
   const settings = Settings.isolated({ "memory.backend": "off", "autolearn.enabled": false, "retry.enabled": false,
     "retry.modelFallback": false, "title.refreshOnReplan": false });

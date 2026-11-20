@@ -78,14 +78,14 @@ async function fixture() {
   } });
   const closeBaseware = await listenBaseware(basewareSocket, core);
   const devices = await connectBaseware({ socket: basewareSocket, seconds: 60, runDir, record: log.record });
-  const runtime = new Runtime(devices, log.record, 60, log.clock.id);
+  const runtime = new Runtime(devices, log.record, log.clock.id);
   runtime.attach({ controller: new WorkspaceController({ workspace, devices, env: {}, record: log.record }) });
   const closeLudens = await listenLudens(ludensSocket, runtime);
   const control = new AbortController();
   let cycle: Cycle | undefined = { epoch: (await runtime.start()).epoch!, signal: control.signal };
   const trace = new ModelTrace(log, () => ({ epoch: cycle?.epoch }));
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
-    runDir, basewareSocket, ludensSocket, binDir: resolve(import.meta.dir, "../bin"), maxRequests: 50, trace: trace.current,
+    runDir, basewareSocket, ludensSocket, binDir: resolve(import.meta.dir, "../bin"), trace: trace.current,
     cycle: () => { if (!cycle) throw new Error("No active control cycle"); return cycle; } });
   const settings = Settings.isolated({ "memory.backend": "off", "autolearn.enabled": false, "retry.enabled": false,
     "retry.modelFallback": false, "title.refreshOnReplan": false, "async.enabled": true, "launch.enabled": true });

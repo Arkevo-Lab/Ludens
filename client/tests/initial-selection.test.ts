@@ -4,8 +4,8 @@ import { initialSelection } from "@ludens/protocol/initial-selection";
 import type { Project } from "@ludens/protocol/types";
 
 const projects: Project[] = [
-  { id: "first", runs: [{ id: "new", model: null, seconds: 600, drivers: [{ id: "test", version: "1" }] }] },
-  { id: "workspace-a", runs: ["latest", "older"].map((id) => ({ id, model: null, seconds: 600, drivers: [{ id: "test", version: "1" }] })) },
+  { id: "first", runs: [{ id: "new", model: null, drivers: [{ id: "test", version: "1" }] }] },
+  { id: "workspace-a", runs: ["latest", "older"].map((id) => ({ id, model: null, drivers: [{ id: "test", version: "1" }] })) },
 ];
 
 test("pet links select the catalog project and historical run, retaining the cycle for run validation", () => {

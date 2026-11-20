@@ -66,7 +66,7 @@ def hold():
   });
   await atomicJson(manifestPath, {...manifest, eventSources: devices.eventSources,
     logging: {diagnostics: ctx.log.diagnostics, basewareDiagnostics: devices.diagnostics}});
-  const runtime = new Runtime(devices, ctx.log.record, 60, ctx.log.clock.id, ctx.log.diagnostics);
+  const runtime = new Runtime(devices, ctx.log.record, ctx.log.clock.id, ctx.log.diagnostics);
   runtime.attach({ controller: new WorkspaceController({ workspace: ctx.workspace, devices, env, record: ctx.log.record }) });
   devices.onHandback(reason => { void runtime.stop(reason); });
   devices.onDisconnect(error => { void runtime.disconnected(error); });

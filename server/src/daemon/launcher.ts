@@ -155,7 +155,6 @@ export async function launchPlan(
         ...transportArgs, "--socket", basewareSocket,
         "--data-dir", join(workspace, "logs/baseware"), "--diagnostics", config.logging.diagnostics],
       host: [...cliCommand(ludens), "run", "--baseware-socket", basewareSocket, "--model", config.model,
-        "--seconds", String(config.seconds), "--requests", String(config.requests),
         ...(config.compactionThreshold !== undefined
           ? ["--compaction-threshold", String(config.compactionThreshold)] : []),
         "--diagnostics", config.logging.diagnostics,
@@ -179,7 +178,7 @@ export function petLaunchCommand(repo: string, workspace: string, platform: Node
 }
 
 type CommandResult = { code: number; stdout: string; stderr: string };
-type HostStatus = { runId: string; epoch?: string | null; mode: string; connected: boolean; thinking: boolean; consolidating: boolean; maxSeconds: number };
+type HostStatus = { runId: string; epoch?: string | null; mode: string; connected: boolean; thinking: boolean; consolidating: boolean; timerSeconds: number | null };
 type BasewareStatus = { serviceId: string; mode: string; connected: boolean; epoch: string | null };
 type Job = { target: string; registered: boolean; pid: number | null; state: string | null; lastExitCode: number | null };
 

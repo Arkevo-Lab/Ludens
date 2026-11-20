@@ -66,8 +66,6 @@ export interface CreateWorkspaceInput {
   model?: string;
   serviceTier?: OmpServiceTier | null;
   effort?: OmpEffort | null;
-  seconds?: number;
-  requests?: number;
   pet?: boolean;
   registerDriver?: boolean;
 }
@@ -81,8 +79,6 @@ export interface WorkspaceConfigSummary {
   model: string;
   serviceTier?: OmpServiceTier;
   effort?: OmpEffort;
-  seconds: number;
-  requests: number;
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
   machines?: WorkspaceMachinesBinding;
@@ -247,8 +243,6 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
       model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "openai-codex/gpt-6.2-sol",
       ...(isOmpServiceTier(raw.serviceTier) ? { serviceTier: raw.serviceTier } : {}),
       ...(isOmpEffort(raw.effort) ? { effort: raw.effort } : {}),
-      seconds: typeof raw.seconds === "number" && Number.isInteger(raw.seconds) && raw.seconds > 0 ? raw.seconds : 1800,
-      requests: typeof raw.requests === "number" && Number.isInteger(raw.requests) && raw.requests > 0 ? raw.requests : 1000,
       ...(typeof raw.compactionThreshold === "number" && Number.isInteger(raw.compactionThreshold) && raw.compactionThreshold > 0
         ? { compactionThreshold: raw.compactionThreshold }
         : {}),
@@ -307,7 +301,7 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
     throw new Error("全局默认配置必须是对象");
   }
   const patch = input as Record<string, unknown>;
-  const allowed = ["model", "serviceTier", "effort", "seconds", "requests", "compactionThreshold", "pet", "connection"];
+  const allowed = ["model", "serviceTier", "effort", "compactionThreshold", "pet", "connection"];
   for (const key of Object.keys(patch)) {
     if (!allowed.includes(key)) throw new Error(`未知的全局默认配置字段：${key}`);
   }
@@ -328,15 +322,13 @@ export async function updateGlobalDefaults(input: unknown, home = globalHome): P
       else if (isOmpEffort(patch.effort)) defaults.effort = patch.effort;
       else throw new Error("defaults.effort 必须是 minimal、low、medium、high、xhigh、max 或 null");
     }
-    for (const key of ["seconds", "requests", "compactionThreshold"] as const) {
-      if (key in patch) {
-        if (patch[key] === null || patch[key] === undefined || patch[key] === "") {
-          delete defaults[key];
-        } else if (typeof patch[key] === "number" && Number.isInteger(patch[key]) && (patch[key] as number) > 0) {
-          defaults[key] = patch[key] as number;
-        } else {
-          throw new Error(`defaults.${key} 必须是正整数或 null`);
-        }
+    if ("compactionThreshold" in patch) {
+      if (patch.compactionThreshold === null || patch.compactionThreshold === undefined || patch.compactionThreshold === "") {
+        delete defaults.compactionThreshold;
+      } else if (typeof patch.compactionThreshold === "number" && Number.isInteger(patch.compactionThreshold) && patch.compactionThreshold > 0) {
+        defaults.compactionThreshold = patch.compactionThreshold;
+      } else {
+        throw new Error("defaults.compactionThreshold 必须是正整数或 null");
       }
     }
     if ("pet" in patch) {
@@ -1617,8 +1609,6 @@ export async function updateWorkspaceStudioConfig(
     "model",
     "serviceTier",
     "effort",
-    "seconds",
-    "requests",
     "compactionThreshold",
     "diagnostics",
     "pet",
@@ -1657,14 +1647,6 @@ export async function updateWorkspaceStudioConfig(
       if (patch.effort === null || patch.effort === undefined || patch.effort === "") delete next.effort;
       else if (isOmpEffort(patch.effort)) next.effort = patch.effort;
       else throw new Error("effort 必须是 minimal、low、medium、high、xhigh、max 或 null");
-    }
-    for (const key of ["seconds", "requests"] as const) {
-      if (key in patch) {
-        if (typeof patch[key] !== "number" || !Number.isInteger(patch[key]) || (patch[key] as number) <= 0) {
-          throw new Error(`${key} 必须是正整数`);
-        }
-        next[key] = patch[key];
-      }
     }
     if ("compactionThreshold" in patch) {
       if (patch.compactionThreshold === null || patch.compactionThreshold === undefined || patch.compactionThreshold === "") {

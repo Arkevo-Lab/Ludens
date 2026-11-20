@@ -23,8 +23,6 @@ describe("in-process workspace initialization & onboarding options", () => {
             model: "openai-codex/gpt-5.2",
             effort: "medium",
             serviceTier: "priority",
-            seconds: 1200,
-            requests: 500,
             pet: false,
           },
         },
@@ -40,8 +38,6 @@ describe("in-process workspace initialization & onboarding options", () => {
           model: "anthropic/claude-sonnet-4-5",
           effort: "high",
           serviceTier: null,
-          seconds: 900,
-          requests: 250,
           pet: true,
         },
         undefined,
@@ -59,8 +55,8 @@ describe("in-process workspace initialization & onboarding options", () => {
       expect(rawConfig.model).toBe("anthropic/claude-sonnet-4-5");
       expect(rawConfig.effort).toBe("high");
       expect(rawConfig.serviceTier).toBeUndefined();
-      expect(rawConfig.seconds).toBe(900);
-      expect(rawConfig.requests).toBe(250);
+      expect(rawConfig.seconds).toBeUndefined();
+      expect(rawConfig.requests).toBeUndefined();
       expect(rawConfig.pet).toBe(true);
       expect(rawConfig.machines).toEqual({
         active: "local-desktop",

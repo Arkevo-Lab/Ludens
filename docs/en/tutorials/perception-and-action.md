@@ -88,7 +88,7 @@ Saving `perception.py` or any `.py` module imported by it automatically reloads 
 ludens-core perception reload
 ```
 
-During **Auto Run**, reloading increments `inputGeneration` under the active Control Cycle `epoch`, immediately zeroes held inputs and cancels in-flight actions from the old generation, and swaps in the new code without interrupting budgets or your Shiori thread.
+During **Auto Run**, reloading increments `inputGeneration` under the active Control Cycle `epoch`, immediately zeroes held inputs and cancels in-flight actions from the old generation, and swaps in the new code without interrupting active timers or your Shiori thread.
 
 ## 3. Querying `.ludens/timeline/` (`Client.observe()` & `ludens-core perception observe`)
 

@@ -42,7 +42,7 @@ flowchart LR
 
 **工作区（Workspace）**（默认位于 `~/.ludens/workspaces/<name>`，也可指定任意目录）是由智能体与开发者共同维护的普通代码目录：
 
-- **工作区资产**：`ludens.json` 保存启动与预算配置；`baseware.json` 缓存当前设备能力快照；`perception.py` 定义常驻感知入口 `Perception`；可选的 `loop.py` 定义可编程外层循环与轮首注入器 `Loop`；`skills/<name>/SKILL.md` 沉淀可复用流程；`MEMORY.md` 保存长期环境机制与不变量；`memory/current.md` 记录当前目标与后续步骤。
+- **工作区资产**：`ludens.json` 保存工作区启动与模型配置；`baseware.json` 缓存当前设备能力快照；`perception.py` 定义常驻感知入口 `Perception`；可选的 `loop.py` 定义可编程外层循环与轮首注入器 `Loop`；`skills/<name>/SKILL.md` 沉淀可复用流程；`MEMORY.md` 保存长期环境机制与不变量；`memory/current.md` 记录当前目标与后续步骤。
 - **30 Hz 常驻感知与精简输入契约**：在控制租约激活期间，`perception.py:Perception.sample()` 按宿主配置的频率上限（默认 `30 Hz`）持续采样，并将结构化记录与分段 fMP4 视频写入 `.ludens/timeline/`，作为 `ludens-core perception observe` 与 `Client().replay()` 的唯一事实来源。面向模型的常规读取仅交付精简感知包络（`{ ok, records: [{ id, sequence, recordedAt, text?, data?, space?, effect?, transition? }] }`），剥离内部采样遥测噪声，仅在历史/过滤查询时附带分页与可用性元数据。
 - **热重载与进程内闭环**：修改 `perception.py`、`loop.py` 或其导入的 `.py` 模块会自动触发对应常驻进程热重载；`perception.py` 重载时递进 `inputGeneration` 并释放残留输入，而 `loop.py` 在轮间自动生效且遇到异常时发出 `loop_fault` 并安全回退至默认循环，同时保留当前 `epoch` 与会话上下文。处于**手动待命**时，常驻进程保持热备，可继续响应只读时间轴查询而不触发采样。
 - **统一能力目录**：工作区中用 `@capability` 声明的顶层 Python 函数与 Baseware 设备能力共同汇入 `ludens-core controller` 目录，命令行与 Python 调用方（`ludens_tools.Client`）可统一发现并执行。
@@ -51,7 +51,7 @@ flowchart LR
 
 **Shiori** 严格担任 Ludens 的 **Agent 线程核心**（`@ludens/core` `ludens-core` 内的执行与调度内核，`1 Workspace = 1 Core`，零 Server/Client 依赖），而非泛化的对话角色：
 
-- **控制周期与可编程外层循环**：Shiori 负责驱动**手动待命**与**自主运行**之间的状态切换，向 Baseware 申请并持有当前周期的 `epoch` 租约，执行时间与模型请求数预算限制，并在**收回控制权**时协调设备与录像的有序收尾。工作区不存在 `loop.py` 时运行内置默认循环；存在 `loop.py` 时通过 `Loop.inject` 与 `Loop.step`（返回 `Prompt` / `Consolidate` / `Wait` / `Stop`）在活跃 `epoch` 租约下编排零 Token 的 `@capability` 转移与定制化轮首注入，且人工 `steer` 始终可立即唤醒 `Wait` 并抢占确定性步骤。
+- **控制周期与可编程外层循环**：Shiori 负责驱动**手动待命**与**自主运行**之间的状态切换，向 Baseware 申请并持有当前周期的 `epoch` 租约，执行可选的周期计时器限制，并在**收回控制权**时协调设备与录像的有序收尾。工作区不存在 `loop.py` 时运行内置默认循环；存在 `loop.py` 时通过 `Loop.inject` 与 `Loop.step`（返回 `Prompt` / `Consolidate` / `Wait` / `Stop`）在活跃 `epoch` 租约下编排零 Token 的 `@capability` 转移与定制化轮首注入，且人工 `steer` 始终可立即唤醒 `Wait` 并抢占确定性步骤。
 - **持久化工作区线程**：挂载模型运行时，Shiori 基于底层智能体循环引擎（OMP `18.22.2`）为每个工作区维护可续接的单线程会话（存于 `.ludens/shiori/`），开放文件与终端工具（`read`、`write`、`edit`、`bash`、`wait`，其中 `bash` 自动注入 `core/bin` 以便直接调用 `ludens-core <controller|perception|event|machine|eval>`）以及 `observe`、`event_pool`，不将庞杂的设备 Schema 预先塞满模型工具表。
 - **暂停态切模与记忆整理**：模型、服务档位与推理强度仅允许在**手动待命**态切换，确保同一控制周期内请求归因清晰；`consolidate` 整理轮次仅开放文件读写，在不触碰设备的前提下清洗 `skills/` 与 `memory/current.md`。
 
@@ -74,7 +74,7 @@ flowchart LR
 | **回放** | `?view=replay` | 在同一条绝对时间轴上同步拖拽 30 Hz fMP4 视频帧、设备动作区间与模型调用详情 |
 | **性能** | `?view=perf` | 追踪单次请求传输等待、Prompt 缓存命中率、上下文压缩节点与显式观测链路 |
 | **能力** | `?view=caps` | 查看工作区 **Capability – Eval – Env** 三元拓扑、识别 `stale`/`adapting` 状态并一键运行离线评测 |
-| **配置** | `?view=perception` | 统一配置模型与预算、目标设备、多模态传输、一键启停服务、编辑 `MEMORY.md`、感知录制与循环仿真 |
+| **配置** | `?view=perception` | 统一配置模型、目标设备、多模态传输、一键启停服务、编辑 `MEMORY.md`、感知录制与循环仿真 |
 | **设备** | `?view=baseware` | 管理 Baseware 驱动包、配置跨传输协议的受控节点、绑定工作区机器池并浏览 `Controller` 接口 |
 | **工作区** | `?view=workspaces` | 设置默认工作区目录、登记或迁移已有工作区并切换当前项目 |
 | **文档** | `?view=docs` | 直接读取并渲染仓库 `docs/` 下的中英双语文档 |
@@ -96,6 +96,6 @@ flowchart LR
 
 ## 继续阅读
 
-- 进入[自主循环、控制租约与异步协作](loop-and-control.md)，深入了解四阶段循环、`epoch` 租约、预算与双向协作通道。
+- 进入[自主循环、控制租约与异步协作](loop-and-control.md)，深入了解四阶段循环、`epoch` 租约、周期计时器与双向协作通道。
 - 进入[编码即感知与能力自验证体系](self-verification.md)，掌握常驻感知状态机、**Capability – Eval – Env** 三元体系与 `adapt` 闭环。
 - 准备动手搭建环境，请前往[快速开始](../tutorials/quickstart.md)与[设备与驱动准备](../tutorials/devices.md)；需要查阅底层契约，请见[系统架构与边界](../reference/architecture.md)与[Baseware 设计理念与能力契约](../reference/baseware.md)。
