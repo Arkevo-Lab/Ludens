@@ -18,7 +18,7 @@ cjsModule._extensions[".css"] ??= () => {};
 const { SettingsView } = nodeRequire("../features/workspaces/settings-view") as typeof import("../features/workspaces/settings-view");
 const { ConnectionSettings } = nodeRequire("../features/workspaces/connection-settings") as typeof import("../features/workspaces/connection-settings");
 const {
-  ModelAndBudgetPanel,
+  WorkspaceModelPanel,
   ServicesAndShioriPanel,
   WorkspaceStudioView,
 } = nodeRequire("../features/workspaces/workspace-studio-view") as typeof import("../features/workspaces/workspace-studio-view");
@@ -58,17 +58,12 @@ function makeStudioSnapshot(): WorkspaceStudioSnapshot {
       model: "openai-codex/gpt-6.2-sol",
       serviceTier: "priority",
       effort: "high",
-      seconds: 1800,
-      requests: 1000,
       compactionThreshold: 48000,
       pet: false,
       diagnostics: "normal",
-      ...({} as any),
     },
     defaults: {
       model: "openai-codex/gpt-6.2-sol",
-      seconds: 1800,
-      requests: 1000,
       pet: false,
     },
     services: {
@@ -151,6 +146,7 @@ test("SettingsView renders 5 flat left-rail categories, GlobalDefaults browse tr
   );
   assert.match(defaultsHtml, /data-browse-models="global-defaults"/);
   assert.doesNotMatch(defaultsHtml, /data-slot="card"/);
+  assert.doesNotMatch(defaultsHtml, /Default cycle budget|Default request cap/);
 });
 
 test("ConnectionSettings renders flat rows without scope dropdown or 3-column guide wall, and discloses CLI in workspace mode", () => {
@@ -229,7 +225,7 @@ test("WorkspaceStudioView renders all 6 categories including Target Device, keep
     createElement(
       LocaleProvider,
       null,
-      createElement(ModelAndBudgetPanel, {
+      createElement(WorkspaceModelPanel, {
         studio: snapshot,
         isZh: false,
         workspaceRunning: false,
@@ -243,6 +239,7 @@ test("WorkspaceStudioView renders all 6 categories including Target Device, keep
   assert.match(modelHtml, /data-browse-models="workspace-studio"/);
   assert.doesNotMatch(modelHtml, /studio-dashboard-switch/);
   assert.doesNotMatch(modelHtml, /data-slot="card"/);
+  assert.doesNotMatch(modelHtml, /Cycle time budget|Cycle request cap/);
 
   const servicesHtml = renderToStaticMarkup(
     createElement(

@@ -246,10 +246,10 @@ export async function dispatch(runtime: Runtime, request: Request, signal = new 
     }
     if (argv[0] === "timer") {
       if (argv.length !== 2) throw new Error("Usage: ludens auto timer <seconds|off>");
-      if (argv[1] === "off" || argv[1] === "unbounded" || argv[1] === "none") return runtime.setBudget(null);
+      if (argv[1] === "off" || argv[1] === "unbounded" || argv[1] === "none") return runtime.setTimer(null);
       const sec = Number(argv[1]);
       if (!Number.isFinite(sec) || sec <= 0 || sec * 1000 > 2_147_483_647) throw new Error("--seconds must be positive and within the timer range");
-      return runtime.setBudget(sec);
+      return runtime.setTimer(sec);
     }
     if (argv.length === 1 && argv[0] === "off") { await runtime.stop(); return runtime.status(); }
     throw new Error("Usage: ludens auto on [--message <text>] [--seconds <n>] | ludens auto timer <seconds|off> | ludens auto off");

@@ -107,8 +107,8 @@ flowchart LR
 
 Ludens 遵循 **1 Workspace = 1 Core** 隔离原则，由 **`@ludens/server`（`ludens-server`）** 统一监管多个工作区的 Core 进程（`Project.core` / `ProjectCoreSummary`）：
 
-- **按需拉起（On-Demand Spawn）与 0-Run 零门槛**：选择任意工作区（即使尚未产生历史运行记录）即可直接进入运行页（Live），基于 `Project.defaults` 展示预设模型与预算；在运行页发送目标消息或点击 **启动自主运行**（`▶`）时，`ludens-server` 会通过 JSON-RPC（`runtime/control` / `eventPool/mutate`）自动按需拉起对应工作区的 Core（`ludens-core run`）与 Baseware（`spawned: true`），无需预先在终端执行 `ludens workspace up`。
-- **Warm Standby 热备驻留**：当主动**收回控制权**（`ludens auto off`）或控制预算耗尽时，Core 退出自主运行循环并保持 **Warm Standby**（手动待命，`manual` 态）：Baseware 设备连接与 Shiori OMP 会话持续驻留就绪，仅停止高频采样与录制，支持随时发送新消息秒级续接或切换模型。
+- **按需拉起（On-Demand Spawn）与 0-Run 零门槛**：选择任意工作区（即使尚未产生历史运行记录）即可直接进入运行页（Live），基于 `Project.defaults` 展示预设模型；在运行页发送目标消息或点击 **启动自主运行**（`▶`）时，`ludens-server` 会通过 JSON-RPC（`runtime/control` / `eventPool/mutate`）自动按需拉起对应工作区的 Core（`ludens-core run`）与 Baseware（`spawned: true`），无需预先在终端执行 `ludens workspace up`。
+- **Warm Standby 热备驻留**：当主动**收回控制权**（`ludens auto off`）或活动计时器到期时，Core 退出自主运行循环并保持 **Warm Standby**（手动待命，`manual` 态）：Baseware 设备连接与 Shiori OMP 会话持续驻留就绪，仅停止高频采样与录制，支持随时发送新消息秒级续接或切换模型。
 - **启动来源与 `ActiveCoreQuitGuard` 退出守卫**：每个活跃 Core 都会记录启动来源 `ServiceLaunchOrigin`（`"app"` 或 `"cli"`）及所属 `appInstanceId`，并在控制台侧边栏「活跃 Core」列表直观标注来源与单点停止按钮（`■`）。关闭桌面主窗口（`×`）仅隐藏至系统托盘与可选桌宠；显式退出桌面 App（`⌘Q` / `before-quit` / 托盘 **Quit**）时，由 `ActiveCoreQuitGuard` 查询 `daemon/status`：若当前无活跃 Core，应用直接退出并保留后台单例守护进程；若存在活跃 Core，则弹出三选一确认框（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。
 - **物理设备冲突仲裁（`CONFLICT -32009 DEVICE_BUSY` + `preempt`）**：绑定不同物理设备或不同端口的工作区 Core 完全并发运行、互不干扰。当多个工作区尝试占用同一物理设备或端口时：
   - 若当前持有设备的 Core 处于 **Warm Standby（手动待命，`manual`）**，系统自动让位释放其设备租约并由新工作区接管；
@@ -116,11 +116,11 @@ Ludens 遵循 **1 Workspace = 1 Core** 隔离原则，由 **`@ludens/server`（`
 
 ### 2. 控制租约（`epoch`）与权限校验
 
-- 每次执行 `ludens auto on [--seconds <n>]` 会开启一个新的控制周期，生成唯一 **`epoch`** 并重置本轮模型请求数（`requests`）预算。持续时间（`seconds`）为可选参数：省略时（`null`）租约与运行时循环不设超时定时器，一直持续运行直到显式执行 `ludens auto off`；传入时由 Baseware 与 Shiori 共同按该周期上限计时。
-- `ludens auto timer <seconds|off>` 就地更新 Baseware 的 `lease_duration` 与 Shiori 的活动停止计时器，并记录 `control_budget`，不会生成新的 `epoch`。
+- 每次执行 `ludens auto on [--seconds <n>]` 会开启一个新的控制周期，生成唯一 **`epoch`**。持续时间（`seconds`）为可选参数：省略时（`null`）租约与运行时循环不设超时定时器，一直持续运行直到显式执行 `ludens auto off`；传入时由 Baseware 与 Shiori 共同按该周期计时上限执行。
+- `ludens auto timer <seconds|off>` 就地更新 Baseware 的 `lease_duration` 与 Shiori 的活动停止计时器，并记录 `control_timer`，不会生成新的 `epoch`。
 - Core 通过持久连接向 Baseware 持有该 `epoch`，并将 `BASEWARE_EPOCH` 注入工作区进程环境。
 - 查询能力目录与 `--help` 无需控制权；具体能力是否要求控制权由其 `requiresControl` 属性声明（部分只读状态查询同样要求有效 `epoch`）。通过 `ludens-core controller` 调用工作区 `python/...` 能力同样要求处于活跃控制周期。
-- 当发生人工收回控制权（`ludens auto off`）、预算耗尽、Core 断线或设备断开时，Baseware 立即废止旧 `epoch`、中断在途动作并执行设备释放（清零按键与触点），清理完毕后回到手动待命（`manual`）状态。
+- 当发生人工收回控制权（`ludens auto off`）、计时器到期、Core 断线或设备断开时，Baseware 立即废止旧 `epoch`、中断在途动作并执行设备释放（清零按键与触点），清理完毕后回到手动待命（`manual`）状态。
 
 ### 3. 手柄异步时间表（`pad.play`）
 
@@ -136,7 +136,7 @@ ludens-core controller controller/pad.play --args '{"inputs":[{"atMs":0,"duratio
 
 ### 4. 常驻状态机与输入重置
 
-统一常驻 `perception.py` 状态机在进入自主运行时采用 Core 当前控制 `epoch`，并在每次重载时采用新的 `inputGeneration`。当自动重载轮换 generation 或在 `auto` 周期内执行显式 `ludens-core perception reload` 时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、剩余预算与 OMP 会话。常驻进程从属于该控制周期：连续采样与 fMP4 视频录制只在控制租约活跃期间运行，`Runtime.stop()` 会等待感知租约撤销——停止采样器、刷出最后一条 `perception_stats` 并封口活跃视频分段——之后才记录周期 `control(manual)` 切换事件；在手动待命（`manual`）期间常驻进程保持热备，可继续服务时间线读取但不采样。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
+统一常驻 `perception.py` 状态机在进入自主运行时采用 Core 当前控制 `epoch`，并在每次重载时采用新的 `inputGeneration`。当自动重载轮换 generation 或在 `auto` 周期内执行显式 `ludens-core perception reload` 时，系统通过 Baseware 立即取消并释放本工作区的全部当前输入（包含并发 CLI 输入），递进 `inputGeneration` 拒绝旧实例残余调用，同时保留当前 `epoch`、活动计时器与 OMP 会话。常驻进程从属于该控制周期：连续采样与 fMP4 视频录制只在控制租约活跃期间运行，`Runtime.stop()` 会等待感知租约撤销——停止采样器、刷出最后一条 `perception_stats` 并封口活跃视频分段——之后才记录周期 `control(manual)` 切换事件；在手动待命（`manual`）期间常驻进程保持热备，可继续服务时间线读取但不采样。详见 [core/src/core/shiori/runtime.ts](../../../core/src/core/shiori/runtime.ts)。
 
 ## 会话与 Loop
 
@@ -154,7 +154,7 @@ Core 在单工作区内复用同一个 OMP 会话（持久化于 `.ludens/shiori
 1. **发起轮次**：使用 [continue.md](../../../core/prompts/continue.md) 发起 OMP `prompt`（开启自主运行若带 `auto on --message` 则附加一次性提醒）。
 2. **常驻状态机与模型推理并行运转**：模型推理期间环境持续运行——在周期控制租约之下，常驻 `Perception.sample()` 按 Core 配置的频率（`LUDENS_PERCEPTION_SAMPLE_HZ`，默认 `30` Hz）持续采样写入 `.ludens/timeline/`，其进程内能力在同一进程中持续读取时空轴并执行高频闭环控制；取舍见 [为什么感知层参数要分成三层管理](../insights/perception-parameters.md)。
 3. **自动上下文交付**：Ludens 扩展挂载 OMP 的 `before_agent_start` 钩子（见 [extension.ts](../../../core/src/core/agent-omp/extension.ts)）。当自动注入开启（默认 `inject on`）时，在每轮 prompt 开始自动追加尚未交付的最新主通道感知记录以及采样器状态变迁（`state / codeSHA / error`）；工具结果不再被追加任何观察，`tool_result` 钩子只登记原生工具图片的交付事实，轮内需要画面由模型显式调用 `observe` 组合。曾在工具批次末追加最新帧的通道已于 2026-10-29 删除，取舍见 [注入收敛为轮首单通道](../insights/omp-injection.md)。
-4. **续轮或收回控制权**：单次 `prompt` 结束且预算未耗尽时自动发起下一轮；一旦人工收回控制权或预算耗尽，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
+4. **续轮或收回控制权**：单次 `prompt` 结束且控制周期仍活跃时自动发起下一轮；一旦人工收回控制权或计时器到期，`addBeforeModelCall` 门禁立即阻断新模型请求，释放设备控制权。
 
 ### 2. 上下文压缩与传输恢复
 

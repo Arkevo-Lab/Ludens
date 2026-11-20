@@ -16,9 +16,9 @@ async function fixture() {
   await mkdir(directory, { recursive: true });
   await writeFile(join(directory, "manifest.json"), JSON.stringify({ workspace }));
   const log = new EventLog(directory, { id: "epochs", now: () => performance.now() }, workspace);
-  const cycles = [["one", 120, "human"], ["two", null, "time budget"]] as const;
-  for (const [epoch, maxSeconds, reason] of cycles) {
-    log.record("control", { mode: "auto", epoch, maxSeconds, remainingSeconds: maxSeconds }, { epoch });
+  const cycles = [["one", 120, "human"], ["two", null, "timer expired"]] as const;
+  for (const [epoch, timerSeconds, reason] of cycles) {
+    log.record("control", { mode: "auto", epoch, timerSeconds, remainingSeconds: timerSeconds }, { epoch });
     log.record("model_start", { request: "prompt" }, { epoch, modelCallId: `call-${epoch}` });
     log.record("model_end", { durationMs: 100, stopReason: "done", usage: { input: 10, output: 5 } }, { epoch, modelCallId: `call-${epoch}` });
     log.record("user_message", { text: `note ${epoch}` }, { epoch });
@@ -41,13 +41,13 @@ test("epoch=all spans every cycle with close metadata while the latest anchors s
     expect(all.wholeRun).toBe(true);
     expect(all.selectedEpoch).toBe("two");
     expect(all.cycles.map(cycle => cycle.epoch)).toEqual(["one", "two"]);
-    expect(all.cycles[0]).toMatchObject({ startedAt: expect.any(String), endedAt: expect.any(String), reason: "human", maxSeconds: 120 });
-    expect(all.cycles[1]).toMatchObject({ reason: "time budget", maxSeconds: null });
+    expect(all.cycles[0]).toMatchObject({ startedAt: expect.any(String), endedAt: expect.any(String), reason: "human", timerSeconds: 120 });
+    expect(all.cycles[1]).toMatchObject({ reason: "timer expired", timerSeconds: null });
     // The whole-run projection carries calls from both epochs.
     const projection = await readRunProjection(f.index, all.selectedEpoch, {}, true);
     expect(projection.calls).toHaveLength(2);
     expect(projection.summary.completed).toBe(2);
-    expect(projection.lastControl).toMatchObject({ mode: "manual", reason: "time budget" });
+    expect(projection.lastControl).toMatchObject({ mode: "manual", reason: "timer expired" });
     // A single-epoch view stays scoped to that cycle only.
     const single = await selectIndexedCycle(f.index, f.manifest, "one");
     expect(single).toMatchObject({ selectedEpoch: "one", wholeRun: false });

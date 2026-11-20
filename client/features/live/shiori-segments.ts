@@ -350,7 +350,7 @@ export function summarizeStepBlock(block: ActivityBlock): { badge: string; detai
         detail: previewText || String(rec?.capability ?? block.title),
       };
     }
-    if (block.title === "control_budget") {
+    if (block.title === "control_timer") {
       const reqSec = rec?.requestedSeconds;
       const detail =
         reqSec == null
@@ -414,7 +414,7 @@ export function summarizeSystemCategories(steps: ActivityBlock[]): SystemStepCat
       seen.add("device");
     } else if (title.includes("perception")) {
       seen.add("perception");
-    } else if (title === "control_budget") {
+    } else if (title === "control_timer") {
       seen.add("timer");
     } else if (title.includes("compaction")) {
       seen.add("compaction");
@@ -452,7 +452,7 @@ export type StreamSegment =
       startedAt: string;
       endedAt: string | null;
       durationSeconds: number | null;
-      maxSeconds: number | null;
+      timerSeconds: number | null;
       stopReason: string | null;
       gapSeconds: number | null;
       isActive: boolean;
@@ -744,11 +744,11 @@ export function buildCodexSegments(
     const isActive = Boolean(isLatestCycleInRun && options.isAuto && !manualEnd && !indexed?.endedAt);
     const endedAt = isActive ? null : (indexed?.endedAt ?? manualEnd?.endedAt ?? null);
     const stopReason = isActive ? null : (indexed?.reason ?? manualEnd?.reason ?? null);
-    const maxSeconds =
-      indexed && "maxSeconds" in indexed
-        ? (indexed.maxSeconds ?? null)
-        : typeof autoBlockData?.maxSeconds === "number"
-          ? autoBlockData.maxSeconds
+    const timerSeconds =
+      indexed && "timerSeconds" in indexed
+        ? (indexed.timerSeconds ?? null)
+        : typeof autoBlockData?.timerSeconds === "number"
+          ? autoBlockData.timerSeconds
           : null;
 
     const startMs = Date.parse(startedAt);
@@ -777,7 +777,7 @@ export function buildCodexSegments(
       startedAt,
       endedAt,
       durationSeconds,
-      maxSeconds,
+      timerSeconds,
       stopReason,
       gapSeconds,
       isActive,
@@ -1268,7 +1268,7 @@ export function reconcileSegments(previous: StreamSegment[], next: StreamSegment
           p.startedAt === seg.startedAt &&
           p.endedAt === seg.endedAt &&
           p.durationSeconds === seg.durationSeconds &&
-          p.maxSeconds === seg.maxSeconds &&
+          p.timerSeconds === seg.timerSeconds &&
           p.stopReason === seg.stopReason &&
           p.gapSeconds === seg.gapSeconds &&
           p.isActive === seg.isActive;

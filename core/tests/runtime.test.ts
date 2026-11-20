@@ -42,7 +42,8 @@ test("takeover time remaining ignores host age and resets on each epoch", async 
   const now = spyOn(performance, "now").mockReturnValue(120_000);
   try {
     expect(runtime.status().remainingSeconds).toBeNull();
-    const first = await runtime.start();
+    const first = await runtime.start(undefined, undefined, 300);
+    expect(first.timerSeconds).toBe(300);
     expect(first.remainingSeconds).toBe(300);
     now.mockReturnValue(240_000);
     expect(runtime.status().remainingSeconds).toBe(180);
@@ -50,8 +51,9 @@ test("takeover time remaining ignores host age and resets on each epoch", async 
     expect(runtime.status().remainingSeconds).toBe(0);
     await runtime.stop();
     expect(runtime.status().remainingSeconds).toBeNull();
-    const second = await runtime.start();
+    const second = await runtime.start(undefined, undefined, 300);
     expect(second.epoch).not.toBe(first.epoch);
+    expect(second.timerSeconds).toBe(300);
     expect(second.remainingSeconds).toBe(300);
   } finally { now.mockRestore(); await runtime.close(); }
 });
@@ -61,53 +63,60 @@ test("auto on without --seconds runs unbounded while --seconds bounds the cycle"
   const run = (argv: string[]) => dispatch(runtime, { kind: "auto", argv, runId: runtime.status().runId });
   try {
     const unbounded = await run(["on"]);
-    expect(unbounded).toMatchObject({ mode: "auto", maxSeconds: null, remainingSeconds: null });
+    expect(unbounded).toMatchObject({ mode: "auto", timerSeconds: null, remainingSeconds: null });
     await run(["off"]);
     // Explicit duration, flags in any order after "on".
     const bounded = await run(["on", "--seconds", "15", "--message", "bounded"]);
-    expect(bounded).toMatchObject({ mode: "auto", maxSeconds: 15, remainingSeconds: 15 });
+    expect(bounded).toMatchObject({ mode: "auto", timerSeconds: 15, remainingSeconds: 15 });
+    const retimed = await run(["timer", "30"]);
+    expect(retimed).toMatchObject({ mode: "auto", timerSeconds: 30, remainingSeconds: 30 });
+    const cleared = await run(["timer", "off"]);
+    expect(cleared).toMatchObject({ mode: "auto", timerSeconds: null, remainingSeconds: null });
     await run(["off"]);
     await expect(run(["on", "--seconds", "0"])).rejects.toThrow("--seconds must be positive");
     await expect(run(["on", "--bogus"])).rejects.toThrow("Usage: ludens auto on");
   } finally { await runtime.close(); }
 });
 
-test("a null time budget never expires on a timer and explicit seconds still bound one cycle", async () => {
+test("unbounded cycles never expire on a timer and explicit seconds still bound one cycle", async () => {
   const { core, devices } = createTestDeviceSession({ controllers: [] });
   await core.acquire("unbounded-lease", null, { id: "test" });
   expect(core.status()).toMatchObject({ mode: "auto", remainingSeconds: null });
   await Bun.sleep(50); // Any expiry timer below this window would release.
   expect(core.status()).toMatchObject({ mode: "auto", remainingSeconds: null });
   await core.release("unbounded-lease");
-  const runtime = new Runtime(devices, () => {}, null);
+  const events: { type: string; data: unknown }[] = [];
+  const runtime = new Runtime(devices, (type, data) => events.push({ type, data }));
   try {
-    expect(await runtime.start(undefined, undefined, null)).toMatchObject({ mode: "auto", maxSeconds: null, remainingSeconds: null });
+    expect(await runtime.start()).toMatchObject({ mode: "auto", timerSeconds: null, remainingSeconds: null });
+    const timed = await runtime.setTimer(5);
+    expect(timed).toMatchObject({ mode: "auto", timerSeconds: 5, remainingSeconds: 5 });
+    expect(events.at(-1)).toMatchObject({ type: "control_timer", data: { requestedSeconds: 5, timerSeconds: 5, remainingSeconds: 5 } });
+    const cleared = await runtime.setTimer(null);
+    expect(cleared).toMatchObject({ mode: "auto", timerSeconds: null, remainingSeconds: null });
+    expect(events.at(-1)).toMatchObject({ type: "control_timer", data: { requestedSeconds: null, timerSeconds: null, remainingSeconds: null } });
     await runtime.stop();
-    expect(await runtime.start(undefined, undefined, 5)).toMatchObject({ mode: "auto", maxSeconds: 5, remainingSeconds: 5 });
+    expect(await runtime.start(undefined, undefined, 5)).toMatchObject({ mode: "auto", timerSeconds: 5, remainingSeconds: 5 });
     await runtime.stop();
-    await expect(runtime.start(undefined, undefined, 0)).rejects.toThrow("Invalid Shiori time budget");
-    expect(() => new Runtime(devices, () => {}, -1)).toThrow("Invalid Shiori time budget");
+    await expect(runtime.start(undefined, undefined, 0)).rejects.toThrow("Invalid Shiori timer duration");
+    await expect(runtime.setTimer(-1)).rejects.toThrow("Invalid Shiori timer duration");
   } finally { await runtime.close(); }
 });
 
-test("a nested Runtime retains the enclosing deadline across takeovers and releases on its stop signal", async () => {
+test("an armed timer expires with reason 'timer expired' and releases the device", async () => {
   const { devices } = createTestDeviceSession({ controllers: [] });
-  const budgetEnd = new AbortController();
-  const runtime = new Runtime(devices, () => {}, 300, "nested", "normal", { deadlineMs: 11_000, signal: budgetEnd.signal });
-  const now = spyOn(Date, "now").mockReturnValue(1000);
-  const monotonic = spyOn(performance, "now").mockReturnValue(100);
+  const runtime = new Runtime(devices, () => {});
   const release = spyOn(devices, "release");
   try {
-    expect((await runtime.start()).remainingSeconds).toBe(10);
-    await runtime.stop("human");
-    now.mockReturnValue(5000); monotonic.mockReturnValue(4100);
-    expect((await runtime.start()).remainingSeconds).toBe(6);
-    budgetEnd.abort("time budget");
-    await runtime.close();
-    expect(runtime.status()).toMatchObject({ mode: "manual", thinking: false, reason: "time budget" });
-    expect(release).toHaveBeenCalledTimes(2);
-    await expect(runtime.start()).rejects.toBe("time budget");
-  } finally { now.mockRestore(); monotonic.mockRestore(); await runtime.close(); release.mockRestore(); }
+    await runtime.start(undefined, undefined, 0.03);
+    const deadline = performance.now() + 2000;
+    while (runtime.status().mode !== "manual") {
+      if (performance.now() > deadline) throw new Error("Timer did not expire");
+      await Bun.sleep(10);
+    }
+    expect(runtime.status()).toMatchObject({ mode: "manual", thinking: false, reason: "timer expired", timerSeconds: null, remainingSeconds: null });
+    expect(release).toHaveBeenCalledTimes(1);
+  } finally { await runtime.close(); release.mockRestore(); }
 });
 
 test("a human takeover message reaches only its own cycle and malformed arguments cannot acquire control", async () => {
@@ -232,7 +241,7 @@ test("parallel hosts route to independent devices and reject each other's epochs
     expect([a.angle(), b.angle()]).toEqual([15, 30]);
     await expect(send(socketA, { kind: "auto", argv: ["off"], runId: b.runtime.status().runId })).rejects.toThrow("STALE_RUN");
     await expect(send(socketA, { kind: "auto", argv: ["off"], runId: a.runtime.status().runId, expectedEpoch: ownerB.epoch })).rejects.toThrow("STALE_EPOCH");
-    expect(a.runtime.status()).toMatchObject({ mode: "auto", maxSeconds: 300 });
+    expect(a.runtime.status()).toMatchObject({ mode: "auto", timerSeconds: null });
     await send(socketA, { kind: "auto", argv: ["off"], runId: a.runtime.status().runId, expectedEpoch: ownerA.epoch });
     expect(a.runtime.status().mode).toBe("manual");
     expect(b.runtime.status().mode).toBe("auto");
@@ -287,7 +296,7 @@ test("consolidation keeps devices manual, rejects overlap, and drains cancellati
   expect(deviceCalls).toBe(0);
 });
 
-test("consolidation reports completion, failure, and time budget cancellation separately", async () => {
+test("consolidation reports completion, failure, and timer cancellation separately", async () => {
   for (const expected of ["completed", "failed", "aborted"]) {
     const events: { type: string; data: any }[] = [];
     const done = Promise.withResolvers<void>();
@@ -335,7 +344,7 @@ test("off cancels acquisition, bounds an uncooperative session, and releases its
     async release(epoch) { releases++; if (nativeOwner === epoch) nativeOwner = undefined; },
     async execute() { throw new Error("unused"); },
   };
-  const runtime = new Runtime(devices, () => {}, 30, "fixture", "normal", undefined, 20);
+  const runtime = new Runtime(devices, () => {}, "fixture", "normal", 20);
   const start = runtime.start().catch(error => error);
   try {
     const stop = runtime.stop();
@@ -360,7 +369,7 @@ test("a stuck device release completes stop as disconnected instead of admitting
     async acquire() {}, async release() { await gate.promise; },
     async execute() { throw new Error("unused"); },
   };
-  const runtime = new Runtime(devices, () => {}, 30, "fixture", "normal", undefined, 20);
+  const runtime = new Runtime(devices, () => {}, "fixture", "normal", 20);
   try {
     await runtime.start();
     expect(await Promise.race([runtime.stop().then(() => true), Bun.sleep(500).then(() => false)])).toBe(true);
@@ -374,7 +383,7 @@ test("takeover stop reports elapsed control time and periodic stats only when co
   type StatsEvent = { reason: string; mode: string; elapsedMs: number; memory: Record<string, unknown> };
   const events: { type: string; data: unknown }[] = [];
   const now = spyOn(Date, "now").mockReturnValue(1_000);
-  const runtime = new Runtime(devices, (type, data) => events.push({ type, data }), 300, "stats", "normal", undefined, 30_000, 5);
+  const runtime = new Runtime(devices, (type, data) => events.push({ type, data }), "stats", "normal", 30_000, 5);
   try {
     await runtime.start();
     expect(events.filter(event => event.type === "runtime_stats")).toEqual([]);

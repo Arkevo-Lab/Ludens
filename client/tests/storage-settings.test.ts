@@ -45,7 +45,7 @@ const {
   StorageProfileForm,
   StorageSettings,
 } = nodeRequire("../features/workspaces/storage-settings") as typeof import("../features/workspaces/storage-settings");
-const { ModelAndBudgetPanel } = nodeRequire("../features/workspaces/workspace-studio-view") as typeof import("../features/workspaces/workspace-studio-view");
+const { WorkspaceModelPanel } = nodeRequire("../features/workspaces/workspace-studio-view") as typeof import("../features/workspaces/workspace-studio-view");
 
 const PROJECTS: Project[] = [
   {
@@ -171,17 +171,12 @@ function makeStudioSnapshot(
     config: {
       driver: "cua",
       model: "openai-codex/gpt-6.2-sol",
-      seconds: 1800,
-      requests: 1000,
       pet: false,
       diagnostics: "normal",
       ...(storage ? { storage } : {}),
-      ...({} as any),
     },
     defaults: {
       model: "openai-codex/gpt-6.2-sol",
-      seconds: 1800,
-      requests: 1000,
       pet: false,
     },
     services: {
@@ -470,7 +465,7 @@ test("StorageProfileForm SSR-renders S3 saved-secret placeholder, test connectio
   assert.match(dirFormHtml, /\/Volumes\/NAS\/ludens-media/);
 });
 
-test("WorkspaceStudio ModelAndBudgetPanel SSR-renders Timeline Storage Policy override controls", () => {
+test("WorkspaceStudio WorkspaceModelPanel SSR-renders Timeline Storage Policy override controls", () => {
   const overview = makeSampleOverview();
   const studio = makeStudioSnapshot({
     mode: "profile",
@@ -483,7 +478,7 @@ test("WorkspaceStudio ModelAndBudgetPanel SSR-renders Timeline Storage Policy ov
     createElement(
       LocaleProvider,
       null,
-      createElement(ModelAndBudgetPanel, {
+      createElement(WorkspaceModelPanel, {
         studio,
         isZh: false,
         workspaceRunning: false,

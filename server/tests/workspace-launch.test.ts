@@ -98,7 +98,7 @@ class FakeServices implements LaunchIO {
       const thinking = this.cleanupReads-- > 0;
       this.events.push(`host:${this.mode}:${thinking}`);
       return result(JSON.stringify({ runId: "original-session", mode: this.mode, connected: true,
-        thinking, consolidating: false, maxSeconds: this.plan.config.seconds }));
+        thinking, consolidating: false, timerSeconds: null }));
     }
     if (argv.join("\0") === [...cliCommand(this.plan.ludens), "auto", "off"].join("\0")) {
       this.events.push("auto off");
@@ -293,7 +293,9 @@ test("legacy dashboard field in ludens.json is silently stripped without exposin
 
 test("launch config keeps limits explicit and paths as literal argv entries", async () => {
   const value = await plan();
-  expect(value.config).toMatchObject({ port: 47991, seconds: 1800, requests: 1000 });
+  expect(value.config).toMatchObject({ port: 47991 });
+  expect(value.commands.host).not.toContain("--seconds");
+  expect(value.commands.host).not.toContain("--requests");
   // Default follows the selected model's native OMP compaction trigger; no flag is passed.
   expect(parseConfig({ driver: "prepared-fixture" }, manifestFor("prepared-fixture")).compactionThreshold).toBeUndefined();
   expect(value.commands.host).not.toContain("--compaction-threshold");
@@ -424,7 +426,6 @@ test("init and dry-run preserve existing workspace files and never invoke servic
         driver: "bridge-fixture",
         driverPackage: `file:${packagePath}`,
         game: "games/Uninstalled ; $ game.rom",
-        seconds: 600,
       },
       { home },
     );
@@ -432,7 +433,7 @@ test("init and dry-run preserve existing workspace files and never invoke servic
     const manifest = await resolveDriver("bridge-fixture", `file:${packagePath}`, defaultDriverCacheRoot());
     const parsedConfig = parseConfig(JSON.parse(configBefore), manifest);
     const preview = await launchPlan(parsedConfig, await realpath(workspace), undefined, undefined, manifest);
-    expect(preview).toMatchObject({ workspace: await realpath(workspace), config: { seconds: 600, pet: false } });
+    expect(preview).toMatchObject({ workspace: await realpath(workspace), config: { pet: false } });
     expect(preview.commands.pet).toBeUndefined();
     const withPet = await launchPlan({ ...parsedConfig, pet: true }, await realpath(workspace), undefined, undefined, manifest);
     expect(withPet.commands.pet).toBeDefined();

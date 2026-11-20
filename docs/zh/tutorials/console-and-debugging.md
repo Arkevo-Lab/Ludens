@@ -12,7 +12,7 @@ Ludens 在零端口桌面应用（`@ludens/desktop` 走 UDS `app-server.sock`）
 | **回放（Replay）** | `?view=replay` | 拖拽受限 30 秒 fMP4 视频窗（上限 60 秒）与 15 分钟事件窗，使用 **跳转时间** 精确定位毫秒时刻，在 **事件流** 按 **全部轨道** 筛选，并点击 **节点详情** 核对真实送入模型的截图、工具调用与 `observation_context` 回执 |
 | **性能（Performance）** | `?view=perf` | 观测 **性能概览**（已完成轮次、P95 与中位轮次延迟、Prompt 缓存命中率、解码速率、占空比、采样速率、自主运行占比），并在 **请求与调用链回溯** 中排查单次请求耗时与压缩时间线 |
 | **能力（Capabilities）** | `?view=caps` | 浏览 **Capability – Eval – Env** 三元拓扑，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）过滤，核对 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**Core 连接检查** 与 **社区驱动验证**，并一键运行全部或单项评测 |
-| **配置（Config）** | `?view=perception` | 通过 6 个页签管理工作区配置：**模型与预算**、**目标设备**、**连接与多模态传输**、**感知录制参数**（`hotSeconds`、`videoSegmentSeconds`、`videoIdleSeconds`）、**后台服务与会话**（含一键 **启动工作区 / 热重载 Core / 停止**、`emulator`/`baseware`/`core`/`app-daemon`/`pet` 后台进程状态行、**工作区长期记忆（`MEMORY.md`）** 与 Shiori 会话摘要），以及 **上下文容量推演** |
+| **配置（Config）** | `?view=perception` | 通过 6 个页签管理工作区配置：**模型**、**目标设备**、**连接与多模态传输**、**感知录制参数**（`hotSeconds`、`videoSegmentSeconds`、`videoIdleSeconds`）、**后台服务与会话**（含一键 **启动工作区 / 热重载 Core / 停止**、`emulator`/`baseware`/`core`/`app-daemon`/`pet` 后台进程状态行、**工作区长期记忆（`MEMORY.md`）** 与 Shiori 会话摘要），以及 **上下文容量推演** |
 
 ### 全局与工具视图
 

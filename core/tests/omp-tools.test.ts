@@ -22,8 +22,8 @@ afterEach(() => {
   }
 });
 
-test("request budgets reset on a new takeover while repeated prompts share the same epoch budget", async () => {
-  const directory = await mkdtemp(join(tmpdir(), "ludens-epoch-budget-"));
+test("per-cycle request counter resets on a new takeover while repeated prompts share the same epoch", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "ludens-epoch-counter-"));
   const workspace = join(directory, "workspace");
   await mkdir(join(workspace, "skills"), { recursive: true });
   const requests: {epoch?: string; request: number}[] = [];
@@ -41,7 +41,7 @@ test("request budgets reset on a new takeover while repeated prompts share the s
     async close() {},
   } });
   const extension = createLudensExtension({runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
-    basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 2,
+    basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     cycle: () => cycle,
   });
   const handlers: Record<string, (event: any) => any> = {};
@@ -56,12 +56,9 @@ test("request budgets reset on a new takeover while repeated prompts share the s
         await handlers.context({});
       }
       expect(runtime.status()).toMatchObject({mode: "auto", epoch});
-      // Post-stop attempts are gate-blocked and not recorded; no hook error.
-      await handlers.context({});
-      // Await the real settle chain (run promise includes the finally that
-      // clears `running`), so round 2's start() sees a finished cycle.
+      await runtime.stop("human");
       await runtime.runSettled;
-      expect(runtime.status()).toMatchObject({mode: "manual", reason: "model request budget", thinking: false});
+      expect(runtime.status()).toMatchObject({mode: "manual", reason: "human", thinking: false});
     }
     expect(epochs[0]).not.toBe(epochs[1]);
     expect(requests).toEqual(epochs.flatMap(epoch => [{epoch, request: 1}, {epoch, request: 2}]));
@@ -107,7 +104,7 @@ class Perception:
   }
   const control = new AbortController();
   const extension = createLudensExtension({ runtime, workspace: new Workspace(join(directory, "workspace"), join(directory, "skill-versions")),
-    basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 1,
+    basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     cycle: () => ({ epoch: "test-epoch", signal: control.signal }),
   });
   // This is the same conversion createAgentSession applies to SDK customTools.
@@ -156,7 +153,7 @@ class Perception:
   for (let i = 0; i < 200 && !(await runtime.perception!.observe(new AbortController().signal)).records.length; i++) await Bun.sleep(10);
   const control = new AbortController();
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
-    basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 3,
+    basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     cycle: () => ({ epoch: "test", signal: control.signal }),
   });
   const handlers: Record<string, (event: any) => any> = {};
@@ -271,7 +268,7 @@ test("automatic delivery stays bounded across fast tools, unavailable sampling a
         timing: { clock: "test", requestedAtMs: sequence, receivedAtMs: sequence } }] }] });
   const abort = new AbortController();
   const extension = createLudensExtension({ runtime, workspace: work, basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
-    maxRequests: 2000, cycle: () => ({ epoch: "test", signal: abort.signal }) });
+    cycle: () => ({ epoch: "test", signal: abort.signal }) });
   const handlers: Record<string, (event: any) => any> = {};
   await extension.factory({ on(name: string, handler: (event: any) => any) { handlers[name] = handler; } } as ExtensionAPI);
   const tool = async (content: Array<{ type: "text"; text: string } | { type: "image"; data: string; mimeType: string }> = [{ type: "text", text: "done" }]) => {
@@ -349,7 +346,7 @@ test.each(["injection disabled", "explicit observe", "context replacement"])(
     perception.observe = async () => ({ queryId: "explicit-query", ok: true, query: {}, hasMore: false, records: [] });
     const abort = new AbortController();
     const extension = createLudensExtension({ runtime, workspace: new Workspace(directory, join(directory, "versions")),
-      basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 10,
+      basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
       cycle: () => ({ epoch: "test", signal: abort.signal }) });
     const handlers: Record<string, (event: any) => any> = {};
     await extension.factory({ on(name: string, handler: (event: any) => any) { handlers[name] = handler; } } as ExtensionAPI);
@@ -399,7 +396,7 @@ test("cancelled perception reads do not consume an undelivered sampler state", a
   let abort = new AbortController();
   perception.observe = async (signal) => { abort.abort(); signal.throwIfAborted(); throw new Error("unreachable"); };
   const extension = createLudensExtension({ runtime, workspace: new Workspace(directory, join(directory, "versions")),
-    basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 10,
+    basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     cycle: () => ({ epoch: "test", signal: abort.signal }) });
   const handlers: Record<string, (event: any) => any> = {};
   await extension.factory({ on(name: string, handler: (event: any) => any) { handlers[name] = handler; } } as ExtensionAPI);

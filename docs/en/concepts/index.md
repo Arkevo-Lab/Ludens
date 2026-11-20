@@ -7,7 +7,7 @@ Ludens is a multimodal, cross-device Agent Harness designed for complex end-to-e
 | Topic | What You Will Learn | Document |
 | --- | --- | --- |
 | **System Overview** | Why a code-first Harness beats static action wrappers, and how **Baseware**, **Workspace**, **Shiori**, and **Console** divide responsibilities | [What Is Ludens & System Architecture](overview.md) |
-| **Loop & Control** | The Observe → Reason → Act & Eval → Consolidate loop, **Auto Run** vs. **Manual Standby**, **Reclaim Control**, monotonic `epoch` leases, budgets, **Event Pool**, and `steer` | [Control Cycles, Perception Loop & Collaboration](loop-and-control.md) |
+| **Loop & Control** | The Observe → Reason → Act & Eval → Consolidate loop, **Auto Run** vs. **Manual Standby**, **Reclaim Control**, monotonic `epoch` leases, optional cycle timers, **Event Pool**, and `steer` | [Control Cycles, Perception Loop & Collaboration](loop-and-control.md) |
 | **Self-Verification** | Code-first perception at 30 Hz, the **Capability – Eval – Env** triad, `ludens workspace eval` / `ludens-core eval` regression gates, `adapt` failure-frame feedback, and skill/memory consolidation | [Code-First Perception & Self-Verification](self-verification.md) |
 
 ## Key Terms at a Glance
@@ -17,7 +17,7 @@ Ludens is a multimodal, cross-device Agent Harness designed for complex end-to-e
 | **Ludens** | Both the complete cross-device multimodal Harness and its personified mascot. |
 | **Baseware** | The cross-device integration layer that standardizes drivers, multi-node transports (`stdio`, `bridge`, `ssh`, `http`, `sse`), and `epoch` control leases. |
 | **Workspace** | The persistent coding directory (`perception.py`, `@capability` modules, `skills/`, `memory/`, `.ludens/timeline/`) shared by the agent and operator. |
-| **Shiori** | Ludens's **Agent Thread Core**, orchestrating Control Cycles, time/request budgets, context delivery, and safe device release. |
+| **Shiori** | Ludens's **Agent Thread Core**, orchestrating Control Cycles, optional cycle timers, context delivery, and safe device release. |
 | **Console** | The unified React 19 + Vite static SPA observability and control plane (zero-port Desktop App over `app-server.sock`, hosted Web / remote `wss://` over `/rpc`, and mobile multi-target switching) covering Live, Replay, Performance, Capabilities, Config, Devices, Workspaces, Docs, Settings, and Developer views. |
 
 ## Where to Go Next

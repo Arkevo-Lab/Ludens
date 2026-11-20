@@ -10,7 +10,7 @@ Ludens 将每个工作区组织为一个可编程的代码工程，并将受控�
 
 | 路径 | 职责 |
 | --- | --- |
-| `ludens.json` | 工作区配置（驱动、模型、控制周期预算、受控节点池、多模态传输开关、`storage` 录像存储覆盖策略、`dashboard` / `pet` 开关、日志模式） |
+| `ludens.json` | 工作区配置（驱动、模型、受控节点池、多模态传输开关、`storage` 录像存储覆盖策略、`dashboard` / `pet` 开关、日志模式） |
 | `AGENTS.md` | Shiori 在该工作区内遵守的工程约束与自验证工作流说明 |
 | `MEMORY.md` | 工作区根目录长期记忆，沉淀环境规律与已验证策略（可直接编辑或在控制台 **配置** 页编辑） |
 | `memory/` | 阶段性运行记忆笔记（例如在 `ludens consolidate` 边界更新的 `memory/current.md`） |
@@ -250,7 +250,7 @@ class Loop(Loop):
 
 - **运行（Live，`?view=live`）**：在模型卡片中展开 **查看传入模型的 Input 详情** 即可 1:1 检视 `Loop.inject` 交付的真实 `deliveredPayload`；轮间 `loop_step` / `loop_fault` 事件与不经模型的 `@capability` 调用会折叠在 **Loop 调度步骤** 分组内（异常时自动展开）。
 - **能力（Capabilities，`?view=caps`）**：直观检视 **Capability – Eval – Env** 拓扑关系，按状态（`verified`、`adapting`、`stale`、`failed`、`unverified`、`missing`）筛选，查看 **工作区来源**（`baseware.json` 与静态 Python `@capability`）、**Core 连接检查** 与 **社区驱动验证** 结果，并可一键点击运行全部或单项评测。
-- **配置（Config，`?view=perception`）**：在 **模型与预算（Model & Budget）** 页签配置当前工作区的 **录像持久化策略（`ludens.json · storage`）**；在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
+- **配置（Config，`?view=perception`）**：在 **模型（Model）** 页签配置当前工作区的 **录像持久化策略（`ludens.json · storage`）**；在 **后台服务与会话（Services & Session）** 页签直接编辑 **工作区长期记忆（`MEMORY.md`）**、查看 Shiori 会话摘要，或一键执行 **启动工作区 / 热重载 Core / 停止**。
 - **全局设置 → 录像与存储（Settings → Recording & Storage，`?view=settings`）**：汇总全部工作区的视频、缓存、索引与日志占用，支持 **一键按配额清理全部工作区**、**立即同步归档** 与单工作区 **清理 / 归档 / 清缓存**，并集中管理全局存储配置池与目录读写 / S3 连接延迟探测。
 - **记忆与技能沉淀（`ludens consolidate` 或运行页按钮）**：开启一次禁用所有设备访问的纯文件整理轮次，自动把 `verified` 能力晋升或保留到 `skills/` 技能卡片中，清除 `unverified`/`stale`/`adapting`/`failed` 条目，并刷新 `memory/current.md`。
 

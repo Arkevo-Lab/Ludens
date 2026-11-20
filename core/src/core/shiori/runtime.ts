@@ -58,12 +58,6 @@ export interface DeviceSession {
   execute(id: string, args: ToolArguments, epoch: string | undefined, signal: AbortSignal, trace: EventTrace, origin?: ObservationOrigin, machine?: string): Promise<ExecutionResult>;
 }
 
-/** An enclosing Shiori owns this deadline and signals its measurement boundary. */
-export interface SharedBudget {
-  deadlineMs: number;
-  signal: AbortSignal;
-}
-
 export class Runtime {
   private epoch = "";
   private mode: "manual" | "acquiring" | "auto" | "releasing" = "manual";
@@ -77,11 +71,11 @@ export class Runtime {
   private consolidating = false;
   private switchingModel = false;
   private timer?: ReturnType<typeof setTimeout>;
-  private activeMaxSeconds: number | null = 300;
+  private activeTimerSeconds: number | null = null;
   private takeoverDeadlineMs: number | null = null;
   private takeoverStartedAtMs: number | null = null;
   private statsTimer: ReturnType<typeof setInterval> | null = null;
-  private readonly budgetEnded = () => { void this.stop("time budget").catch(error => this.record("error", String(error))); };
+  private readonly onTimerExpired = () => { void this.stop("timer expired").catch(error => this.record("error", String(error))); };
   private reason = "startup";
   private connected = true;
   private perceptionInjection = true;
@@ -122,20 +116,17 @@ export class Runtime {
 
   private readonly launchedBy: ServiceLaunchOrigin;
 
-  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private maxSeconds: number | null = 300, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private budget?: SharedBudget, private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0, launchedBy?: ServiceLaunchOrigin) {
-    if (maxSeconds !== null && (!Number.isFinite(maxSeconds) || maxSeconds <= 0 || maxSeconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori time budget");
-    if (budget && !Number.isFinite(budget.deadlineMs)) throw new Error("Invalid shared Shiori deadline");
-    this.activeMaxSeconds = this.maxSeconds;
+  constructor(private devices: DeviceSession | undefined, readonly record: RecordEvent, private runId: string = crypto.randomUUID(), readonly diagnostics: DiagnosticsMode = "normal", private controlTimeoutMs = 30_000, private readonly runtimeStatsIntervalMs = 0, launchedBy?: ServiceLaunchOrigin) {
     this.launchedBy = launchedBy ?? (process.env.LUDENS_LAUNCHED_BY === "app" ? "app" : "cli");
     devices?.onReconnect?.(() => { void this.reconnected(); });
   }
 
   status() {
-    // The host can outlive many takeovers; its log clock is not this cycle's budget.
+    // The host can outlive many takeovers; its log clock is not this cycle's timer.
     const remainingSeconds = this.mode === "auto" && this.takeoverDeadlineMs !== null ? Math.max(0, Math.ceil((this.takeoverDeadlineMs - performance.now()) / 1000)) : null;
     return {
       runId: this.runId,
-      maxSeconds: this.mode === "auto" ? this.activeMaxSeconds : this.maxSeconds,
+      timerSeconds: this.mode === "auto" ? this.activeTimerSeconds : null,
       remainingSeconds,
       mode: this.mode,
       epoch: this.mode === "auto" ? this.epoch : null,
@@ -213,13 +204,12 @@ export class Runtime {
     return result;
   }
 
-  async start(message?: string, program?: (context: { epoch: string; signal: AbortSignal }) => Promise<void>, seconds?: number | null) {
+  async start(message?: string, program?: (context: { epoch: string; signal: AbortSignal }) => Promise<void>, seconds: number | null = null) {
     if (this.mode !== "manual" || this.running || this.calls.size || this.switchingModel) throw new Error("Previous control cycle has not finished");
     if (!this.connected) throw new Error("Baseware disconnected; restart the application");
-    this.budget?.signal.throwIfAborted();
-    // An explicit duration overrides the configured budget; null runs unbounded.
-    const cycleSeconds = seconds !== undefined ? seconds : this.maxSeconds;
-    if (cycleSeconds !== null && (!Number.isFinite(cycleSeconds) || cycleSeconds <= 0 || cycleSeconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori time budget");
+    // Unbounded by default; pass a positive duration to arm an interactive stop timer.
+    const cycleSeconds = seconds ?? null;
+    if (cycleSeconds !== null && (!Number.isFinite(cycleSeconds) || cycleSeconds <= 0 || cycleSeconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori timer duration");
     const epoch = this.epoch = crypto.randomUUID();
     const control = this.control = new AbortController();
     this.ownsDevice = !program;
@@ -238,22 +228,18 @@ export class Runtime {
           }
         }
       }), "Control acquisition") : Promise.resolve();
-    if (this.budget) {
-      this.budget.signal.addEventListener("abort", this.budgetEnded, { once: true });
-      if (this.budget.signal.aborted) this.budgetEnded();
-    }
     try { await this.opening; }
     catch (error) { if (this.control === control) await this.stop(String(error)); throw error; }
     if (control.signal.aborted || this.control !== control) return this.status();
-    this.activeMaxSeconds = this.budget ? Math.max(1, Math.ceil((this.budget.deadlineMs - Date.now()) / 1000)) : cycleSeconds;
-    this.takeoverDeadlineMs = this.budget ? performance.now() + (this.budget.deadlineMs - Date.now()) : cycleSeconds !== null ? performance.now() + cycleSeconds * 1000 : null;
+    this.activeTimerSeconds = cycleSeconds;
+    this.takeoverDeadlineMs = cycleSeconds !== null ? performance.now() + cycleSeconds * 1000 : null;
     this.mode = "auto";
     this.reason = "enabled";
     this.takeoverStartedAtMs = Date.now();
     this.startStatsTimer();
     this.record("control", this.status(), { epoch });
     if (message) this.record("user_message", { text: message, mode: "start" }, { epoch });
-    if (!this.budget && cycleSeconds !== null) this.timer = setTimeout(this.budgetEnded, cycleSeconds * 1000);
+    if (cycleSeconds !== null) this.timer = setTimeout(this.onTimerExpired, cycleSeconds * 1000);
     if (control.signal.aborted) return this.status();
     try {
       if (this.ownsDevice) {
@@ -281,8 +267,8 @@ export class Runtime {
     return this.status();
   }
 
-  /** Ordinary programs use Shiori's same budget, cancellation and drain path, without OMP or a device lease. */
-  async runProgram(program: Program, signal?: AbortSignal): Promise<void> {
+  /** Ordinary programs use Shiori's same timer, cancellation and drain path, without OMP or a device lease. */
+  async runProgram(program: Program, signal?: AbortSignal, seconds: number | null = null): Promise<void> {
     signal?.throwIfAborted();
     let failure: unknown;
     const cancel = () => { void this.stop("cancelled"); };
@@ -292,7 +278,7 @@ export class Runtime {
         const deadlineMs = this.takeoverDeadlineMs !== null ? Date.now() + this.takeoverDeadlineMs - performance.now() : Infinity;
         try { await executeProgram(program, controlSignal, this.record, deadlineMs, signal); }
         catch (error) { failure = error; throw error; }
-      });
+      }, seconds);
       if (signal?.aborted) cancel();
       await this.running;
       if (failure) throw failure;
@@ -309,7 +295,7 @@ export class Runtime {
     this.consolidating = true;
     this.reason = "consolidating";
     this.record("consolidation_start", { seconds }, { epoch });
-    this.timer = setTimeout(() => void this.stop("consolidation time budget"), seconds * 1000);
+    this.timer = setTimeout(() => void this.stop("consolidation timer expired"), seconds * 1000);
     let outcome = "completed";
     this.running = this._agent.consolidate({ epoch, signal: control.signal })
       .catch((error) => {
@@ -364,10 +350,9 @@ export class Runtime {
   }
 
   /** Live stop-timer update on the running cycle; no new epoch, no new cycle. */
-  async setBudget(seconds: number | null) {
-    if (seconds !== null && (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori time budget");
+  async setTimer(seconds: number | null) {
+    if (seconds !== null && (!Number.isFinite(seconds) || seconds <= 0 || seconds * 1000 > 2_147_483_647)) throw new Error("Invalid Shiori timer duration");
     if (this.mode !== "auto" || !this.epoch) throw new Error("Auto loop is not active");
-    if (this.budget) throw new Error("Shared evaluation budget cannot be modified interactively");
     const epoch = this.epoch;
     const control = this.control;
     if (this.ownsDevice && this.devices?.setLeaseDuration) await this.withControlTimeout(this.devices.setLeaseDuration(epoch, seconds), "Control lease update");
@@ -376,16 +361,16 @@ export class Runtime {
     this.timer = undefined;
     const elapsedSec = this.takeoverStartedAtMs !== null ? Math.max(0, Math.floor((Date.now() - this.takeoverStartedAtMs) / 1000)) : 0;
     if (seconds !== null) {
-      this.activeMaxSeconds = elapsedSec + Math.ceil(seconds);
+      this.activeTimerSeconds = elapsedSec + Math.ceil(seconds);
       this.takeoverDeadlineMs = performance.now() + seconds * 1000;
-      this.timer = setTimeout(this.budgetEnded, seconds * 1000);
+      this.timer = setTimeout(this.onTimerExpired, seconds * 1000);
     } else {
-      this.activeMaxSeconds = null;
+      this.activeTimerSeconds = null;
       this.takeoverDeadlineMs = null;
     }
-    // control_budget, never control: cycle indexing and autoStarted must stay untouched.
+    // control_timer, never control: cycle indexing and autoStarted must stay untouched.
     const nextStatus = this.status();
-    this.record("control_budget", { maxSeconds: nextStatus.maxSeconds, remainingSeconds: nextStatus.remainingSeconds, requestedSeconds: seconds }, { epoch });
+    this.record("control_timer", { timerSeconds: nextStatus.timerSeconds, remainingSeconds: nextStatus.remainingSeconds, requestedSeconds: seconds }, { epoch });
     return nextStatus;
   }
 
@@ -538,9 +523,11 @@ export class Runtime {
     const wasAuto = this.mode === "auto";
     const elapsedMs = this.takeoverStartedAtMs !== null ? Math.max(0, Date.now() - this.takeoverStartedAtMs) : undefined;
     this.takeoverStartedAtMs = null;
+    this.activeTimerSeconds = null;
+    this.takeoverDeadlineMs = null;
     this.mode = "releasing";
     this.reason = reason;
-    this.control?.abort(reason === "time budget" ? new DOMException(reason, "AbortError") : undefined);
+    this.control?.abort(reason === "timer expired" ? new DOMException(reason, "AbortError") : undefined);
     if (this.statsTimer) { clearInterval(this.statsTimer); this.statsTimer = null; }
     if (this.runtimeStatsIntervalMs > 0 && wasAuto) this.emitRuntimeStats("stopped");
     clearTimeout(this.timer);

@@ -140,11 +140,9 @@ function makeRunData(run: string, calls: Call[], updatedAt = "2026-11-12T10:05:0
       socket: "/ws/diablo3/.ludens/host.sock",
       drivers: [],
       model: "gpt-5.4",
-      seconds: 1800,
-      maxRequests: 500,
       compactionThreshold: 120_000,
     },
-    cycles: [{ epoch: "ep-1", startedAt: "2026-11-12T10:00:00.000Z", maxSeconds: 1800 }],
+    cycles: [{ epoch: "ep-1", startedAt: "2026-11-12T10:00:00.000Z", timerSeconds: 1800 }],
     selectedEpoch: null,
     calls,
     selectedCall: calls.at(-1),
@@ -183,7 +181,7 @@ function makeRunData(run: string, calls: Call[], updatedAt = "2026-11-12T10:05:0
       agent: true,
       model: "gpt-5.4",
       thinking: true,
-      maxSeconds: 1800,
+      timerSeconds: 1800,
       remainingSeconds: 900,
     },
     livePhase: null,
@@ -478,8 +476,8 @@ test("upward pagination prepends monotonically, retains tail across live deltas,
 
   // Load older run-1 and paginate older run-1 twice with the same cursor -> 0 duplicate requests!
   const runs: RunInfo[] = [
-    { id: "run-2", model: "gpt-5.4", seconds: 1800, drivers: [], startedAt: "2026-11-12T10:00:00.000Z" },
-    { id: "run-1", model: "gpt-5.4", seconds: 1800, drivers: [], startedAt: "2026-11-12T09:00:00.000Z" },
+    { id: "run-2", model: "gpt-5.4", drivers: [], startedAt: "2026-11-12T10:00:00.000Z" },
+    { id: "run-1", model: "gpt-5.4", drivers: [], startedAt: "2026-11-12T09:00:00.000Z" },
   ];
   const loadedRun1 = await engine.loadOlderRuns({ currentRunId: "run-2", runs });
   assert.equal(loadedRun1, true);
@@ -789,7 +787,7 @@ test("unified mutations apply optimistic state, fallback cleanly, and roll back 
   );
   assert.equal(engine.getSnapshot().optimisticHost?.status.mode, "auto");
 
-  // 2. extendAutoStopTimer reads fresh status (120s) and sets budget to 120 + 300 = 420s
+  // 2. extendAutoStopTimer reads fresh status (120s) and sets timer to 120 + 300 = 420s
   await engine.extendAutoStopTimer({
     workspace: "/ws/diablo3",
     run: "run-2",
@@ -798,10 +796,10 @@ test("unified mutations apply optimistic state, fallback cleanly, and roll back 
     deltaSeconds: 300,
     fallbackRemainingSeconds: 60,
   });
-  const lastBudgetCmd = runtimeCommands.at(-1);
-  assert.equal(lastBudgetCmd?.action, "auto_budget");
-  if (lastBudgetCmd?.action === "auto_budget") {
-    assert.equal(lastBudgetCmd.seconds, 420);
+  const lastTimerCmd = runtimeCommands.at(-1);
+  assert.equal(lastTimerCmd?.action, "auto_timer");
+  if (lastTimerCmd?.action === "auto_timer") {
+    assert.equal(lastTimerCmd.seconds, 420);
   }
 
   // 3. switchModel online + HOST_OFFLINE fallback + rollback on failure
@@ -1119,8 +1117,8 @@ test("hardReset generation rotation aborts stale upward history requests, and sa
 
   // Start olderRun load, then reset same run via resetRevision -> loadingOlderRun must reset to false!
   const runs: RunInfo[] = [
-    { id: "run-2", startedAt: "2026-11-12T10:00:00.000Z", model: "gpt-5.4", seconds: 1800, drivers: [] },
-    { id: "run-1", startedAt: "2026-11-12T09:00:00.000Z", model: "gpt-5.4", seconds: 1800, drivers: [] },
+    { id: "run-2", startedAt: "2026-11-12T10:00:00.000Z", model: "gpt-5.4", drivers: [] },
+    { id: "run-1", startedAt: "2026-11-12T09:00:00.000Z", model: "gpt-5.4", drivers: [] },
   ];
   void engine.loadOlderRuns({ currentRunId: "run-2", runs });
   assert.equal(engine.getSnapshot().loadingOlderRun, true);
@@ -1281,5 +1279,139 @@ test("switchModel persists offline when sendRuntimeControl rejects with CORE_OFF
   assert.equal(snap.spawningCore, false);
   assert.deepEqual(snap.lastSpawnedRun, { runId: "20261113T120000Z-spawned", seq: 1 });
   assert.equal(snap.optimisticHost?.run, "20261113T120000Z-spawned");
+  engine.dispose();
+});
+
+test("STALE_EPOCH on control commands auto-refreshes live status + pool + run state and surfaces localized friendly message", async () => {
+  const { DEFAULT_STALE_EPOCH_MESSAGE, RuntimeControlError, isStaleEpochError } = await import(
+    "../features/live/live-session-store"
+  );
+  const enMessages = (await import("../messages/en.json")).default;
+  const zhMessages = (await import("../messages/zh.json")).default;
+
+  assert.equal(enMessages.shioriCockpit.staleEpochSynced, DEFAULT_STALE_EPOCH_MESSAGE);
+  assert.equal(zhMessages.shioriCockpit.staleEpochSynced, "控制周期已切换，状态已自动同步，请重试。");
+
+  const seenCommands: RuntimeControlCommand[] = [];
+  let poolReads = 0;
+  let updatedCalls = 0;
+
+  const engine = new LiveSessionEngine({
+    project: "diablo3",
+    transport: {
+      fetchEventPool: async () => {
+        poolReads += 1;
+        return { hostOnline: true, snapshot: makePoolSnapshot([]) };
+      },
+      sendRuntimeControl: async (_project, _workspace, cmd) => {
+        seenCommands.push(cmd);
+        if (cmd.action === "status") {
+          return {
+            status: {
+              runId: "run-2",
+              mode: "manual",
+              epoch: "ep-new-9",
+              connected: true,
+              timerSeconds: null,
+              remainingSeconds: null,
+            },
+          };
+        }
+        if ("expectedEpoch" in cmd && cmd.expectedEpoch === "ep-stale-1") {
+          throw new Error("Error: STALE_EPOCH: the control cycle changed");
+        }
+        return {
+          status: {
+            runId: "run-2",
+            mode: "auto",
+            epoch: "ep-new-9",
+            connected: true,
+            timerSeconds: 600,
+            remainingSeconds: 600,
+          },
+        };
+      },
+    },
+  });
+
+  engine.syncEventPool({ workspace: "/ws/diablo3", isLiveRun: true, enabled: true, refresh: false });
+  await flushMicrotasks();
+  assert.equal(poolReads, 1);
+
+  // 1. English friendly message + automatic status resync on STALE_EPOCH
+  await assert.rejects(
+    () =>
+      engine.setAutoStopTimer({
+        workspace: "/ws/diablo3",
+        run: "run-2",
+        baseUpdatedAt: "2026-11-12T10:05:00.000Z",
+        expectedEpoch: "ep-stale-1",
+        seconds: 600,
+        onUpdated: () => {
+          updatedCalls += 1;
+        },
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof RuntimeControlError);
+      assert.equal(isStaleEpochError(err), true);
+      assert.equal(err.message, enMessages.shioriCockpit.staleEpochSynced);
+      assert.doesNotMatch(err.message, /STALE_EPOCH/);
+      return true;
+    },
+  );
+  await flushMicrotasks();
+
+  assert.deepEqual(
+    seenCommands.map(c => c.action),
+    ["auto_timer", "status"],
+    "STALE_EPOCH must immediately query runtime status to resync the latest epoch",
+  );
+  assert.equal(engine.getSnapshot().optimisticHost?.status.epoch, "ep-new-9");
+  assert.equal(engine.getSnapshot().staleEpochNotice, enMessages.shioriCockpit.staleEpochSynced);
+  assert.equal(updatedCalls, 1, "onUpdated callback must fire to refresh run/get");
+  assert.equal(poolReads, 2, "Event Pool must also be nudged during STALE_EPOCH resync");
+
+  // 2. Chinese localized message + switchModel rollback & resync on STALE_EPOCH
+  engine.setStaleEpochMessage(zhMessages.shioriCockpit.staleEpochSynced);
+  await assert.rejects(
+    () =>
+      engine.switchModel({
+        workspace: "/ws/diablo3",
+        run: "run-2",
+        baseUpdatedAt: "2026-11-12T10:05:00.000Z",
+        baseServerModel: "gpt-5.4",
+        expectedEpoch: "ep-stale-1",
+        hostOnline: true,
+        model: "claude-opus-4-6",
+        serviceTier: null,
+        effort: null,
+        onUpdated: () => {
+          updatedCalls += 1;
+        },
+      }),
+    (err: unknown) => {
+      assert.ok(err instanceof RuntimeControlError);
+      assert.equal(err.message, "控制周期已切换，状态已自动同步，请重试。");
+      return true;
+    },
+  );
+  assert.equal(engine.getSnapshot().optimisticModel, null, "switchModel must roll back optimisticModel on STALE_EPOCH");
+  assert.equal(engine.getSnapshot().staleEpochNotice, "控制周期已切换，状态已自动同步，请重试。");
+  assert.equal(updatedCalls, 2);
+
+  // 3. Subsequent retry with the synced epoch succeeds and clears staleEpochNotice
+  await engine.setAutoStopTimer({
+    workspace: "/ws/diablo3",
+    run: "run-2",
+    baseUpdatedAt: "2026-11-12T10:05:00.000Z",
+    expectedEpoch: "ep-new-9",
+    seconds: 600,
+    onUpdated: () => {
+      updatedCalls += 1;
+    },
+  });
+  assert.equal(engine.getSnapshot().staleEpochNotice, null);
+  assert.equal(engine.getSnapshot().optimisticHost?.status.timerSeconds, 600);
+
   engine.dispose();
 });

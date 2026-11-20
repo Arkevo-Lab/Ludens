@@ -423,7 +423,7 @@ export type RuntimeControlCommandDto =
       expectedEpoch?: string | null;
     }
   | {
-      action: "auto_budget";
+      action: "auto_timer";
       seconds: number | null;
       runId?: string;
       expectedEpoch?: string | null;

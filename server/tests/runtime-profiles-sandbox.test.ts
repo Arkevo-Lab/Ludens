@@ -180,7 +180,6 @@ test("remote WS sessions enforce managed-sandbox capability restrictions across 
       input: {
         name: "managed-cloud-ws",
         driver: "cua",
-        seconds: 1200,
       },
     })) as { id: string; workspace: string };
     expect(createdManaged.workspace).toBe(join(home, "workspaces", "managed-cloud-ws"));
@@ -189,12 +188,12 @@ test("remote WS sessions enforce managed-sandbox capability restrictions across 
       action: "updateStudioConfig",
       workspaceId: createdManaged.id,
       patch: {
-        seconds: 900,
+        compactionThreshold: 64000,
         pet: false,
         storage: { mode: "ephemeral" },
       },
-    })) as { config: { seconds: number; storage: { mode: string } } };
-    expect(updatedSafeStudio.config.seconds).toBe(900);
+    })) as { config: { compactionThreshold: number; storage: { mode: string } } };
+    expect(updatedSafeStudio.config.compactionThreshold).toBe(64000);
     expect(updatedSafeStudio.config.storage.mode).toBe("ephemeral");
 
     const updatedSafeStorage = await remoteClient.call("storage/update", {
@@ -621,7 +620,7 @@ test("legacy dashboard properties in config.json and ludens.json are silently st
       JSON.stringify({
         version: 1,
         workspaceRoot: join(home, "workspaces"),
-        defaults: { seconds: 600, dashboard: false, pet: true },
+        defaults: { compactionThreshold: 64000, dashboard: false, pet: true },
       }),
       "utf8",
     );
@@ -635,11 +634,11 @@ test("legacy dashboard properties in config.json and ludens.json are silently st
 
     // 2. Workspace ludens.json with legacy `dashboard`
     const parsedLaunch = parseWorkspaceLaunchConfig(
-      { driver: "cua", dashboard: true, pet: false, seconds: 900 },
+      { driver: "cua", dashboard: true, pet: false, compactionThreshold: 64000 },
       { id: "cua", transport: "stdio" },
     );
     expect("dashboard" in parsedLaunch).toBe(false);
-    expect(parsedLaunch).toMatchObject({ driver: "cua", pet: false, seconds: 900 });
+    expect(parsedLaunch).toMatchObject({ driver: "cua", pet: false, compactionThreshold: 64000 });
 
     await writeFile(
       join(wsDir, "ludens.json"),

@@ -62,7 +62,7 @@ async function fixture() {
   }});
   const closeBaseware = await listenBaseware(basewareSocket, core);
   const devices = await connectBaseware({socket: basewareSocket, seconds: 60, runDir, record});
-  const runtime = new Runtime(devices, record, 60, "integration-run");
+  const runtime = new Runtime(devices, record, "integration-run");
   const env = { ...process.env, LUDENS_SOCKET: ludensSocket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "integration-run", BASEWARE_SOCKET: basewareSocket,
     PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(delimiter),
     PYTHONPATH: join(import.meta.dir, "../python") };

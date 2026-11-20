@@ -109,10 +109,9 @@ export function validateGlobalConfig(value: unknown): LudensConfig {
   if (!object(value.defaults)) throw new Error("defaults must be an object");
   const defaults: WorkspaceDefaults = {};
   for (const [key, setting] of Object.entries(value.defaults)) {
-    if (["seconds", "requests", "compactionThreshold"].includes(key)) {
+    if (key === "compactionThreshold") {
       if (typeof setting !== "number" || !Number.isSafeInteger(setting) || setting <= 0) throw new Error(`defaults.${key} must be a positive integer`);
-      if (key === "seconds" && setting * 1000 > 2_147_483_647) throw new Error("defaults.seconds exceeds the control timer range");
-      defaults[key as "seconds" | "requests" | "compactionThreshold"] = setting;
+      defaults.compactionThreshold = setting;
     } else if (key === "dashboard") {
       // Silently ignore legacy `defaults.dashboard` so existing ~/.ludens/config.json files remain readable.
       continue;

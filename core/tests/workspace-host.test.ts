@@ -138,8 +138,8 @@ test("hosts route by workspace, resume only its selected session, and can start 
     await writeFile(join(first.workspace, "notes.txt"), "Keep this learned material.\n");
     await writeFile(join(first.workspace, "AGENTS.md"), "Keep these task instructions.\n");
     await writeFile(join(first.workspace, "baseware.json"), JSON.stringify({ stale: true }));
-    const firstHost = testbed.launch(first.workspace, ["--seconds", "111"], {}, true);
-    const secondHost = testbed.launch(second.workspace, ["--seconds", "222"]);
+    const firstHost = testbed.launch(first.workspace, [], {}, true);
+    const secondHost = testbed.launch(second.workspace, []);
     const [one, two] = await Promise.all([ready(firstHost), ready(secondHost)]);
     expect(one.socket).toBe(first.socket);
     expect(two.socket).toBe(second.socket);
@@ -162,7 +162,7 @@ test("hosts route by workspace, resume only its selected session, and can start 
         workspace: state.workspace, resume: join(state.sessionsDir, "selected.jsonl"), cwd: state.workspace,
       });
       expect(await testbed.status(state.workspace, state === first)).toMatchObject({ runId: result.runId, mode: "manual",
-        maxSeconds: state === first ? 111 : 222 });
+        timerSeconds: null });
     }
     const firstGuide = await readFile(join(first.workspace, "AGENTS.md"), "utf8");
     expect(firstGuide).toBe("Keep these task instructions.\n");

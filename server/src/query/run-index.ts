@@ -326,7 +326,7 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
           if (nextAutoEpoch) activeEpoch = nextAutoEpoch;
           state.autoStarted = Date.parse(event.at);
           if (event.trace.epoch) await index.store("run-cycles").put(epoch,
-            { epoch, startedAt: event.at, maxSeconds: typeof d.maxSeconds === "number" ? d.maxSeconds : null }, { position, epoch });
+            { epoch, startedAt: event.at, timerSeconds: typeof d.timerSeconds === "number" ? d.timerSeconds : null }, { position, epoch });
         } else if (state.autoStarted !== undefined) {
           state.elapsedMs += Date.parse(event.at) - state.autoStarted;
           delete state.autoStarted;
@@ -335,7 +335,7 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
           // Close the cycle record with its stop reason, keeping its start position.
           const targetEpoch = event.trace.epoch || activeEpoch;
           const cycleStore = index.store("run-cycles");
-          const existing = await cycleStore.get<{ epoch: string; startedAt: string; maxSeconds?: number | null }>(targetEpoch);
+          const existing = await cycleStore.get<{ epoch: string; startedAt: string; timerSeconds?: number | null }>(targetEpoch);
           if (existing) {
             await cycleStore.put(targetEpoch, { ...existing, endedAt: event.at,
               ...(typeof d.reason === "string" ? { reason: d.reason } : {}) },
@@ -344,18 +344,18 @@ export async function createRunReducer(index: LogIndex, options: { cold?: boolea
         }
         if (d.mode === "manual") activeEpoch = "";
       }
-      if (event.type === "control_budget") {
+      if (event.type === "control_timer") {
         if (state.lastControl) state.lastControl = { ...state.lastControl,
-          maxSeconds: typeof d.maxSeconds === "number" ? d.maxSeconds : null,
+          timerSeconds: typeof d.timerSeconds === "number" ? d.timerSeconds : null,
           remainingSeconds: typeof d.remainingSeconds === "number" ? d.remainingSeconds : null,
           at: event.at };
         if (epoch || activeEpoch) {
           // A live timer change updates its cycle in place; the start record stays untouched.
           const targetEpoch = epoch || activeEpoch;
           const cycleStore = index.store("run-cycles");
-          const existing = await cycleStore.get<{ epoch: string; startedAt: string; maxSeconds?: number | null; endedAt?: string; reason?: string }>(targetEpoch);
+          const existing = await cycleStore.get<{ epoch: string; startedAt: string; timerSeconds?: number | null; endedAt?: string; reason?: string }>(targetEpoch);
           if (existing) {
-            await cycleStore.put(targetEpoch, { ...existing, maxSeconds: typeof d.maxSeconds === "number" ? d.maxSeconds : null },
+            await cycleStore.put(targetEpoch, { ...existing, timerSeconds: typeof d.timerSeconds === "number" ? d.timerSeconds : null },
               { position: cycleStore.meta(targetEpoch)?.position ?? position, epoch: targetEpoch });
           }
         }

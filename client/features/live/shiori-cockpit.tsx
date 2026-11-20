@@ -58,6 +58,7 @@ import { CachedObservationImg } from "@/features/live/live-media-cache";
 import {
   getLiveSessionEngine,
   isDeviceBusyError,
+  isStaleEpochError,
   type EventPoolCommand,
   type RuntimeControlCommand,
 } from "@/features/live/live-session-store";
@@ -86,8 +87,8 @@ import { clockTime } from "@/features/live/run-visuals";
 import { runWindowSummary } from "@ludens/protocol/run-identity";
 import type { Call, Observation, RunData, RunInfo } from "@ludens/protocol/types";
 
-// The run budget is drawn as this many pixel blocks.
-const BUDGET_BLOCKS = 24;
+// The countdown timer is drawn as this many pixel blocks.
+const TIMER_BLOCKS = 24;
 
 export type RuntimeControlAction = RuntimeControlCommand;
 export type EventPoolClientCommand = EventPoolCommand;
@@ -211,27 +212,27 @@ function useLiveUpdatedDeltaSec(enabled: boolean, statusAnchorMs: number): numbe
 
 function computeLiveTimerValues(options: {
   isAuto: boolean;
-  activeMaxSeconds: number | null;
+  activeTimerSeconds: number | null;
   baseCycleElapsed: number;
   rawRemainingSeconds: number | null;
   updatedDeltaSec: number;
 }) {
-  const { isAuto, activeMaxSeconds, baseCycleElapsed, rawRemainingSeconds, updatedDeltaSec } = options;
+  const { isAuto, activeTimerSeconds, baseCycleElapsed, rawRemainingSeconds, updatedDeltaSec } = options;
   const cycleElapsedSeconds =
-    activeMaxSeconds != null
-      ? Math.min(activeMaxSeconds, baseCycleElapsed + updatedDeltaSec)
+    activeTimerSeconds != null
+      ? Math.min(activeTimerSeconds, baseCycleElapsed + updatedDeltaSec)
       : baseCycleElapsed + updatedDeltaSec;
   const liveRemainingSeconds =
-    isAuto && typeof rawRemainingSeconds === "number"
-      ? Math.max(0, Math.round(rawRemainingSeconds) - updatedDeltaSec)
-      : isAuto && activeMaxSeconds != null
-        ? Math.max(0, Math.round(activeMaxSeconds - cycleElapsedSeconds))
-        : null;
-  const budgetRatio =
-    activeMaxSeconds != null && activeMaxSeconds > 0
-      ? Math.min(100, Math.round((cycleElapsedSeconds / activeMaxSeconds) * 100))
+    isAuto && activeTimerSeconds != null
+      ? typeof rawRemainingSeconds === "number"
+        ? Math.max(0, Math.round(rawRemainingSeconds) - updatedDeltaSec)
+        : Math.max(0, Math.round(activeTimerSeconds - cycleElapsedSeconds))
+      : null;
+  const timerRatio =
+    activeTimerSeconds != null && activeTimerSeconds > 0
+      ? Math.min(100, Math.round((cycleElapsedSeconds / activeTimerSeconds) * 100))
       : 0;
-  return { cycleElapsedSeconds, liveRemainingSeconds, budgetRatio };
+  return { cycleElapsedSeconds, liveRemainingSeconds, timerRatio };
 }
 
 const LivePhaseInlineBadge = memo(function LivePhaseInlineBadge({
@@ -422,7 +423,7 @@ export function formatCycleReason(reason: string | null, t: (key: string) => str
     return t("stopReasonLoopCustom").replace("{reason}", detail);
   }
   const lower = reason.toLowerCase();
-  if (lower.includes("budget exhausted") || reason === "time budget") return t("stopReasonBudget");
+  if (lower === "timer expired" || lower.includes("timer expired")) return t("stopReasonTimer");
   if (lower.includes("device disconnected") || lower.includes("econnreset")) {
     return t("stopReasonDisconnected");
   }
@@ -507,8 +508,8 @@ const CodexSessionDivider = memo(function CodexSessionDivider({
           {segment.isActive && (
             <span className="codex-session-divider-meta">
               ·{" "}
-              {segment.maxSeconds != null
-                ? `${t("segmentLimitLabel")} ${formatDurationCompact(segment.maxSeconds, locale)}`
+              {segment.timerSeconds != null
+                ? `${t("segmentLimitLabel")} ${formatDurationCompact(segment.timerSeconds, locale)}`
                 : `∞ ${t("durationUnbounded")}`}
             </span>
           )}
@@ -1054,6 +1055,14 @@ function resolveCallForTurn(
 
 export type ComposerMode = "event" | "start" | "steer";
 
+function formatControlFailure(cause: unknown, staleEpochMessage: string): string {
+  const msg = cause instanceof Error ? cause.message : String(cause);
+  if (isStaleEpochError(cause) && msg.includes("STALE_EPOCH")) {
+    return staleEpochMessage;
+  }
+  return msg;
+}
+
 function LiveStopTimerControl({
   remainingSeconds,
   disabled = false,
@@ -1106,7 +1115,7 @@ function LiveStopTimerControl({
       await onApplyTimer(seconds);
       setOpen(false);
     } catch (cause) {
-      setErr(cause instanceof Error ? cause.message : String(cause));
+      setErr(formatControlFailure(cause, t("staleEpochSynced")));
     } finally {
       setBusy(false);
     }
@@ -1192,7 +1201,7 @@ function LiveStopTimerControl({
                     setErr(null);
                     void onExtendTimer(900)
                       .then(() => setOpen(false))
-                      .catch(cause => setErr(cause instanceof Error ? cause.message : String(cause)))
+                      .catch(cause => setErr(formatControlFailure(cause, t("staleEpochSynced"))))
                       .finally(() => setBusy(false));
                   } else {
                     void apply(Math.max(60, Math.round((remainingSeconds ?? 0) + 900)));
@@ -1276,7 +1285,7 @@ function LiveStopTimerControl({
 export interface LiveTimerSpec {
   tickEnabled: boolean;
   statusAnchorMs: number;
-  activeMaxSeconds: number | null;
+  activeTimerSeconds: number | null;
   baseCycleElapsed: number;
   rawRemainingSeconds: number | null;
 }
@@ -1301,7 +1310,7 @@ const LiveComposerTimerSlot = memo(function LiveComposerTimerSlot({
   const computedRemaining = spec
     ? computeLiveTimerValues({
         isAuto: true,
-        activeMaxSeconds: spec.activeMaxSeconds,
+        activeTimerSeconds: spec.activeTimerSeconds,
         baseCycleElapsed: spec.baseCycleElapsed,
         rawRemainingSeconds: spec.rawRemainingSeconds,
         updatedDeltaSec,
@@ -1343,9 +1352,9 @@ const LiveRuntimeTelemetryHeader = memo(function LiveRuntimeTelemetryHeader({
 }) {
   const t = useTranslations("shioriCockpit");
   const updatedDeltaSec = useLiveUpdatedDeltaSec(spec.tickEnabled, spec.statusAnchorMs);
-  const { cycleElapsedSeconds, liveRemainingSeconds, budgetRatio } = computeLiveTimerValues({
+  const { cycleElapsedSeconds, liveRemainingSeconds, timerRatio } = computeLiveTimerValues({
     isAuto,
-    activeMaxSeconds: spec.activeMaxSeconds,
+    activeTimerSeconds: spec.activeTimerSeconds,
     baseCycleElapsed: spec.baseCycleElapsed,
     rawRemainingSeconds: spec.rawRemainingSeconds,
     updatedDeltaSec,
@@ -1353,7 +1362,7 @@ const LiveRuntimeTelemetryHeader = memo(function LiveRuntimeTelemetryHeader({
 
   return (
     <>
-      <div className="codex-runtime-header shiori-budget-header">
+      <div className="codex-runtime-header shiori-timer-header">
         <h3 className="codex-dock-heading" title={t("telemetryCardTitle")}>
           {t("telemetryCardTitle")}
         </h3>
@@ -1384,21 +1393,21 @@ const LiveRuntimeTelemetryHeader = memo(function LiveRuntimeTelemetryHeader({
         </div>
       </div>
 
-      {isAuto && spec.activeMaxSeconds != null && liveRemainingSeconds != null && (
+      {isAuto && spec.activeTimerSeconds != null && liveRemainingSeconds != null && (
         <div
-          className="shiori-budget-bar"
+          className="shiori-timer-bar"
           role="progressbar"
-          aria-valuenow={budgetRatio}
+          aria-valuenow={timerRatio}
           aria-valuemin={0}
           aria-valuemax={100}
         >
-          {Array.from({ length: BUDGET_BLOCKS }, (_, index) => {
-            const lit = Math.round((budgetRatio / 100) * BUDGET_BLOCKS);
+          {Array.from({ length: TIMER_BLOCKS }, (_, index) => {
+            const lit = Math.round((timerRatio / 100) * TIMER_BLOCKS);
             return (
               <i
                 key={index}
                 data-on={index < lit || undefined}
-                data-head={(index === lit - 1 && lit < BUDGET_BLOCKS) || undefined}
+                data-head={(index === lit - 1 && lit < TIMER_BLOCKS) || undefined}
               />
             );
           })}
@@ -1470,6 +1479,9 @@ export function ShioriComposer({
   onUpdated(): void;
 }) {
   const t = useTranslations("shioriCockpit");
+  if (!sessionActions && project) {
+    getLiveSessionEngine(project).setStaleEpochMessage(t("staleEpochSynced"));
+  }
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [draft, setDraft] = useState("");
@@ -1789,7 +1801,7 @@ export function ShioriComposer({
       }
       if (replyTarget?.id === eventId) onSelectReplyTarget?.(null);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(formatControlFailure(cause, t("staleEpochSynced")));
     } finally {
       setLocalSubmitting(false);
     }
@@ -1890,7 +1902,7 @@ export function ShioriComposer({
           feedback: text || t("resumedDefaultPrompt"),
         };
       } else {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(formatControlFailure(cause, t("staleEpochSynced")));
       }
     } finally {
       setLocalSubmitting(false);
@@ -1918,7 +1930,7 @@ export function ShioriComposer({
       setLastSent(feedbackLabel);
     } catch (cause) {
       if (!isDeviceBusyError(cause)) {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(formatControlFailure(cause, t("staleEpochSynced")));
       }
     } finally {
       setLocalSubmitting(false);
@@ -2595,6 +2607,7 @@ export function ShioriWorkbench({
     isLiveRun,
     refresh,
     olderRunLoadFailedText: t("olderRunLoadFailed"),
+    staleEpochMessage: t("staleEpochSynced"),
     onUpdated,
     onRunSpawned,
   });
@@ -3240,20 +3253,20 @@ export function ShioriWorkbench({
 
   const summary = data.summary;
   const latestCycle = data.cycles.at(-1);
-  const activeMaxSeconds =
-    isAuto && live && "maxSeconds" in live
-      ? (live.maxSeconds ?? null)
-      : latestCycle && "maxSeconds" in latestCycle
-        ? (latestCycle.maxSeconds ?? null)
-        : (data.manifest.seconds ?? null);
+  const activeTimerSeconds =
+    isAuto && live && "timerSeconds" in live
+      ? (live.timerSeconds ?? null)
+      : latestCycle && "timerSeconds" in latestCycle
+        ? (latestCycle.timerSeconds ?? null)
+        : null;
   const elapsedSeconds = summary?.elapsedSeconds ?? 0;
   const latestCycleDurationSeconds =
     latestCycle?.startedAt && latestCycle?.endedAt
       ? Math.max(0, Math.round((Date.parse(latestCycle.endedAt) - Date.parse(latestCycle.startedAt)) / 1000))
       : null;
   const baseCycleElapsed =
-    isAuto && activeMaxSeconds != null && typeof live?.remainingSeconds === "number"
-      ? Math.max(0, activeMaxSeconds - live.remainingSeconds)
+    isAuto && activeTimerSeconds != null && typeof live?.remainingSeconds === "number"
+      ? Math.max(0, activeTimerSeconds - live.remainingSeconds)
       : isAuto && latestCycle?.startedAt && Number.isFinite(Date.parse(latestCycle.startedAt))
         ? Math.max(0, Math.floor((statusAnchorMs - Date.parse(latestCycle.startedAt)) / 1000))
         : (latestCycleDurationSeconds ?? elapsedSeconds);
@@ -3264,11 +3277,11 @@ export function ShioriWorkbench({
     () => ({
       tickEnabled: timerTickEnabled,
       statusAnchorMs,
-      activeMaxSeconds,
+      activeTimerSeconds,
       baseCycleElapsed,
       rawRemainingSeconds,
     }),
-    [timerTickEnabled, statusAnchorMs, activeMaxSeconds, baseCycleElapsed, rawRemainingSeconds],
+    [timerTickEnabled, statusAnchorMs, activeTimerSeconds, baseCycleElapsed, rawRemainingSeconds],
   );
 
   const applyLiveStopTimer = useCallback(

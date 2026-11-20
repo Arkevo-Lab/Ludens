@@ -109,7 +109,7 @@ All `ludens` commands (`ludens config ...`, `ludens workspace <init|list|open|fo
 
 Useful flags for `ludens workspace init` and `ludens workspace up`:
 
-- `ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]`
+- `ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--register-driver] [--pet | --no-pet]`
 - `ludens workspace up [--preempt] [--services <emulator,baseware,core>]` (`--preempt` preempts a conflicting active Core on the same device; `--services` scopes startup to selected services)
 
 If you move or import an existing directory later, register it with `ludens workspace open <dir> [--new-id]` or migrate legacy state via `ludens workspace import <dir> [--legacy-state <dir>] [--previous-workspace <dir>]`.
@@ -119,7 +119,7 @@ If you move or import an existing directory later, register it with `ludens work
 Ludens separates supervision from direct operation across two explicit control modes:
 
 - **Manual Standby** (`manual`): You hold the active input lease. **Shiori** (Ludens's Agent Thread Core) stays warm and ready in **Warm Standby** without dispatching actuation calls.
-- **Auto Run** (`auto`): Shiori holds the active **Control Cycle** (`epoch`), executing turns against the Baseware driver and the resident `perception.py` loop within your time and request budget.
+- **Auto Run** (`auto`): Shiori holds the active **Control Cycle** (`epoch`), executing turns against the Baseware driver and the resident `perception.py` loop unbounded until manually paused (or until an explicit `--seconds` / `ludens auto timer` countdown expires).
 
 ### Operating from Console (`Live`, `?view=live`)
 
@@ -162,7 +162,6 @@ Other handy lifecycle commands:
 | `game` / `port` / `cuaCommand` | unset | Optional target binary path, controller port, or custom CUA server command |
 | `model` | `openai-codex/gpt-6.2-sol` | Primary model identifier (`provider/model`) for Shiori |
 | `serviceTier` / `effort` | unset | Optional inference tier (`none`, `priority`, `ultrafast`) and reasoning effort (`none`..`max`) |
-| `seconds` / `requests` | `1800` / `1000` | Default per-run Auto Run duration budget (seconds) and request limit |
 | `compactionThreshold` | unset | Optional token threshold triggering background context compaction |
 | `connection` | inherited | Multimodal transport flags (`openaiWebsockets`, `cacheRetention`, `appendOnlyContext`, `imageUrls`) |
 | `machines` | unset | Allowed and active node list (`{ active?, allowed }`) for multi-machine routing |
@@ -175,8 +174,6 @@ Use `ludens config` to set machine-wide defaults stored under `~/.ludens/` (over
 ludens config show
 ludens config set workspaceRoot "$HOME/ludens-workspaces"
 ludens config set defaults.model "openai-codex/gpt-6.2-sol"
-ludens config set defaults.seconds 1800
-ludens config set defaults.requests 1000
 ludens config set defaults.pet false
 ludens config set defaults.connection.imageUrls.enabled true
 ```

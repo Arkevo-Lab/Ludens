@@ -356,7 +356,7 @@ test("real OMP preserves image prefixes and native tool traces while shell IPC r
   const trace = new ModelTrace(log, () => ({epoch: epoch!, ...extension.context()}));
   const extension = createLudensExtension({runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")), basewareSocket,
     binDir: resolve(import.meta.dir, "../bin"),
-    cycle: () => ({epoch: epoch!, signal: new AbortController().signal}), maxRequests: 7, trace: trace.current});
+    cycle: () => ({epoch: epoch!, signal: new AbortController().signal}), trace: trace.current});
   const received: string[] = [];
   const server = Bun.serve({hostname: "127.0.0.1", port: 0, async fetch(request) {
     received.push(await request.text());

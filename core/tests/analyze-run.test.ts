@@ -164,7 +164,7 @@ test("analysis without speculation events has zero lifecycle counts and no model
   const event = fixture();
   const report = await analyze([
     event("control", "one", { mode: "auto", epoch: "one" }),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
   ]);
   expect(report.compactionSpeculation).toEqual([]);
   expect(report.summary.compactionSpeculation).toEqual(emptySpeculation);
@@ -268,7 +268,7 @@ test("analysis pairs concurrent capabilities by span, keeps late cancellation, a
     event("python_capability", "one", { capabilityId: "macro", codeSHA: "version-a" }, trace("b", "tool")),
     event("python_capability_result", "one", { outcome: "success", durationMs: 10 }, trace("b", "tool")),
     event("capability_end", "one", { outcome: "success", durationMs: 12 }, trace("b", "tool")),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
     event("python_capability_result", "one", { outcome: "cancelled", durationMs: 30 }, trace("a", "tool")),
     event("capability_end", "one", { outcome: "cancelled", durationMs: 32 }, trace("a", "tool")),
     native(event("shiori_run_end", "one", { scope: "agent_loop", summary: { usage: { totalTokens: 100 } }, coverage: {} }, trace("loop"))),
@@ -304,7 +304,7 @@ test("analysis separates local Python calls from runners and actions, retaining 
     event("command", "one", { controllerId: "pad", requiresControl: true }, { ...trace("device", "inner"), operationId: "input" }),
     event("execution", "one", { id: "input", status: "completed", timing: { requestedAtMs: 1, receivedAtMs: 2 } }, { ...trace("device", "inner"), operationId: "input" }),
     local("python_call_end", "one", "inner", "outer", { outcome: "success", durationMs: 5 }),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
     event("control", "two", { mode: "auto", epoch: "two" }),
     local("python_call_start", "two", "outer", "runner"),
     local("python_call_end", "one", "outer", "runner", { outcome: "cancelled", durationMs: 10, error: "cancelled" }),
@@ -430,7 +430,7 @@ test("analysis retains ready and applied boundaries and reports candidate durati
     event("compaction_speculation", "one", { stage: "started", snapshotLeafId: "second-leaf" }),
     event("compaction_speculation", "one", { stage: "armed", snapshotLeafId: "second-leaf", durationMs: 86_000 }),
     event("compaction_speculation", "one", { stage: "applied", snapshotLeafId: "second-leaf" }),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
   ];
   const report = await analyze(events);
   expect(report.compactionSpeculation).toHaveLength(7);
@@ -455,7 +455,7 @@ test("analysis isolates lifecycle to the chosen epoch and retains its late HTTP 
     event("compaction_speculation", "selected", { stage: "started", snapshotLeafId: "same-leaf" }),
     event("compaction_http_start", "selected", { method: "POST", bodyBytes: 123 }, { httpId: "reused-http" }),
     event("compaction_speculation", "old", { stage: "armed", snapshotLeafId: "same-leaf", durationMs: 99_999 }),
-    event("control", "selected", { mode: "manual", reason: "time budget" }),
+    event("control", "selected", { mode: "manual", reason: "timer expired" }),
     event("compaction_http_error", "selected", { aborted: true, error: "cancelled", fetchDurationMs: 3000 }, { httpId: "reused-http" }),
     event("compaction_speculation", "selected", { stage: "failed", error: "cancelled" }),
     event("control", "next", { mode: "auto", epoch: "next" }),
@@ -465,7 +465,7 @@ test("analysis isolates lifecycle to the chosen epoch and retains its late HTTP 
     event("compaction_speculation", "next", { stage: "armed", durationMs: 90_000 }),
   ];
   const report = await analyze(events, "selected");
-  expect(report.window).toMatchObject({ epoch: "selected", stopReason: "time budget", observedElapsedMs: 4000 });
+  expect(report.window).toMatchObject({ epoch: "selected", stopReason: "timer expired", observedElapsedMs: 4000 });
   expect(report.compactionSpeculation.map((item: { seq: number }) => item.seq)).toEqual([5, 10]);
   expect(report.summary.compactionSpeculation).toEqual({ ...emptySpeculation, started: 1, failed: 1 });
   expect(report.summary.compactionHttp).toMatchObject({ attempts: 1, abortedAttempts: 1, responsesReceived: 0, preparedBodyBytes: 123 });
@@ -503,7 +503,7 @@ test("analysis measures foreground compaction windows including late cancellatio
     event("auto_compaction_end", "one", { errorMessage: "fixture failure" }),
     event("auto_compaction_start", "one", { reason: "threshold" }),
     event("auto_compaction_end", "another-epoch", { aborted: false }),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
     event("auto_compaction_end", "one", { aborted: true }),
   ]);
   expect(report.compactions[0]).toMatchObject({ seq: 2, atMs: 2000, epoch: "one" });
@@ -529,7 +529,7 @@ test("analysis pairs interleaved maintenance identities and preserves explicit d
     event("auto_compaction_start", "one", { reason: "threshold" }, first),
     event("auto_compaction_start", "one", { reason: "threshold" }, second),
     event("auto_compaction_end", "one", { aborted: false, durationMs: 500 }, first),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
     event("auto_compaction_end", "one", { errorMessage: "candidate unavailable", durationMs: 750 }, second),
     event("compaction_speculation", "one", { stage: "cancelled" }, first),
   ]);
@@ -556,7 +556,7 @@ test("analysis reports explicit native retry warnings despite HTTP 200 and prese
     event("compaction_http_end", "one", { status: 200 }, { httpId: "second" }),
     event("compaction_retry", "one", { attempt: 2, retryDelayMs: 2000, model: { name: "private-model" }, error: { message: "private-error" } }),
     event("compaction_retry", "other", { attempt: 1, retryDelayMs: 1000, error: "private-other-epoch" }),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
     event("compaction_retry", "one", { attempt: 1, retryDelayMs: 1000, error: "late retry" }),
   ];
   const report = await analyze(events, "one");
@@ -601,7 +601,7 @@ test("analysis counts tool errors separately from model failures and preserves a
     event("tool_start", "selected", { toolName: "observe", args: { sensorId: "screen", argv: ["capture", "--delay-ms", "2000"] } }, corrected),
     event("tool_end", "selected", { toolName: "observe", isError: false }, corrected),
     event("tool_start", "selected", { toolName: "exec" }, { modelCallId: "pending-call", toolCallId: "pending-exec" }),
-    event("control", "selected", { mode: "manual", reason: "time budget" }),
+    event("control", "selected", { mode: "manual", reason: "timer expired" }),
     event("control", "next", { mode: "auto", epoch: "next" }),
     event("tool_start", "next", { toolName: "observe" }, corrected),
     event("tool_end", "next", { toolName: "observe", isError: true }, corrected),
@@ -684,7 +684,7 @@ test("analysis retains controller errors when the shell batch succeeds and isola
       timing: { requestedAtMs: 12_000, receivedAtMs: 13_000 } }, success),
     event("exec_result", "selected", { exitCode: 0, stderr: `${error}\nUnrelated error text\n` }, trace),
     event("tool_end", "selected", { toolName: "exec", isError: false }, trace),
-    event("control", "selected", { mode: "manual", reason: "time budget" }),
+    event("control", "selected", { mode: "manual", reason: "timer expired" }),
     event("execution_error", "selected", { error: "late error", aborted: true }, failed),
     event("control", "next", { mode: "auto", epoch: "next" }),
     event("execution_error", "next", { error: "next error", aborted: false }, failed),
@@ -756,7 +756,7 @@ test("analysis attributes late compaction lifecycle to its epoch without extendi
     event("compaction_speculation", "one", { stage: "started", snapshotLeafId: "same-leaf" }, first),
     event("auto_compaction_start", "one", { reason: "threshold" }, first),
     event("compaction_speculation", "one", { stage: "armed", durationMs: 999_999 }, { epoch: null }),
-    event("control", "one", { mode: "manual", reason: "time budget" }),
+    event("control", "one", { mode: "manual", reason: "timer expired" }),
     event("control", "two", { mode: "auto", epoch: "two" }),
     event("compaction_speculation", "two", { stage: "started", snapshotLeafId: "same-leaf" }, second),
     event("compaction_http_start", "one", { bodyBytes: 100 }, http),
@@ -766,7 +766,7 @@ test("analysis attributes late compaction lifecycle to its epoch without extendi
     event("compaction_speculation", "one", { stage: "applied" }, first),
     event("compaction_speculation", "two", { stage: "failed", error: "unattributed" }, { epoch: null }),
     event("compaction_speculation", "two", { stage: "failed", error: "candidate-b failed" }, second),
-    event("control", "two", { mode: "manual", reason: "time budget" }),
+    event("control", "two", { mode: "manual", reason: "timer expired" }),
   ].map(row => ({ ...row, source: { component: row.type === "control" ? "ludens" : "shiori" } }));
   const report = await analyze(events, "one");
   expect(report.window.observedElapsedMs).toBe(4000);

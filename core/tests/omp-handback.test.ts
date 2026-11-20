@@ -26,7 +26,7 @@ test("native OMP handback aborts the active tool and skips queued tool side effe
   const model = resolveOmpImageModel(registry, "openai-codex/gpt-6.2-sol");
   let cycle: Cycle | undefined;
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")),
-    basewareSocket: "/tmp/unused.sock", binDir: "/tmp", maxRequests: 10,
+    basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
     cycle: () => { if (!cycle) throw new Error("No active control cycle"); return cycle; },
   });
   const parameters = z.object({});

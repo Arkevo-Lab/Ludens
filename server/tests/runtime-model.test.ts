@@ -25,8 +25,6 @@ test("session model events update run and activity index projections", async () 
       workspaceId: "ws-1",
       drivers: [],
       model: "openai-codex/gpt-6.2-sol",
-      seconds: 300,
-      maxRequests: 10,
       compactionThreshold: null,
     }));
     await writeFile(join(runDir, "events.jsonl"), [

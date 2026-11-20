@@ -31,7 +31,7 @@ test("unified resident effects rotate real Baseware authority, reset inputs, and
   const closeDevice = await listenDevice(deviceSocket, core);
   const devices = await connectBaseware({ socket: deviceSocket, seconds: 30, runDir, record: log.record });
   const runtime = await createHostRuntime({ devices, workspace, runDir, state, log,
-    ludensSocket: socket, basewareSocket: deviceSocket, seconds: 30, maxRequests: 1 });
+    ludensSocket: socket, basewareSocket: deviceSocket });
   const closeHost = await listen(socket, runtime);
   const perception = runtime.perception!;
   const code = `from ludens_tools import capability, record

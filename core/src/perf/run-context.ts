@@ -10,10 +10,8 @@ export interface PerfContext {
   metadata: Record<string, unknown>;
   model: string;
   seconds: number;
-  maxRequests: number;
   seed: number;
   signal?: AbortSignal;
-  budget: { deadlineMs: number; signal: AbortSignal };
 }
 
 export interface PerfContextOptions {
@@ -29,6 +27,5 @@ export async function createPerfContext(root: string, options: PerfContextOption
   const seconds = options.seconds ?? 60;
   const log = new EventLog(runDir, { id: runId, now: () => performance.now() }, workspace);
   return { runDir, workspace, log, metadata: {}, model: options.model ?? "openai-codex/gpt-6.2-sol",
-    seconds, maxRequests: 1000, seed: options.seed ?? 7, signal: options.signal,
-    budget: { deadlineMs: Date.now() + seconds * 1000, signal: new AbortController().signal } };
+    seconds, seed: options.seed ?? 7, signal: options.signal };
 }

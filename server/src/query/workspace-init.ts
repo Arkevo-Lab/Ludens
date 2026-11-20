@@ -50,8 +50,6 @@ export interface LaunchConfig {
   model: string;
   serviceTier?: OmpServiceTier;
   effort?: OmpEffort;
-  seconds: number;
-  requests: number;
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
   machines?: WorkspaceMachinesBinding;
@@ -72,8 +70,6 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
     "model",
     "serviceTier",
     "effort",
-    "seconds",
-    "requests",
     "compactionThreshold",
     "connection",
     "machines",
@@ -111,8 +107,6 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
   const result = {
     ...(bridge && manifest?.defaultPort !== undefined ? { port: manifest.defaultPort } : {}),
     model: "openai-codex/gpt-6.2-sol",
-    seconds: 1800,
-    requests: 1000,
     pet: false,
     logging: { diagnostics: "normal" },
     ...cleanConfig,
@@ -125,9 +119,6 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
     || !["normal", "full"].includes(result.logging.diagnostics)
   ) {
     throw new Error("logging must contain diagnostics: normal|full");
-  }
-  for (const key of ["seconds", "requests"] as const) {
-    if (!Number.isInteger(result[key]) || result[key] <= 0) throw new Error(`${key} must be a positive integer`);
   }
   if (result.compactionThreshold !== undefined && (!Number.isInteger(result.compactionThreshold) || result.compactionThreshold <= 0)) {
     throw new Error("compactionThreshold must be a positive integer");
@@ -197,8 +188,6 @@ const ALLOWED_CREATE_KEYS = new Set([
   "model",
   "serviceTier",
   "effort",
-  "seconds",
-  "requests",
   "pet",
   "registerDriver",
 ]);
@@ -292,8 +281,6 @@ export function validateCreateWorkspacePayload(
   }
 
   const port = normalizePositiveInt(value.port, "port", 1, 65535);
-  const seconds = normalizePositiveInt(value.seconds, "seconds", 1);
-  const requests = normalizePositiveInt(value.requests, "requests", 1);
 
   let serviceTier: OmpServiceTier | null | undefined;
   if (value.serviceTier !== undefined) {
@@ -342,8 +329,6 @@ export function validateCreateWorkspacePayload(
     ...(trimOpt(value.model) ? { model: trimOpt(value.model) } : {}),
     ...(serviceTier !== undefined ? { serviceTier } : {}),
     ...(effort !== undefined ? { effort } : {}),
-    ...(seconds !== undefined ? { seconds } : {}),
-    ...(requests !== undefined ? { requests } : {}),
     ...(value.pet !== undefined ? { pet: value.pet } : {}),
     ...(value.registerDriver !== undefined ? { registerDriver: value.registerDriver } : {}),
   };
@@ -484,8 +469,6 @@ export async function initializeWorkspace(
   if (parsed.port !== undefined) rawConfig.port = parsed.port;
   if (parsed.cuaCommand !== undefined) rawConfig.cuaCommand = parsed.cuaCommand;
   if (parsed.model !== undefined) rawConfig.model = parsed.model;
-  if (parsed.seconds !== undefined) rawConfig.seconds = parsed.seconds;
-  if (parsed.requests !== undefined) rawConfig.requests = parsed.requests;
   if (parsed.pet !== undefined) rawConfig.pet = parsed.pet;
   if (parsed.serviceTier === null) {
     delete rawConfig.serviceTier;

@@ -28,7 +28,7 @@ Files in a single run directory `workspace/logs/<run-id>/`:
 
 | File / directory | Content and owner |
 | --- | --- |
-| `manifest.json` | Workspace paths, models, Driver list, budgets, effective log modes, Shiori implementation version, Git/prompt hashes, and `eventSources` external fact-source declarations. |
+| `manifest.json` | Workspace paths, models, Driver list, effective log modes, Shiori implementation version, Git/prompt hashes, and `eventSources` external fact-source declarations. |
 | `events.jsonl` | Ludens-written Schema v2 main event stream (call identities, statistics, and content references). |
 | `diagnostics.jsonl` | High-frequency internal-call diagnostics stream in `full` mode, read with on-demand pagination. |
 | `streams/` | Model streaming-response shards (`ludens-stream-v1` format; small leaf nodes inline, large nodes referencing `.ludens/archive/`). |

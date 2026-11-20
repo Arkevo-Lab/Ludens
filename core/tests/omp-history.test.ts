@@ -36,7 +36,7 @@ test.each([1, 26])("OMP persists batches of %i images and reuses the Codex prefi
   const control = new AbortController();
   const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "skill-versions")),
     basewareSocket: "/tmp/unused.sock", binDir: "/tmp",
-    maxRequests: 9, cycle: () => ({ epoch: "test", signal: control.signal }),
+    cycle: () => ({ epoch: "test", signal: control.signal }),
   });
   const settings = Settings.isolated({ "memory.backend": "off", "autolearn.enabled": false,
     "retry.enabled": false, "retry.modelFallback": false, "title.refreshOnReplan": false });

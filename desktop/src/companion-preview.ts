@@ -200,7 +200,7 @@ void app.whenReady().then(async () => {
     { id: 'design:tool', kind: 'tool', at: '', title: 'exec', status: 'running', text: '',
       tool: { intent: 'Move toward the stairs', args: { command: 'baseware controller pad play --inputs \'[{"atMs":0,"durationMs":600,"state":{"LY":1}}]\' --wait true' }, result: { exitCode: 0, stdout: 'Controller released.' } } },
     { id: 'design:system', kind: 'system', at: '', title: 'control', status: 'complete', text: '',
-      data: { mode: 'manual', reason: 'time budget' } },
+      data: { mode: 'manual', reason: 'timer expired' } },
     { id: 'design:diagnostic', kind: 'diagnostic', at: '', title: 'model_end', status: 'complete', text: '',
       data: { durationMs: 2410, cacheRead: '98.1%', transport: 'websocket' } },
   ]

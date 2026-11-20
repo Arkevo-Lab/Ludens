@@ -329,7 +329,7 @@ test("workspace registry reads only local logs and never falls back to old artif
     await mkdir(join(workspace, "logs/new"), { recursive: true });
     await writeFile(join(state, "workspace.json"), JSON.stringify({ workspace }));
     await registerFixture(root, "ws-workspace-a", workspace);
-    const manifest = JSON.stringify({ model: "test", seconds: 600, drivers: [{ id: "test", version: "1" }] });
+    const manifest = JSON.stringify({ model: "test", drivers: [{ id: "test", version: "1" }] });
     await writeFile(join(state, "runs/old/manifest.json"), manifest);
     await writeFile(join(workspace, "logs/new/manifest.json"), manifest);
     assert.equal(await resolveRun("ws-workspace-a", "new", root), join(workspace, "logs/new"));
@@ -750,7 +750,7 @@ test("catalog extracts startedAt and endedAt from run events.jsonl when present"
     const workspace = join(root, "workspace"), run = join(workspace, "logs", "2026-11-05T11-46-06.227Z");
     await registerFixture(root, "game", workspace);
     await mkdir(run, { recursive: true });
-    await writeFile(join(run, "manifest.json"), JSON.stringify({ model: "test", seconds: 600, drivers: [] }));
+    await writeFile(join(run, "manifest.json"), JSON.stringify({ model: "test", drivers: [] }));
     await writeFile(
       join(run, "events.jsonl"),
       [

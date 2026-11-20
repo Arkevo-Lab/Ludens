@@ -2623,7 +2623,7 @@ details.codex-step-group:not([open])::details-content {
 }
 
 .codex-runtime-header,
-.shiori-budget-header {
+.shiori-timer-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -2871,19 +2871,19 @@ details.codex-step-group:not([open])::details-content {
   color: var(--muted-foreground);
 }
 
-.shiori-budget-bar {
+.shiori-timer-bar {
   display: grid;
   grid-template-columns: repeat(24, minmax(0, 1fr));
   gap: 2px;
   height: 6px;
 }
-.shiori-budget-bar i {
+.shiori-timer-bar i {
   background: var(--input);
 }
-.shiori-budget-bar i[data-on] {
+.shiori-timer-bar i[data-on] {
   background: var(--text);
 }
-.shiori-budget-bar i[data-head] {
+.shiori-timer-bar i[data-head] {
   background: var(--gold);
 }
 

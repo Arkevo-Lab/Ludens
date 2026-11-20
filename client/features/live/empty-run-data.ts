@@ -16,7 +16,6 @@ export function synthesizeEmptyRunData(project: Project, locale?: string): RunDa
   const model = project.defaults?.model ?? project.core?.model ?? null;
   const serviceTier = project.defaults?.serviceTier ?? null;
   const effort = project.defaults?.effort ?? null;
-  const maxSeconds = project.defaults?.maxSeconds ?? null;
   const mode = project.core?.mode ?? "manual";
   const coreOnline = Boolean(project.core?.online);
   const reason = locale === "zh" ? "Core 未启动（发送消息后按需拉起）" : "Core offline (spawns on demand)";
@@ -31,8 +30,6 @@ export function synthesizeEmptyRunData(project: Project, locale?: string): RunDa
       socket: "",
       drivers: [],
       model,
-      seconds: maxSeconds ?? 0,
-      maxRequests: 0,
       compactionThreshold: null,
     },
     cycles: [],
@@ -82,7 +79,7 @@ export function synthesizeEmptyRunData(project: Project, locale?: string): RunDa
       serviceTier,
       effort,
       thinking: false,
-      maxSeconds,
+      timerSeconds: null,
       remainingSeconds: null,
       launchedBy: project.core?.launchedBy,
       coreOffline: !coreOnline,

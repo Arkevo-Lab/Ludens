@@ -33,7 +33,7 @@
     },
     "perception": {
       "title": "Workspace Config",
-      "description": "Manage model & budget, transport, runtime services, session history, perception recording, and loop simulation."
+      "description": "Manage model & runtime config, transport, runtime services, session history, perception recording, and loop simulation."
     },
     "baseware": {
       "title": "Devices & Nodes · Baseware",
@@ -77,8 +77,6 @@
     "defaultsSectionTitle": "New Workspace Defaults",
     "defaultsModelLabel": "Default model",
     "defaultsModelHint": "Provider/model identifier applied when creating a workspace without --model.",
-    "defaultsSecondsLabel": "Default cycle budget",
-    "defaultsRequestsLabel": "Default request cap",
     "defaultsCompactionLabel": "Default compaction threshold",
     "defaultsPetLabel": "Launch Desktop Pet on run",
     "defaultsPetHint": "Automatically launch or connect Desktop Pet when starting a run.",
@@ -94,8 +92,6 @@
       "modelLabel": "Default model (defaults.model)",
       "modelHint": "Provider/model identifier used when creating a new workspace without --model.",
       "browseModels": "Browse Models…",
-      "secondsLabel": "Default cycle budget (seconds)",
-      "requestsLabel": "Default request cap (requests)",
       "compactionLabel": "Default compaction token threshold (tokens)",
       "compactionPlaceholder": "Leave blank for model default",
       "petLabel": "Launch Desktop Pet on workspace startup (defaults.pet)",
@@ -1203,7 +1199,6 @@
     "deviceOnly": "Device only",
     "min": "m",
     "sec": "s",
-    "budget": "budget",
     "minLong": "min",
     "roundSummary": "Round summary",
     "metric": {
@@ -1963,7 +1958,7 @@
     "stateAutoThinking": "Auto Run · Agent Thinking",
     "stateAutoIdle": "Auto Run Active",
     "stateManual": "Manual Standby",
-    "remainingBudgetHint": "Remaining cycle time budget",
+    "remainingTimerHint": "Remaining auto-stop timer countdown",
     "queuedBadge": "{count} queued",
     "deviceOnly": "Device only",
     "turnsCount": "{completed} turns · {actions} actions",
@@ -2140,7 +2135,7 @@
     "segmentRanFor": "Ran {duration}",
     "segmentLimitLabel": "Limit",
     "stopReasonManual": "Reclaimed manually",
-    "stopReasonBudget": "Duration reached",
+    "stopReasonTimer": "Timer expired",
     "stopReasonAwaitingHuman": "Paused · Awaiting human",
     "stopReasonDisconnected": "Device disconnected",
     "stopReasonLoopCompleted": "Loop completed",
@@ -2180,6 +2175,7 @@
     "timerUpdatedUnboundedFeedback": "Switched to ∞ continuous run",
     "timerUpdatedCountdownFeedback": "Auto-stop timer set for {duration}",
     "timerSetBtnHint": "Click to set or adjust the auto-stop countdown",
+    "staleEpochSynced": "Control cycle changed — status synced, please try again.",
     "clickToSwitchModeAuto": "Click to switch delivery mode (Event Pool / Steer Now)",
     "clickToSwitchModeManual": "Click to switch mode (Start Auto Run / Event Pool)",
     "locatingSegmentBanner": "Locating historical session segment…",
@@ -2236,7 +2232,7 @@
   },
   "workspaceStudio": {
     "title": "Workspace Config",
-    "subtitle": "Unified control plane for workspace model & budget, multimodal transport, background services, agent thread sessions, perception recording, and loop context simulation.",
+    "subtitle": "Unified control plane for workspace model & runtime config, multimodal transport, background services, agent thread sessions, perception recording, and loop context simulation.",
     "stopped": "Stopped",
     "startWorkspace": "Start Workspace",
     "startingWorkspace": "Starting…",
@@ -2252,7 +2248,7 @@
     "selectWorkspace": "Select a workspace from the header to inspect and configure its settings.",
     "loading": "Loading workspace config…",
     "tabs": {
-      "model": "Model & Budget",
+      "model": "Model & Runtime",
       "device": "Target Device",
       "connection": "Connection & Transport",
       "services": "Services & Session",
@@ -2280,17 +2276,12 @@
       "driverLaunchTitle": "Driver & Launch Parameters"
     },
     "modelSection": {
-      "title": "Model, Loop Budget & Driver Contract (ludens.json)",
-      "description": "Edit the workspace's primary reasoning model, control cycle budget, context compaction threshold, and driver launch parameters.",
+      "title": "Model & Driver Contract (ludens.json)",
+      "description": "Edit the workspace's primary reasoning model, context compaction threshold, and driver launch parameters.",
       "configureTransport": "Configure Transport",
       "modelLabel": "Workspace model (model)",
       "modelHint": "Provider/model identifier used by the Shiori agent thread in this workspace.",
       "browseModels": "Browse Models…",
-      "secondsLabel": "Cycle time budget (seconds)",
-      "secondsHint": "Time budget per Auto Run cycle before Core reclaims control or starts a new cycle.",
-      "requestsLabel": "Cycle request cap (requests)",
-      "requestsUnit": "reqs",
-      "requestsHint": "Maximum main-loop model requests allowed per cycle.",
       "compactionLabel": "Context compaction token threshold (compactionThreshold)",
       "compactionPlaceholder": "Leave blank for model default (contextWindow - reserve)",
       "compactionHint": "Token count threshold that triggers automatic history compaction. Lower values (e.g. 24,000–48,000 tokens) reduce vision re-encoding cost on stateless HTTP endpoints.",
@@ -2308,7 +2299,7 @@
       "switchDeviceBtn": "Switch device"
     },
     "savedTitle": "Workspace configuration saved to ludens.json.",
-    "savedHint": "Restart the workspace Core while keeping the environment open to apply updated model or budget settings.",
+    "savedHint": "Restart the workspace Core while keeping the environment open to apply updated model or runtime settings.",
     "unsavedChanges": "Unsaved workspace configuration changes.",
     "syncedWithDisk": "Synced with workspace ludens.json.",
     "discard": "Discard changes",

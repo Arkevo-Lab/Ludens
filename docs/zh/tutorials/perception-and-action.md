@@ -88,7 +88,7 @@ ludens-core perception inject on
 ludens-core perception reload
 ```
 
-在**自主运行**期间发生重载时，宿主会在当前控制周期 `epoch` 下递增 `inputGeneration`，立即把旧版本持有的设备输入归零并取消未完成动作，再无缝切换到新版状态机——整个过程不会丢失当前 `epoch`、时间/请求预算或 Shiori 会话线程。
+在**自主运行**期间发生重载时，宿主会在当前控制周期 `epoch` 下递增 `inputGeneration`，立即把旧版本持有的设备输入归零并取消未完成动作，再无缝切换到新版状态机——整个过程不会丢失当前 `epoch`、活动计时器或 Shiori 会话线程。
 
 ## 3. 查询 `.ludens/timeline/`（`Client.observe()` 与 `ludens-core perception observe`）
 

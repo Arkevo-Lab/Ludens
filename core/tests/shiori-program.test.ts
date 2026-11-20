@@ -22,34 +22,34 @@ const EXIT_ZERO_ON_TERM = program("trap 'exit 0' TERM; while :; do sleep 1; done
 `);
 const EXIT_ZERO = program("exit 0", "process.exit(0)");
 
-test("a completed program cannot leave a background process holding output pipes and consuming the remaining budget", async () => {
+test("a completed program cannot leave a background process holding output pipes and consuming the remaining timer", async () => {
   const root = await mkdtemp(join(tmpdir(), "shiori-pipes-"));
-  const runtime = new Runtime(undefined, () => {}, 3);
+  const runtime = new Runtime(undefined, () => {});
   try {
     const started = performance.now();
     await runtime.runProgram({ argv: BACKGROUND_HOLDING_PIPES, cwd: root, env: process.env,
-      stdout: join(root, "stdout.log"), stderr: join(root, "stderr.log") });
+      stdout: join(root, "stdout.log"), stderr: join(root, "stderr.log") }, undefined, 3);
     expect(performance.now() - started).toBeLessThan(1500);
     expect(runtime.status()).toMatchObject({ mode: "manual", thinking: false, agent: false });
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 });
 
-test("program budget cancellation drains a process that ignores TERM and leaves the Runtime reusable", async () => {
+test("program timer cancellation drains a process that ignores TERM and leaves the Runtime reusable", async () => {
   const root = await mkdtemp(join(tmpdir(), "shiori-timeout-"));
-  const runtime = new Runtime(undefined, () => {}, 0.1);
+  const runtime = new Runtime(undefined, () => {});
   const output = { cwd: root, env: process.env, stdout: join(root, "stdout.log"), stderr: join(root, "stderr.log") };
   try {
-    await expect(runtime.runProgram({ ...output, argv: IGNORE_TERM })).rejects.toThrow();
-    expect(runtime.status()).toMatchObject({ mode: "manual", thinking: false, reason: "time budget" });
+    await expect(runtime.runProgram({ ...output, argv: IGNORE_TERM }, undefined, 0.1)).rejects.toThrow();
+    expect(runtime.status()).toMatchObject({ mode: "manual", thinking: false, reason: "timer expired" });
     await runtime.runProgram({ ...output, argv: EXIT_ZERO });
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 }, 5000);
 
 test("an ordinary program that handles timeout with exit zero is still an error", async () => {
   const root = await mkdtemp(join(tmpdir(), "shiori-zero-timeout-"));
-  const runtime = new Runtime(undefined, () => {}, 0.1);
+  const runtime = new Runtime(undefined, () => {});
   try {
     await expect(runtime.runProgram({ argv: EXIT_ZERO_ON_TERM,
-      cwd: root, env: process.env, stdout: join(root, "stdout.log"), stderr: join(root, "stderr.log") })).rejects.toBeDefined();
+      cwd: root, env: process.env, stdout: join(root, "stdout.log"), stderr: join(root, "stderr.log") }, undefined, 0.1)).rejects.toBeDefined();
   } finally { await runtime.close(); await rm(root, { recursive: true, force: true }); }
 }, 5000);

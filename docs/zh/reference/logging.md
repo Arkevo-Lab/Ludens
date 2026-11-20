@@ -30,7 +30,7 @@
 
 | 文件 / 目录 | 内容与归属 |
 | --- | --- |
-| `manifest.json` | 工作区路径、模型、Driver 列表、预算、生效日志模式、Shiori 实现版本、Git/提示词哈希及 `eventSources` 外部事实源声明。 |
+| `manifest.json` | 工作区路径、模型、Driver 列表、生效日志模式、Shiori 实现版本、Git/提示词哈希及 `eventSources` 外部事实源声明。 |
 | `events.jsonl` | Ludens 写入的 Schema v2 主事件流（保存调用身份、统计与内容引用）。 |
 | `diagnostics.jsonl` | `full` 模式下的高频内部调用诊断流，按需分页读取。 |
 | `streams/` | 模型流式响应分片（`ludens-stream-v1` 格式，小根节点内联，大节点引用 `.ludens/archive/`）。 |

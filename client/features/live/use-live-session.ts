@@ -61,7 +61,7 @@ export function resolveShioriActiveModel(options: {
 }
 
 export type LiveHostStatus = NonNullable<RunData["live"]> & {
-  maxSeconds?: number | null;
+  timerSeconds?: number | null;
   remainingSeconds?: number | null;
   consolidating?: boolean;
   model?: string | null;
@@ -120,6 +120,8 @@ export interface UseLiveSessionResult {
   pendingContention: DeviceContentionConflict | null;
   preemptError: string | null;
   preemptSuccessSeq: number;
+  staleEpochNotice: string | null;
+  dismissStaleEpochNotice: () => void;
   confirmPreempt: () => Promise<boolean>;
   dismissContention: () => void;
   poolSnapshot: EventPoolSnapshot | null;
@@ -163,6 +165,7 @@ export function useLiveSession(options: {
   isLiveRun: boolean;
   refresh: boolean;
   olderRunLoadFailedText?: string;
+  staleEpochMessage?: string;
   onUpdated: () => void;
   onRunSpawned?: (runId: string) => void;
 }): UseLiveSessionResult {
@@ -175,6 +178,7 @@ export function useLiveSession(options: {
     isLiveRun,
     refresh,
     olderRunLoadFailedText = "Failed to load older run",
+    staleEpochMessage,
     onUpdated,
     onRunSpawned,
   } = options;
@@ -191,6 +195,9 @@ export function useLiveSession(options: {
     [rpcCall],
   );
   const engine = useMemo(() => getLiveSessionEngine(project, rpcCaller), [project, rpcCaller]);
+  if (staleEpochMessage) {
+    engine.setStaleEpochMessage(staleEpochMessage);
+  }
   const snap = useSyncExternalStore(engine.subscribe, engine.getSnapshot, engine.getSnapshot);
 
   useEffect(() => {
@@ -465,7 +472,7 @@ export function useLiveSession(options: {
     segments: [],
   });
 
-  const liveMaxSeconds = isAuto && live && "maxSeconds" in live ? (live.maxSeconds ?? null) : undefined;
+  const liveTimerSeconds = isAuto && live && "timerSeconds" in live ? (live.timerSeconds ?? null) : undefined;
   const blocksLoading = feed.loading && feed.blocks.length === 0;
 
   const computedSegments = useMemo(() => {
@@ -524,9 +531,9 @@ export function useLiveSession(options: {
     }
 
     const liveSyncedCycles =
-      isAuto && liveMaxSeconds !== undefined && data.cycles.length > 0
+      isAuto && liveTimerSeconds !== undefined && data.cycles.length > 0
         ? data.cycles.map((cycle, idx) =>
-            idx === data.cycles.length - 1 ? { ...cycle, maxSeconds: liveMaxSeconds } : cycle,
+            idx === data.cycles.length - 1 ? { ...cycle, timerSeconds: liveTimerSeconds } : cycle,
           )
         : data.cycles;
 
@@ -567,7 +574,7 @@ export function useLiveSession(options: {
     data.cycles,
     isLiveRun,
     isAuto,
-    liveMaxSeconds,
+    liveTimerSeconds,
     blocksLoading,
     poolSnapshot,
     earliestLoadedMs,
@@ -594,6 +601,7 @@ export function useLiveSession(options: {
 
   const confirmPreempt = useCallback(() => engine.confirmPreempt(), [engine]);
   const dismissContention = useCallback(() => engine.dismissContention(), [engine]);
+  const dismissStaleEpochNotice = useCallback(() => engine.dismissStaleEpochNotice(), [engine]);
 
   const latestContextRef = useRef({
     workspace,
@@ -819,6 +827,8 @@ export function useLiveSession(options: {
     pendingContention: snap.pendingContention,
     preemptError: snap.preemptError,
     preemptSuccessSeq: snap.preemptSuccessSeq,
+    staleEpochNotice: snap.staleEpochNotice,
+    dismissStaleEpochNotice,
     confirmPreempt,
     dismissContention,
     poolSnapshot,

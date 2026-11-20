@@ -163,8 +163,8 @@ test("sidebar WorkspacePicker and compact RunPicker render clean contextual trig
 
   const compactRunHtml = renderToStaticMarkup(
     createElement(RunPicker, {
-      runs: [{ id: "run-2", model: "gpt-5", seconds: 0, drivers: [], startedAt: "2026-04-11T12:00:00Z" }],
-      latest: { id: "run-2", model: "gpt-5", seconds: 0, drivers: [], startedAt: "2026-04-11T12:00:00Z" },
+      runs: [{ id: "run-2", model: "gpt-5", drivers: [], startedAt: "2026-04-11T12:00:00Z" }],
+      latest: { id: "run-2", model: "gpt-5", drivers: [], startedAt: "2026-04-11T12:00:00Z" },
       value: "",
       onChange() {},
     }),

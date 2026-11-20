@@ -24,8 +24,8 @@ test("empty workspaces reach the no-game-run state instead of loading forever", 
 
 test("historical recordings remain loadable, including during a catalog retry", () => {
   const project: Project = { id: "workspace", runs: [
-    { id: "evaluation", model: null, seconds: 60, drivers: [] },
-    { id: "older", model: null, seconds: 60, drivers: [] },
+    { id: "evaluation", model: null, drivers: [] },
+    { id: "older", model: null, drivers: [] },
   ] };
   for (const id of ["evaluation", "older"]) {
     const selection = initialSelection(`?view=replay&project=workspace&run=${id}&epoch=all`, [project]);

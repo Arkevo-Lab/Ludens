@@ -14,7 +14,7 @@ import {
 } from "./operator-rpc.ts";
 
 export const WORKSPACE_HELP = `Ludens workspace management & evaluations (RPC):
-ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]
+ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--register-driver] [--pet | --no-pet]
 ludens workspace list
 ludens workspace open <directory> [--new-id]
 ludens workspace forget <id>
@@ -278,8 +278,6 @@ export async function runWorkspaceWithClient(
         game: { type: "string" },
         port: { type: "string" },
         "cua-command": { type: "string" },
-        seconds: { type: "string" },
-        requests: { type: "string" },
         model: { type: "string" },
         effort: { type: "string" },
         "service-tier": { type: "string" },
@@ -342,8 +340,6 @@ export async function runWorkspaceWithClient(
       ...(typeof values["cua-command"] === "string"
         ? { cuaCommand: values["cua-command"] }
         : {}),
-      ...(typeof values.seconds === "string" ? { seconds: Number(values.seconds) } : {}),
-      ...(typeof values.requests === "string" ? { requests: Number(values.requests) } : {}),
       ...(typeof values.model === "string" ? { model: values.model } : {}),
       ...(typeof values.effort === "string"
         ? { effort: values.effort as CreateWorkspaceInputDto["effort"] }

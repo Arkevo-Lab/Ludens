@@ -44,7 +44,7 @@ export type RuntimeControlCommand =
       preempt?: boolean;
     }
   | { action: "auto_off"; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
-  | { action: "auto_budget"; seconds: number | null; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
+  | { action: "auto_timer"; seconds: number | null; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
   | { action: "steer"; message: string; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
   | { action: "consolidate"; seconds?: number; runId?: string; expectedEpoch?: string | null; preempt?: boolean }
   | {
@@ -164,6 +164,20 @@ export function isDeviceBusyError(cause: unknown): boolean {
   if (!cause || typeof cause !== "object") return false;
   const rec = cause as { status?: unknown; code?: unknown };
   return rec.status === 409 && rec.code === "DEVICE_BUSY";
+}
+
+export const DEFAULT_STALE_EPOCH_MESSAGE =
+  "Control cycle changed — status synced, please try again.";
+
+export function isStaleEpochError(cause: unknown): boolean {
+  if (
+    (cause instanceof RuntimeControlError || (cause && typeof cause === "object")) &&
+    (cause as { code?: unknown }).code === "STALE_EPOCH"
+  ) {
+    return true;
+  }
+  const msg = cause instanceof Error ? cause.message : String(cause);
+  return msg.includes("STALE_EPOCH");
 }
 
 export function isCoreOfflineError(cause: unknown): boolean {
@@ -336,6 +350,7 @@ export interface LiveSessionSnapshot {
   pendingContention: DeviceContentionConflict | null;
   preemptError: string | null;
   preemptSuccessSeq: number;
+  staleEpochNotice: string | null;
   lastSpawnedRun: { runId: string; seq: number } | null;
 }
 
@@ -414,7 +429,7 @@ function sameCyclesArray(left: RunData["cycles"], right: RunData["cycles"]): boo
       a.startedAt !== b.startedAt ||
       a.endedAt !== b.endedAt ||
       a.reason !== b.reason ||
-      a.maxSeconds !== b.maxSeconds
+      a.timerSeconds !== b.timerSeconds
     ) {
       return false;
     }
@@ -502,6 +517,7 @@ function emptySessionSnapshot(project: string, resetRevision = 0): LiveSessionSn
     pendingContention: null,
     preemptError: null,
     preemptSuccessSeq: 0,
+    staleEpochNotice: null,
     lastSpawnedRun: null,
   };
 }
@@ -519,6 +535,7 @@ export class LiveSessionEngine {
   private streamRefresh = false;
   private selectedBlockId: string | undefined;
   private scopeChangedMessage = "Activity scope changed";
+  private staleEpochMessage = DEFAULT_STALE_EPOCH_MESSAGE;
   private spawnInFlightCount = 0;
   private spawnSeq = 0;
   private pendingContentionRetry: (() => Promise<void>) | null = null;
@@ -550,9 +567,13 @@ export class LiveSessionEngine {
     project: string;
     rpc?: LudensRpcCaller | null;
     transport?: Partial<LiveSessionTransport>;
+    staleEpochMessage?: string;
   }) {
     this.project = options.project;
     this.rpc = options.rpc ?? null;
+    if (options.staleEpochMessage) {
+      this.staleEpochMessage = options.staleEpochMessage;
+    }
     const rpcTransport = createRpcLiveSessionTransport(() => this.rpc);
     this.transport = { ...rpcTransport, ...options.transport };
     this.state = emptySessionSnapshot(options.project);
@@ -595,6 +616,18 @@ export class LiveSessionEngine {
   setScopeChangedMessage(message: string): void {
     this.scopeChangedMessage = message;
   }
+
+  setStaleEpochMessage(message: string): void {
+    if (message) {
+      this.staleEpochMessage = message;
+    }
+  }
+
+  dismissStaleEpochNotice = (): void => {
+    if (this.state.staleEpochNotice !== null) {
+      this.update(prev => ({ ...prev, staleEpochNotice: null }));
+    }
+  };
 
   /**
    * Synchronizes the unfiltered continuous activity stream for `(run, epoch)`:
@@ -1473,6 +1506,47 @@ export class LiveSessionEngine {
     }));
   }
 
+  private clearStaleEpochNotice(): void {
+    if (this.state.staleEpochNotice !== null) {
+      this.update(prev => ({ ...prev, staleEpochNotice: null }));
+    }
+  }
+
+  /**
+   * Resyncs live host status, activity stream, and event pool when a control command fails
+   * with `STALE_EPOCH`, then surfaces a localized, actionable `RuntimeControlError`.
+   */
+  private async syncAfterStaleEpoch(options: {
+    workspace: string | null;
+    run: string;
+    baseUpdatedAt: string;
+    baseServerModel?: string | null;
+    onUpdated?: () => void;
+  }): Promise<never> {
+    const { workspace, run, baseUpdatedAt, baseServerModel, onUpdated } = options;
+    if (workspace) {
+      try {
+        const fresh = await this.transport.sendRuntimeControl(this.project, workspace, {
+          action: "status",
+        });
+        const freshStatus = this.extractReturnedStatus(fresh);
+        const freshRunId =
+          this.recordSpawnedRun(fresh) ||
+          (typeof freshStatus?.runId === "string" && freshStatus.runId.trim()
+            ? freshStatus.runId.trim()
+            : run);
+        this.recordOptimisticHost(freshRunId, baseUpdatedAt, freshStatus, baseServerModel);
+      } catch {
+        // Ignore transient status refresh failures during STALE_EPOCH recovery
+      }
+    }
+    this.nudgeEventPool();
+    this.reconcileNow(onUpdated);
+    const friendly = this.staleEpochMessage;
+    this.update(prev => ({ ...prev, staleEpochNotice: friendly }));
+    throw new RuntimeControlError(friendly, { status: 409, code: "STALE_EPOCH" });
+  }
+
   // ── Unified Mutations ──
 
   async runRuntimeCommand(options: {
@@ -1490,6 +1564,9 @@ export class LiveSessionEngine {
     this.update(prev => ({ ...prev, submitting: true }));
     try {
       const payload = await this.transport.sendRuntimeControl(this.project, workspace, command);
+      if (command.action !== "status") {
+        this.clearStaleEpochNotice();
+      }
       const spawnedRunId = this.recordSpawnedRun(payload);
       const status = this.recordOptimisticHost(
         spawnedRunId || run,
@@ -1501,6 +1578,15 @@ export class LiveSessionEngine {
       return { payload, status };
     } catch (cause) {
       if (command.action !== "status") {
+        if (isStaleEpochError(cause)) {
+          await this.syncAfterStaleEpoch({
+            workspace,
+            run,
+            baseUpdatedAt,
+            baseServerModel,
+            onUpdated,
+          });
+        }
         this.recordContention(cause, async () => {
           await this.runRuntimeCommand({
             ...options,
@@ -1570,6 +1656,7 @@ export class LiveSessionEngine {
           throw steerErr;
         }
       }
+      this.clearStaleEpochNotice();
       const spawnedRunId = this.recordSpawnedRun(payload);
       const status = this.recordOptimisticHost(
         spawnedRunId || run,
@@ -1580,6 +1667,15 @@ export class LiveSessionEngine {
       this.reconcileNow(onUpdated);
       return { fellBackToAutoOn, status };
     } catch (cause) {
+      if (isStaleEpochError(cause)) {
+        await this.syncAfterStaleEpoch({
+          workspace,
+          run,
+          baseUpdatedAt,
+          baseServerModel,
+          onUpdated,
+        });
+      }
       this.recordContention(cause, async () => {
         if (fellBackToAutoOn) {
           await this.runRuntimeCommand({
@@ -1622,14 +1718,22 @@ export class LiveSessionEngine {
     onUpdated?: () => void;
   }): Promise<void> {
     const { workspace, run, baseUpdatedAt, expectedEpoch, seconds, onUpdated } = options;
-    const payload = await this.transport.sendRuntimeControl(this.project, workspace, {
-      action: "auto_budget",
-      seconds,
-      runId: run,
-      expectedEpoch: expectedEpoch ?? undefined,
-    });
-    this.recordOptimisticHost(run, baseUpdatedAt, this.extractReturnedStatus(payload));
-    this.reconcileNow(onUpdated);
+    try {
+      const payload = await this.transport.sendRuntimeControl(this.project, workspace, {
+        action: "auto_timer",
+        seconds,
+        runId: run,
+        expectedEpoch: expectedEpoch ?? undefined,
+      });
+      this.clearStaleEpochNotice();
+      this.recordOptimisticHost(run, baseUpdatedAt, this.extractReturnedStatus(payload));
+      this.reconcileNow(onUpdated);
+    } catch (cause) {
+      if (isStaleEpochError(cause)) {
+        await this.syncAfterStaleEpoch({ workspace, run, baseUpdatedAt, onUpdated });
+      }
+      throw cause;
+    }
   }
 
   async extendAutoStopTimer(options: {
@@ -1744,6 +1848,7 @@ export class LiveSessionEngine {
         persistedOffline = true;
       }
 
+      this.clearStaleEpochNotice();
       this.update(prev => ({
         ...prev,
         optimisticModel: {
@@ -1757,6 +1862,15 @@ export class LiveSessionEngine {
       return { persistedOffline };
     } catch (error) {
       this.update(prev => ({ ...prev, optimisticModel: priorModel }));
+      if (isStaleEpochError(error)) {
+        await this.syncAfterStaleEpoch({
+          workspace,
+          run,
+          baseUpdatedAt,
+          baseServerModel,
+          onUpdated,
+        });
+      }
       throw error;
     }
   }
@@ -1871,6 +1985,15 @@ export class LiveSessionEngine {
           };
         });
         this.triggerPoolCycle();
+      }
+      if (isStaleEpochError(error)) {
+        await this.syncAfterStaleEpoch({
+          workspace,
+          run,
+          baseUpdatedAt,
+          baseServerModel,
+          onUpdated,
+        });
       }
       this.recordContention(error, async () => {
         await this.mutatePool({

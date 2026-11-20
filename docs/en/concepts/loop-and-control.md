@@ -34,7 +34,7 @@ When `loop.py` is absent from the workspace root, Shiori runs the built-in defau
 | --- | --- |
 | `Prompt(prompt=None, injection=...)` | Starts the next LLM turn (passing `prompt` overrides `ctx.default_prompt`; omitting `injection` calls `self.inject(ctx)` automatically) |
 | `Consolidate(prompt=None)` | Runs an in-cycle file-only consolidation turn (`read`, `write`, `edit` only, no device access), then continues the outer loop |
-| `Wait(seconds=1.0, reason=None)` | Sleeps deterministically without spending LLM tokens or request budget; wakes immediately on **Reclaim Control** or human `steer` |
+| `Wait(seconds=1.0, reason=None)` | Sleeps deterministically without spending LLM tokens or model turns; wakes immediately on **Reclaim Control** or human `steer` |
 | `Stop(reason="completed")` | Ends the active Control Cycle cleanly with stop reason `loop: <reason>`, releasing the `epoch` lease back to **Manual Standby** |
 
 - **Inter-turn hot-reload and fault isolation (`loop_fault`)**: `LoopRuntime` tracks source hashes for `loop.py` and its imported workspace `.py` modules, hot-reloading automatically between turns. Syntax, import, or runtime exceptions in `load`, `step`, or `inject` never crash the worker or deadlock the cycle: the host emits `loop_fault` (`fallback: "default_loop"`), falls back safely to the built-in default `Prompt` turn, and surfaces `loopFault` in the next observation payload (`observation_context`) so Shiori or the operator can fix `loop.py` live. Once a clean reload succeeds, `loopFault` clears automatically.
@@ -56,33 +56,32 @@ stateDiagram-v2
     manual --> acquiring : "Start Auto Run (ludens auto on)"
     acquiring --> auto : "Baseware grants epoch lease"
     acquiring --> manual : "Cancelled or failed"
-    auto --> releasing : "Reclaim Control / budget / Loop Stop / pause"
+    auto --> releasing : "Reclaim Control / timer expired / Loop Stop / pause"
     releasing --> manual : "Inputs zeroed & timeline sealed"
 ```
 
 - **Manual Standby (`manual`)**: Every workspace host (`ludens workspace up` or `ludens-core run`) starts in **Manual Standby**. The operator retains direct control of the target device, the resident `perception.py` worker stays warm for read-only `ludens-core perception observe` queries, and offline `ludens workspace eval` / `ludens-core eval` checks or paused-only `ludens model` switches can run freely.
-- **Start Auto Run (`auto`)**: Clicking **Start Auto Run** in Console **Live** (`?view=live`) or running `ludens auto on [--message <text>] [--seconds <n>]` transitions the host to **Auto Run**, opening a fresh **Control Cycle** (`epoch`). Continuous 30 Hz sampling activates and Shiori executes autonomous turns until stopped or a budget expires.
+- **Start Auto Run (`auto`)**: Clicking **Start Auto Run** in Console **Live** (`?view=live`) or running `ludens auto on [--message <text>] [--seconds <n>]` transitions the host to **Auto Run**, opening a fresh **Control Cycle** (`epoch`). Continuous 30 Hz sampling activates and Shiori executes autonomous turns until stopped or an active timer expires.
 - **Reclaim Control (`manual`)**: Clicking **Reclaim Control** in Console or running `ludens auto off` triggers immediate release regardless of what the model is doing. Shiori aborts the current turn, closes the model-call gate so no further inference starts, stops continuous perception sampling while sealing active fMP4 video segments, drains in-flight calls, and instructs Baseware to release the target and reset held keys, contacts, or actuators back to neutral.
 
 To keep provenance unambiguous within every Control Cycle, switching models, serving tiers, or reasoning effort (`ludens model` or Console model picker) is allowed only during **Manual Standby** with no active turn or consolidation in progress.
 
-## Control Leases (`epoch`) & Dual Budgets
+## Control Leases (`epoch`) & Optional Cycle Timer
 
-Hardware safety and cost bounds are enforced structurally by Baseware and Shiori rather than by prompt instructions alone.
+Hardware safety and cycle bounds are enforced structurally by Baseware and Shiori rather than by prompt instructions alone.
 
 ### Monotonic `epoch` Leases
 
 Each time **Auto Run** begins, Shiori mints a unique UUID **`epoch`** and acquires the lease over a persistent connection to Baseware. Shiori injects `BASEWARE_EPOCH` into workspace shells and subprocesses for that cycle:
 
 - **Lease enforcement**: Any Baseware `Controller` marked `requiresControl` — as well as workspace `python/...` CLI invocations and `Client().call(...)` calls inside `loop.py:Loop.step` — checks the supplied `epoch`. Calls carrying an expired or missing `epoch` are rejected (`STALE_EPOCH`), preventing delayed background scripts from touching hardware after **Reclaim Control** or cycle expiration.
-- **Hot-reload without dropping the cycle**: When `perception.py` or one of its imported modules is edited during **Auto Run** (or on `ludens-core perception reload`), the host increments `inputGeneration`, immediately cancels and zeros active workspace device inputs, and swaps in the new resident perception code; editing `loop.py` or its imported modules reloads the outer loop automatically between turns — both preserve the active `epoch`, remaining budgets, and Shiori session.
+- **Hot-reload without dropping the cycle**: When `perception.py` or one of its imported modules is edited during **Auto Run** (or on `ludens-core perception reload`), the host increments `inputGeneration`, immediately cancels and zeros active workspace device inputs, and swaps in the new resident perception code; editing `loop.py` or its imported modules reloads the outer loop automatically between turns — both preserve the active `epoch`, active timer, and Shiori session.
 
-### Time and Request Budgets
+### Optional Cycle Timer
 
-Each Control Cycle tracks two independent limits:
+Each Control Cycle runs unbounded (`null`) by default until explicit **Reclaim Control**, unless an explicit timer is set:
 
-- **Time budget (`--seconds <n>`)**: Optional wall-clock duration for a Control Cycle. When `--seconds` is omitted on `ludens auto on` (or set to unbounded in Console), the cycle runs without a timer (`null`) until explicit **Reclaim Control** or request exhaustion. You can update or clear the countdown in place during **Auto Run** using `ludens auto timer <seconds|off>` (or the Console timer menu) without minting a new `epoch` or interrupting the active turn.
-- **Request budget (`--requests <n>`)**: Caps how many model requests Shiori may issue inside a single Control Cycle (default `50` on `ludens-core run`). Once reached, the model gate blocks further requests and cleanly releases control back to **Manual Standby**.
+- **Cycle timer (`--seconds <n>`)**: Optional wall-clock duration for a Control Cycle. When `--seconds` is omitted on `ludens auto on` (or left unbounded in Console), the cycle runs without a timer (`null`) until explicit **Reclaim Control** or `Loop.step` `Stop`. You can set, update, or clear the countdown in place during **Auto Run** using `ludens auto timer <seconds|off>` (or the Console timer menu) without minting a new `epoch` or interrupting the active turn; when a timer expires, the model gate blocks further requests and cleanly releases control back to **Manual Standby**.
 
 ## Duplex Collaboration: Event Pool vs. Live Steer
 

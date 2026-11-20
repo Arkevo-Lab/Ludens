@@ -49,8 +49,6 @@ const DEFAULT_SETTINGS = {
     workspaceRoot: "/tmp/workspaces",
     defaults: {
       model: "openai-codex/gpt-6.2-sol",
-      seconds: 300,
-      requests: 50,
       dashboard: true,
       pet: false,
       connection: { openaiWebsockets: "auto" },
@@ -82,7 +80,7 @@ test("ludens config show and set route 100% through workspaces RPC", async () =>
   assert.equal(code1, 0);
   assert.equal(JSON.parse(outputs[0]!).workspaceRoot, "/tmp/workspaces");
 
-  const code2 = await runCli(["config", "set", "defaults.seconds", "600"], {
+  const code2 = await runCli(["config", "set", "defaults.compactionThreshold", "24000"], {
     env: { LUDENS_HOME: "/tmp/ludens-test" },
     rpcOptions: { createUdsClient: () => client },
     out: () => {},
@@ -90,7 +88,7 @@ test("ludens config show and set route 100% through workspaces RPC", async () =>
   assert.equal(code2, 0);
   assert.deepEqual(calls.at(-1), {
     method: "workspaces/mutate",
-    params: { action: "updateGlobalDefaults", defaults: { seconds: 600 } },
+    params: { action: "updateGlobalDefaults", defaults: { compactionThreshold: 24000 } },
   });
 
   const code3 = await runCli(["config", "set", "defaults.connection.imageUrls.enabled", "true"], {
@@ -119,17 +117,19 @@ test("ludens config show and set route 100% through workspaces RPC", async () =>
   });
 
   const beforeBadCount = calls.length;
+  for (const removedField of ["defaults.seconds", "defaults.requests"]) {
+    await assert.rejects(
+      () =>
+        runCli(["config", "set", removedField, "600"], {
+          env: { LUDENS_HOME: "/tmp/ludens-test" },
+          rpcOptions: { createUdsClient: () => client },
+          out: () => {},
+        }),
+      /Unknown global default setting/,
+      `Expected removed ${removedField} to be rejected`,
+    );
+  }
   for (const [field, badValue] of [
-    ["defaults.seconds", "typo"],
-    ["defaults.seconds", "0"],
-    ["defaults.seconds", "-5"],
-    ["defaults.seconds", "1.5"],
-    ["defaults.seconds", "2147484"],
-    ["defaults.seconds", "9007199254740992"],
-    ["defaults.seconds", "NaN"],
-    ["defaults.requests", "1.5"],
-    ["defaults.requests", "0"],
-    ["defaults.requests", "9007199254740992"],
     ["defaults.compactionThreshold", "typo"],
     ["defaults.compactionThreshold", "1.5"],
     ["defaults.compactionThreshold", "-1"],
@@ -430,6 +430,31 @@ test("ludens top-level remote control shortcuts route over runtime/control and r
       preempt: true,
     },
   });
+
+  await runCli(["auto", "timer", "300"], { env, rpcOptions, out: () => {} });
+  assert.deepEqual(calls.at(-1), {
+    method: "runtime/control",
+    params: {
+      project: "ws-alpha",
+      workspace: "/tmp/workspaces/alpha",
+      command: { action: "auto_timer", seconds: 300 },
+    },
+  });
+
+  await runCli(["auto", "timer", "off"], { env, rpcOptions, out: () => {} });
+  assert.deepEqual(calls.at(-1), {
+    method: "runtime/control",
+    params: {
+      project: "ws-alpha",
+      workspace: "/tmp/workspaces/alpha",
+      command: { action: "auto_timer", seconds: null },
+    },
+  });
+
+  await assert.rejects(
+    () => runCli(["auto", "budget", "300"], { env, rpcOptions, out: () => {} }),
+    /Use ludens auto <on\|off\|timer>/,
+  );
 
   await runCli(["steer", "check", "inventory"], { env, rpcOptions, out: () => {} });
   assert.deepEqual(calls.at(-1), {

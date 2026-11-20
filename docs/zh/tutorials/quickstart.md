@@ -109,7 +109,7 @@ ludens workspace up
 
 `ludens workspace init` 与 `ludens workspace up` 常用参数：
 
-- `ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--seconds <n>] [--requests <n>] [--register-driver] [--pet | --no-pet]`
+- `ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--register-driver] [--pet | --no-pet]`
 - `ludens workspace up [--preempt] [--services <emulator,baseware,core>]`（`--preempt` 抢占同一设备上的冲突 Core；`--services` 指定启动的子服务）
 
 如果需要在磁盘上纳管已有目录或迁移旧版工作区，可执行 `ludens workspace open <dir> [--new-id]` 或 `ludens workspace import <dir> [--legacy-state <dir>] [--previous-workspace <dir>]`。
@@ -119,7 +119,7 @@ ludens workspace up
 Ludens 将人工监管与智能体自主执行划分为两个清晰的控制模式：
 
 - **手动待命**（`manual`）：设备操作权由你持有，**Shiori**（Ludens 的 Agent 线程核心）处于 **Warm Standby** 待命状态，不会下发执行动作。
-- **自主运行**（`auto`）：Shiori 获得当前**控制租约 (Epoch)** / **控制周期**，在设定的时间与请求预算内持续驱动 `perception.py` 与 Baseware 设备执行闭环任务。
+- **自主运行**（`auto`）：Shiori 获得当前**控制租约 (Epoch)** / **控制周期**，持续驱动 `perception.py` 与 Baseware 设备执行闭环任务；默认不设上限直至人工暂停，或按显式 `--seconds` / `ludens auto timer` 倒计时运行。
 
 ### 在控制台（**运行**，`?view=live`）操作
 
@@ -162,7 +162,6 @@ ludens consolidate
 | `game` / `port` / `cuaCommand` | 未设置 | 可选目标程序路径、控制器端口或自定义 CUA 启动命令 |
 | `model` | `openai-codex/gpt-6.2-sol` | Shiori 使用的主推理模型（`provider/model`） |
 | `serviceTier` / `effort` | 未设置 | 可选服务档位（`none`、`priority`、`ultrafast`）与推理力度（`none`..`max`） |
-| `seconds` / `requests` | `1800` / `1000` | 单次自主运行的默认时长预算（秒）与请求上限 |
 | `compactionThreshold` | 未设置 | 触发后台上下文压缩的 Token 阈值 |
 | `connection` | 继承全局 | 多模态传输参数（`openaiWebsockets`、`cacheRetention`、`appendOnlyContext`、`imageUrls`） |
 | `machines` | 未设置 | 多节点白名单与当前活跃节点（`{ active?, allowed }`） |
@@ -175,8 +174,6 @@ ludens consolidate
 ludens config show
 ludens config set workspaceRoot "$HOME/ludens-workspaces"
 ludens config set defaults.model "openai-codex/gpt-6.2-sol"
-ludens config set defaults.seconds 1800
-ludens config set defaults.requests 1000
 ludens config set defaults.pet false
 ludens config set defaults.connection.imageUrls.enabled true
 ```

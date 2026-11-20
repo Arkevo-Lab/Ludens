@@ -1,5 +1,5 @@
 import { delimiter, resolve } from "node:path";
-import { Runtime, type DeviceSession, type ServiceLaunchOrigin, type SharedBudget } from "./runtime.ts";
+import { Runtime, type DeviceSession, type ServiceLaunchOrigin } from "./runtime.ts";
 import { WorkspaceController } from "../subsystems/controller.ts";
 import { PerceptionRuntime } from "../subsystems/perception.ts";
 import { LoopRuntime } from "../subsystems/loop.ts";
@@ -12,14 +12,13 @@ import type { ModelConnectionConfig } from "@ludens/protocol/ludens";
 export async function createHostRuntime(options: {
   devices: DeviceSession; workspace: string; runDir: string; state: WorkspaceState;
   log: EventLog; record?: RecordEvent; ludensSocket: string; basewareSocket: string;
-  seconds: number; model?: string; maxRequests: number; resume?: string; compactionThreshold?: number;
+  model?: string; resume?: string; compactionThreshold?: number;
   connection?: ModelConnectionConfig;
-  budget?: SharedBudget;
   launchedBy?: ServiceLaunchOrigin;
 }) {
   const { devices, workspace, runDir, state, log, ludensSocket, basewareSocket } = options;
   const record = options.record ?? log.record;
-  const runtime = new Runtime(devices, record, options.seconds, log.clock.id, log.diagnostics, options.budget, undefined, undefined, options.launchedBy);
+  const runtime = new Runtime(devices, record, log.clock.id, log.diagnostics, undefined, undefined, options.launchedBy);
   const eventPool = new WorkspaceEventPool(state.dir);
   runtime.attach({ eventPool, eventPoolSummary: await eventPool.summary() });
   const binDir = resolve(import.meta.dir, "../../../bin");
@@ -50,7 +49,7 @@ export async function createHostRuntime(options: {
     if (options.model) {
       const { createOmpAgent } = await import("../agent-omp/session.ts");
       runtime.attach({ agent: await createOmpAgent({ runtime, workspace, runDir, state, log, binDir, ludensSocket, basewareSocket,
-        model: options.model, maxRequests: options.maxRequests, resume: options.resume,
+        model: options.model, resume: options.resume,
         compactionThreshold: options.compactionThreshold, connection: options.connection }) });
     }
     return runtime;

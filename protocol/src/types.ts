@@ -39,8 +39,6 @@ export interface Manifest {
   socket: string;
   drivers: { id: string; version: string }[];
   model: string | null;
-  seconds: number;
-  maxRequests: number;
   compactionThreshold: number | null;
 }
 
@@ -48,7 +46,6 @@ export interface RunInfo {
   kind?: string;
   id: string;
   model: string | null;
-  seconds: number;
   drivers: { id: string; version: string }[];
   startedAt?: string;
   endedAt?: string;
@@ -81,7 +78,6 @@ export interface ProjectWorkspaceDefaults {
   model?: string | null;
   serviceTier?: OmpServiceTier | null;
   effort?: OmpEffort | null;
-  maxSeconds?: number | null;
 }
 
 export interface Project {
@@ -240,7 +236,7 @@ export interface LiveStatus {
   serviceTier?: OmpServiceTier | null;
   effort?: OmpEffort | null;
   thinking: boolean;
-  maxSeconds?: number | null;
+  timerSeconds?: number | null;
   remainingSeconds?: number | null;
   launchedBy?: ServiceLaunchOrigin;
   coreOffline?: boolean;
@@ -355,7 +351,7 @@ export interface RunData {
   project: string;
   run: string;
   manifest: Manifest;
-  cycles: { epoch: string; startedAt: string; endedAt?: string; reason?: string; maxSeconds?: number | null }[];
+  cycles: { epoch: string; startedAt: string; endedAt?: string; reason?: string; timerSeconds?: number | null }[];
   selectedEpoch: string | null;
   calls: Call[];
   selectedCall?: Call;

@@ -26,8 +26,6 @@ export interface WorkspaceDefaults {
   model?: string;
   serviceTier?: OmpServiceTier;
   effort?: OmpEffort;
-  seconds?: number;
-  requests?: number;
   compactionThreshold?: number;
   pet?: boolean;
   connection?: ModelConnectionConfig;
@@ -68,8 +66,6 @@ export interface CreateWorkspaceInput {
   model?: string;
   serviceTier?: OmpServiceTier | null;
   effort?: OmpEffort | null;
-  seconds?: number;
-  requests?: number;
   pet?: boolean;
   registerDriver?: boolean;
 }
@@ -83,8 +79,6 @@ export interface WorkspaceConfigSummary {
   model: string;
   serviceTier?: OmpServiceTier;
   effort?: OmpEffort;
-  seconds: number;
-  requests: number;
   compactionThreshold?: number;
   connection?: ModelConnectionConfig;
   machines?: WorkspaceMachinesBinding;
@@ -211,8 +205,6 @@ export interface WorkspaceStudioConfigPatch {
   model?: string;
   serviceTier?: OmpServiceTier | null;
   effort?: OmpEffort | null;
-  seconds?: number;
-  requests?: number;
   compactionThreshold?: number | null;
   diagnostics?: "normal" | "full";
   pet?: boolean;

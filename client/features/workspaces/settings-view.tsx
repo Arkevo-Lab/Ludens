@@ -103,8 +103,6 @@ export function GlobalDefaultsCard() {
   const st = useTranslations("settings");
   const ct = useTranslations("connectionSettings");
   const modelId = useId();
-  const secondsId = useId();
-  const requestsId = useId();
   const compactionId = useId();
 
   const [loading, setLoading] = useState(true);
@@ -118,16 +116,12 @@ export function GlobalDefaultsCard() {
     model: string;
     serviceTier: ModelServiceTier | null;
     effort: ModelEffort | null;
-    seconds: string;
-    requests: string;
     compactionThreshold: string;
     pet: boolean;
   }>({
     model: "",
     serviceTier: null,
     effort: null,
-    seconds: "",
-    requests: "",
     compactionThreshold: "",
     pet: false,
   });
@@ -158,8 +152,6 @@ export function GlobalDefaultsCard() {
           model: d.model ?? "",
           serviceTier: d.serviceTier ?? null,
           effort: d.effort ?? null,
-          seconds: d.seconds !== undefined ? String(d.seconds) : "",
-          requests: d.requests !== undefined ? String(d.requests) : "",
           compactionThreshold: d.compactionThreshold !== undefined ? String(d.compactionThreshold) : "",
           pet: d.pet ?? false,
         };
@@ -180,8 +172,6 @@ export function GlobalDefaultsCard() {
     draft.model.trim() !== saved.model.trim() ||
     draft.serviceTier !== saved.serviceTier ||
     draft.effort !== saved.effort ||
-    draft.seconds.trim() !== saved.seconds.trim() ||
-    draft.requests.trim() !== saved.requests.trim() ||
     draft.compactionThreshold.trim() !== saved.compactionThreshold.trim() ||
     draft.pet !== saved.pet;
 
@@ -202,8 +192,6 @@ export function GlobalDefaultsCard() {
           model: draft.model.trim() || null,
           serviceTier: draft.serviceTier,
           effort: draft.effort,
-          seconds: draft.seconds.trim() ? Number(draft.seconds.trim()) : null,
-          requests: draft.requests.trim() ? Number(draft.requests.trim()) : null,
           compactionThreshold: draft.compactionThreshold.trim() ? Number(draft.compactionThreshold.trim()) : null,
           pet: draft.pet,
         } as unknown as Partial<WorkspaceDefaults>,
@@ -213,8 +201,6 @@ export function GlobalDefaultsCard() {
         model: d.model ?? "",
         serviceTier: d.serviceTier ?? null,
         effort: d.effort ?? null,
-        seconds: d.seconds !== undefined ? String(d.seconds) : "",
-        requests: d.requests !== undefined ? String(d.requests) : "",
         compactionThreshold: d.compactionThreshold !== undefined ? String(d.compactionThreshold) : "",
         pet: d.pet ?? false,
       };
@@ -286,46 +272,6 @@ export function GlobalDefaultsCard() {
                 </Button>
               </div>
             </div>
-          }
-        />
-
-        <SettingsRow
-          label={st("defaultsSecondsLabel")}
-          htmlFor={secondsId}
-          control={
-            <Input
-              id={secondsId}
-              type="number"
-              min={1}
-              disabled={loading || saving}
-              value={draft.seconds}
-              onChange={event => {
-                setDraft(current => ({ ...current, seconds: event.target.value }));
-                setSavedNotice(false);
-              }}
-              placeholder="1800"
-              className="w-full font-mono text-sm sm:w-36"
-            />
-          }
-        />
-
-        <SettingsRow
-          label={st("defaultsRequestsLabel")}
-          htmlFor={requestsId}
-          control={
-            <Input
-              id={requestsId}
-              type="number"
-              min={1}
-              disabled={loading || saving}
-              value={draft.requests}
-              onChange={event => {
-                setDraft(current => ({ ...current, requests: event.target.value }));
-                setSavedNotice(false);
-              }}
-              placeholder="1000"
-              className="w-full font-mono text-sm sm:w-36"
-            />
           }
         />
 

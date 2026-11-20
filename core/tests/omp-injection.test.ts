@@ -66,7 +66,7 @@ class Perception:
     await until(async () => (await records()).length > 0);
     const extension = createLudensExtension({ runtime, workspace: new Workspace(workspace, join(directory, "versions")), runDir,
       basewareSocket: "/tmp/unused.sock", ludensSocket: socket, binDir: resolve(import.meta.dir, "../bin"),
-      maxRequests: 12, cycle: () => ({ epoch: epoch!, signal: abort.signal }) });
+      cycle: () => ({ epoch: epoch!, signal: abort.signal }) });
     ({ session } = await createOmpSession({ cwd: workspace, agentDir: join(directory, "omp"), model, authStorage, modelRegistry, settings,
       sessionManager: SessionManager.create(workspace, join(directory, "session")), systemPrompt: "Exercise local observation controls.",
       cacheWarming: false, skills: [], rules: [], contextFiles: [], promptTemplates: [], slashCommands: [],

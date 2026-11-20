@@ -27,9 +27,9 @@ test("local Python, Controller and CLI share a workspace timeline across runs wi
   const env = {...process.env, LUDENS_SOCKET: socket, LUDENS_WORKSPACE: workspace, LUDENS_RUN_ID: "first-run",
     PYTHONPATH: join(import.meta.dir, "../python"), BASEWARE_EPOCH: undefined,
     PATH: [dirname(process.execPath), join(import.meta.dir, "../bin"), process.env.PATH].join(delimiter)};
-  let runtime = new Runtime(devices, record, 60, "first-run");
+  let runtime = new Runtime(devices, record, "first-run");
   const configure = (runId: string) => {
-    runtime = new Runtime(devices, record, 60, runId);
+    runtime = new Runtime(devices, record, runId);
     runtime.attach({ controller: new WorkspaceController({workspace, devices, record, env: {...env, LUDENS_RUN_ID: runId}}) });
     runtime.attach({ perception: new PerceptionRuntime({workspace, runDir: join(workspace, "logs", runId),
       env: {...env, LUDENS_RUN_ID: runId}, record}) });

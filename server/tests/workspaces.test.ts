@@ -14,13 +14,13 @@ test("workspace management preserves defaults, missing registrations, files, and
   const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-management-")));
   const home = join(root, "home"), workspace = join(root, "workspace"), parent = join(root, "new-workspaces");
   try {
-    await writeGlobalConfig({ version: 1, workspaceRoot: join(home, "workspaces"), defaults: { seconds: 77, pet: false } }, home);
+    await writeGlobalConfig({ version: 1, workspaceRoot: join(home, "workspaces"), defaults: { compactionThreshold: 77000, pet: false } }, home);
     const registered = await registerFixture(home, "fixture", workspace);
     await writeFile(join(workspace, "keep.txt"), "retained");
     await setPetTarget(registered.id, false, home);
     const updated = await updateWorkspaceRoot(parent, home);
     assert.equal(updated.config.workspaceRoot, parent);
-    assert.deepEqual(updated.config.defaults, { seconds: 77, pet: false });
+    assert.deepEqual(updated.config.defaults, { compactionThreshold: 77000, pet: false });
     await assert.rejects(updateWorkspaceRoot("relative", home), /绝对路径/);
     const old = join(root, "old-directory"); await mkdir(old);
     await assert.rejects(openWorkspace(old, home), /import/);
@@ -178,12 +178,12 @@ test("creating through the CLI uses the global default or explicit directory wit
     Object.assign(process.env, { LUDENS_WORKSPACE: join(root, "unrelated-workspace"), LUDENS_SOCKET: join(root, "unrelated-ludens.sock"),
       BASEWARE_DRIVER_PACKAGES: "/nonexistent/inherited-driver", BASEWARE_SOCKET: join(root, "unrelated-baseware.sock") });
     const before = await readGlobalConfig(home);
-    await writeGlobalConfig({ ...before, defaults: { seconds: 79, requests: 13, pet: false } }, home);
+    await writeGlobalConfig({ ...before, defaults: { compactionThreshold: 79000, pet: false } }, home);
     const created = await createWorkspace({ name: "one", driver: "cua" }, undefined, home);
     assert.equal(created.workspace, join(home, "workspaces/one"));
     assert.deepEqual((await workspaceSettings(home)).workspaces.map(entry => entry.id), [created.id]);
     const config = JSON.parse(await readFile(join(created.workspace, "ludens.json"), "utf8"));
-    assert.equal(config.seconds, 79); assert.equal(config.requests, 13); assert.equal(config.pet, false);
+    assert.equal(config.compactionThreshold, 79000); assert.equal(config.pet, false);
     await assert.rejects(readFile(join(created.workspace, "logs/background/host.plist")), { code: "ENOENT" });
     const explicit = join(root, "custom path");
     assert.equal((await createWorkspace({ name: "two", workspace: explicit, driver: "cua" }, undefined, home)).workspace, explicit);
@@ -272,14 +272,10 @@ test("worker reads and updates global and workspace model connection transport c
 
     const defaultsResult = await worker.call("updateGlobalDefaults", [{
       model: "openai-codex/gpt-5.4",
-      seconds: 240,
-      requests: 30,
       compactionThreshold: 48000,
       pet: false,
     }]);
     assert.equal(defaultsResult.config.defaults.model, "openai-codex/gpt-5.4");
-    assert.equal(defaultsResult.config.defaults.seconds, 240);
-    assert.equal(defaultsResult.config.defaults.requests, 30);
     assert.equal(defaultsResult.config.defaults.compactionThreshold, 48000);
     assert.equal(defaultsResult.config.defaults.pet, false);
     assert.deepEqual(defaultsResult.config.defaults.connection, {
@@ -305,15 +301,11 @@ test("worker reads and updates global and workspace model connection transport c
 
     const studioUpdated = await worker.call("updateWorkspaceStudioConfig", [entry.id, {
       model: "anthropic/claude-sonnet-5-5",
-      seconds: 300,
-      requests: 25,
       compactionThreshold: 24000,
       diagnostics: "full",
       pet: true,
     }]);
     assert.equal(studioUpdated.config?.model, "anthropic/claude-sonnet-5-5");
-    assert.equal(studioUpdated.config?.seconds, 300);
-    assert.equal(studioUpdated.config?.requests, 25);
     assert.equal(studioUpdated.config?.compactionThreshold, 24000);
     assert.equal(studioUpdated.config?.diagnostics, "full");
     assert.equal(studioUpdated.config?.pet, true);

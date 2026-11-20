@@ -6,13 +6,13 @@ import { PerceptionRuntime, perceptionMetadata, type PerceptionRead } from "../s
 import { WorkspaceController } from "../src/core/subsystems/controller.ts";
 
 /** Exercise the production device core without a socket or a real device. */
-export function createTestDeviceSession(capabilities: Capabilities, record: RecordEvent = () => {}, maxSeconds = 300) {
+export function createTestDeviceSession(capabilities: Capabilities, record: RecordEvent = () => {}) {
   const core = new BasewareCore({ capabilities, drivers: [{ id: "test", version: "1" }],
     record: (type, data, trace) => record(type, data, trace as EventTrace) });
   const client = { id: crypto.randomUUID() };
   const devices: DeviceSession = {
     catalog: core.list(),
-    async acquire(epoch, signal, seconds) { await core.acquire(epoch, seconds !== undefined ? seconds : maxSeconds, client, signal); },
+    async acquire(epoch, signal, seconds) { await core.acquire(epoch, seconds ?? null, client, signal); },
     async release(epoch) { await core.release(epoch); },
     async setLeaseDuration(epoch, seconds) { await core.setLeaseDuration(epoch, seconds, client); },
     execute: (id, args, epoch, signal, trace, origin) => core.execute(id, args, epoch, signal, { ...trace }, undefined, origin),
@@ -25,9 +25,9 @@ export function captureResult(observations: Observation[]): ToolExecutionResult 
     timing: observations[0]?.timing ?? { clock: "test", requestedAtMs: 0, receivedAtMs: 1 } };
 }
 
-export function createTestRuntime(capabilities: Capabilities, record: RecordEvent = () => {}, maxSeconds = 300, runId?: string) {
-  const { devices } = createTestDeviceSession(capabilities, record, maxSeconds);
-  const runtime = new Runtime(devices, record, maxSeconds, runId);
+export function createTestRuntime(capabilities: Capabilities, record: RecordEvent = () => {}, runId?: string) {
+  const { devices } = createTestDeviceSession(capabilities, record);
+  const runtime = new Runtime(devices, record, runId);
   runtime.attach({ controller: new WorkspaceController({ workspace: process.cwd(), devices, record, env: {} }) });
   return runtime;
 }
