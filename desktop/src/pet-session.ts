@@ -327,7 +327,9 @@ export class PetSessionCoordinator implements LudensActivitySource {
   }
 
   private select(target: PetTarget | null) {
-    this.source?.stop?.()
+    try {
+      this.source?.stop?.()
+    } catch {}
     this.source = undefined
     this.target = target
     const generation = ++this.generation
@@ -410,7 +412,11 @@ export class PetSessionCoordinator implements LudensActivitySource {
     this.unsubscribeEvents?.()
     this.unsubscribeEvents = undefined
     this.abort.abort()
-    this.source?.stop?.()
+    try {
+      this.source?.stop?.()
+    } catch {}
+    this.source = undefined
+    this.target = null
     void this.ownedRpc?.close().catch(() => {})
   }
 }

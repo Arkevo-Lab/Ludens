@@ -99,9 +99,11 @@ export class ActiveCoreQuitGuard {
     }
     event.preventDefault()
     if (!this.checkPromise) {
-      this.checkPromise = this.runCheck().finally(() => {
-        this.checkPromise = undefined
-      })
+      this.checkPromise = this.runCheck()
+        .catch(() => {})
+        .finally(() => {
+          this.checkPromise = undefined
+        })
     }
     return false
   }
@@ -112,14 +114,23 @@ export class ActiveCoreQuitGuard {
   }
 
   private async confirmAndQuit(context: QuitConfirmContext): Promise<void> {
-    await this.options.onConfirmQuit(context)
-    this.quitConfirmed = true
-    this.options.triggerQuit()
+    try {
+      await withTimeout(
+        Promise.resolve().then(() => this.options.onConfirmQuit(context)),
+        5_000,
+        undefined,
+      )
+    } catch {
+      // Never wedge quit if teardown throws or times out.
+    } finally {
+      this.quitConfirmed = true
+      this.options.triggerQuit()
+    }
   }
 
   private async runCheck(): Promise<void> {
     const status = await withTimeout(
-      this.options.queryStatus(this.statusTimeoutMs),
+      Promise.resolve().then(() => this.options.queryStatus(this.statusTimeoutMs)),
       this.statusTimeoutMs,
       null,
     )
@@ -142,7 +153,11 @@ export class ActiveCoreQuitGuard {
     }
 
     if (action === 'stop-all') {
-      await this.options.stopAllCores().catch(() => {})
+      await withTimeout(
+        Promise.resolve().then(() => this.options.stopAllCores()),
+        8_500,
+        undefined,
+      )
     }
 
     await this.confirmAndQuit({ keepDaemonAlive: action === 'keep-background' })

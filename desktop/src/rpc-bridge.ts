@@ -243,6 +243,7 @@ export class DesktopUdsRpcRelay {
         if (this.socket === socket) {
           this.socket = undefined
         }
+        socket.on('error', () => {})
         try { socket.destroy() } catch {}
         this.pendingWrites = []
         this.setStatus({ state: 'disconnected', error: error.message })
@@ -257,6 +258,7 @@ export class DesktopUdsRpcRelay {
       const onConnect = () => {
         if (this.disposed || this.socket !== socket) {
           cleanupConnectListeners()
+          socket.on('error', () => {})
           try { socket.destroy() } catch {}
           rejectConnect(new Error('UDS RPC connection cancelled'))
           return
@@ -371,6 +373,7 @@ export class DesktopUdsRpcRelay {
     if (!active) return
     try {
       active.removeAllListeners()
+      active.on('error', () => {})
       active.destroy()
     } catch {}
   }

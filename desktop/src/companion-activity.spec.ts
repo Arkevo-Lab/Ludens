@@ -72,4 +72,33 @@ describe('companion notification IPC',()=>{
     expect(()=>get(event)).toThrow('Unauthorized')
     pet.emit('closed')
   })
+
+  it('completes handler and listener teardown even when source.stop() or poll() throws', async () => {
+    vi.useFakeTimers(); state.home = mkdtempSync(join(tmpdir(), 'ludens-teardown-'))
+    const owner = windowStub(), pet = windowStub()
+    const activity = installCompanionActivity(owner as never, pet as never)
+    activity.configure({
+      identity: () => 'ws',
+      read: async () => {
+        throw new Error('ENOENT: workspace deleted')
+      },
+      stop: () => {
+        throw Object.assign(new Error('ENOENT: stop failed'), { code: 'ENOENT' })
+      },
+      record: () => {
+        throw Object.assign(new Error('ENOENT: record failed'), { code: 'ENOENT' })
+      },
+    })
+
+    await vi.advanceTimersByTimeAsync(2_500)
+    expect(() => pet.emit('closed')).not.toThrow()
+    expect(handlers.size).toBe(0)
+    expect(vi.getTimerCount()).toBe(0)
+    expect(owner.listenerCount('show')).toBe(0)
+    expect(owner.listenerCount('hide')).toBe(0)
+    expect(owner.listenerCount('minimize')).toBe(0)
+    expect(owner.listenerCount('restore')).toBe(0)
+    expect(pet.listenerCount('hide')).toBe(0)
+    expect(pet.listenerCount('show')).toBe(0)
+  })
 })

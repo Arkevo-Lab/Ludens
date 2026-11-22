@@ -27,15 +27,26 @@ export type ConsumerRecord = (type: string, data: Record<string, unknown>, conte
 export function consumerRecorder(workspace: string): ConsumerRecord {
   const clockId = randomUUID(), directory = join(workspace, 'logs', 'consumers')
   const path = join(directory, `pet-${process.pid}-${clockId}.jsonl`)
-  mkdirSync(directory, { recursive: true })
+  let disabled = false
+  try {
+    mkdirSync(directory, { recursive: true })
+  } catch {
+    disabled = true
+  }
   let seq = 0
   return (type, data, context = {}) => {
+    if (disabled) return
     seq++
     const at = new Date().toISOString(), atMs = performance.now()
-    appendFileSync(path, JSON.stringify({ schemaVersion: 2, source: { component: 'pet' },
-      runId: context.runId ?? null, seq, at, atMs,
-      origin: { eventId: `${clockId}:${seq}`, clockId, seq, at, atMs },
-      trace: { ...context.trace, ...(context.epoch ? { epoch: context.epoch } : {}) }, type, data }) + '\n')
+    try {
+      appendFileSync(path, JSON.stringify({ schemaVersion: 2, source: { component: 'pet' },
+        runId: context.runId ?? null, seq, at, atMs,
+        origin: { eventId: `${clockId}:${seq}`, clockId, seq, at, atMs },
+        trace: { ...context.trace, ...(context.epoch ? { epoch: context.epoch } : {}) }, type, data }) + '\n')
+    } catch {
+      // Stop recording if the workspace disappears so deleted directories are never recreated.
+      disabled = true
+    }
   }
 }
 
@@ -234,16 +245,18 @@ export class LudensSource implements LudensActivitySource {
     // Revisions include streaming text; no full-history fingerprint or retained block cache.
     const progress = JSON.stringify([next.identity, next.activity, next.current.error, next.projection?.throughSeq, next.revision])
     if (progress !== this.progress) {
-      this.record(readError ? 'read_error' : 'read', {
-        durationMs: performance.now() - started,
-        projection: next.projection,
-        blocks: next.blocks.length,
-        activity: next.activity,
-        mode: next.mode,
-        revision: next.revision,
-        hasMore: next.hasMore,
-        error: readError ?? null,
-      }, next.current)
+      try {
+        this.record(readError ? 'read_error' : 'read', {
+          durationMs: performance.now() - started,
+          projection: next.projection,
+          blocks: next.blocks.length,
+          activity: next.activity,
+          mode: next.mode,
+          revision: next.revision,
+          hasMore: next.hasMore,
+          error: readError ?? null,
+        }, next.current)
+      } catch {}
       this.progress = progress
     }
     const { blocks: _blocks, acknowledge: _acknowledge, ...latest } = next

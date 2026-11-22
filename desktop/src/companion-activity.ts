@@ -56,13 +56,14 @@ export function installCompanionActivity(owner: BrowserWindow, pet: BrowserWindo
   owner.on('show', transition); owner.on('hide', transition); owner.on('minimize', transition); owner.on('restore', transition)
   pet.on('hide', transition); pet.on('show', transition)
   // Native main timer continues while the main renderer is minimized/throttled.
-  const timer = setInterval(() => { void controller.poll() }, 2_500)
+  const timer = setInterval(() => { void controller.poll().catch(() => {}) }, 2_500)
   owner.webContents.on('did-start-navigation', (_event, _url, isInPlace, isMainFrame) => { if (isMainFrame && !isInPlace) transition() })
   pet.once('closed', () => {
-    clearInterval(timer); controller.stop()
+    clearInterval(timer)
+    try { controller.stop() } catch {}
     for (const channel of handlers) ipcMain.removeHandler(channel)
     owner.removeListener('show', transition); owner.removeListener('hide', transition); owner.removeListener('minimize', transition); owner.removeListener('restore', transition)
     pet.removeListener('hide', transition); pet.removeListener('show', transition)
   })
-  return { configure(value: LudensActivitySource) { source = value; void controller.poll() } }
+  return { configure(value: LudensActivitySource) { source = value; void controller.poll().catch(() => {}) } }
 }

@@ -274,4 +274,34 @@ describe('Ludens block speech', () => {
     expect(s.read).toHaveBeenCalledTimes(2); expect(s.controller.snapshot()).toEqual([])
     expect(vi.getTimerCount()).toBe(0)
   })
+
+  it('survives ENOENT thrown by consumer record during poll() and stop()', async () => {
+    const read = vi.fn()
+    const sourceStop = vi.fn()
+    const acknowledge = vi.fn()
+    const sent: { surface: string; event: ActivityDisplay }[] = []
+    const record = vi.fn(() => {
+      throw Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' })
+    })
+    const controller = new LudensActivityController(
+      { identity: () => 'workspace-enoent', read, stop: sourceStop },
+      {
+        foreground: () => false,
+        petVisible: () => true,
+        open: vi.fn(),
+        send: (surface, event) => sent.push({ surface, event }),
+      },
+      structuredClone(DEFAULT_ACTIVITY_PREFERENCES),
+      record,
+    )
+
+    read.mockResolvedValueOnce(state([block('live', 'text', 'running')], { acknowledge }))
+    await expect(controller.poll()).resolves.toBeUndefined()
+    expect(acknowledge).toHaveBeenCalledTimes(1)
+    expect(sent.some(item => item.event.type === 'show' && item.event.input.id === 'live')).toBe(true)
+
+    expect(() => controller.stop()).not.toThrow()
+    expect(sourceStop).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+  })
 })
