@@ -14,6 +14,8 @@ import {
   canControl,
   hostRequest,
   catalog,
+  scanCatalog,
+  workspaceForProject,
   mediaFile,
   stopRun,
 } from "../src/query/data";
@@ -808,6 +810,78 @@ test("controlState bypasses stale 3s catalog cache for a newly started run and r
     assert.equal(state.live?.epoch, "ep-live");
   } finally {
     srv.close();
+    clearCatalogCache();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("scanCatalog and catalog degrade cleanly when a workspace vanishes mid-scan or manifest.json is truncated", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-catalog-resilience-")));
+  const home = join(root, "home");
+  const wsHealthy = join(root, "ws-healthy");
+  const wsVanish = join(root, "ws-vanish");
+  try {
+    await registerFixture(home, "healthy", wsHealthy);
+    await registerFixture(home, "vanish", wsVanish);
+
+    await mkdir(join(wsHealthy, "logs/run-valid"), { recursive: true });
+    await writeFile(
+      join(wsHealthy, "logs/run-valid/manifest.json"),
+      JSON.stringify({ model: "test", workspaceId: "healthy", drivers: [] }),
+    );
+    await mkdir(join(wsHealthy, "logs/run-empty"), { recursive: true });
+    await writeFile(join(wsHealthy, "logs/run-empty/manifest.json"), "");
+    await mkdir(join(wsHealthy, "logs/run-truncated"), { recursive: true });
+    await writeFile(join(wsHealthy, "logs/run-truncated/manifest.json"), '{"model":"test');
+    await mkdir(join(wsHealthy, "logs/run-null"), { recursive: true });
+    await writeFile(join(wsHealthy, "logs/run-null/manifest.json"), "null");
+
+    // 1. Truncated/empty/null manifest.json entries are skipped without failing catalog().
+    clearCatalogCache();
+    const projectsWithBadManifest = await catalog(home, true);
+    const healthyProj = projectsWithBadManifest.find(p => p.id === "healthy")!;
+    assert.equal(healthyProj.available, true);
+    assert.deepEqual(healthyProj.runs.map(r => r.id), ["run-valid"]);
+
+    // 2. Deleting wsVanish mid-scan (after listRegisteredWorkspaces) degrades only wsVanish to available: false.
+    const midScanResult = await scanCatalog(home, true, {
+      workspaceForProject: async (projectId, catalogHome) => {
+        if (projectId === "vanish") {
+          await rm(wsVanish, { recursive: true, force: true });
+        }
+        return workspaceForProject(projectId, catalogHome);
+      },
+    });
+    const vanished = midScanResult.find(p => p.id === "vanish")!;
+    assert.deepEqual(vanished, { id: "vanish", name: "ws-vanish", available: false, runs: [] });
+    const surviving = midScanResult.find(p => p.id === "healthy")!;
+    assert.equal(surviving.available, true);
+    assert.deepEqual(surviving.runs.map(r => r.id), ["run-valid"]);
+
+    // 3. Truncated .ludens/workspace.json mid-scan also degrades cleanly without failing catalog.
+    const corruptIdentityResult = await scanCatalog(home, true, {
+      readWorkspaceIdentity: async ws => {
+        if (ws === wsHealthy) {
+          throw new SyntaxError("Unexpected end of JSON input");
+        }
+        return { version: 1, id: "vanish" };
+      },
+    });
+    assert.deepEqual(corruptIdentityResult.find(p => p.id === "healthy"), {
+      id: "healthy",
+      name: "ws-healthy",
+      available: false,
+      runs: [],
+    });
+
+    // 4. Intentional workspaceId mismatch in run manifest still fails explicitly.
+    await writeFile(
+      join(wsHealthy, "logs/run-valid/manifest.json"),
+      JSON.stringify({ model: "test", workspaceId: "other-workspace", drivers: [] }),
+    );
+    clearCatalogCache();
+    await assert.rejects(catalog(home, true), /运行记录与工作区身份不一致/);
+  } finally {
     clearCatalogCache();
     await rm(root, { recursive: true, force: true });
   }

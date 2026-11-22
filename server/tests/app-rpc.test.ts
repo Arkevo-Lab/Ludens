@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
+import { randomUUID } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
+import { createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import type { LudensServerEvent } from "@ludens/protocol/app-rpc";
@@ -14,7 +16,12 @@ import {
   resolveAppServerSocketPath,
   stopLocalAppDaemon,
 } from "../src/daemon/app-daemon.ts";
-import { startBackgroundJob, stopBackgroundJob } from "../src/daemon/process-manager.ts";
+import {
+  isPidAlive,
+  probeBackgroundJob,
+  startBackgroundJob,
+  stopBackgroundJob,
+} from "../src/daemon/process-manager.ts";
 import { startAppServer } from "../src/server/app-server.ts";
 import { EVENT_HUB_RING_CAPACITY, EventHub } from "../src/server/event-hub.ts";
 import {
@@ -507,3 +514,207 @@ test("ensureLocalAppDaemon deduplicates concurrent starts, daemon CLI works end-
     await rm(rootDir, { recursive: true, force: true });
   }
 }, 25_000);
+
+test("daemon/status reconciles externally SIGKILLed app-owned host jobs", async () => {
+  const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-reconcile-killed-")));
+  const home = join(rootDir, "home");
+  const wsDir = join(rootDir, "ws");
+  await mkdir(wsDir, { recursive: true });
+  await writeFile(join(wsDir, "ludens.json"), JSON.stringify({ driver: "cua" }), "utf8");
+  const identity = await ensureWorkspaceIdentity(wsDir);
+  await registerWorkspace(wsDir, home);
+
+  const server = await startAppServer({ home, wsListen: null });
+  const client = new NodeUdsRpcClient({ socketPath: server.socketPath! });
+  const appHostJob = await startBackgroundJob({
+    name: "host",
+    command: [process.execPath, "-e", "setInterval(() => {}, 1000);"],
+    cwd: wsDir,
+    env: { ...process.env, LUDENS_HOME: home },
+    launchedBy: "app",
+    appInstanceId: server.supervisor.instanceId,
+  });
+
+  try {
+    await server.supervisor.trackOwnedService(wsDir, "host", identity.id, appHostJob.pid);
+    await client.connect();
+    await client.initialize();
+
+    const beforeStatus = await client.call("daemon/status");
+    expect(beforeStatus.activeCores).toEqual([identity.id]);
+    expect(beforeStatus.managedWorkspaces).toEqual([identity.id]);
+
+    process.kill(appHostJob.pid, "SIGKILL");
+    await waitForCondition(() => !isPidAlive(appHostJob.pid));
+
+    const afterStatus = await client.call("daemon/status");
+    expect(afterStatus.activeCores).toEqual([]);
+    expect(afterStatus.managedWorkspaces).toEqual([]);
+    expect(server.supervisor.activeCoreWorkspaceIds()).toEqual([]);
+    expect(server.supervisor.managedWorkspaceIds()).toEqual([]);
+  } finally {
+    await client.close().catch(() => {});
+    await stopBackgroundJob(appHostJob.stateFile, { immediate: true }).catch(() => {});
+    await server.close({ emergency: true }).catch(() => {});
+    await rm(rootDir, { recursive: true, force: true });
+  }
+}, 15_000);
+
+test("cores/stopAll stops live app-owned host and baseware within 5s without touching CLI jobs or closing supervisor", async () => {
+  const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-stopall-bounded-")));
+  const home = join(rootDir, "home");
+  const appWs = join(rootDir, "app-ws");
+  const cliWs = join(rootDir, "cli-ws");
+  await mkdir(appWs, { recursive: true });
+  await mkdir(cliWs, { recursive: true });
+  await writeFile(join(appWs, "ludens.json"), JSON.stringify({ driver: "cua" }), "utf8");
+  await writeFile(join(cliWs, "ludens.json"), JSON.stringify({ driver: "cua" }), "utf8");
+  const appIdentity = await ensureWorkspaceIdentity(appWs);
+  await ensureWorkspaceIdentity(cliWs);
+  await registerWorkspace(appWs, home);
+  await registerWorkspace(cliWs, home);
+
+  const server = await startAppServer({ home, wsListen: null });
+  const client = new NodeUdsRpcClient({ socketPath: server.socketPath! });
+  const appHostJob = await startBackgroundJob({
+    name: "host",
+    command: [process.execPath, "-e", "setInterval(() => {}, 1000);"],
+    cwd: appWs,
+    env: { ...process.env, LUDENS_HOME: home },
+    launchedBy: "app",
+    appInstanceId: server.supervisor.instanceId,
+  });
+  const appBasewareJob = await startBackgroundJob({
+    name: "baseware",
+    command: [process.execPath, "-e", "setInterval(() => {}, 1000);"],
+    cwd: appWs,
+    env: { ...process.env, LUDENS_HOME: home },
+    launchedBy: "app",
+    appInstanceId: server.supervisor.instanceId,
+  });
+  const cliHostJob = await startBackgroundJob({
+    name: "host",
+    command: [process.execPath, "-e", "setInterval(() => {}, 1000);"],
+    cwd: cliWs,
+    env: { ...process.env, LUDENS_HOME: home },
+    launchedBy: "cli",
+  });
+
+  try {
+    await server.supervisor.trackOwnedService(appWs, "host", appIdentity.id, appHostJob.pid);
+    await server.supervisor.trackOwnedService(appWs, "baseware", appIdentity.id, appBasewareJob.pid);
+    await client.connect();
+    await client.initialize();
+
+    const startedAt = Date.now();
+    const stopRes = await client.call("cores/stopAll");
+    const elapsedMs = Date.now() - startedAt;
+
+    expect(stopRes.stopped).toEqual([appIdentity.id]);
+    expect(elapsedMs).toBeLessThan(5_000);
+    expect(isPidAlive(appHostJob.pid)).toBe(false);
+    expect(isPidAlive(appBasewareJob.pid)).toBe(false);
+    expect((await probeBackgroundJob(appHostJob.stateFile)).registered).toBe(false);
+    expect((await probeBackgroundJob(appBasewareJob.stateFile)).registered).toBe(false);
+    expect(isPidAlive(cliHostJob.pid)).toBe(true);
+    expect((await probeBackgroundJob(cliHostJob.stateFile)).registered).toBe(true);
+
+    // Daemon and supervisor remain operational after cores/stopAll.
+    const statusAfter = await client.call("daemon/status");
+    expect(statusAfter.activeCores).toEqual([]);
+    expect(statusAfter.managedWorkspaces).toEqual([]);
+  } finally {
+    await client.close().catch(() => {});
+    await stopBackgroundJob(appHostJob.stateFile, { immediate: true }).catch(() => {});
+    await stopBackgroundJob(appBasewareJob.stateFile, { immediate: true }).catch(() => {});
+    await stopBackgroundJob(cliHostJob.stateFile, { immediate: true }).catch(() => {});
+    await server.close({ emergency: true }).catch(() => {});
+    await rm(rootDir, { recursive: true, force: true });
+  }
+}, 15_000);
+
+test("NodeUdsRpcClient handles multiple socket errors, delayed stale close/data, and readBuffer reset across reconnects", async () => {
+  const rootDir = await realpath(await mkdtemp(join(tmpdir(), "ludens-uds-resilience-")));
+  const socketPath =
+    process.platform === "win32"
+      ? `\\\\.\\pipe\\ludens-uds-resilience-${randomUUID()}`
+      : join(rootDir, "rpc.sock");
+
+  const serverSockets: Socket[] = [];
+  let holdResponses = false;
+  let delayedResponder: (() => void) | null = null;
+
+  const server = createServer(conn => {
+    serverSockets.push(conn);
+    let buf = "";
+    conn.setEncoding("utf8");
+    conn.on("data", chunk => {
+      buf += chunk;
+      let nl = buf.indexOf("\n");
+      while (nl >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line) {
+          const req = JSON.parse(line) as { id: number; method: string };
+          const reply = () => {
+            if (!conn.destroyed) {
+              conn.write(`${JSON.stringify({ jsonrpc: "2.0", id: req.id, result: { ok: true, method: req.method } })}\n`);
+            }
+          };
+          if (holdResponses) {
+            delayedResponder = reply;
+          } else {
+            reply();
+          }
+        }
+        nl = buf.indexOf("\n");
+      }
+    });
+  });
+  await new Promise<void>(resolveListen => server.listen(socketPath, resolveListen));
+
+  const client = new NodeUdsRpcClient({ socketPath, connectTimeoutMs: 2000 });
+  try {
+    await client.connect();
+    await waitForCondition(() => serverSockets.length === 1);
+    const serverConn1 = serverSockets[0]!;
+    const sock1 = (client as unknown as { socket: Socket }).socket;
+
+    // Seed an incomplete NDJSON frame in sock1's readBuffer before disconnecting.
+    serverConn1.write('{"jsonrpc":"2.0","id":999');
+    await waitForCondition(() => (client as unknown as { readBuffer: string }).readBuffer.length > 0);
+
+    // Emit first error on active sock1, then immediately start sock2 reconnect.
+    sock1.emit("error", new Error("first socket error"));
+    const reconnectPromise = client.connect();
+
+    // While sock2 is connecting, stale sock1 emits a second error, delayed close, and stale data.
+    sock1.emit("error", new Error("second socket error"));
+    sock1.emit("close", true);
+    sock1.emit("data", '{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"stale"}}\n');
+
+    await reconnectPromise;
+    await waitForCondition(() => serverSockets.length === 2);
+
+    // While an RPC call is in flight on sock2, stale sock1 events still cannot disrupt sock2.
+    holdResponses = true;
+    const callPromise = client.call("daemon/status");
+    await waitForCondition(() => delayedResponder !== null);
+    sock1.emit("error", new Error("late error"));
+    sock1.emit("close", true);
+    sock1.emit("data", '{"partial":');
+    delayedResponder!();
+
+    const result = (await callPromise) as unknown as { ok: boolean; method: string };
+    expect(result).toEqual({ ok: true, method: "daemon/status" });
+  } finally {
+    await client.close().catch(() => {});
+    for (const s of serverSockets) {
+      try {
+        s.destroy();
+      } catch {}
+    }
+    await new Promise<void>(resolveClose => server.close(() => resolveClose()));
+    await rm(rootDir, { recursive: true, force: true });
+  }
+}, 15_000);

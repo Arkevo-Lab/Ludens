@@ -516,21 +516,21 @@ async function buildDesktopShell() {
   }
 }
 
-function resolveDesktopCommand(devOrigin, platform = process.platform) {
+export function resolveDesktopCommand(devOrigin, platform = process.platform, exists = existsSync) {
   const mainEntry = join(desktopRoot, "dist/electron/main.js");
-  if (!existsSync(mainEntry)) {
+  if (!exists(mainEntry)) {
     throw new Error(
       "Desktop bundle desktop/dist/electron/main.js is missing. Run `bun run build:desktop` first.",
     );
   }
-  const desktopArgs = ["--server", devOrigin, "--show-window"];
+  const desktopArgs = ["--server", devOrigin, "--show-window", "--parent-watchdog"];
   if (platform === "win32") {
     const exeCandidates = [
       join(desktopRoot, "node_modules/electron/dist/electron.exe"),
       join(repoRoot, "node_modules/electron/dist/electron.exe"),
     ];
     for (const candidate of exeCandidates) {
-      if (existsSync(candidate)) {
+      if (exists(candidate)) {
         return { command: candidate, args: [mainEntry, ...desktopArgs] };
       }
     }
@@ -645,10 +645,16 @@ async function main() {
   const cleanup = () => {
     shuttingDown = true;
     cleanupPromise ??= (async () => {
-      if (desktopChild && desktopChild.exitCode === null && desktopChild.signalCode === null) {
+      if (desktopChild) {
         try {
-          desktopChild.kill("SIGTERM");
+          desktopChild.stdin?.end();
+          desktopChild.stdin?.destroy();
         } catch {}
+        if (desktopChild.exitCode === null && desktopChild.signalCode === null) {
+          try {
+            desktopChild.kill("SIGTERM");
+          } catch {}
+        }
       }
       if (viteChild && viteChild.exitCode === null && viteChild.signalCode === null) {
         try {
@@ -747,8 +753,9 @@ async function main() {
         desktopChild = spawn(command, desktopArgs, {
           cwd: desktopRoot,
           env: desktopEnv,
-          stdio: "inherit",
+          stdio: ["pipe", "inherit", "inherit"],
         });
+        desktopChild.stdin?.on("error", () => {});
         desktopChild.once("error", error => {
           if (!shuttingDown) {
             console.error(`[ludens-dev] desktop shell failed: ${error.message}`);

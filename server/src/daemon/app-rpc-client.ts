@@ -221,7 +221,9 @@ export class NodeUdsRpcClient extends BaseJsonRpcClient {
   private readonly socketPath: string;
   private readonly connectTimeoutMs: number;
   private socket: Socket | null = null;
+  private connectingSocket: Socket | null = null;
   private connectPromise: Promise<void> | null = null;
+  private connectAttempt = 0;
   private readBuffer = "";
 
   constructor(options: string | NodeUdsRpcClientOptions) {
@@ -244,61 +246,98 @@ export class NodeUdsRpcClient extends BaseJsonRpcClient {
     if (this.socket && !this.socket.destroyed) return;
     if (this.connectPromise) return this.connectPromise;
 
-    this.connectPromise = new Promise<void>((resolveConnect, rejectConnect) => {
-      const sock = connect(this.socketPath);
-      sock.setEncoding("utf8");
-      let settled = false;
+    const attempt = ++this.connectAttempt;
+    let resolveConnect!: () => void;
+    let rejectConnect!: (reason?: unknown) => void;
+    const promise = new Promise<void>((res, rej) => {
+      resolveConnect = res;
+      rejectConnect = rej;
+    });
+    this.connectPromise = promise;
 
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        sock.destroy();
+    const sock = connect(this.socketPath);
+    this.connectingSocket = sock;
+    sock.setEncoding("utf8");
+    let settled = false;
+
+    const clearAttemptState = () => {
+      if (this.connectPromise === promise) {
         this.connectPromise = null;
-        rejectConnect(new Error(`Timed out connecting to UDS socket: ${this.socketPath}`));
-      }, this.connectTimeoutMs);
-      timer.unref?.();
+      }
+      if (this.connectingSocket === sock) {
+        this.connectingSocket = null;
+      }
+    };
 
-      sock.once("connect", () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        this.socket = sock;
-        this.connectPromise = null;
-        resolveConnect();
-      });
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      clearAttemptState();
+      if (!sock.destroyed) sock.destroy();
+      rejectConnect(new Error(`Timed out connecting to UDS socket: ${this.socketPath}`));
+    }, this.connectTimeoutMs);
+    timer.unref?.();
 
-      sock.on("data", chunk => {
-        this.readBuffer += chunk;
-        let idx = this.readBuffer.indexOf("\n");
-        while (idx !== -1) {
-          const line = this.readBuffer.slice(0, idx).trim();
-          this.readBuffer = this.readBuffer.slice(idx + 1);
-          if (line) this.handleIncomingText(line);
-          idx = this.readBuffer.indexOf("\n");
-        }
-      });
-
-      sock.once("error", err => {
-        clearTimeout(timer);
-        if (!settled) {
-          settled = true;
-          this.connectPromise = null;
-          rejectConnect(err);
-          return;
-        }
-        this.socket = null;
-        this.rejectAllPending(err);
-      });
-
-      sock.once("close", () => {
-        clearTimeout(timer);
-        this.socket = null;
-        this.connectPromise = null;
-        this.rejectAllPending(new Error("UDS RPC connection closed"));
-      });
+    sock.once("connect", () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearAttemptState();
+      if (this.closed || this.connectAttempt !== attempt) {
+        if (!sock.destroyed) sock.destroy();
+        rejectConnect(new Error("UDS RPC client is closed"));
+        return;
+      }
+      this.readBuffer = "";
+      this.socket = sock;
+      resolveConnect();
     });
 
-    await this.connectPromise;
+    sock.on("data", chunk => {
+      if (this.socket !== sock) return;
+      this.readBuffer += chunk;
+      let idx = this.readBuffer.indexOf("\n");
+      while (idx !== -1 && this.socket === sock) {
+        const line = this.readBuffer.slice(0, idx).trim();
+        this.readBuffer = this.readBuffer.slice(idx + 1);
+        if (line) this.handleIncomingText(line);
+        idx = this.readBuffer.indexOf("\n");
+      }
+    });
+
+    sock.on("error", err => {
+      clearTimeout(timer);
+      if (!settled) {
+        settled = true;
+        clearAttemptState();
+        if (!sock.destroyed) sock.destroy();
+        rejectConnect(err);
+        return;
+      }
+      if (this.socket === sock) {
+        this.socket = null;
+        this.readBuffer = "";
+        if (!sock.destroyed) sock.destroy();
+        this.rejectAllPending(err);
+      }
+    });
+
+    sock.once("close", () => {
+      clearTimeout(timer);
+      if (!settled) {
+        settled = true;
+        clearAttemptState();
+        rejectConnect(new Error("UDS RPC connection closed"));
+        return;
+      }
+      if (this.socket === sock) {
+        this.socket = null;
+        this.readBuffer = "";
+        this.rejectAllPending(new Error("UDS RPC connection closed"));
+      }
+    });
+
+    await promise;
   }
 
   protected sendFrame(payload: string): void {
@@ -309,8 +348,16 @@ export class NodeUdsRpcClient extends BaseJsonRpcClient {
   }
 
   protected async closeTransport(): Promise<void> {
+    this.connectAttempt++;
+    this.connectPromise = null;
+    const connecting = this.connectingSocket;
+    this.connectingSocket = null;
+    if (connecting && !connecting.destroyed) {
+      connecting.destroy();
+    }
     const sock = this.socket;
     this.socket = null;
+    this.readBuffer = "";
     if (!sock || sock.destroyed) return;
     await new Promise<void>(resolveClose => {
       sock.once("close", () => resolveClose());

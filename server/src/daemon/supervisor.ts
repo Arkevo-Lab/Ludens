@@ -116,15 +116,45 @@ export class WorkspaceSupervisor {
     return paths;
   }
 
+  async reconcileOwned(): Promise<void> {
+    const records = [...this.owned.values()];
+    await Promise.all(
+      records.map(async record => {
+        const entries = [...record.ownedServices.entries()];
+        await Promise.all(
+          entries.map(async ([service, expectedPid]) => {
+            const stateFile = jobStateFilePath(record.backgroundDir, service);
+            const [probe, jobRecord] = await Promise.all([
+              probeBackgroundJob(stateFile),
+              readJobRecord(stateFile),
+            ]).catch(() => [null, null] as const);
+            const keep =
+              Boolean(probe?.registered) &&
+              probe?.pid !== null &&
+              probe?.pid !== undefined &&
+              jobRecord?.launchedBy === "app" &&
+              jobRecord.appInstanceId === this.instanceId &&
+              (expectedPid === null || expectedPid === undefined || probe.pid === expectedPid);
+            if (!keep && record.ownedServices.get(service) === expectedPid) {
+              record.ownedServices.delete(service);
+            }
+          }),
+        );
+        if (record.ownedServices.size === 0 && this.owned.get(record.workspace) === record) {
+          this.owned.delete(record.workspace);
+        }
+      }),
+    );
+  }
+
   async stopAllManaged(): Promise<string[]> {
-    const targets = [...this.owned.values()]
-      .filter(record => record.ownedServices.size > 0)
-      .map(record => ({ workspaceId: record.workspaceId, workspace: record.workspace }));
+    await this.reconcileOwned();
+    const targets = [...this.owned.values()].filter(record => record.ownedServices.size > 0);
     const stopped: string[] = [];
     await Promise.allSettled(
-      targets.map(async target => {
-        await this.down(target.workspace, { keepEmulator: false });
-        stopped.push(target.workspaceId);
+      targets.map(async record => {
+        await this.withWorkspaceLock(record.workspace, () => this.shutdownRecord(record, false));
+        stopped.push(record.workspaceId);
       }),
     );
     return stopped;

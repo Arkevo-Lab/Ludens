@@ -8,6 +8,7 @@ import {
   buildManagedAppServerArgs,
   buildServerSpawn,
   parseDevArgs,
+  resolveDesktopCommand,
   resolveDevHome,
   resolveLudensServerCommand,
 } from "../../scripts/dev.mjs";
@@ -226,4 +227,42 @@ test("resolveLudensServerCommand prefers bun + server/src/cli/main.ts over .cmd 
     ],
     windowsVerbatimArguments: true,
   });
+});
+
+test("resolveDesktopCommand passes --parent-watchdog on POSIX and win32 without requiring built bundle", () => {
+  const devOrigin = "http://127.0.0.1:3015";
+  const expectedArgs = ["--server", devOrigin, "--show-window", "--parent-watchdog"];
+  const onlyMainExists = (p: unknown) =>
+    String(p).replace(/\\/g, "/").endsWith("desktop/dist/electron/main.js");
+
+  for (const platform of ["darwin", "linux"] as const) {
+    const cmd = resolveDesktopCommand(devOrigin, platform, onlyMainExists);
+    assert.ok(cmd.command.replace(/\\/g, "/").endsWith("desktop/bin/ludens-app"));
+    assert.deepEqual(cmd.args, expectedArgs);
+  }
+
+  const winExe = resolveDesktopCommand(
+    devOrigin,
+    "win32",
+    p => {
+      const normalized = String(p).replace(/\\/g, "/");
+      return (
+        normalized.endsWith("desktop/dist/electron/main.js") ||
+        normalized.endsWith("desktop/node_modules/electron/dist/electron.exe")
+      );
+    },
+  );
+  assert.ok(winExe.command.replace(/\\/g, "/").endsWith("desktop/node_modules/electron/dist/electron.exe"));
+  assert.ok(winExe.args[0]?.replace(/\\/g, "/").endsWith("desktop/dist/electron/main.js"));
+  assert.deepEqual(winExe.args.slice(1), expectedArgs);
+
+  const winCmdFallback = resolveDesktopCommand(devOrigin, "win32", onlyMainExists);
+  assert.equal(winCmdFallback.args[0], "/c");
+  assert.ok(winCmdFallback.args[1]?.replace(/\\/g, "/").endsWith("desktop/bin/ludens-app.cmd"));
+  assert.deepEqual(winCmdFallback.args.slice(2), expectedArgs);
+
+  assert.throws(
+    () => resolveDesktopCommand(devOrigin, "darwin", () => false),
+    /Desktop bundle desktop\/dist\/electron\/main\.js is missing/,
+  );
 });

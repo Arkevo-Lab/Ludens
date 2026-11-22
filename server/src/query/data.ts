@@ -199,16 +199,46 @@ async function probeCoreSummary(workspace: string): Promise<ProjectCoreSummary> 
   };
 }
 
-async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project[]> {
+export interface ScanCatalogDeps {
+  listRegisteredWorkspaces?: typeof listRegisteredWorkspaces;
+  workspaceForProject?: typeof workspaceForProject;
+  readWorkspaceIdentity?: typeof readWorkspaceIdentity;
+}
+
+export async function scanCatalog(
+  home: string,
+  includeEmpty: boolean,
+  deps: ScanCatalogDeps = {},
+): Promise<Project[]> {
+  const listWorkspaces = deps.listRegisteredWorkspaces ?? listRegisteredWorkspaces;
+  const resolveWorkspace = deps.workspaceForProject ?? workspaceForProject;
+  const readIdentity = deps.readWorkspaceIdentity ?? readWorkspaceIdentity;
   const [registered, globalConfig] = await Promise.all([
-    listRegisteredWorkspaces(home),
+    listWorkspaces(home),
     readGlobalConfig(home).catch(() => ({ defaults: {} as LudensConfig["defaults"] })),
   ]);
   const projects = await Promise.all(registered.map(async entry => {
     const project: Project = { id: entry.id, name: entry.name, available: entry.available, runs: [] };
     if (!entry.available) return project;
-    const workspace = await workspaceForProject(entry.id, home);
-    const identity = await readWorkspaceIdentity(workspace);
+    let workspace: string;
+    let identity: Awaited<ReturnType<typeof readWorkspaceIdentity>>;
+    try {
+      workspace = await resolveWorkspace(entry.id, home);
+      identity = await readIdentity(workspace);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (
+        code === "ENOENT" ||
+        code === "ENOTDIR" ||
+        code === "EACCES" ||
+        code === "EPERM" ||
+        error instanceof SyntaxError ||
+        (error instanceof Error && error.message === "Invalid .ludens/workspace.json identity")
+      ) {
+        return { id: entry.id, name: entry.name, available: false, runs: [] };
+      }
+      throw error;
+    }
     const archiveIds = new Set([identity.id, ...(identity.historyIds ?? [])]);
     project.workspace = workspace;
     const roots = [join(workspace, "logs")];
@@ -219,12 +249,18 @@ async function scanCatalog(home: string, includeEmpty: boolean): Promise<Project
       Promise.all(names.sort().reverse().map(async id => {
         try {
           const path = await resolveInRoots(id, roots);
-          const manifest: Manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
+          const rawManifest: unknown = JSON.parse(await readFile(join(path, "manifest.json"), "utf8"));
+          if (!rawManifest || typeof rawManifest !== "object" || Array.isArray(rawManifest)) return null;
+          const manifest = rawManifest as Manifest;
           if (manifest.workspaceId && !archiveIds.has(manifest.workspaceId)) throw new Error("运行记录与工作区身份不一致");
           const bounds = await readEventLogBounds(join(path, "events.jsonl"));
           return { id, ...(manifest.kind ? { kind: manifest.kind } : {}), model: manifest.model,
             drivers: manifest.drivers, ...bounds };
-        } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          if (code === "ENOENT" || code === "ENOTDIR" || error instanceof SyntaxError) return null;
+          throw error;
+        }
       })),
       probeCoreSummary(workspace),
       readWorkspaceDefaults(workspace, globalConfig.defaults),
