@@ -301,17 +301,18 @@ baseware mcp                               # Expose Baseware controllers over st
 Implemented in [`desktop/src/main.ts`](../../../desktop/src/main.ts). Launches the zero-port Electron desktop app loading the bundled `@ludens/client` Vite SPA (`ludens-app://console/` from `client/dist`, packaged as `Resources/client`) and local media (`ludens-media://local/media?...`) over UDS `app-server.sock` via `AppServerHost` (`ensureLocalAppDaemon`), with `ActiveCoreQuitGuard` and the optional Desktop Pet (`PetSessionCoordinator`).
 
 ```bash
-ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
-  [--profile <path>] [--background] [--show-window] [--help]
+ludens-app [--workspace <path>] [--server <url>] [--profile <path>] \
+  [--background] [--show-window] [--parent-watchdog] [--help]
 ```
 
 | Flag | Purpose |
 | --- | --- |
 | `--workspace <path>` | Focus or attach to a workspace directory |
-| `--server <url>` / `--dashboard <url>` | Override `ludens-app://console/` to load an external dev/Vite renderer URL (also via `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL`) |
-| `--profile <path>` | Override the Electron user-data profile directory |
+| `--server <url>` | Override `ludens-app://console/` to load an external local dev/Vite renderer URL (takes precedence over `LUDENS_DESKTOP_DEV_URL` / `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL`) |
+| `--profile <path>` | Override the Electron user-data profile directory (defaults to `$LUDENS_HOME/desktop/profile`; main-process diagnostics go to `<userData>/logs/main.log`) |
 | `--background` | Start minimized / tray-resident without forcing the main window open |
 | `--show-window` | Show and focus the Console window immediately on launch |
+| `--parent-watchdog` | Exit cleanly and stop any app-spawned local UDS daemon when parent `stdin` closes (automatically passed by `bun run dev:desktop` and `bun --cwd=desktop run dev`) |
 | `--help` | Print desktop launcher usage |
 
 ---
@@ -356,7 +357,7 @@ Verified across [`protocol/`](../../../protocol/src/), [`baseware/`](../../../ba
 | `LUDENS_APP_TOKEN` | — | Bearer token environment variable forwarded/read when running authenticated `ludens-server` (`--token-env LUDENS_APP_TOKEN`) |
 | `LUDENS_STATIC_DIR` | — | Static Vite SPA Console asset directory (`client/dist`) served by `ludens-server` |
 | `LUDENS_APP_SERVER_URL` | — | Upstream `ludens-server` target proxied by root `scripts/dev.mjs` / `client/vite.config.ts` (`/rpc`, `/media`, `/health`) |
-| `LUDENS_APP_DEV_URL` | — | Dev renderer URL loaded by `ludens-app` (`LUDENS_DEV_URL` alias) |
+| `LUDENS_DESKTOP_DEV_URL` / `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL` | — | Local dev renderer URL loaded by `ludens-app` (checked in this precedence order; overridden by `--server`) |
 | `LUDENS_BUN` | — | Path override for the Bun executable |
 | `LUDENS_SERVER_BIN` / `LUDENS_APP_SERVER_BIN` | — | Binary path override when `ludens` CLI or `ludens-app` spawns `ludens-server` |
 | `LUDENS_DISABLE_COMPANION` | — | Disable launching the optional Desktop Pet from the Electron shell |

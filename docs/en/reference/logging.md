@@ -40,6 +40,8 @@ Three underlying stores shared across runs:
 2. **Workspace spacetime axis (`.ludens/timeline/`)**: cross-run shared perception and capability archives — `video/<id>.mp4` with companion state files `.mp4.json` (distinguishing `pending / ready / evicted / error`, plus `archive: { backend, profileId, key, bytes, archivedAt }` once archived externally), deduplicated non-video media `objects/<sha256>.bin` (with optional `.bin.json` archive pointers), bounded LRU replay cache `cache/`, explicit eviction lock file `pins.json`, and locally resident segmented records `segments/` (with JSONL, fixed-length `.idx` index, and `.meta.json`). With persistence off (`LUDENS_PERCEPTION_PERSIST=0` or `ephemeral` backend), only `window-<pid>-.../` temporary windows are used.
 3. **Content-addressed structured archive (`.ludens/archive/`)**: uniformly read/written by [protocol/src/log-archive.ts](../../../protocol/src/log-archive.ts). Model messages, tool definitions, and large parameters/results are stored as `objects/<sha256>.json.gz` (using `encoding: "ludens-json-v1"` with tagged JSON to distinguish internal references from user `$ref` fields). Image/audio data in logs is not stored twice; instead it references `.ludens/timeline/` assets, with a lightweight hash-to-video-frame mapping index kept in `.ludens/archive/media/<sha256>.json` (in-memory LRU capped at 4096 entries).
 
+Baseware paths above are passed explicitly by workspace orchestration; standalone `baseware serve` without `--data-dir` defaults to `$LUDENS_HOME/logs/baseware/<socket-name>/` (explicit directories always take precedence). Shared Desktop Pet preferences and background logs live under `$LUDENS_HOME/pet/`, while per-workspace consumer events are written to `<workspace>/logs/consumers/`.
+
 ### 2. Pluggable timeline media backends and retention (`storage.json`)
 
 Media persistence is governed jointly by global `$LUDENS_HOME/storage.json` (`mode 0600`, serialized via `storage.json.lock`) and each workspace's optional `ludens.json` `storage` override (`LUDENS_PERCEPTION_PERSIST=0` always takes precedence and forces `ephemeral`):
@@ -67,6 +69,13 @@ Every JSONL event carries a top-level writer identity (`runId` or `serviceId`, i
 - **`origin`**: `{eventId, clockId, seq, at, atMs}` of the source process that first generated the fact; unchanged across forwarding and persistence (`atMs` may only be subtracted within the same `clockId`).
 - **`trace`**: call-chain and business-ownership context, with `traceId / spanId / parentSpanId` (call-tree relations), `epoch / modelCallId / requestId / httpId / toolCallId / operationId` (business entity IDs), `recordingId / recordingPurpose` (run ownership and resident purpose), and `inputGeneration` (action-worker reload generation within an epoch).
 - **`type` / `data`**: the concrete event type and payload.
+
+### 4. Desktop Shell Main-Process Diagnostics Log (`main.log`)
+
+The Electron desktop shell (`ludens-app`) writes main-process diagnostics to `<userData>/logs/main.log` (defaulting to `$LUDENS_HOME/desktop/profile/logs/main.log`, i.e. `~/.ludens/desktop/profile/logs/main.log`, or `~/.ludens-dev/desktop/profile/logs/main.log` in isolated dev mode via `bun run dev:desktop` / `bun --cwd=desktop run dev`; follows `--profile <path>` when overridden):
+
+- **Bounded single-backup rotation**: capped at **2 MiB** with single-backup rotation to `main.log.1`; filesystem errors during log writes are handled without throwing into the main process.
+- **Captured diagnostics and stdio fallback**: captures main-process `console.warn` / `console.error`, Node `warning` events, and `uncaughtException` / `unhandledRejection`, and provides fallback diagnostics when terminal `stdio` (`EIO` / `EPIPE`) is disconnected.
 
 ## Calls and lifecycles
 

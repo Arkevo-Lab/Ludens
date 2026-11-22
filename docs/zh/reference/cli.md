@@ -301,17 +301,18 @@ baseware mcp                               # 通过标准输入输出以 MCP 协
 实现位于 [`desktop/src/main.ts`](../../../desktop/src/main.ts)。启动零监听 TCP 端口的 Electron 桌面壳，通过 `AppServerHost`（`ensureLocalAppDaemon`）走 UDS `app-server.sock`、使用 `ludens-app://console/` 加载 `@ludens/client` 打包产物（`client/dist`，打包态 `Resources/client`）、使用 `ludens-media://local/media?...` 加载本地媒体，并通过 `ActiveCoreQuitGuard` 与可选桌宠（`PetSessionCoordinator`）运行。
 
 ```bash
-ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
-  [--profile <path>] [--background] [--show-window] [--help]
+ludens-app [--workspace <path>] [--server <url>] [--profile <path>] \
+  [--background] [--show-window] [--parent-watchdog] [--help]
 ```
 
 | 参数 | 用途 |
 | --- | --- |
 | `--workspace <path>` | 打开并聚焦指定工作区目录 |
-| `--server <url>` / `--dashboard <url>` | 覆盖 `ludens-app://console/`，连接外部 Vite 开发或远端渲染地址（亦可设 `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL`） |
-| `--profile <path>` | 覆盖 Electron 用户数据目录路径 |
+| `--server <url>` | 覆盖 `ludens-app://console/`，连接外部本地开发/Vite 渲染地址（优先级高于环境变量 `LUDENS_DESKTOP_DEV_URL` / `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL`） |
+| `--profile <path>` | 覆盖 Electron 用户数据目录路径（默认 `$LUDENS_HOME/desktop/profile`，主进程诊断日志写入 `<userData>/logs/main.log`） |
 | `--background` | 以后台/托盘常驻模式启动，不自动弹出主窗口 |
 | `--show-window` | 启动时立即显示并聚焦控制台窗口 |
+| `--parent-watchdog` | 当父进程 `stdin` 关闭时干净退出，并停止由桌面端拉起的本地 UDS 守护进程（由 `bun run dev:desktop` 与 `bun --cwd=desktop run dev` 自动传入） |
 | `--help` | 打印桌面启动器用法说明 |
 
 ---
@@ -356,7 +357,7 @@ ludens-app [--workspace <path>] [--server <url> | --dashboard <url>] \
 | `LUDENS_APP_TOKEN` | — | 启停鉴权版 `ludens-server`（`--token-env LUDENS_APP_TOKEN`）时传递/读取的 Token 环境变量 |
 | `LUDENS_STATIC_DIR` | — | `ludens-server` 托管的 Vite 静态 SPA 控制台构建产物目录（`client/dist`） |
 | `LUDENS_APP_SERVER_URL` | — | 根目录 `scripts/dev.mjs` / `client/vite.config.ts` 代理转发的上游 `ludens-server` 地址（`/rpc`、`/media`、`/health`） |
-| `LUDENS_APP_DEV_URL` | — | `ludens-app` 加载外部开发渲染地址（别名 `LUDENS_DEV_URL`） |
+| `LUDENS_DESKTOP_DEV_URL` / `LUDENS_APP_DEV_URL` / `LUDENS_DEV_URL` | — | `ludens-app` 加载外部本地开发渲染地址（按此顺序优先，被 `--server` 覆盖） |
 | `LUDENS_BUN` | — | 覆盖 Bun 可执行文件路径 |
 | `LUDENS_SERVER_BIN` / `LUDENS_APP_SERVER_BIN` | — | `ludens` CLI 或 `ludens-app` 桌面端按需拉起 `ludens-server` 时的二进制路径覆盖 |
 | `LUDENS_DISABLE_COMPANION` | — | 禁止 Electron 桌面端自动拉起可选桌宠窗口 |
