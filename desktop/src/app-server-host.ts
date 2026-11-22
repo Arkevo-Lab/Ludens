@@ -335,7 +335,9 @@ export class AppServerHost {
   private daemonInfo: StartedAppDaemon | undefined
   private ownedDaemonPid: number | null = null
   private startPromise: Promise<StartedAppDaemon> | undefined
+  private reclaimPromise: Promise<void> | undefined
   private stopped = false
+  private reclaimOwnedOnStop = false
 
   constructor(options: AppServerHostOptions = {}) {
     this.options = options
@@ -398,23 +400,52 @@ export class AppServerHost {
   /**
    * Releases host tracking. When `stopOwnedDaemon` is true and this host spawned the
    * current local UDS-only daemon (no external TCP/WS listener and 0 active Cores),
-   * cleanly shuts down that owned daemon via `daemon/shutdown`.
+   * cleanly shuts down that owned daemon via `daemon/shutdown`, awaiting any in-flight start.
    */
   async stop(options: { stopOwnedDaemon?: boolean } = {}): Promise<void> {
-    const ownedPid = this.ownedDaemonPid
-    const socketPath = this.socketPath()
+    let ownedPid = this.ownedDaemonPid
+    let socketPath = this.socketPath()
+    const pendingStart = this.startPromise
     this.stopped = true
+    if (options.stopOwnedDaemon) {
+      this.reclaimOwnedOnStop = true
+    }
     this.daemonInfo = undefined
     this.ownedDaemonPid = null
 
-    if (!options.stopOwnedDaemon || ownedPid === null) {
+    if (!options.stopOwnedDaemon) {
       return
     }
-    const status = await this.probeDaemon(this.home, { timeoutMs: 1_200, socketPath }).catch(() => null)
-    if (!status || status.pid !== ownedPid || status.wsUrl || status.activeCores.length > 0) {
+    if (ownedPid === null && pendingStart) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const settled = await Promise.race([
+        pendingStart.catch(() => undefined),
+        new Promise<undefined>(resolveWait => {
+          timer = setTimeout(() => resolveWait(undefined), 2_000)
+          timer.unref?.()
+        }),
+      ])
+      if (timer) clearTimeout(timer)
+      if (settled && settled.started && settled.pid > 0 && !settled.wsUrl) {
+        ownedPid = settled.pid
+        socketPath = settled.socketPath
+      }
+    }
+    if (ownedPid === null) {
       return
     }
-    await this.stopDaemon(this.home, { stopCores: false, timeoutMs: 3_000 }).catch(() => {})
+    await this.reclaimOwnedDaemon(ownedPid, socketPath)
+  }
+
+  private reclaimOwnedDaemon(ownedPid: number, socketPath: string): Promise<void> {
+    this.reclaimPromise ??= (async () => {
+      const status = await this.probeDaemon(this.home, { timeoutMs: 1_200, socketPath }).catch(() => null)
+      if (!status || status.pid !== ownedPid || status.wsUrl || status.activeCores.length > 0) {
+        return
+      }
+      await this.stopDaemon(this.home, { stopCores: false, timeoutMs: 3_000 }).catch(() => {})
+    })()
+    return this.reclaimPromise
   }
 
   private async performStart(): Promise<StartedAppDaemon> {
@@ -445,6 +476,14 @@ export class AppServerHost {
     if (!this.stopped) {
       this.daemonInfo = started
       this.ownedDaemonPid = started.started && started.pid > 0 && !started.wsUrl ? started.pid : null
+    } else if (
+      this.reclaimOwnedOnStop &&
+      started.started &&
+      started.pid > 0 &&
+      !started.wsUrl &&
+      started.activeCores.length === 0
+    ) {
+      await this.reclaimOwnedDaemon(started.pid, started.socketPath)
     }
     return started
   }

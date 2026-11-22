@@ -192,7 +192,7 @@ if (values.help) {
       if (immediateShutdownStarted) return
       immediateShutdownStarted = true
       quitting = true
-      const forceExitTimer = setTimeout(() => app.exit(code), 2_000)
+      const forceExitTimer = setTimeout(() => app.exit(code), 3_500)
       forceExitTimer.unref()
       try {
         await cleanupDesktopResources({ saveWindow: false, stopOwnedDaemon: true })
