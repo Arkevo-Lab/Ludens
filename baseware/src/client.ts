@@ -1,4 +1,5 @@
 import { connect, type Socket } from "node:net";
+import type { ViewportControlAction, ViewportHumanInput, ViewportState } from "@ludens/protocol/viewport";
 import type { DeviceEvent, Message, Request } from "./protocol.ts";
 export type { DeviceEvent, Request, Trace } from "./protocol.ts";
 
@@ -68,6 +69,43 @@ export class BasewareClient {
       signal?.addEventListener("abort", cancel, { once: true });
       this.socket.write(JSON.stringify({ id, request }) + "\n");
     });
+  }
+
+  viewportDescribe(machine?: string, signal?: AbortSignal): Promise<ViewportState> {
+    return this.request({ kind: "viewport.describe", ...(machine ? { machine } : {}) }, signal) as Promise<ViewportState>;
+  }
+
+  viewportAction(action: ViewportControlAction, machine?: string, signal?: AbortSignal): Promise<ViewportState> {
+    return this.request(
+      { kind: "viewport.action", viewportAction: action, ...(machine ? { machine } : {}) },
+      signal,
+    ) as Promise<ViewportState>;
+  }
+
+  viewportInput(
+    input: ViewportHumanInput,
+    machine?: string,
+    signal?: AbortSignal,
+  ): Promise<{ ok: true; pointerLocked: boolean }> {
+    return this.request(
+      { kind: "viewport.input", viewportInput: input, ...(machine ? { machine } : {}) },
+      signal,
+    ) as Promise<{ ok: true; pointerLocked: boolean }>;
+  }
+
+  viewportSubscribe(
+    options: { machine?: string; maxFps?: number; quality?: number } = {},
+    signal?: AbortSignal,
+  ): Promise<{ subscribed: true; machineId: string | null }> {
+    return this.request(
+      {
+        kind: "viewport.subscribe",
+        ...(options.machine ? { machine: options.machine } : {}),
+        ...(options.maxFps !== undefined ? { maxFps: options.maxFps } : {}),
+        ...(options.quality !== undefined ? { quality: options.quality } : {}),
+      },
+      signal,
+    ) as Promise<{ subscribed: true; machineId: string | null }>;
   }
 
   close() { this.socket.destroy(); }

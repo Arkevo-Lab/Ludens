@@ -1,9 +1,11 @@
 import { randomBytes } from "node:crypto";
-import type { Capabilities, ExecutionResult, Observation, ToolArguments } from "./contracts.ts";
+import type { Capabilities, ExecutionResult, Observation, ToolArguments, ViewportProvider } from "./contracts.ts";
 import { argumentValidator, archivedToolResult, observationMetadata } from "./tool-contract.ts";
 import type { BasewareMountedMachineStatus, Catalog, DeviceEvent, EventMetadata, RecordEvent, Request, Trace } from "./protocol.ts";
 import type { DriverManifest } from "./drivers/registry.ts";
 import type { EventSourceDescriptor } from "@ludens/protocol/event-sources";
+import { resolveMachineStageKind } from "@ludens/protocol/machines";
+import type { ViewportState } from "@ludens/protocol/viewport";
 import { SamplingStats } from "./sampling-stats.ts";
 import { ObservationStreamSpool } from "./stream.ts";
 
@@ -45,12 +47,15 @@ export class BasewareCore {
   readonly diagnostics: "normal" | "full";
   private machines = new Map<string, MountedMachineEntry>();
   private primaryCapabilities: Capabilities;
+  private primaryViewport?: ViewportProvider;
   private controllerMachine = new Map<string, string>();
   private onReconnect?: (machineId?: string) => Promise<boolean>;
   private onMachines?: (action: MachinesAction, payload: { id?: string; ids?: string[] }) => Promise<unknown>;
   activeMachineId?: string;
   private sink: RecordEvent;
   private clients = new Map<string, ClientContext>();
+  private viewportSubscriptions = new Map<string, Map<string, () => void>>();
+  private viewportEventSequence = 0;
   private owner?: ClientContext;
   private epoch?: string;
   private controlTrace: Trace = {};
@@ -84,7 +89,10 @@ export class BasewareCore {
     onMachines?: (action: MachinesAction, payload: { id?: string; ids?: string[] }) => Promise<unknown>;
     activeMachineId?: string }) {
     // Machine mounting rewrites this list; never alias the caller's capabilities object.
-    this.capabilities = { controllers: [...options.capabilities.controllers] };
+    this.capabilities = {
+      controllers: [...options.capabilities.controllers],
+      ...(options.capabilities.viewport ? { viewport: options.capabilities.viewport } : {}),
+    };
     this.drivers = options.drivers;
     this.sink = options.record ?? (() => {});
     this.serviceId = options.serviceId ?? crypto.randomUUID();
@@ -96,6 +104,7 @@ export class BasewareCore {
       if (new Set(ids).size !== ids.length) throw new Error("Duplicate capability or driver ID");
     }
     this.primaryCapabilities = options.capabilities;
+    this.primaryViewport = options.capabilities.viewport;
     this.onReconnect = options.onReconnect;
     this.onMachines = options.onMachines;
     this.activeMachineId = options.activeMachineId;
@@ -155,6 +164,7 @@ export class BasewareCore {
     const names = merged.map(c => c.tool.name);
     if (new Set(names).size !== names.length) throw new Error("Duplicate capability or driver ID");
     this.capabilities.controllers = merged;
+    this.capabilities.viewport = primary ? primary.capabilities.viewport : this.primaryViewport;
     this.controllerMachine = machineOf;
     this.validators = new Map(merged.map(c => [c.tool.name, argumentValidator(c.tool)]));
   }
@@ -181,9 +191,18 @@ export class BasewareCore {
   }
 
   getMountedMachines(): BasewareMountedMachineStatus[] {
-    return [...this.machines.values()].map(machine => ({ id: machine.id, label: machine.label, driver: machine.driver,
-      transport: machine.transport, connected: machine.connected, reason: machine.reason, isPrimary: machine.isPrimary,
-      controllers: machine.capabilities.controllers.map(c => c.tool.name) }));
+    return [...this.machines.values()].map(machine => ({
+      id: machine.id,
+      label: machine.label,
+      driver: machine.driver,
+      transport: machine.transport,
+      stageKind: resolveMachineStageKind({ driver: machine.driver }),
+      hasViewport: Boolean(machine.capabilities.viewport),
+      connected: machine.connected,
+      reason: machine.reason,
+      isPrimary: machine.isPrimary,
+      controllers: machine.capabilities.controllers.map(c => c.tool.name),
+    }));
   }
 
   status() {
@@ -418,6 +437,13 @@ export class BasewareCore {
 
   async disconnectClient(id: string) {
     this.clients.delete(id);
+    const subs = this.viewportSubscriptions.get(id);
+    if (subs) {
+      this.viewportSubscriptions.delete(id);
+      for (const unsubscribe of subs.values()) {
+        try { unsubscribe(); } catch { /* ignore cleanup error */ }
+      }
+    }
     if (this.owner?.id === id) await this.release(this.epoch, "owner disconnected");
   }
 
@@ -437,8 +463,14 @@ export class BasewareCore {
         machine.capabilities = update.capabilities;
         machine.connected = true;
         machine.reason = "reconnected";
-        if (machine.isPrimary) this.primaryCapabilities = update.capabilities;
-      } else if (!update.machineId || update.machineId === this.activeMachineId) this.primaryCapabilities = update.capabilities;
+        if (machine.isPrimary) {
+          this.primaryCapabilities = update.capabilities;
+          this.primaryViewport = update.capabilities.viewport;
+        }
+      } else if (!update.machineId || update.machineId === this.activeMachineId) {
+        this.primaryCapabilities = update.capabilities;
+        this.primaryViewport = update.capabilities.viewport;
+      }
       this.rebuildControllers();
     }
     const machine = this.machines.get(update?.machineId ?? this.activeMachineId ?? "");
@@ -557,6 +589,72 @@ export class BasewareCore {
     }
   }
 
+  private resolveViewport(machineId?: string): {
+    viewport: ViewportProvider;
+    machineId: string | null;
+    driver: string | null;
+    isConnected(): boolean;
+  } {
+    if (machineId) {
+      const machine = this.machines.get(machineId);
+      if (machine) {
+        if (!machine.capabilities.viewport) {
+          throw new Error(`Machine ${machineId} does not expose a viewport`);
+        }
+        return {
+          viewport: machine.capabilities.viewport,
+          machineId: machine.id,
+          driver: machine.driver,
+          isConnected: () => machine.connected,
+        };
+      }
+      if (machineId === this.activeMachineId && this.primaryViewport) {
+        return {
+          viewport: this.primaryViewport,
+          machineId: this.activeMachineId ?? null,
+          driver: this.drivers[0]?.id ?? null,
+          isConnected: () => this.connected,
+        };
+      }
+      throw new Error(`Unknown machine: ${machineId}`);
+    }
+    const primary = (this.activeMachineId ? this.machines.get(this.activeMachineId) : undefined)
+      ?? [...this.machines.values()].find(m => m.isPrimary);
+    if (primary) {
+      if (!primary.capabilities.viewport) {
+        throw new Error(`Active machine ${primary.id} does not expose a viewport`);
+      }
+      return {
+        viewport: primary.capabilities.viewport,
+        machineId: primary.id,
+        driver: primary.driver,
+        isConnected: () => primary.connected,
+      };
+    }
+    if (this.primaryViewport) {
+      return {
+        viewport: this.primaryViewport,
+        machineId: this.activeMachineId ?? null,
+        driver: this.drivers[0]?.id ?? null,
+        isConnected: () => this.connected,
+      };
+    }
+    throw new Error("No viewport provider is available");
+  }
+
+  private withViewportControlMode(
+    state: ViewportState,
+    target: { machineId: string | null; driver: string | null; isConnected(): boolean },
+  ): ViewportState {
+    const targetConnected = target.isConnected() && state.connected;
+    return {
+      ...state,
+      machineId: state.machineId ?? target.machineId,
+      driver: state.driver ?? target.driver,
+      controlMode: !targetConnected ? "offline" : this.mode === "manual" ? "manual" : "auto",
+    };
+  }
+
   async handle(request: Request, client: ClientContext, signal = new AbortController().signal): Promise<unknown> {
     let deviceOperation = false;
     try {
@@ -579,6 +677,70 @@ export class BasewareCore {
         case "machines":
           if (this.onMachines) return await this.onMachines(request.action ?? "list", { id: request.id, ids: request.ids });
           return { activeMachineId: this.activeMachineId ?? null, machines: this.getMountedMachines() };
+        case "viewport.describe": {
+          const target = this.resolveViewport(request.machine);
+          const state = await target.viewport.describe(signal);
+          return this.withViewportControlMode(state, target);
+        }
+        case "viewport.action": {
+          if (this.mode !== "manual") throw new Error("Device is currently under agent control");
+          if (!request.viewportAction) throw new Error("viewport.action requires viewportAction");
+          const target = this.resolveViewport(request.machine);
+          const state = await target.viewport.performAction(request.viewportAction, signal);
+          return this.withViewportControlMode(state, target);
+        }
+        case "viewport.input": {
+          if (this.mode !== "manual") throw new Error("Device is currently under agent control");
+          if (!request.viewportInput) throw new Error("viewport.input requires viewportInput");
+          const target = this.resolveViewport(request.machine);
+          return await target.viewport.sendHumanInput(request.viewportInput, signal);
+        }
+        case "viewport.subscribe": {
+          const target = this.resolveViewport(request.machine);
+          const machineKey = target.machineId ?? "__primary__";
+          const unsubscribe = await target.viewport.subscribe(
+            {
+              ...(request.maxFps !== undefined ? { maxFps: request.maxFps } : {}),
+              ...(request.quality !== undefined ? { quality: request.quality } : {}),
+            },
+            event => {
+              const seq = ++this.viewportEventSequence;
+              const payload = event.event === "state"
+                ? { ...event, state: this.withViewportControlMode(event.state, target) }
+                : event;
+              const transientEvent: DeviceEvent = {
+                type: event.event === "frame" ? "viewport_frame" : "viewport_state",
+                data: payload,
+                trace: {},
+                persisted: false,
+                source: { component: "baseware", implementation: "baseware" },
+                origin: {
+                  eventId: `${this.serviceId}:viewport:${seq}`,
+                  clockId: this.serviceId,
+                  seq,
+                  at: new Date().toISOString(),
+                  atMs: performance.now(),
+                },
+              };
+              try { client.onEvent?.(transientEvent); } catch { /* client owns its transport */ }
+            },
+          );
+          if (signal.aborted) {
+            try { unsubscribe(); } catch { /* ignore */ }
+            throw signal.reason instanceof Error ? signal.reason : new Error("Request aborted");
+          }
+          let clientSubs = this.viewportSubscriptions.get(client.id);
+          if (!clientSubs) {
+            clientSubs = new Map();
+            this.viewportSubscriptions.set(client.id, clientSubs);
+          }
+          const existing = clientSubs.get(machineKey);
+          if (existing) {
+            try { existing(); } catch { /* ignore */ }
+          }
+          clientSubs.set(machineKey, unsubscribe);
+          return { subscribed: true, machineId: target.machineId };
+        }
         case "controller":
           if (!request.id) throw new Error("Missing controller ID");
           deviceOperation = true;
@@ -597,6 +759,12 @@ export class BasewareCore {
   }
 
   async close() {
+    for (const subs of this.viewportSubscriptions.values()) {
+      for (const unsubscribe of subs.values()) {
+        try { unsubscribe(); } catch { /* ignore cleanup error */ }
+      }
+    }
+    this.viewportSubscriptions.clear();
     await this.release(undefined, "shutdown");
     clearInterval(this.statsTimer);
     this.sampling.flush(true);

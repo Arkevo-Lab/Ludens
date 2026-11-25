@@ -23,11 +23,14 @@ interface MountedRuntime {
 }
 
 function transportParams(spec: BasewareMachineSpec): Partial<DriverCreateOptions> {
+  const common: Partial<DriverCreateOptions> = {
+    ...(spec.initialUrl ? { initialUrl: spec.initialUrl } : {}),
+  };
   const transport = spec.transport;
-  if (transport.kind === "bridge") return { port: transport.port, host: transport.host };
-  if (transport.kind === "stdio") return { command: transport.command };
-  if (transport.kind === "ssh") return { ssh: { host: transport.host, user: transport.user, port: transport.port, identityFile: transport.identityFile, command: transport.command } };
-  return { url: transport.url, transportMode: transport.kind };
+  if (transport.kind === "bridge") return { ...common, port: transport.port, host: transport.host };
+  if (transport.kind === "stdio") return { ...common, command: transport.command, ...(transport.args ? { args: transport.args } : {}) };
+  if (transport.kind === "ssh") return { ...common, ssh: { host: transport.host, user: transport.user, port: transport.port, identityFile: transport.identityFile, command: transport.command } };
+  return { ...common, url: transport.url, transportMode: transport.kind };
 }
 
 function driverInfo(registration: DriverRegistration, provider: DriverProvider): DriverInfo {
@@ -54,6 +57,9 @@ export async function main(args = process.argv.slice(2)) {
     "ssh-host": { type: "string" }, "ssh-user": { type: "string" }, "ssh-port": { type: "string" },
     "ssh-identity": { type: "string" }, "ssh-command": { type: "string" },
     "machine-id": { type: "string" },
+    "session-id": { type: "string" },
+    "initial-url": { type: "string" },
+    "browser-socket": { type: "string" },
   } });
   if (!values.driver?.trim()) throw new Error("serve requires --driver <id>; emulator drivers also require --driver-package <spec>");
   const machineId = values["machine-id"] ?? process.env.LUDENS_MACHINE_ID ?? "primary";
@@ -106,9 +112,14 @@ export async function main(args = process.argv.slice(2)) {
       startResync(runtime.spec.id);
     });
   };
+  const browserRuntimeParams = (spec: BasewareMachineSpec): Partial<DriverCreateOptions> => ({
+    ...(values["session-id"] ? { sessionId: values["session-id"] } : {}),
+    ...(values["browser-socket"] ? { browserSocket: values["browser-socket"] } : {}),
+    ...(!spec.initialUrl && values["initial-url"] ? { initialUrl: values["initial-url"] } : {}),
+  });
   const connectMachineSpec = async (spec: BasewareMachineSpec, isPrimary: boolean, existing?: DriverRegistration): Promise<MountedRuntime> => {
     const resolved = existing ?? await resolveDriver(spec.driver, spec.driverPackage, defaultDriverCacheRoot());
-    const provider = await resolved.load({ ...transportParams(spec), clock });
+    const provider = await resolved.load({ ...transportParams(spec), ...(spec.driver === "browser" ? browserRuntimeParams(spec) : {}), clock });
     if (isPrimary) for (const m of machines.values()) m.isPrimary = false;
     const runtime: MountedRuntime = { spec, registration: resolved, provider, connected: true, reason: "connected", isPrimary };
     machines.set(spec.id, runtime);
@@ -120,7 +131,11 @@ export async function main(args = process.argv.slice(2)) {
     const runtime = machines.get(id);
     if (!runtime || runtime.connected) return !!runtime?.connected;
     try {
-      const provider = await runtime.registration.load({ ...transportParams(runtime.spec), clock });
+      const provider = await runtime.registration.load({
+        ...transportParams(runtime.spec),
+        ...(runtime.spec.driver === "browser" ? browserRuntimeParams(runtime.spec) : {}),
+        clock,
+      });
       runtime.provider = provider;
       runtime.connected = true;
       runtime.reason = "reconnected";
@@ -190,9 +205,11 @@ export async function main(args = process.argv.slice(2)) {
     const log = new EventLog(dataDir, serviceId);
     const primarySpec: BasewareMachineSpec = { id: machineId, name: machineId, driver: values.driver!,
       ...(values["driver-package"] ? { driverPackage: values["driver-package"] } : {}),
+      ...(values["initial-url"] ? { initialUrl: values["initial-url"] } : {}),
       transport: ssh ? { kind: "ssh", host: ssh.host, user: ssh.user, port: ssh.port, identityFile: ssh.identityFile, command: ssh.command }
         : values.url ? { kind: transportMode === "sse" ? "sse" : "http", url: values.url }
         : values["cua-command"] ? { kind: "stdio", command: values["cua-command"] }
+        : registration.transport === "stdio" ? { kind: "stdio" }
         : { kind: "bridge", port: port ?? 0, host: values.host },
       updatedAt: new Date().toISOString() };
     const onReconnect = async (targetId?: string): Promise<boolean> => {
@@ -205,7 +222,8 @@ export async function main(args = process.argv.slice(2)) {
       return ok;
     };
     const provider = await registration.load({ port, host: values.host, command: values["cua-command"],
-      transportMode, ssh, url: values.url, clock });
+      transportMode, ssh, url: values.url, sessionId: values["session-id"], initialUrl: values["initial-url"],
+      browserSocket: values["browser-socket"], clock });
     core = new BasewareCore({ capabilities: provider.capabilities, record: log.record, serviceId, source: log.source,
       diagnostics: values.diagnostics, streamDir: join(dataDir, "stream"),
       streamPrefetch: process.env.LUDENS_BASEWARE_STREAM_PREFETCH !== "0",
