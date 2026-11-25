@@ -26,9 +26,9 @@ ludens workspace up
   - 在 **`Auto`** 模式下，Baseware 的 `epoch` 控制门禁会屏蔽人工透传输入，由 Shiori 与 `perception.py` 通过 `screen.capture`、`page.*`、`keyboard.*`、`mouse.*`（含 Pointer Lock 相对位移 `mouse.moveRelative`）与 `input.play` 接管操作。
   - 随时点击 **收回控制权（Reclaim Control）**（或执行 `ludens auto off`），Baseware 会立即取消在途 `input.play` 序列并触发 `release(epoch)` → `session.releaseAll`，强制抬起所有按住的键盘按键与鼠标键，确保绝不卡键。
 - **统一 `<DeviceViewport />` 与 Web 控制台 `/viewport` 串流**：
-  - 在 **Ludens 桌面端（`electron-local`）**，`<DeviceViewport />` 将原生 `WebContentsView` 直接贴合到可拖拽调宽的右侧工作台槽位（0ms WebGL 渲染 + 原生音频），主窗口弹出 Modal 遮挡时自动降级为最新静态帧占位。
+  - 在 **Ludens 桌面端（`electron-local`）**，`<DeviceViewport />` 将原生 `WebContentsView` 直接贴合到可拖拽调宽的右侧工作台槽位（0ms WebGL 渲染 + 原生音频），当悬浮窗或弹窗覆盖视口区域时平滑切换至进程内高帧率画布流。
   - 在 **Web 控制台、手机端或远端客户端**，`<DeviceViewport />` 连接 `ludens-server` 的 HMAC 鉴权 `/viewport` 二进制 WebSocket 帧流（通过 `createImageBitmap` 渲染并采用单槽丢旧帧背压），并在 `Manual` 模式下将鼠标、滚轮、键盘与 Pointer Lock 输入回传给宿主。
-  - **沉浸模式（Immersive Mode）**：在 **运行（Live）** 顶栏或视口右上角点击 **沉浸模式**，可将内置浏览器（以及计算机视口或设备观测舞台）全屏最大化为主工作区、顶部居中展示胶囊地址栏，并将原有的 Shiori 胶囊输入栏（支持一键收起/展开与最新动态预览）置于屏幕最下方；点击 **分栏视图** 即可零中断切回左右分栏，过程中不重建连接、不丢帧、不丢失输入草稿。
+  - **沉浸模式（Immersive Mode）**：在 **运行（Live）** 视口右上角点击进入 **沉浸模式**，会自动收起左侧导航栏、将导航与居中胶囊地址栏合入单条极简顶栏（桌面端 `38px` 窗口顶栏合一，Web 端 `40px`），并让内置浏览器 `100%` 无黑边贴边铺满舞台、实时同步视口分辨率；角落提供支持自由拖拽与五点磁吸记忆的三档 **Codex 悬浮小窗**（**最小化胶囊** ↔ **紧凑输入卡** ↔ **迷你对话流抽屉**）。随时切回 **分栏视图** 不会断连、不丢帧、不丢失输入草稿，并会自动还原 `1280×720` 桌面视口与侧栏状态。
 
 ## 2. 开箱即用的桌面目标（`cua`）
 
