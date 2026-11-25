@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -34,6 +34,8 @@ export interface DeviceViewportProps {
   reclaiming?: boolean;
   suspended?: boolean;
   immersive?: boolean;
+  leadingSlot?: ReactNode;
+  immersiveLabel?: string;
   onToggleImmersive?: () => void;
   onReclaimControl?: () => void | Promise<void>;
 }
@@ -45,6 +47,8 @@ export function DeviceViewport({
   reclaiming = false,
   suspended = false,
   immersive = false,
+  leadingSlot,
+  immersiveLabel,
   onToggleImmersive,
   onReclaimControl,
 }: DeviceViewportProps) {
@@ -116,11 +120,12 @@ export function DeviceViewport({
       data-suspended={suspended ? "true" : undefined}
       aria-label={t(stageKind === "browser" ? "browserAria" : "computerAria")}
     >
-      {/* Top Chrome Bar */}
+      {/* Single 46px Top Chrome Bar (flush with left thread header) */}
       <header className="device-viewport-chrome">
         {stageKind === "browser" ? (
           <>
             <div className="device-viewport-nav-group">
+              {leadingSlot}
               <button
                 type="button"
                 className="device-viewport-icon-btn"
@@ -191,6 +196,7 @@ export function DeviceViewport({
           </>
         ) : (
           <div className="device-viewport-computer-id">
+            {leadingSlot}
             <Monitor className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
             <span className="device-viewport-computer-name">
               {state?.machineId || t("computerDefaultLabel")}
@@ -248,8 +254,9 @@ export function DeviceViewport({
           {onToggleImmersive && (
             <button
               type="button"
-              className="device-viewport-icon-btn device-viewport-immersive-btn"
+              className="device-viewport-immersive-pill"
               data-viewport-immersive-toggle=""
+              data-immersive-toggle=""
               data-active={immersive ? "true" : undefined}
               aria-pressed={immersive}
               title={t(immersive ? "exitImmersiveHint" : "immersiveModeHint")}
@@ -257,10 +264,11 @@ export function DeviceViewport({
               onClick={onToggleImmersive}
             >
               {immersive ? (
-                <Columns2 className="size-3.5" aria-hidden="true" />
+                <Columns2 className="size-3.5 shrink-0" aria-hidden="true" />
               ) : (
-                <Expand className="size-3.5" aria-hidden="true" />
+                <Expand className="size-3.5 shrink-0" aria-hidden="true" />
               )}
+              {immersiveLabel && <span className="device-viewport-immersive-label">{immersiveLabel}</span>}
             </button>
           )}
         </div>

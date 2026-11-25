@@ -47,11 +47,11 @@ test("detectBrowserPlatform identifies darwin, win32, and linux hints", () => {
 });
 
 test("resolveDesktopChromeState handles plain Web, Electron macOS/Win32 bridges, and cross-OS browser previews", () => {
-  // 1. Plain Web browser (unified 38px topbar, non-desktop window chrome)
+  // 1. Plain Web browser
   const web = resolveDesktopChromeState({ fallbackWebPlatform: "darwin" });
   assert.equal(web.active, false);
   assert.equal(web.isPreview, false);
-  assert.equal(web.titlebarHeight, 38);
+  assert.equal(web.titlebarHeight, 0);
 
   // 2. Native Electron macOS hiddenInset
   const macNative = resolveDesktopChromeState({
@@ -221,6 +221,7 @@ test("DesktopTitlebar renders Antigravity macOS layout, Windows 11 custom Fluent
     focused: true,
     isPreview: true,
     sidebarCollapsed: false,
+    workspaceTitle: "switch2-diablo3",
     viewTitle: "Live",
     canGoBack: true,
     canGoForward: false,
@@ -230,6 +231,7 @@ test("DesktopTitlebar renders Antigravity macOS layout, Windows 11 custom Fluent
     onGoBack: noop,
     onGoForward: noop,
     onOpenQuickSwitcher: noop,
+    onReload: noop,
     onToggleCompanion: noop,
     onMinimize: noop,
     onToggleMaximize: noop,
@@ -238,28 +240,17 @@ test("DesktopTitlebar renders Antigravity macOS layout, Windows 11 custom Fluent
     onSelectPreviewPlatform: noop,
   };
 
-  // Plain Web mode renders the same unified single-row top bar without native traffic lights or window controls
-  const webHtml = renderToStaticMarkup(
-    createElement(
-      LocaleProvider,
-      null,
+  assert.equal(
+    renderToStaticMarkup(
       createElement(DesktopTitlebar, {
         ...baseProps,
         active: false,
-        isPreview: false,
         platform: "darwin",
-        captionStyle: "custom",
+        captionStyle: "macos",
       }),
     ),
+    "",
   );
-  assert.match(webHtml, /data-desktop-titlebar=""/);
-  assert.match(webHtml, /data-desktop-window="false"/);
-  assert.match(webHtml, /padding-left:12px/);
-  assert.match(webHtml, /data-titlebar-brand/);
-  assert.match(webHtml, /data-titlebar-view-title=""[^>]*>Live<\/strong>/);
-  assert.doesNotMatch(webHtml, /data-preview-traffic-lights/);
-  assert.doesNotMatch(webHtml, /data-win-controls/);
-  assert.doesNotMatch(webHtml, /data-action="reload"/);
 
   const macHtml = renderToStaticMarkup(
     createElement(
@@ -274,13 +265,12 @@ test("DesktopTitlebar renders Antigravity macOS layout, Windows 11 custom Fluent
   );
   assert.match(macHtml, /padding-left:74px/);
   assert.match(macHtml, /data-preview-traffic-lights/);
-  assert.match(macHtml, /data-titlebar-primary/);
+  assert.match(macHtml, /switch2-diablo3/);
   assert.match(macHtml, /data-action="toggle-companion"/);
   assert.match(macHtml, /data-preview-switcher/);
   assert.match(macHtml, /⌘K/);
   assert.doesNotMatch(macHtml, /data-win-controls/);
   assert.doesNotMatch(macHtml, /data-titlebar-brand/);
-  assert.doesNotMatch(macHtml, /data-action="reload"/);
 
   const macFsNativeHtml = renderToStaticMarkup(
     createElement(
@@ -445,7 +435,7 @@ test("Viewport 100dvh budgets subtract --shell-topbar-height across shell, live,
     "utf8",
   );
 
-  assert.match(globalsCss, /--shell-topbar-height:\s*38px/);
+  assert.match(globalsCss, /--shell-topbar-height:\s*0px/);
   assert.match(
     globalsCss,
     /\.sidebar\s*\{[\s\S]*?height:\s*calc\(100dvh\s*-\s*var\(--shell-topbar-height,\s*0px\)\)/,

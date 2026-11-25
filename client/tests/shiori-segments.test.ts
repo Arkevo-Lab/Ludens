@@ -322,7 +322,7 @@ function sampleWorkbenchFeed(historical = true): ActivityFeedData {
   };
 }
 
-test("ShioriWorkbench delegates topbar controls to unified TopbarSlot, keeps floating scroll-bottom pill above composer, and removes redundant dock close button", async () => {
+test("ShioriWorkbench renders single-line 46px thread header, keeps floating scroll-bottom pill above composer, and aligns right dock header", async () => {
   const { ShioriWorkbench } = await import("../features/live/shiori-cockpit");
 
   const html = renderToStaticMarkup(
@@ -348,13 +348,13 @@ test("ShioriWorkbench delegates topbar controls to unified TopbarSlot, keeps flo
     ),
   );
 
-  // Secondary stacked cockpit header and noisy inline buttons are removed in favor of unified single-row topbar
-  assert.doesNotMatch(html, /codex-cockpit-header/);
-  assert.doesNotMatch(html, /codex-thread-brand/);
-  assert.doesNotMatch(html, /codex-expand-all-btn/);
-  assert.doesNotMatch(html, /codex-pool-trigger-btn/);
-  assert.doesNotMatch(html, /codex-follow-toggle-btn/);
-  assert.doesNotMatch(html, /codex-dock-close-btn/);
+  // Clean zero-topbar single-line cockpit header in left pane
+  assert.match(html, /codex-cockpit-header/);
+  assert.match(html, /codex-thread-brand/);
+  assert.match(html, /data-test-run-picker="true"/);
+  assert.match(html, /codex-pool-trigger-btn/);
+  assert.match(html, /codex-follow-toggle-btn/);
+  assert.match(html, /codex-dock-close-btn/);
 
   const scrollStagePos = html.indexOf("codex-chat-scroll-stage");
   const scrollBtnPos = html.indexOf("codex-scroll-bottom-btn");

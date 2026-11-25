@@ -89,7 +89,7 @@
   --surface-inset: #07080b;
   --thinking: #a78bfa;
   --radius: 0.375rem;
-  --shell-topbar-height: 38px;
+  --shell-topbar-height: 0px;
   --shell-sidebar-width: 220px;
   --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);

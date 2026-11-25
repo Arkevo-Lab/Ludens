@@ -2593,6 +2593,13 @@ details.codex-step-group:not([open])::details-content {
   flex-direction: column;
   gap: 20px;
 }
+.codex-dock-body[data-flush-stage="true"] {
+  padding: 0;
+  gap: 0;
+}
+.codex-dock-body[data-flush-stage="true"] > .codex-dock-section {
+  padding: 16px;
+}
 
 .codex-dock-viewport {
   min-width: 0;

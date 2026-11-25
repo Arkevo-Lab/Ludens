@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { bytes, clockTime, percent, requestBytes, RequestChart, RequestDetails, seconds, transport } from "@/features/live/run-visuals";
-import { TopbarSlot } from "@/shell/topbar-slots";
 
 export interface RunAnalysisProps {
   data: RunData;
@@ -139,19 +138,9 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
     className="aria-disabled:opacity-50" onClick={event => retry(event.currentTarget)}>{t(retrying ? "reading" : "retry")}</Button>;
 
   return <Tabs value={currentTab} onValueChange={value => handleTabChange(value as "overview" | "requests")} className="run-analysis">
-    {(runPicker || statusSlot) && (
-      <TopbarSlot slot="primary">
-        {runPicker}
-        {statusSlot}
-      </TopbarSlot>
-    )}
-    {handoverSlot && (
-      <TopbarSlot slot="actions">
-        {handoverSlot}
-      </TopbarSlot>
-    )}
-    <div className="perf-toolbar flex min-h-[40px] flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2">
+    <div className="perf-toolbar flex min-h-[48px] flex-wrap items-center justify-between gap-2 border-b border-border/60 pb-2 min-[1080px]:flex-nowrap">
       <div className="perf-toolbar-left flex shrink-0 items-center gap-2">
+        {mobileNavSlot}
         <TabsList className="perf-tabs-list h-auto shrink-0">
           <TabsTrigger value="overview" className="perf-tab-trigger">
             <BarChart3 className="size-4" aria-hidden="true" />
@@ -164,6 +153,13 @@ export function RunAnalysis({ data, detailData, call, requestedCall, pending, er
           </TabsTrigger>
         </TabsList>
       </div>
+      {(statusSlot || runPicker || handoverSlot) && (
+        <div className="perf-toolbar-right ml-auto flex min-w-0 flex-wrap items-center justify-end gap-2 min-[1080px]:flex-nowrap [&_.perf-run-status]:ml-0 [&_.perf-run-status]:px-2.5 [&_.perf-run-status]:py-1">
+          {statusSlot}
+          {runPicker}
+          {handoverSlot}
+        </div>
+      )}
     </div>
 
     <TabsContent value="overview" className="perf-overview-pane">

@@ -16,8 +16,7 @@ import { REPLAY_COARSE_TICK_MS, useReplayClock, useReplaySession, type ReplayClo
 import "@/features/replay/timeline-player.css";
 import { useTranslations } from "@/lib/locale";
 import { useMediaResolver } from "@/lib/ludens-rpc";
-import { ChevronLeft, ChevronRight, PanelRight, RefreshCw, RotateCcw, RotateCw, Search, Share2 } from "lucide-react";
-import { TopbarSlot } from "@/shell/topbar-slots";
+import { ChevronLeft, ChevronRight, PanelRight, RefreshCw, RotateCcw, RotateCw, Search, Share2, X } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ReplayTimeJump } from "@/features/replay/replay-time-jump";
 import { ReplayEventSearch } from "@/features/replay/replay-event-search";
@@ -561,7 +560,11 @@ export function TimelinePlayer({
   if (!project || !run) {
     return (
       <div className="replay-player outline-none">
-        {runPicker && <TopbarSlot slot="primary">{runPicker}</TopbarSlot>}
+        {(mobileNavSlot || runPicker) && (
+          <header className="replay-studio-topbar">
+            <div className="replay-studio-topbar-left">{mobileNavSlot}{runPicker}</div>
+          </header>
+        )}
         <section className="surface empty-state m-4">
           <h2>{t("emptyTitle")}</h2>
           <p>{t("emptyDescription")}</p>
@@ -573,7 +576,11 @@ export function TimelinePlayer({
   if (!overview) {
     return (
       <div className="replay-player outline-none">
-        {runPicker && <TopbarSlot slot="primary">{runPicker}</TopbarSlot>}
+        {(mobileNavSlot || runPicker) && (
+          <header className="replay-studio-topbar">
+            <div className="replay-studio-topbar-left">{mobileNavSlot}{runPicker}</div>
+          </header>
+        )}
         <section className="surface empty-state m-4">
           <h1>{overviewError ? t("unavailable") : t("preparing")}</h1>
           {overviewError ? (
@@ -626,97 +633,105 @@ export function TimelinePlayer({
       data-dock-open={dockOpen ? "true" : undefined}
       data-overlay-dock={!desktopDock ? "true" : undefined}
     >
-      <TopbarSlot slot="primary">
-        {runPicker}
-        {(capabilities.length > 1 || Boolean(capability)) && (
-          <div className="replay-capability">
-            <Label htmlFor={`${controlsId}-capability`} className="sr-only">{t("capabilityLabel")}</Label>
-            <NativeSelect
-              id={`${controlsId}-capability`}
-              size="sm"
-              className="h-6 max-w-[156px] py-0 pr-7 text-xs data-[size=sm]:h-6 data-[size=sm]:py-0"
-              value={capability}
-              onChange={event => {
-                session.cancelStep(); setCapability(event.target.value);
-              }}
-            >
-              <NativeSelectOption value="">{t("allCapabilities")}</NativeSelectOption>
-              {capabilities.map(value => <NativeSelectOption key={value} value={value}>{shortCapabilityName(value)}</NativeSelectOption>)}
-            </NativeSelect>
-          </div>
-        )}
-        {coverage && !coverage.complete && (
-          <span
-            className="replay-coverage-pill"
-            role="status"
-            title={`${t("coverageReadPrefix")} ${Math.round(coverage.bytes / Math.max(1, coverage.totalBytes) * 100)}%`}
-          >
-            <span className="replay-coverage-label">{t("coverageReadPrefix")} </span>
-            {Math.round(coverage.bytes / Math.max(1, coverage.totalBytes) * 100)}%
-          </span>
-        )}
-      </TopbarSlot>
-
-      <TopbarSlot slot="actions">
-        {shareState && <span className="replay-share-feedback" role="status">{shareState}</span>}
-        <button
-          type="button"
-          className="desktop-chrome-icon-btn replay-topbar-action-btn"
-          title={nt("findEvent")}
-          aria-label={nt("findEvent")}
-          onClick={() => {
-            setDockOpen(true);
-            setInspectorTab("events");
-            requestAnimationFrame(() => eventSearchInput.current?.focus());
-          }}
-        >
-          <Search className="size-[14px]" strokeWidth={1.75} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="desktop-chrome-icon-btn replay-topbar-action-btn"
-          disabled={refreshing}
-          title={refreshLabel}
-          aria-label={refreshLabel}
-          onClick={session.refresh}
-        >
-          <RefreshCw className={"size-[14px]" + (refreshing ? " motion-safe:animate-spin" : "")} strokeWidth={1.75} aria-hidden="true" />
-        </button>
-        <button
-          type="button"
-          className="desktop-chrome-icon-btn replay-topbar-action-btn"
-          title={t("shareMoment")}
-          aria-label={t("shareMoment")}
-          onClick={share}
-        >
-          <Share2 className="size-[14px]" strokeWidth={1.75} aria-hidden="true" />
-        </button>
-      </TopbarSlot>
-
-      <TopbarSlot slot="dockToggle">
-        <button
-          ref={dockToggleRef}
-          type="button"
-          className="desktop-chrome-icon-btn replay-dock-toggle-btn"
-          data-action="toggle-dock"
-          data-replay-dock-toggle=""
-          data-active={String(dockOpen)}
-          aria-expanded={dockOpen}
-          aria-pressed={dockOpen}
-          title={dockToggleLabel}
-          aria-label={dockToggleLabel}
-          onClick={toggleDock}
-        >
-          <PanelRight className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
-        </button>
-      </TopbarSlot>
-
       <section
         ref={stageMainRef}
         className="surface replay-studio-main"
         data-compact-stage={compactStage ? "true" : undefined}
         aria-label={t("stageTitle")}
       >
+        <header className="replay-studio-topbar">
+          <div className="replay-studio-topbar-left">
+            {mobileNavSlot}
+            {runPicker}
+            {(capabilities.length > 1 || Boolean(capability)) && (
+              <div className="replay-capability">
+                <Label htmlFor={`${controlsId}-capability`} className="sr-only">{t("capabilityLabel")}</Label>
+                <NativeSelect
+                  id={`${controlsId}-capability`}
+                  size="sm"
+                  className="h-7 max-w-[156px] py-0 pr-7 text-xs data-[size=sm]:h-7 data-[size=sm]:py-0"
+                  value={capability}
+                  onChange={event => {
+                    session.cancelStep(); setCapability(event.target.value);
+                  }}
+                >
+                  <NativeSelectOption value="">{t("allCapabilities")}</NativeSelectOption>
+                  {capabilities.map(value => <NativeSelectOption key={value} value={value}>{shortCapabilityName(value)}</NativeSelectOption>)}
+                </NativeSelect>
+              </div>
+            )}
+            {coverage && !coverage.complete && (
+              <span
+                className="replay-coverage-pill"
+                role="status"
+                title={`${t("coverageReadPrefix")} ${Math.round(coverage.bytes / Math.max(1, coverage.totalBytes) * 100)}%`}
+              >
+                <span className="replay-coverage-label">{t("coverageReadPrefix")} </span>
+                {Math.round(coverage.bytes / Math.max(1, coverage.totalBytes) * 100)}%
+              </span>
+            )}
+          </div>
+
+          <div className="replay-studio-topbar-right">
+            {shareState && <span className="replay-share-feedback" role="status">{shareState}</span>}
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="replay-topbar-action-btn"
+              title={nt("findEvent")}
+              aria-label={nt("findEvent")}
+              onClick={() => {
+                setDockOpen(true);
+                setInspectorTab("events");
+                requestAnimationFrame(() => eventSearchInput.current?.focus());
+              }}
+            >
+              <Search className="size-3.5" aria-hidden="true" />
+              <span className="replay-topbar-btn-label">{nt("findEvent")}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              className="replay-topbar-action-btn"
+              disabled={refreshing}
+              title={refreshLabel}
+              aria-label={refreshLabel}
+              onClick={session.refresh}
+            >
+              <RefreshCw className={"size-3.5" + (refreshing ? " motion-safe:animate-spin" : "")} aria-hidden="true" />
+              <span className="replay-topbar-btn-label">{refreshLabel}</span>
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="xs"
+              className="replay-topbar-action-btn"
+              title={t("shareMoment")}
+              aria-label={t("shareMoment")}
+              onClick={share}
+            >
+              <Share2 className="size-3.5" aria-hidden="true" />
+              <span className="replay-topbar-btn-label">{t("shareMoment")}</span>
+            </Button>
+            <Button
+              ref={dockToggleRef}
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="replay-dock-toggle-btn"
+              data-replay-dock-toggle=""
+              data-active={dockOpen ? "true" : undefined}
+              aria-expanded={dockOpen}
+              title={dockToggleLabel}
+              aria-label={dockToggleLabel}
+              onClick={toggleDock}
+            >
+              <PanelRight className="size-3.5" aria-hidden="true" />
+            </Button>
+          </div>
+        </header>
 
         <div className="replay-frames" aria-busy={!ready}>
           {shownFrames.length ? (
@@ -971,6 +986,20 @@ export function TimelinePlayer({
                 {evidence && <i className="replay-tab-dot" aria-hidden="true" />}
               </TabsTrigger>
             </TabsList>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="replay-inspector-close shrink-0"
+              title={nt("closeInspector")}
+              aria-label={nt("closeInspector")}
+              onClick={() => {
+                setDockOpen(false);
+                requestAnimationFrame(() => dockToggleRef.current?.focus());
+              }}
+            >
+              <X className="size-3.5" aria-hidden="true" />
+            </Button>
           </div>
 
           <TabsContent value="events" forceMount className="replay-inspector-content data-[state=inactive]:hidden">
