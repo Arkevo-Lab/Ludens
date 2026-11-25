@@ -1,6 +1,6 @@
 "use client";
 
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { ArrowLeft, ArrowRight, PanelLeft, RotateCw, Search } from "lucide-react";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import type { DesktopCaptionStyle, DesktopPlatform } from "@/lib/desktop";
@@ -28,6 +28,9 @@ export interface DesktopTitlebarProps {
   canGoForward: boolean;
   companionAvailable?: boolean;
   companionVisible?: boolean;
+  centerSlot?: ReactNode;
+  leadingExtraSlot?: ReactNode;
+  trailingExtraSlot?: ReactNode;
   onToggleSidebar(): void;
   onGoBack(): void;
   onGoForward(): void;
@@ -60,6 +63,9 @@ export function DesktopTitlebar({
   canGoForward,
   companionAvailable = false,
   companionVisible = false,
+  centerSlot,
+  leadingExtraSlot,
+  trailingExtraSlot,
   onToggleSidebar,
   onGoBack,
   onGoForward,
@@ -122,6 +128,7 @@ export function DesktopTitlebar({
       data-maximized={String(maximized)}
       data-focused={String(focused)}
       data-preview={isPreview ? "true" : undefined}
+      data-immersive-chrome={centerSlot ? "true" : undefined}
     >
       {/* Left Header Cell: Pixel-aligned with 220px ConsoleSidebar */}
       <div
@@ -184,38 +191,43 @@ export function DesktopTitlebar({
           >
             <PanelLeft className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
           </button>
-          <button
-            type="button"
-            className="desktop-chrome-icon-btn"
-            data-action="navigate-back"
-            disabled={!canGoBack}
-            aria-label={t("navigateBack")}
-            title={backTooltip}
-            onClick={onGoBack}
-          >
-            <ArrowLeft className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="desktop-chrome-icon-btn"
-            data-action="navigate-forward"
-            disabled={!canGoForward}
-            aria-label={t("navigateForward")}
-            title={forwardTooltip}
-            onClick={onGoForward}
-          >
-            <ArrowRight className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
-          </button>
-          <button
-            type="button"
-            className="desktop-chrome-icon-btn"
-            data-action="quick-switcher"
-            aria-label={t("quickSwitcher")}
-            title={searchTooltip}
-            onClick={onOpenQuickSwitcher}
-          >
-            <Search className="size-[14.5px]" strokeWidth={1.75} aria-hidden="true" />
-          </button>
+          {leadingExtraSlot}
+          {!centerSlot && (
+            <>
+              <button
+                type="button"
+                className="desktop-chrome-icon-btn"
+                data-action="navigate-back"
+                disabled={!canGoBack}
+                aria-label={t("navigateBack")}
+                title={backTooltip}
+                onClick={onGoBack}
+              >
+                <ArrowLeft className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="desktop-chrome-icon-btn"
+                data-action="navigate-forward"
+                disabled={!canGoForward}
+                aria-label={t("navigateForward")}
+                title={forwardTooltip}
+                onClick={onGoForward}
+              >
+                <ArrowRight className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="desktop-chrome-icon-btn"
+                data-action="quick-switcher"
+                aria-label={t("quickSwitcher")}
+                title={searchTooltip}
+                onClick={onOpenQuickSwitcher}
+              >
+                <Search className="size-[14.5px]" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -224,21 +236,31 @@ export function DesktopTitlebar({
         className="desktop-titlebar-main"
         onDoubleClick={handleSurfaceDoubleClick}
       >
-        <div className="desktop-titlebar-breadcrumb" data-titlebar-breadcrumb="">
-          <span className="desktop-breadcrumb-product">Ludens</span>
-          <span className="desktop-breadcrumb-sep" aria-hidden="true">/</span>
-          {workspaceTitle ? (
-            <>
-              <span className="desktop-breadcrumb-workspace">
-                {workspaceTitle}
-              </span>
-              <span className="desktop-breadcrumb-sep" aria-hidden="true">
-                ·
-              </span>
-            </>
-          ) : null}
-          <strong className="desktop-breadcrumb-view">{viewTitle}</strong>
-        </div>
+        {centerSlot ? (
+          <div
+            className="desktop-titlebar-center-slot"
+            data-titlebar-center-slot=""
+            data-no-drag=""
+          >
+            {centerSlot}
+          </div>
+        ) : (
+          <div className="desktop-titlebar-breadcrumb" data-titlebar-breadcrumb="">
+            <span className="desktop-breadcrumb-product">Ludens</span>
+            <span className="desktop-breadcrumb-sep" aria-hidden="true">/</span>
+            {workspaceTitle ? (
+              <>
+                <span className="desktop-breadcrumb-workspace">
+                  {workspaceTitle}
+                </span>
+                <span className="desktop-breadcrumb-sep" aria-hidden="true">
+                  ·
+                </span>
+              </>
+            ) : null}
+            <strong className="desktop-breadcrumb-view">{viewTitle}</strong>
+          </div>
+        )}
 
         <div className="desktop-titlebar-right" data-no-drag="">
           <div className="desktop-titlebar-tools">
@@ -282,6 +304,8 @@ export function DesktopTitlebar({
               </div>
             )}
 
+            {trailingExtraSlot}
+
             {companionAvailable && onToggleCompanion && (
               <button
                 type="button"
@@ -300,16 +324,18 @@ export function DesktopTitlebar({
               </button>
             )}
 
-            <button
-              type="button"
-              className="desktop-chrome-icon-btn"
-              data-action="reload"
-              aria-label={t("reload")}
-              title={t("reload")}
-              onClick={onReload}
-            >
-              <RotateCw className="size-[13.5px]" strokeWidth={1.75} aria-hidden="true" />
-            </button>
+            {!centerSlot && (
+              <button
+                type="button"
+                className="desktop-chrome-icon-btn"
+                data-action="reload"
+                aria-label={t("reload")}
+                title={t("reload")}
+                onClick={onReload}
+              >
+                <RotateCw className="size-[13.5px]" strokeWidth={1.75} aria-hidden="true" />
+              </button>
+            )}
           </div>
 
           {layout.reserveWin32Overlay && (

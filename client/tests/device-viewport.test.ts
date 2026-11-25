@@ -23,13 +23,15 @@ import { resolveRuntimeCapabilities } from "../lib/use-runtime-capabilities";
 import {
   buildViewportWsUrl,
   computePointerCoordinates,
+  desktopFramePayloadToPacket,
   extractInputModifiers,
   mapMouseButton,
   normalizeBrowserNavigationUrl,
+  rectsIntersectWithTolerance,
   resolveEffectiveStageKind,
   type UseDeviceViewportResult,
 } from "../features/live/use-device-viewport";
-import { DeviceViewport } from "../features/live/device-viewport";
+import { DeviceViewport, ViewportTopbarControls } from "../features/live/device-viewport";
 import {
   emptyWorkspaceDraft,
   isBrowserTargetDraft,
@@ -370,7 +372,7 @@ test("workspace-create-model supports Built-in Browser first-class selection and
   );
 });
 
-test("DeviceViewport renders browser chrome, auto reclaim overlay, offline card, and computer chrome without omnibox", () => {
+test("DeviceViewport renders browser chrome, clean auto shield without bottom-right banner collision, hideChrome, offline card, and computer chrome", () => {
   const browserAutoHtml = renderToStaticMarkup(
     createElement(
       LocaleProvider,
@@ -391,6 +393,53 @@ test("DeviceViewport renders browser chrome, auto reclaim overlay, offline card,
   assert.doesNotMatch(browserAutoHtml, /1280×720/);
   assert.match(browserAutoHtml, /data-viewport-reclaim=""/);
   assert.match(browserAutoHtml, /data-viewport-auto-overlay=""/);
+  assert.doesNotMatch(
+    browserAutoHtml,
+    /device-viewport-auto-pill/,
+    "Auto shield must not render bottom-right auto-pill banner that collides with ImmersiveFloatingPod",
+  );
+  assert.doesNotMatch(
+    browserAutoHtml,
+    /aspect-ratio:/,
+    "Full-bleed immersive browser slot omits inline aspect-ratio lock",
+  );
+
+  // Desktop merged topbar mode hides duplicate inner .device-viewport-chrome
+  const mergedDesktopHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(DeviceViewport, {
+        viewport: makeStubViewportResult(makeViewportState({ controlMode: "manual" })),
+        stageKind: "browser",
+        isAuto: false,
+        immersive: true,
+        hideChrome: true,
+      }),
+    ),
+  );
+  assert.match(mergedDesktopHtml, /data-hide-chrome="true"/);
+  assert.doesNotMatch(mergedDesktopHtml, /device-viewport-chrome/);
+  assert.doesNotMatch(mergedDesktopHtml, /device-viewport-omnibox/);
+
+  // ViewportTopbarControls builds leading nav, center omnibox, and trailing reclaim + exit slots
+  const topbarSlots = ViewportTopbarControls({
+    stageKind: "browser",
+    state: makeViewportState({ controlMode: "auto" }),
+    isAuto: true,
+    immersive: true,
+    onAction() {},
+    onToggleImmersive() {},
+    onReclaimControl() {},
+  });
+  const centerHtml = renderToStaticMarkup(createElement(LocaleProvider, null, topbarSlots.centerSlot));
+  const leadingHtml = renderToStaticMarkup(createElement(LocaleProvider, null, topbarSlots.leadingExtraSlot));
+  const trailingHtml = renderToStaticMarkup(createElement(LocaleProvider, null, topbarSlots.trailingExtraSlot));
+  assert.match(centerHtml, /device-viewport-omnibox/);
+  assert.match(leadingHtml, /data-viewport-nav="back"/);
+  assert.match(leadingHtml, /data-viewport-nav="reload"/);
+  assert.match(trailingHtml, /data-viewport-reclaim=""/);
+  assert.match(trailingHtml, /data-viewport-immersive-toggle=""/);
 
   const browserOfflineHtml = renderToStaticMarkup(
     createElement(
@@ -464,11 +513,39 @@ test("CLI ludens workspace init forwards --url for browser workspaces", async ()
   });
 });
 
+test("rectsIntersectWithTolerance and desktopFramePayloadToPacket support Electron zero-port occluded streaming", () => {
+  const slot = { left: 100, top: 38, right: 1380, bottom: 758, width: 1280, height: 720 };
+  const overlappingPod = { left: 960, top: 620, right: 1362, bottom: 742, width: 402, height: 122 };
+  const outsideOverlay = { left: 0, top: 0, right: 101, bottom: 38, width: 101, height: 38 };
+  assert.equal(rectsIntersectWithTolerance(overlappingPod, slot, 2), true);
+  assert.equal(rectsIntersectWithTolerance(outsideOverlay, slot, 2), false);
+
+  const sampleBytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]);
+  const packet = desktopFramePayloadToPacket({
+    sessionId: "ws-demo",
+    format: "jpeg",
+    dataBase64: Buffer.from(sampleBytes).toString("base64"),
+    width: 1440,
+    height: 862,
+    timestampMs: 1732500001000,
+    seq: 9,
+    pointerLocked: true,
+  });
+  assert.equal(packet.format, "jpeg");
+  assert.equal(packet.width, 1440);
+  assert.equal(packet.height, 862);
+  assert.equal(packet.seq, 9);
+  assert.equal(packet.pointerLocked, true);
+  assert.deepEqual(Array.from(packet.bytes), Array.from(sampleBytes));
+});
+
 test("en.json and zh.json maintain exact key parity across all namespaces including deviceViewport", () => {
   const enKeys = collectLeafKeys(en as unknown as Record<string, unknown>);
   const zhKeys = collectLeafKeys(zh as unknown as Record<string, unknown>);
   assert.deepEqual(zhKeys, enKeys);
   assert.ok(enKeys.some(key => key.startsWith("deviceViewport.")));
+  assert.ok(enKeys.includes("deviceViewport.autoControlClickHint"));
+  assert.ok(enKeys.includes("shioriCockpit.immersivePodAria"));
   assert.ok(enKeys.includes("workspaceSetup.initialUrlLabel"));
   assert.ok(enKeys.includes("shioriCockpit.resizeDockAria"));
 });

@@ -32,14 +32,17 @@ import {
   type ConnectionTarget,
   type ResolvedConnectionEndpoints,
 } from "@/lib/connection-target";
-import type { DesktopViewportHostInfo } from "@/lib/desktop";
+import type {
+  DesktopViewportFramePayload,
+  DesktopViewportHostInfo,
+} from "@/lib/desktop";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 
 export type ViewportTransportMode = "native-electron" | "stream" | "none";
 export type ViewportStreamStatus = "idle" | "connecting" | "connected" | "disconnected";
 
 const MODAL_OCCLUSION_SELECTOR =
-  '[role="dialog"], [data-slot="dialog-content"], .codex-dock-backdrop';
+  '[role="dialog"], [data-slot="dialog-content"], .codex-dock-backdrop, [data-viewport-floating-overlay]';
 
 const PREVENT_DEFAULT_KEYS = new Set([
   "ArrowUp",
@@ -181,8 +184,53 @@ export function computePointerCoordinates(
   return { x, y };
 }
 
-function hasVisibleModalOcclusion(doc: Document): boolean {
+export function rectsIntersectWithTolerance(
+  a: Pick<DOMRect, "left" | "top" | "right" | "bottom" | "width" | "height">,
+  b: Pick<DOMRect, "left" | "top" | "right" | "bottom" | "width" | "height">,
+  tolerancePx = 2,
+): boolean {
+  if (a.width <= 0 || a.height <= 0 || b.width <= 0 || b.height <= 0) {
+    return false;
+  }
+  return (
+    a.right > b.left + tolerancePx &&
+    a.left < b.right - tolerancePx &&
+    a.bottom > b.top + tolerancePx &&
+    a.top < b.bottom - tolerancePx
+  );
+}
+
+export function desktopFramePayloadToPacket(
+  frame: DesktopViewportFramePayload,
+): ViewportFramePacket {
+  let bytes: Uint8Array;
+  if (typeof Buffer !== "undefined") {
+    const buf = Buffer.from(frame.dataBase64, "base64");
+    bytes = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+  } else {
+    const binary = atob(frame.dataBase64);
+    bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+  }
+  return {
+    format: frame.format,
+    width: frame.width,
+    height: frame.height,
+    timestampMs: frame.timestampMs,
+    seq: frame.seq,
+    pointerLocked: frame.pointerLocked,
+    bytes,
+  };
+}
+
+export function hasVisibleModalOcclusion(
+  doc: Document,
+  slotEl?: HTMLElement | null,
+): boolean {
   const nodes = doc.querySelectorAll<HTMLElement>(MODAL_OCCLUSION_SELECTOR);
+  const slotRect = slotEl ? slotEl.getBoundingClientRect() : null;
   for (const node of nodes) {
     if (node.hidden) continue;
     if (node.getAttribute("aria-hidden") === "true" && !node.classList.contains("codex-dock-backdrop")) {
@@ -196,9 +244,17 @@ function hasVisibleModalOcclusion(doc: Document): boolean {
       continue;
     }
     const rect = node.getBoundingClientRect();
-    if (rect.width > 0 && rect.height > 0) {
-      return true;
+    if (rect.width <= 0 || rect.height <= 0) {
+      continue;
     }
+    if (node.hasAttribute("data-viewport-floating-overlay")) {
+      if (!slotRect) continue;
+      if (rectsIntersectWithTolerance(rect, slotRect, 2)) {
+        return true;
+      }
+      continue;
+    }
+    return true;
   }
   return false;
 }
@@ -226,6 +282,7 @@ export interface UseDeviceViewportOptions {
   machineId?: string | null;
   isAuto: boolean;
   hostOnline: boolean;
+  immersive?: boolean;
   suspended?: boolean;
   enabled?: boolean;
 }
@@ -270,6 +327,7 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
     machineId = null,
     isAuto,
     hostOnline,
+    immersive = false,
     suspended = false,
     enabled = true,
   } = options;
@@ -431,7 +489,7 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
     return "none";
   }, [enabled, effectiveStageKind, state?.available, canNativeEmbed, wsUrl]);
 
-  // Detect modal / dialog occlusion when using native Electron WebContentsView overlay
+  // Detect modal / dialog / geometric floating-overlay occlusion when using native Electron WebContentsView
   useEffect(() => {
     if (transportMode !== "native-electron" || typeof document === "undefined") {
       setOccluded(false);
@@ -439,24 +497,53 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
     }
 
     const check = () => {
-      setOccluded(hasVisibleModalOcclusion(document));
+      setOccluded(hasVisibleModalOcclusion(document, slotRef.current));
     };
     check();
 
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined" && slotRef.current) {
+      resizeObserver = new ResizeObserver(check);
+      resizeObserver.observe(slotRef.current);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", check);
+    }
+
     if (typeof MutationObserver === "undefined" || !document.body) {
-      return;
+      return () => {
+        resizeObserver?.disconnect();
+        if (typeof window !== "undefined") {
+          window.removeEventListener("resize", check);
+        }
+      };
     }
     const observer = new MutationObserver(check);
     observer.observe(document.body, {
       childList: true,
       subtree: true,
       attributes: true,
-      attributeFilter: ["role", "data-slot", "data-state", "data-motion-state", "class", "hidden", "style"],
+      attributeFilter: [
+        "role",
+        "data-slot",
+        "data-state",
+        "data-motion-state",
+        "data-viewport-floating-overlay",
+        "data-pod-tier",
+        "data-pod-anchor",
+        "class",
+        "hidden",
+        "style",
+      ],
     });
     return () => {
       observer.disconnect();
+      resizeObserver?.disconnect();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("resize", check);
+      }
     };
-  }, [transportMode]);
+  }, [transportMode, immersive]);
 
   // Synchronize Electron native WebContentsView bounds, visibility, and interactivity
   const nativeSessionId = transportMode === "native-electron" ? (state?.sessionId ?? null) : null;
@@ -764,6 +851,61 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
     };
   }, [shouldConnectStream, wsUrl, drawFramePacket]);
 
+  // Zero-port Electron IPC frame stream fallback when native WebContentsView is occluded by an overlay
+  useEffect(() => {
+    if (
+      !enabled ||
+      suspended ||
+      transportMode !== "native-electron" ||
+      !occluded ||
+      !nativeSessionId ||
+      Boolean(wsUrl) ||
+      typeof window === "undefined" ||
+      !window.ludens?.viewport?.setFrameStream ||
+      !window.ludens?.viewport?.onFrame
+    ) {
+      return;
+    }
+
+    const bridge = window.ludens.viewport;
+    let disposed = false;
+    setStreamStatus("connected");
+
+    const offFrame = bridge.onFrame!(frame => {
+      if (disposed || frame.sessionId !== nativeSessionId) return;
+      try {
+        drawFramePacket(desktopFramePayloadToPacket(frame));
+      } catch {
+        // Ignore malformed frame payload
+      }
+    });
+
+    void bridge
+      .setFrameStream!({
+        sessionId: nativeSessionId,
+        active: true,
+        maxFps: 30,
+        quality: 82,
+      })
+      .catch(() => {
+        if (!disposed) {
+          setStreamStatus("disconnected");
+        }
+      });
+
+    return () => {
+      disposed = true;
+      offFrame();
+      pendingFrameRef.current = null;
+      void bridge
+        .setFrameStream!({ sessionId: nativeSessionId, active: false })
+        .catch(() => {
+          // Ignore teardown errors
+        });
+      setStreamStatus("idle");
+    };
+  }, [enabled, suspended, transportMode, occluded, nativeSessionId, wsUrl, drawFramePacket]);
+
   // Clean up retained ImageBitmap on unmount
   useEffect(() => {
     return () => {
@@ -821,6 +963,10 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
 
   const sendInput = useCallback(
     (input: ViewportHumanInput) => {
+      const canDispatchCanvasInput =
+        transportMode === "stream" || (transportMode === "native-electron" && occluded);
+      if (!canDispatchCanvasInput && input.type !== "releaseAll") return;
+
       const current = stateRef.current;
       if (!current || current.controlMode !== "manual") return;
 
@@ -859,7 +1005,7 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
           // Non-fatal during mode transitions
         });
     },
-    [machineId, project, workspace],
+    [machineId, occluded, project, transportMode, workspace],
   );
 
   // Release pointer lock & held inputs whenever leaving manual mode or suspending
@@ -906,6 +1052,91 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
     },
     [machineId, project, workspace],
   );
+
+  // Live Browser Resize Sync: full-bleed slot dimensions in Immersive Mode, 1280x720 desktop layout on Split exit
+  const wasImmersiveRef = useRef(Boolean(immersive));
+  useEffect(() => {
+    const prevImmersive = wasImmersiveRef.current;
+    wasImmersiveRef.current = Boolean(immersive);
+    if (
+      prevImmersive &&
+      !immersive &&
+      enabled &&
+      effectiveStageKind === "browser" &&
+      stateRef.current?.available &&
+      stateRef.current.capabilities.resize
+    ) {
+      void performAction({
+        kind: "resize",
+        width: DEFAULT_VIEWPORT_WIDTH,
+        height: DEFAULT_VIEWPORT_HEIGHT,
+      });
+    }
+  }, [immersive, enabled, effectiveStageKind, performAction]);
+
+  useEffect(() => {
+    if (
+      !immersive ||
+      !enabled ||
+      suspended ||
+      effectiveStageKind !== "browser" ||
+      !state?.available ||
+      !state.capabilities.resize ||
+      state.controlMode !== "manual"
+    ) {
+      return;
+    }
+    const slotEl = slotRef.current;
+    if (!slotEl) return;
+
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleSlotResize = () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        debounceTimer = null;
+        const el = slotRef.current;
+        const current = stateRef.current;
+        if (!el || !current || !current.available || current.controlMode !== "manual") {
+          return;
+        }
+        const rect = el.getBoundingClientRect();
+        const slotW = Math.round(rect.width);
+        const slotH = Math.round(rect.height);
+        if (slotW < 320 || slotH < 240) return;
+        if (Math.abs(slotW - current.width) > 2 || Math.abs(slotH - current.height) > 2) {
+          void performAction({ kind: "resize", width: slotW, height: slotH });
+        }
+      }, 120);
+    };
+
+    scheduleSlotResize();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(scheduleSlotResize);
+      resizeObserver.observe(slotEl);
+    }
+    if (typeof window !== "undefined") {
+      window.addEventListener("resize", scheduleSlotResize);
+    }
+
+    return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
+      resizeObserver?.disconnect();
+      if (typeof window !== "undefined") {
+        window.removeEventListener("resize", scheduleSlotResize);
+      }
+    };
+  }, [
+    immersive,
+    enabled,
+    suspended,
+    effectiveStageKind,
+    state?.available,
+    state?.capabilities.resize,
+    state?.controlMode,
+    performAction,
+  ]);
 
   const stageHandlers = useMemo<DeviceViewportStageHandlers>(() => {
     const getViewportSize = () => ({

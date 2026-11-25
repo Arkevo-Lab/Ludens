@@ -485,11 +485,18 @@ test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100p
   assert.match(activityCss, /\.codex-dock-header\s*\{[^}]*height:\s*46px;/);
   assert.match(activityCss, /\.codex-live-phase\s*\{[^}]*display:\s*block;[^}]*min-width:\s*68px;/);
   assert.match(activityCss, /\.codex-workbench\[data-dock-open\]\s*\{[^}]*clamp\(380px,\s*26vw,\s*410px\)/);
-  assert.match(activityCss, /@media\s*\(max-width:\s*1439px\)[\s\S]*?clamp\(330px,\s*26\.5vw,\s*350px\)/);
+  assert.match(
+    activityCss,
+    /@media\s*\(max-width:\s*1439px\)[\s\S]*?\.codex-workbench\[data-dock-open\]:not\(\[data-immersive="true"\]\)[\s\S]*?clamp\(330px,\s*26\.5vw,\s*350px\)/,
+  );
   assert.match(activityCss, /\.codex-header-icon-btn\s*\{[^}]*min-width:\s*28px;/);
   assert.match(
     activityCss,
-    /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(370px,\s*calc\(100vw\s*-\s*48px\)\);/,
+    /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock:not\(\[data-immersive="true"\]\)\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(370px,\s*calc\(100vw\s*-\s*48px\)\);/,
+  );
+  assert.match(
+    activityCss,
+    /\.codex-workbench\[data-immersive="true"\]\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\);[^}]*grid-template-areas:\s*"dock";/,
   );
   assert.match(activityCss, /\.codex-runtime-header,\s*\.shiori-timer-header\s*\{[^}]*flex-wrap:\s*nowrap;/);
   assert.match(activityCss, /\.shiori-timer-bar\s*\{[^}]*repeat\(24,/);
