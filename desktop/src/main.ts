@@ -18,8 +18,10 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { NodeUdsRpcClient } from '@ludens/client/cli/app-rpc-client'
 import { ludensHome, registerWorkspace } from '@ludens/protocol/ludens'
+import type { DesktopViewportAttachInput, NativeViewportBounds } from '@ludens/protocol/viewport'
 import type { DesktopWindowCommand, DesktopWindowState } from '@ludens/client/lib/desktop'
 import { AppServerHost, resolveStaticDir } from './app-server-host.js'
+import { BrowserHost } from './browser-host.js'
 import { createCompanion } from './companion.js'
 import {
   LUDENS_APP_ENTRY_URL,
@@ -37,6 +39,7 @@ import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
 import { installMainProcessSafety, installParentWatchdog } from './process-safety.js'
 import { ActiveCoreQuitGuard, mapDialogButtonToQuitAction } from './quit-guard.js'
 import { DesktopUdsRpcRelay } from './rpc-bridge.js'
+import { LUDENS_VIEWPORT_CHANNELS } from './rpc-channels.js'
 import { createLudensTrayIcon } from './tray-icon.js'
 import {
   buildOfflineWaitingHtml,
@@ -149,6 +152,7 @@ if (values.help) {
     let tray: Tray | undefined
     let source: PetSessionCoordinator | undefined
     let rpcRelay: DesktopUdsRpcRelay | undefined
+    let browserHost: BrowserHost | undefined
     let mainMediaClient: NodeUdsRpcClient | undefined
     let mainMediaSocketPath: string | undefined
     let retryDashboard: (() => void) | undefined
@@ -163,6 +167,31 @@ if (values.help) {
     const windowStatePath = join(app.getPath('userData'), 'window-state.json')
     let persistedState: SavedWindowState | undefined
 
+    const notifyBrowserHostStatus = async (
+      socketPath: string | undefined,
+      status: 'online' | 'offline',
+      host: BrowserHost | undefined = browserHost,
+    ): Promise<void> => {
+      if (!socketPath || !host) return
+      const client = new NodeUdsRpcClient({ socketPath, connectTimeoutMs: 1_200 })
+      try {
+        await client.call(
+          'browserHost/notify',
+          {
+            status,
+            hostId: host.hostId,
+            socketPath: host.socketPath,
+            pid: process.pid,
+          },
+          { timeoutMs: 2_000 },
+        )
+      } catch {
+        // Best-effort notification; server also probes browser-host.json/sock directly.
+      } finally {
+        await client.close().catch(() => {})
+      }
+    }
+
     const cleanupDesktopResources = async (cleanupOptions: {
       saveWindow: boolean
       stopOwnedDaemon: boolean
@@ -175,6 +204,13 @@ if (values.help) {
           const nextState = captureWindowState?.()
           if (nextState) saveWindowStateSync(windowStatePath, nextState)
         } catch {}
+      }
+      if (browserHost) {
+        const closingHost = browserHost
+        browserHost = undefined
+        const serverSocket = appServerHost.current()?.socketPath ?? appServerHost.socketPath()
+        await notifyBrowserHostStatus(serverSocket, 'offline', closingHost).catch(() => {})
+        await closingHost.close().catch(() => {})
       }
       try { source?.stop() } catch {}
       try { rpcRelay?.dispose() } catch {}
@@ -293,6 +329,16 @@ if (values.help) {
 
     void app.whenReady().then(async () => {
       appReady = true
+      browserHost = new BrowserHost({
+        home: ludensHome(),
+        version: app.getVersion(),
+      })
+      try {
+        await browserHost.start()
+      } catch (error) {
+        console.error('[ludens] BrowserHost startup failed:', error)
+      }
+
       const staticDir = resolveStaticDir({
         here,
         resourcesPath: process.resourcesPath,
@@ -545,6 +591,12 @@ if (values.help) {
           owner?.hide()
         }
       })
+      owner.on('hide', () => {
+        if (owner) void browserHost?.suspendOwnerView(owner)
+      })
+      owner.on('show', () => {
+        if (owner) void browserHost?.resumeOwnerView(owner)
+      })
 
       const openDetails = (url: string) => {
         if (!owner || owner.isDestroyed() || !isDashboardUrl(url, serverOrigin)) return
@@ -635,6 +687,82 @@ if (values.help) {
       ipcMain.handle(LUDENS_DIALOG_PICK_PATH_CHANNEL, async (event, rawOptions: unknown) => {
         if (!trusted(event)) throw new Error('Unauthorized dialog access')
         return runDialogPickPath(owner, dialog.showOpenDialog.bind(dialog), rawOptions)
+      })
+
+      const parseBounds = (raw: unknown): NativeViewportBounds => {
+        if (!raw || typeof raw !== 'object') {
+          throw new Error('Invalid viewport bounds')
+        }
+        const candidate = raw as Partial<NativeViewportBounds>
+        return {
+          x: typeof candidate.x === 'number' && Number.isFinite(candidate.x) ? candidate.x : 0,
+          y: typeof candidate.y === 'number' && Number.isFinite(candidate.y) ? candidate.y : 0,
+          width: typeof candidate.width === 'number' && Number.isFinite(candidate.width) ? candidate.width : 0,
+          height: typeof candidate.height === 'number' && Number.isFinite(candidate.height) ? candidate.height : 0,
+        }
+      }
+
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.getHostInfo, event => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        return browserHost
+          ? browserHost.getHostInfo()
+          : { available: false, hostId: '', socketPath: '', pid: process.pid }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.attach, async (event, rawInput: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!owner || owner.isDestroyed() || !browserHost?.isRunning()) {
+          throw new Error('Built-in BrowserHost is not running')
+        }
+        if (!rawInput || typeof rawInput !== 'object') {
+          throw new Error('Invalid viewport attach payload')
+        }
+        const candidate = rawInput as Partial<DesktopViewportAttachInput>
+        if (typeof candidate.sessionId !== 'string' || !candidate.sessionId.trim()) {
+          throw new Error('Viewport attach requires sessionId')
+        }
+        await browserHost.attachToOwner(owner, {
+          sessionId: candidate.sessionId.trim(),
+          initialUrl: typeof candidate.initialUrl === 'string' ? candidate.initialUrl : undefined,
+          bounds: parseBounds(candidate.bounds),
+          visible: candidate.visible !== false,
+          interactive: candidate.interactive !== false,
+        })
+        return { ok: true as const }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.updateBounds, async (event, rawInput: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!owner || owner.isDestroyed() || !browserHost?.isRunning()) {
+          return { ok: true as const }
+        }
+        if (!rawInput || typeof rawInput !== 'object') {
+          throw new Error('Invalid viewport bounds payload')
+        }
+        const candidate = rawInput as Partial<DesktopViewportAttachInput>
+        await browserHost.updateOwnerBounds(owner, {
+          sessionId: typeof candidate.sessionId === 'string' && candidate.sessionId.trim()
+            ? candidate.sessionId.trim()
+            : undefined,
+          initialUrl: typeof candidate.initialUrl === 'string' ? candidate.initialUrl : undefined,
+          bounds: parseBounds(candidate.bounds),
+          visible: typeof candidate.visible === 'boolean' ? candidate.visible : undefined,
+          interactive: typeof candidate.interactive === 'boolean' ? candidate.interactive : undefined,
+        })
+        return { ok: true as const }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.detach, async (event, rawTarget: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!owner || !browserHost) return { ok: true as const }
+        let sessionId: string | undefined
+        if (typeof rawTarget === 'string' && rawTarget.trim()) {
+          sessionId = rawTarget.trim()
+        } else if (rawTarget && typeof rawTarget === 'object') {
+          const candidate = rawTarget as { sessionId?: unknown }
+          if (typeof candidate.sessionId === 'string' && candidate.sessionId.trim()) {
+            sessionId = candidate.sessionId.trim()
+          }
+        }
+        await browserHost.detachFromOwner(owner, sessionId)
+        return { ok: true as const }
       })
       ipcMain.handle('ludens-pet:snapshot', event => {
         if (!trusted(event)) throw new Error('Unauthorized pet access')
@@ -767,6 +895,9 @@ if (values.help) {
       if (shouldShowWindow) showOwner()
 
       const daemonInfo = await daemonReadyPromise
+      if (browserHost?.isRunning()) {
+        void notifyBrowserHostStatus(daemonInfo.socketPath, 'online', browserHost)
+      }
       void rpcRelay.start().catch(error => {
         console.error('[ludens] UDS RPC relay initial connection failed (will retry):', error)
       })
