@@ -350,10 +350,11 @@ test("ShioriWorkbench renders single-line 46px thread header, keeps floating scr
 
   // Clean zero-topbar single-line cockpit header in left pane
   assert.match(html, /codex-cockpit-header/);
-  assert.match(html, /codex-thread-brand/);
+  assert.match(html, /class="codex-thread-heading"[^>]*>Demo Workspace<\/strong>/);
+  assert.doesNotMatch(html, /codex-thread-brand/);
+  assert.doesNotMatch(html, /codex-follow-toggle-btn/);
   assert.match(html, /data-test-run-picker="true"/);
   assert.match(html, /codex-pool-trigger-btn/);
-  assert.match(html, /codex-follow-toggle-btn/);
   assert.match(html, /codex-dock-close-btn/);
 
   const scrollStagePos = html.indexOf("codex-chat-scroll-stage");
@@ -485,7 +486,7 @@ test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100p
   assert.match(activityCss, /\.codex-live-phase\s*\{[^}]*display:\s*block;[^}]*min-width:\s*68px;/);
   assert.match(activityCss, /\.codex-workbench\[data-dock-open\]\s*\{[^}]*clamp\(380px,\s*26vw,\s*410px\)/);
   assert.match(activityCss, /@media\s*\(max-width:\s*1439px\)[\s\S]*?clamp\(330px,\s*26\.5vw,\s*350px\)/);
-  assert.match(activityCss, /@media\s*\(max-width:\s*1279px\)[\s\S]*?\.codex-thread-workspace\s*\{\s*display:\s*none;/);
+  assert.match(activityCss, /\.codex-header-icon-btn\s*\{[^}]*min-width:\s*28px;/);
   assert.match(
     activityCss,
     /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(370px,\s*calc\(100vw\s*-\s*48px\)\);/,

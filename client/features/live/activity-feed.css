@@ -474,7 +474,8 @@
   align-items: center;
   gap: 7px;
   min-width: 0;
-  flex: 1 1 auto;
+  max-width: min(100%, 560px);
+  flex: 0 1 auto;
   padding: 3px 8px;
   border: 1px solid transparent;
   border-radius: 999px;
@@ -502,8 +503,7 @@
   gap: 6px;
   flex-shrink: 0;
 }
-.codex-immersive-chip-btn,
-.codex-immersive-topbar-btn {
+.codex-immersive-chip-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -519,15 +519,13 @@
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.codex-immersive-chip-btn:hover,
-.codex-immersive-topbar-btn:hover {
+.codex-immersive-chip-btn:hover {
   color: var(--foreground);
   border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
 }
 .codex-immersive-topbar-btn[data-active="true"],
 .codex-dock-width-btn[data-active="true"] {
-  background: color-mix(in srgb, var(--primary) 14%, var(--card));
-  border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
   color: var(--primary);
 }
 .codex-immersive-chip-btn[data-tone="warn"] {
@@ -555,32 +553,20 @@
   align-items: center;
   gap: 8px;
   flex: 1 1 auto;
-  min-width: 112px;
+  min-width: 96px;
   overflow: hidden;
 }
 .codex-thread-heading,
 .codex-thread-title > strong {
-  display: inline-flex;
-  align-items: baseline;
-  min-width: 44px;
+  display: block;
+  min-width: 0;
   flex: 0 1 auto;
   font-size: 13.5px;
   font-weight: 600;
   color: var(--foreground);
   white-space: nowrap;
   overflow: hidden;
-}
-.codex-thread-brand {
-  flex-shrink: 0;
-}
-.codex-thread-workspace {
-  min-width: 0;
-  margin-left: 4px;
-  overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted-foreground);
-  font-weight: 500;
 }
 .codex-status-pill {
   display: inline-flex;
@@ -636,7 +622,7 @@
 .codex-thread-actions {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   margin-left: 4px;
   min-width: 0;
   flex: 0 1 auto;
@@ -646,17 +632,18 @@
   align-items: center;
   min-width: 0;
   flex: 0 1 auto;
+  margin-right: 2px;
   overflow: hidden;
 }
 .codex-header-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 4px;
   height: 28px;
-  padding: 0 9px;
+  padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   font-size: 12px;
   color: var(--muted-foreground);
@@ -665,41 +652,18 @@
   cursor: pointer;
   transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
 }
-.codex-expand-all-btn,
-.codex-follow-toggle-btn {
+.codex-header-icon-btn {
+  min-width: 28px;
+  padding: 0 6px;
+}
+.codex-expand-all-btn {
   border-color: color-mix(in srgb, var(--border) 75%, transparent);
-}
-.codex-follow-toggle-btn[data-active] {
-  color: var(--foreground);
-  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
-  background: color-mix(in srgb, var(--primary) 8%, var(--surface-inset, var(--muted)));
-}
-.codex-follow-toggle-btn[data-paused] {
-  border-color: color-mix(in srgb, #d97706 36%, var(--border));
-  color: color-mix(in srgb, #f59e0b 85%, var(--foreground));
-}
-.codex-follow-unread-count {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 17px;
-  height: 16px;
-  padding: 0 4.5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--gold) 22%, transparent);
-  color: var(--gold);
-  font: 600 10.5px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-}
-.codex-dock-toggle-btn {
-  padding: 0 7px;
 }
 .codex-header-btn:hover {
   background: var(--surface-inset, var(--muted));
   color: var(--foreground);
 }
 .codex-header-btn[data-active] {
-  border-color: var(--border);
   background: var(--surface-inset, var(--muted));
   color: var(--foreground);
 }
@@ -1804,7 +1768,6 @@ details.codex-step-group:not([open])::details-content {
 
 /* Header Event Pool Quick Trigger (Col 2 → opens Col 3 `事件池` tab) */
 .codex-pool-trigger-btn {
-  border-color: color-mix(in srgb, var(--border) 75%, transparent);
   font-family: inherit;
 }
 .codex-pool-trigger-icon {
@@ -3527,16 +3490,8 @@ details.codex-input-payload-details:not([open])::details-content {
 }
 
 @media (max-width: 1279px) {
-  .codex-thread-workspace {
-    display: none;
-  }
-  .codex-thread-heading,
-  .codex-thread-title > strong {
-    flex: 0 0 auto;
-    overflow: visible;
-  }
   .codex-status-pill {
-    max-width: 190px;
+    max-width: 180px;
   }
   .codex-chat-scroll {
     padding: 22px 20px 22px;
@@ -3547,37 +3502,16 @@ details.codex-input-payload-details:not([open])::details-content {
 }
 
 @media (min-width: 1100px) and (max-width: 1340px) {
-  .codex-workbench[data-dock-open] .codex-thread-doc-icon,
   .codex-workbench[data-dock-open] .codex-live-phase {
     display: none;
   }
 }
 
-/* Event Pool trigger collapses to icon (+count) on compact widths so the Shiori title never clips */
-@media (max-width: 1279px) {
-  .codex-pool-trigger-label {
-    display: none;
-  }
-  .codex-pool-trigger-btn {
-    padding: 0 7px;
-  }
-}
-@media (min-width: 1100px) and (max-width: 1380px) {
-  .codex-workbench[data-dock-open] .codex-pool-trigger-label {
-    display: none;
-  }
-  .codex-workbench[data-dock-open] .codex-pool-trigger-btn {
-    padding: 0 7px;
-  }
-}
-
 @media (max-width: 1199px) {
-  .codex-expand-all-label,
-  .codex-follow-toggle-label {
+  .codex-expand-all-label {
     display: none;
   }
-  .codex-expand-all-btn,
-  .codex-follow-toggle-btn {
+  .codex-expand-all-btn {
     padding: 0 7px;
   }
 }

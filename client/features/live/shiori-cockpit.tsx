@@ -15,7 +15,6 @@ import {
 import {
   AlertCircle,
   ArrowDown,
-  ArrowDownToLine,
   Bot,
   Check,
   ChevronDown,
@@ -25,7 +24,6 @@ import {
   CornerUpLeft,
   Cpu,
   Expand,
-  FileText,
   Inbox,
   Infinity as InfinityIcon,
   Lock,
@@ -3007,7 +3005,6 @@ export function ShioriWorkbench({
     markProgrammaticScroll,
     scrollToBottom: rawScrollToBottom,
     pauseFollow,
-    toggleFollow,
     scrollContainerProps,
   } = useLiveAutoScroll({
     project,
@@ -3625,8 +3622,13 @@ export function ShioriWorkbench({
   const backdropPresence = useAnimatedPresence(!immersiveMode && dockOpen && isOverlayDock, 180);
   const effectiveDockOpen = immersiveMode || dockOpen;
 
+  const showHeaderStatusPill = Boolean(
+    !isLiveRun || isSpawningCore || consolidating || (isAuto && hostOnline),
+  );
+  const immersiveBusy = Boolean(isSpawningCore || consolidating || (isAuto && thinking));
   const latestImmersivePreview = useMemo(() => {
     if (consolidating) return t("stateConsolidating");
+    if (isSpawningCore) return t("spawningCoreStatus");
     if (hostOnline && thinking) return t("stateAutoThinking");
     for (let i = segments.length - 1; i >= 0; i--) {
       const seg = segments[i]!;
@@ -3635,8 +3637,8 @@ export function ShioriWorkbench({
         if (text) return text.replace(/\s+/g, " ").slice(0, 110);
       }
     }
-    return stateTitle;
-  }, [consolidating, hostOnline, thinking, segments, stateTitle, t]);
+    return workspaceTitle || project;
+  }, [consolidating, isSpawningCore, hostOnline, thinking, segments, workspaceTitle, project, t]);
 
   return (
     <div
@@ -3658,25 +3660,25 @@ export function ShioriWorkbench({
         <header className="codex-thread-header codex-cockpit-header">
           <div className="codex-thread-title">
             {mobileNavSlot}
-            <FileText className="codex-thread-doc-icon size-4 text-muted-foreground shrink-0" aria-hidden="true" />
-            <strong className="codex-thread-heading" title={`Shiori · ${workspaceTitle || project}`}>
-              <span className="codex-thread-brand">Shiori</span>
-              <span className="codex-thread-workspace"> · {workspaceTitle || project}</span>
+            <strong className="codex-thread-heading" title={workspaceTitle || project}>
+              {workspaceTitle || project}
             </strong>
-            <span
-              className="codex-status-pill"
-              data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}
-              data-spawning-core={isSpawningCore ? "true" : undefined}
-              title={statePillTitle}
-            >
-              <PixelMark
-                size={13}
-                className="codex-status-mark"
-                state={!isLiveRun ? "idle" : isSpawningCore || consolidating || (isAuto && thinking) ? "reasoning" : !hostOnline ? "waiting" : "idle"}
-                filled={hostOnline && !isAuto}
-              />
-              <span className="codex-status-text">{compactStateTitle}</span>
-            </span>
+            {showHeaderStatusPill && (
+              <span
+                className="codex-status-pill"
+                data-tone={isAuto && hostOnline ? "auto" : hostOnline ? "manual" : "standby"}
+                data-spawning-core={isSpawningCore ? "true" : undefined}
+                title={statePillTitle}
+              >
+                <PixelMark
+                  size={12}
+                  className="codex-status-mark"
+                  state={!isLiveRun ? "idle" : isSpawningCore || consolidating || (isAuto && thinking) ? "reasoning" : "idle"}
+                  filled={hostOnline && !isAuto}
+                />
+                <span className="codex-status-text">{compactStateTitle}</span>
+              </span>
+            )}
             {phaseLabel && (
               <LivePhaseInlineBadge
                 phaseLabel={phaseLabel}
@@ -3691,41 +3693,7 @@ export function ShioriWorkbench({
             {runPicker && <div className="codex-thread-run-picker">{runPicker}</div>}
             <button
               type="button"
-              className="codex-header-btn codex-follow-toggle-btn"
-              data-live-follow-toggle=""
-              data-active={(isFollowing && !feed.historical) || undefined}
-              data-paused={(!isFollowing || feed.historical) || undefined}
-              aria-pressed={isFollowing && !feed.historical}
-              title={
-                isFollowing && !feed.historical
-                  ? t("autoFollowOnHint")
-                  : t("autoFollowPausedHint")
-              }
-              aria-label={
-                isFollowing && !feed.historical
-                  ? t("autoFollowOnHint")
-                  : t("autoFollowPausedHint")
-              }
-              onClick={() =>
-                toggleFollow(() => {
-                  if (feed.historical) feed.latest();
-                  onClearJumpTarget?.();
-                })
-              }
-            >
-              <ArrowDownToLine className="size-3.5 shrink-0" aria-hidden="true" />
-              {(!isFollowing || feed.historical) && unreadCount > 0 && (
-                <span className="codex-follow-unread-count">
-                  {unreadCount > 99 ? "99+" : unreadCount}
-                </span>
-              )}
-              <span className="codex-follow-toggle-label">
-                {isFollowing && !feed.historical ? t("autoFollowOn") : t("autoFollowPaused")}
-              </span>
-            </button>
-            <button
-              type="button"
-              className="codex-header-btn codex-pool-trigger-btn"
+              className="codex-header-btn codex-header-icon-btn codex-pool-trigger-btn"
               data-tone={pendingOutboundCount > 0 ? "outbound" : pendingInboundCount > 0 ? "inbound" : undefined}
               data-active={(dockOpen && dockTab === "pool") || undefined}
               aria-pressed={dockOpen && dockTab === "pool"}
@@ -3736,21 +3704,20 @@ export function ShioriWorkbench({
               {pendingOutboundCount > 0 ? (
                 <span className="codex-pool-trigger-icon" aria-hidden="true">🆘</span>
               ) : (
-                <Inbox className="size-3.5 shrink-0" aria-hidden="true" />
+                <Inbox className="size-4 shrink-0" aria-hidden="true" />
               )}
               {pendingPoolCount > 0 && <span className="codex-pool-trigger-count">{pendingPoolCount}</span>}
-              <span className="codex-pool-trigger-label">{t("poolHeaderTrigger")}</span>
             </button>
             <button
               type="button"
-              className="codex-header-btn codex-dock-toggle-btn"
+              className="codex-header-btn codex-header-icon-btn codex-dock-toggle-btn"
               data-active={dockOpen || undefined}
               aria-pressed={dockOpen}
               title={t("toggleDockHint")}
               aria-label={t("toggleDockHint")}
               onClick={toggleDock}
             >
-              <PanelRight className="size-4" aria-hidden="true" />
+              <PanelRight className="size-4 shrink-0" aria-hidden="true" />
             </button>
           </div>
         </header>
@@ -4248,17 +4215,7 @@ export function ShioriWorkbench({
                 ) : (
                   <Minus className="size-3.5 shrink-0" aria-hidden="true" />
                 )}
-                <PixelMark
-                  size={12}
-                  state={
-                    isSpawningCore || consolidating || (isAuto && thinking)
-                      ? "reasoning"
-                      : !hostOnline
-                        ? "waiting"
-                        : "idle"
-                  }
-                  filled={hostOnline && !isAuto}
-                />
+                {immersiveBusy && <span className="codex-thinking-dot shrink-0" aria-hidden="true" />}
                 <span className="codex-immersive-preview-text">{latestImmersivePreview}</span>
               </button>
 
@@ -4400,14 +4357,15 @@ export function ShioriWorkbench({
                 </button>
               )}
             </div>
-            <div className="inline-flex items-center gap-1.5">
+            <div className="inline-flex items-center gap-1">
               <button
                 type="button"
-                className="codex-immersive-topbar-btn"
+                className="codex-header-btn codex-header-icon-btn codex-immersive-topbar-btn"
                 data-dock-immersive-btn=""
                 data-active={immersiveMode ? "true" : undefined}
                 aria-pressed={immersiveMode}
                 title={t(immersiveMode ? "exitImmersiveHint" : "immersiveModeHint")}
+                aria-label={t(immersiveMode ? "exitImmersiveHint" : "immersiveModeHint")}
                 onClick={toggleImmersiveMode}
               >
                 {immersiveMode ? (
@@ -4415,12 +4373,11 @@ export function ShioriWorkbench({
                 ) : (
                   <Expand className="size-3.5 shrink-0" aria-hidden="true" />
                 )}
-                <span>{t(immersiveMode ? "exitImmersiveBtn" : "immersiveModeBtn")}</span>
               </button>
               {!immersiveMode && (
                 <button
                   type="button"
-                  className="codex-header-btn codex-dock-close-btn"
+                  className="codex-header-btn codex-header-icon-btn codex-dock-close-btn"
                   title={t("closeDock")}
                   aria-label={t("closeDock")}
                   onClick={closeDock}
@@ -4459,7 +4416,6 @@ export function ShioriWorkbench({
                     suspended={viewportSuspended}
                     immersive={immersiveMode}
                     leadingSlot={immersiveMode ? mobileNavSlot : undefined}
-                    immersiveLabel={t(immersiveMode ? "exitImmersiveBtn" : "immersiveModeBtn")}
                     onToggleImmersive={toggleImmersiveMode}
                     onReclaimControl={handleReclaimControl}
                   />

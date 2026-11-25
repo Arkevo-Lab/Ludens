@@ -388,7 +388,7 @@ test("DeviceViewport renders browser chrome, auto reclaim overlay, offline card,
   assert.match(browserAutoHtml, /device-viewport-omnibox/);
   assert.match(browserAutoHtml, /data-immersive="true"/);
   assert.match(browserAutoHtml, /data-viewport-immersive-toggle=""/);
-  assert.match(browserAutoHtml, /1280×720/);
+  assert.doesNotMatch(browserAutoHtml, /1280×720/);
   assert.match(browserAutoHtml, /data-viewport-reclaim=""/);
   assert.match(browserAutoHtml, /data-viewport-auto-overlay=""/);
 
@@ -407,6 +407,7 @@ test("DeviceViewport renders browser chrome, auto reclaim overlay, offline card,
   );
   assert.match(browserOfflineHtml, /data-viewport-offline=""/);
   assert.match(browserOfflineHtml, /Built-in Browser Offline/);
+  assert.doesNotMatch(browserOfflineHtml, /device-viewport-control-capsule/);
 
   const computerHtml = renderToStaticMarkup(
     createElement(
@@ -429,7 +430,7 @@ test("DeviceViewport renders browser chrome, auto reclaim overlay, offline card,
   );
   assert.doesNotMatch(computerHtml, /device-viewport-omnibox/);
   assert.match(computerHtml, /cua-vm-01/);
-  assert.match(computerHtml, /Manual/);
+  assert.doesNotMatch(computerHtml, /device-viewport-control-capsule/);
 });
 
 test("CLI ludens workspace init forwards --url for browser workspaces", async () => {

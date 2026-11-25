@@ -288,12 +288,21 @@ export default function ConsoleShell() {
   const isLiveWorkspaceSwitching = Boolean(view === "live" && entry === "ready" && !error && !liveData && cachedLiveSnapshot);
   const effectiveLiveSnapshot = isLiveWorkspaceSwitching ? cachedLiveSnapshot : null;
   const effectiveLiveData = liveData ?? effectiveLiveSnapshot?.data ?? null;
+  const hasMultiLiveHistory =
+    (project?.runs.length ?? 0) > 1 ||
+    (cycles?.length ?? 0) > 1 ||
+    Boolean(activeLiveSegment || liveJumpTarget?.value);
+  const liveRunPicker = hasMultiLiveHistory ? contextualRunPicker : null;
   const hasWorkbenchHeader =
     (view === "replay" && entry === "ready") ||
     ((view === "live" || view === "perf") &&
       Boolean(view === "live" ? effectiveLiveData : liveData) &&
       (entry === "ready" || allowZeroRunLive));
-  const hasContextualBarPicker = Boolean(runControls && (entry === "ready" || allowZeroRunLive) && contextualRunPicker);
+  const hasContextualBarPicker = Boolean(
+    runControls &&
+      (entry === "ready" || allowZeroRunLive) &&
+      (view === "live" ? liveRunPicker : contextualRunPicker),
+  );
   const activeWorkspaceLabel = workspaceScopedView ? workspaceName(project) : "";
   return (
     <div
@@ -533,7 +542,7 @@ export default function ConsoleShell() {
                   workspace={effectiveLiveSnapshot ? effectiveLiveSnapshot.workspace : (project?.workspace ?? effectiveLiveData.manifest.workspace ?? null)}
                   workspaceTitle={effectiveLiveSnapshot ? effectiveLiveSnapshot.workspaceTitle : workspaceName(project)}
                   runs={effectiveLiveSnapshot ? effectiveLiveSnapshot.runs : (project?.runs ?? [])}
-                  runPicker={contextualRunPicker}
+                  runPicker={liveRunPicker}
                   mobileNavSlot={mobileNavButton}
                   renderEventPoolPanel={props => <EventPoolOverviewPanel {...props} />}
                   jumpTarget={liveJumpTarget}

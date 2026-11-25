@@ -35,7 +35,6 @@ export interface DeviceViewportProps {
   suspended?: boolean;
   immersive?: boolean;
   leadingSlot?: ReactNode;
-  immersiveLabel?: string;
   onToggleImmersive?: () => void;
   onReclaimControl?: () => void | Promise<void>;
 }
@@ -48,7 +47,6 @@ export function DeviceViewport({
   suspended = false,
   immersive = false,
   leadingSlot,
-  immersiveLabel,
   onToggleImmersive,
   onReclaimControl,
 }: DeviceViewportProps) {
@@ -68,7 +66,6 @@ export function DeviceViewport({
     stageHandlers,
     refresh,
     performAction,
-    requestPointerLock,
   } = viewport;
 
   const width = state?.width || DEFAULT_VIEWPORT_WIDTH;
@@ -136,16 +133,18 @@ export function DeviceViewport({
               >
                 <ArrowLeft className="size-3.5" aria-hidden="true" />
               </button>
-              <button
-                type="button"
-                className="device-viewport-icon-btn"
-                title={t("navForward")}
-                aria-label={t("navForward")}
-                disabled={!isManual || !navigation?.canGoForward}
-                onClick={() => void performAction({ kind: "forward" })}
-              >
-                <ArrowRight className="size-3.5" aria-hidden="true" />
-              </button>
+              {navigation?.canGoForward && (
+                <button
+                  type="button"
+                  className="device-viewport-icon-btn"
+                  title={t("navForward")}
+                  aria-label={t("navForward")}
+                  disabled={!isManual}
+                  onClick={() => void performAction({ kind: "forward" })}
+                >
+                  <ArrowRight className="size-3.5" aria-hidden="true" />
+                </button>
+              )}
               <button
                 type="button"
                 className="device-viewport-icon-btn"
@@ -211,50 +210,29 @@ export function DeviceViewport({
         )}
 
         <div className="device-viewport-meta">
-          <span className="device-viewport-res" title={t("resolutionTitle")}>
-            {width}×{height}
-          </span>
-
-          {transportMode === "stream" && isManual && state?.capabilities.pointerLock && (
-            <button
-              type="button"
-              className="device-viewport-icon-btn"
-              data-active={pointerLockedLocal ? "true" : undefined}
-              title={t("pointerLockBtnHint")}
-              aria-label={t("pointerLockBtnHint")}
-              onClick={requestPointerLock}
-            >
-              <Crosshair className="size-3.5" aria-hidden="true" />
-            </button>
+          {isAgentControlled && (
+            <div className="device-viewport-control-capsule" data-mode="auto">
+              <span className="device-viewport-control-dot" aria-hidden="true" />
+              <span className="device-viewport-control-label">{t("controlAutoShiori")}</span>
+              {onReclaimControl && (
+                <button
+                  type="button"
+                  className="device-viewport-reclaim-btn"
+                  data-viewport-reclaim=""
+                  disabled={reclaiming}
+                  onClick={() => void onReclaimControl()}
+                >
+                  <Hand className="size-3" aria-hidden="true" />
+                  <span>{t(reclaiming ? "reclaimingBtn" : "reclaimControlBtn")}</span>
+                </button>
+              )}
+            </div>
           )}
-
-          <div className="device-viewport-control-capsule" data-mode={controlMode}>
-            <span className="device-viewport-control-dot" aria-hidden="true" />
-            <span className="device-viewport-control-label">
-              {controlMode === "offline"
-                ? t("controlOffline")
-                : isAgentControlled
-                  ? t("controlAutoShiori")
-                  : t("controlManual")}
-            </span>
-            {isAgentControlled && onReclaimControl && (
-              <button
-                type="button"
-                className="device-viewport-reclaim-btn"
-                data-viewport-reclaim=""
-                disabled={reclaiming}
-                onClick={() => void onReclaimControl()}
-              >
-                <Hand className="size-3" aria-hidden="true" />
-                <span>{t(reclaiming ? "reclaimingBtn" : "reclaimControlBtn")}</span>
-              </button>
-            )}
-          </div>
 
           {onToggleImmersive && (
             <button
               type="button"
-              className="device-viewport-immersive-pill"
+              className="device-viewport-icon-btn device-viewport-immersive-btn"
               data-viewport-immersive-toggle=""
               data-immersive-toggle=""
               data-active={immersive ? "true" : undefined}
@@ -268,7 +246,6 @@ export function DeviceViewport({
               ) : (
                 <Expand className="size-3.5 shrink-0" aria-hidden="true" />
               )}
-              {immersiveLabel && <span className="device-viewport-immersive-label">{immersiveLabel}</span>}
             </button>
           )}
         </div>

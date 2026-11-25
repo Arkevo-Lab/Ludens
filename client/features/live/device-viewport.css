@@ -31,8 +31,13 @@
 .device-viewport[data-immersive="true"][data-stage-kind="browser"] .device-viewport-omnibox {
   width: 100%;
   height: 30px;
-  padding: 0 13px;
+  padding: 0 14px;
   border-radius: 999px;
+}
+
+.device-viewport[data-immersive="true"][data-stage-kind="browser"] .device-viewport-omnibox:not(:focus-within) .device-viewport-omnibox-input {
+  text-align: center;
+  padding-right: 18px;
 }
 
 .device-viewport[data-immersive="true"][data-stage-kind="browser"] .device-viewport-meta {
@@ -63,36 +68,6 @@
   min-width: 0;
 }
 
-.device-viewport-immersive-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  background: var(--background);
-  color: var(--muted-foreground);
-  font-size: 11px;
-  font-weight: 500;
-  white-space: nowrap;
-  cursor: pointer;
-  flex-shrink: 0;
-  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
-}
-
-.device-viewport-immersive-pill:hover {
-  background: var(--card);
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
-  color: var(--foreground);
-}
-
-.device-viewport-immersive-pill[data-active="true"] {
-  background: color-mix(in srgb, var(--primary) 14%, var(--card));
-  border-color: color-mix(in srgb, var(--primary) 48%, var(--border));
-  color: var(--primary);
-}
-
 .device-viewport-nav-group {
   display: inline-flex;
   align-items: center;
@@ -104,11 +79,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: var(--muted-foreground);
   cursor: pointer;
@@ -117,37 +92,40 @@
 }
 
 .device-viewport-icon-btn:hover:not(:disabled) {
-  background: var(--card);
-  border-color: var(--border);
+  background: var(--surface-inset, var(--muted));
   color: var(--foreground);
 }
 
 .device-viewport-icon-btn[data-active="true"] {
-  background: color-mix(in srgb, var(--primary) 14%, var(--card));
-  border-color: color-mix(in srgb, var(--primary) 45%, var(--border));
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
   color: var(--primary);
 }
 
 .device-viewport-icon-btn:disabled {
-  opacity: 0.36;
+  opacity: 0.32;
   cursor: not-allowed;
 }
 
 .device-viewport-omnibox {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   flex: 1 1 auto;
   min-width: 0;
   height: 28px;
-  padding: 0 9px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--background);
-  transition: border-color 120ms ease, box-shadow 120ms ease;
+  padding: 0 11px;
+  border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface-inset, var(--card)) 55%, var(--background));
+  transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.device-viewport-omnibox:hover {
+  border-color: var(--border);
 }
 
 .device-viewport-omnibox:focus-within {
+  background: var(--background);
   border-color: var(--primary);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
 }
@@ -210,22 +188,8 @@
 .device-viewport-meta {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex-shrink: 0;
-}
-
-.device-viewport-res {
-  display: inline-flex;
-  align-items: center;
-  height: 22px;
-  padding: 0 6px;
-  border-radius: 5px;
-  border: 1px solid var(--border);
-  background: var(--background);
-  font: 500 10.5px/1 var(--font-mono);
-  font-variant-numeric: tabular-nums;
-  color: var(--muted-foreground);
-  white-space: nowrap;
 }
 
 .device-viewport-control-capsule {
