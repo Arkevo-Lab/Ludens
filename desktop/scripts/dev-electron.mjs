@@ -17,6 +17,9 @@ for (const arg of rawArgs) {
     electronArgs.push(arg)
   }
 }
+if (!electronArgs.includes('--parent-watchdog')) {
+  electronArgs.push('--parent-watchdog')
+}
 
 const explicitHome = process.env.LUDENS_HOME?.trim()
 const effectiveHome = realHome
@@ -56,10 +59,21 @@ const { command, args } = resolveElectronCommand()
 const child = spawn(command, args, {
   cwd: desktopRoot,
   env,
-  stdio: 'inherit',
+  stdio: ['pipe', 'inherit', 'inherit'],
 })
+child.stdin?.on('error', () => {})
+
+const closeChildStdin = () => {
+  try {
+    child.stdin?.end()
+  } catch {}
+  try {
+    child.stdin?.destroy()
+  } catch {}
+}
 
 const forward = signal => {
+  closeChildStdin()
   if (child.exitCode === null && child.signalCode === null) {
     try {
       child.kill(signal)
@@ -68,6 +82,7 @@ const forward = signal => {
 }
 process.on('SIGINT', () => forward('SIGINT'))
 process.on('SIGTERM', () => forward('SIGTERM'))
+process.on('exit', closeChildStdin)
 
 child.on('exit', (code, signal) => {
   process.exitCode = code ?? (signal ? 1 : 0)

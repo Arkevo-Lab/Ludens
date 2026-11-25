@@ -214,4 +214,44 @@ describe('DesktopUdsRpcRelay', () => {
     expect(sockets.length).toBe(3)
     expect(resolveCount).toBe(3)
   })
+
+  it('absorbs socket error events emitted during or after destroyActiveSocket()', async () => {
+    class ErrorOnDestroySocket extends MockUdsSocket {
+      override destroy(): this {
+        if (!this.destroyed) {
+          this.destroyed = true
+          this.writable = false
+          this.emit('error', Object.assign(new Error('write EPIPE'), { code: 'EPIPE' }))
+          queueMicrotask(() => {
+            this.emit('error', Object.assign(new Error('read ECONNRESET'), { code: 'ECONNRESET' }))
+            this.emit('close')
+          })
+        }
+        return this
+      }
+    }
+
+    const sockets: ErrorOnDestroySocket[] = []
+    const relay = new DesktopUdsRpcRelay({
+      resolveSocketPath: () => join(tmpdir(), 'mock-destroy-error.sock'),
+      isTrustedSender: () => true,
+      getTargetWebContents: () => undefined,
+      connectSocket: () => {
+        const sock = new ErrorOnDestroySocket()
+        sockets.push(sock)
+        queueMicrotask(() => sock.emit('connect'))
+        return sock
+      },
+    })
+
+    await relay.start()
+    expect(sockets).toHaveLength(1)
+
+    await expect(relay.reconnect()).resolves.toBeUndefined()
+    expect(sockets).toHaveLength(2)
+
+    expect(() => relay.dispose()).not.toThrow()
+    await Promise.resolve()
+    await Promise.resolve()
+  })
 })

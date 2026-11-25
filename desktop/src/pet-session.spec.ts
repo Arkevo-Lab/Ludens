@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -364,5 +364,106 @@ describe('shared Pet follow target over UDS RPC', () => {
     } finally {
       session.stop()
     }
+  })
+
+  it('survives workspace deletion mid-follow with consumerRecorder and clears state cleanly on stop()', async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'ludens-pet-delete-'))
+    const project = `ws-${randomUUID()}`
+    directories.push(workspace)
+    mkdirSync(join(workspace, '.ludens'))
+    writeFileSync(join(workspace, '.ludens', 'workspace.json'), JSON.stringify({ version: 1, id: project }))
+
+    let failRead = false
+    const closeRpc = vi.fn(async () => {})
+    const rpc: PetRpcClient = {
+      call: vi.fn(async method => {
+        if (method === 'pet/getState') {
+          return {
+            target: {
+              project,
+              workspace,
+              revision: 'rev-1',
+              updatedAt: '2026-11-22T00:00:00Z',
+            },
+          } as never
+        }
+        if (method === 'activity/get') {
+          if (failRead) throw new Error('workspace missing')
+          return {
+            scope: { project, runId: 'run-1', epoch: 'epoch-1' },
+            mode: 'snapshot',
+            cursor: 'c1',
+            hasMore: false,
+            blocks: [],
+            projection: {
+              source: { component: 'dashboard' },
+              throughSeq: 1,
+              revision: 1,
+              generation: 'gen-1',
+              latestEventAt: '2026-11-22T00:00:00Z',
+              latestSourceAt: '2026-11-22T00:00:00Z',
+              generatedAt: '2026-11-22T00:00:00Z',
+              durationMs: 1,
+              blockCount: 0,
+            },
+            current: {
+              workspace,
+              runId: 'run-1',
+              epoch: 'epoch-1',
+              activity: 'running',
+              phase: 'following',
+              intent: null,
+              observationId: null,
+              updatedAt: '2026-11-22T00:00:00Z',
+              error: null,
+            },
+          } as never
+        }
+        return {} as never
+      }),
+      close: closeRpc,
+    }
+
+    const session = new PetSessionCoordinator({
+      dashboardUrl: 'ludens-app://console/',
+      rpc,
+      onSnapshot: () => {},
+      onTargetChanged: () => {},
+    })
+
+    await session.pollTarget()
+    await session.read()
+    expect(readdirSync(join(workspace, 'logs', 'consumers'))).toHaveLength(1)
+
+    // Delete workspace mid-follow; consumerRecorder catches ENOENT and never recreates the directory.
+    rmSync(workspace, { recursive: true, force: true })
+    failRead = true
+    const offlineSnapshot = await session.read()
+    expect(offlineSnapshot.activity).toBe('offline')
+    expect(() => session.record('queue_changed', { pendingBlocks: 0 })).not.toThrow()
+    expect(existsSync(workspace)).toBe(false)
+
+    expect(() => session.stop()).not.toThrow()
+    expect(existsSync(workspace)).toBe(false)
+
+    // Also verify stop() swallows source.stop() errors and clears active source/target references.
+    const throwingSourceStop = vi.fn(() => {
+      throw new Error('ENOENT during source.stop')
+    })
+    const sessionWithThrowingStop = new PetSessionCoordinator({
+      dashboardUrl: 'ludens-app://console/',
+      rpc,
+      onSnapshot: () => {},
+      onTargetChanged: () => {},
+      createSource: ws => ({
+        identity: () => ws,
+        read: async () => snapshot('throwing'),
+        stop: throwingSourceStop,
+      }),
+    })
+    await sessionWithThrowingStop.pollTarget()
+    expect(() => sessionWithThrowingStop.stop()).not.toThrow()
+    expect(throwingSourceStop).toHaveBeenCalledTimes(1)
+    expect(() => sessionWithThrowingStop.record('after_stop', {})).not.toThrow()
   })
 })

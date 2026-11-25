@@ -72,6 +72,13 @@
 - **`trace`**：调用链与业务归属上下文，含 `traceId / spanId / parentSpanId`（调用树关系）、`epoch / modelCallId / requestId / httpId / toolCallId / operationId`（业务实体 ID）、`recordingId / recordingPurpose`（运行归属与常驻用途）及 `inputGeneration`（同 epoch 内动作 worker 重载代次）。
 - **`type` / `data`**：具体事件类型与载荷。
 
+### 4. 桌面壳主进程诊断日志（`main.log`）
+
+Electron 桌面壳（`ludens-app`）将主进程诊断日志写入 `<userData>/logs/main.log`（默认 `$LUDENS_HOME/desktop/profile/logs/main.log`，即 `~/.ludens/desktop/profile/logs/main.log`；在 `bun run dev:desktop` / `bun --cwd=desktop run dev` 等开发隔离模式下默认为 `~/.ludens-dev/desktop/profile/logs/main.log`，传入 `--profile <path>` 时位于指定目录的 `logs/main.log`）：
+
+- **有界单备份轮转**：单文件上限 **2 MiB**，达到上限时轮转为单个备份文件 `main.log.1`；文件操作异常不会抛错中断主进程。
+- **捕获与兜底范围**：捕获主进程 `console.warn` / `console.error`、Node `warning` 事件及 `uncaughtException` / `unhandledRejection`；当父终端断开导致标准输入输出流（`stdio`）出现 `EIO` / `EPIPE` 等断流错误时，主动静音受损终端写入并将 `main.log` 作为兜底诊断落盘通道。
+
 ## 调用与生命周期
 
 所有调用链严格依据显式 `trace.spanId / parentSpanId` 配对，绝不通过时间戳相近或函数名猜测父子关系。典型调用链形态为：

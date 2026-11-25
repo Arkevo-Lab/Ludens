@@ -60,8 +60,10 @@ export class LudensActivityController {
     const progress = JSON.stringify(data)
     if (progress === this.progress) return
     this.progress = progress
-    this.record('queue_changed', { ...data,
-      oldestPendingMs: this.queuedAt.size ? performance.now() - Math.min(...this.queuedAt.values()) : 0 }, this.context)
+    try {
+      this.record('queue_changed', { ...data,
+        oldestPendingMs: this.queuedAt.size ? performance.now() - Math.min(...this.queuedAt.values()) : 0 }, this.context)
+    } catch {}
   }
   setPreferences(prefs: ActivityPreferences) {
     this.prefs = prefs
@@ -114,12 +116,14 @@ export class LudensActivityController {
       const started = performance.now()
       this.surface.send(surface, { type: 'show', displayId, input })
       // IPC dispatch is observable here; renderer paint is not.
-      this.record('display_dispatched', { displayId, blockId: block.id, eventId: block.eventId,
-        source: block.source, sourceSeq: block.seq, sourceUpdatedAt: block.updatedAt ?? block.at,
-        surface, kind: block.kind, status: block.status, throughSeq: this.throughSeq,
-        dispatchMs: performance.now() - started,
-        ...(firstDispatch ? { queueWaitMs: started - (this.queuedAt.get(block.id) ?? started) } : {}),
-      }, { ...this.context, trace: block.trace })
+      try {
+        this.record('display_dispatched', { displayId, blockId: block.id, eventId: block.eventId,
+          source: block.source, sourceSeq: block.seq, sourceUpdatedAt: block.updatedAt ?? block.at,
+          surface, kind: block.kind, status: block.status, throughSeq: this.throughSeq,
+          dispatchMs: performance.now() - started,
+          ...(firstDispatch ? { queueWaitMs: started - (this.queuedAt.get(block.id) ?? started) } : {}),
+        }, { ...this.context, trace: block.trace })
+      } catch {}
     }
     // A live block stays in place as text arrives. The preview clock starts
     // when it finishes; subsequent updates do not reset that clock.

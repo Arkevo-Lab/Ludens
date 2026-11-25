@@ -553,5 +553,63 @@ describe('app-server-host', () => {
       await hostWithWs.stop({ stopOwnedDaemon: true })
       expect(stopDaemon).not.toHaveBeenCalled()
     })
+
+    it('awaits in-flight start() and reclaims newly spawned daemon when stop({ stopOwnedDaemon: true }) races with start', async () => {
+      let releaseEnsure: (value: ReturnType<typeof makeEnsureResult>) => void = () => {}
+      const ensureDaemon = vi.fn(
+        () =>
+          new Promise<ReturnType<typeof makeEnsureResult>>(resolveEnsure => {
+            releaseEnsure = resolveEnsure
+          }),
+      )
+      const stopDaemon = vi.fn(async () => ({ stopped: true, pid: 4242, stoppedCores: [] }))
+      const host = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon,
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 4242, activeCores: [] })),
+        stopDaemon,
+      })
+
+      const startPromise = host.start()
+      const stopPromise = host.stop({ stopOwnedDaemon: true })
+      await Promise.resolve()
+      expect(stopDaemon).not.toHaveBeenCalled()
+
+      releaseEnsure(makeEnsureResult(true, { pid: 4242, wsUrl: null, activeCores: [] }))
+      await Promise.all([startPromise, stopPromise])
+
+      expect(stopDaemon).toHaveBeenCalledTimes(1)
+      expect(stopDaemon).toHaveBeenCalledWith('/tmp/ludens-reclaim', { stopCores: false, timeoutMs: 3_000 })
+      expect(host.isOwnedDaemon()).toBe(false)
+      expect(host.current()).toBeUndefined()
+    })
+
+    it('does NOT stop pre-existing external daemon when stop({ stopOwnedDaemon: true }) races with start()', async () => {
+      let releaseEnsure: (value: ReturnType<typeof makeEnsureResult>) => void = () => {}
+      const ensureDaemon = vi.fn(
+        () =>
+          new Promise<ReturnType<typeof makeEnsureResult>>(resolveEnsure => {
+            releaseEnsure = resolveEnsure
+          }),
+      )
+      const stopDaemon = vi.fn(async () => ({ stopped: true, pid: 4242, stoppedCores: [] }))
+      const host = new AppServerHost({
+        home: '/tmp/ludens-reclaim',
+        ensureDaemon,
+        probeDaemon: vi.fn(async () => makeStatus({ pid: 4242, activeCores: [] })),
+        stopDaemon,
+      })
+
+      const startPromise = host.start()
+      const stopPromise = host.stop({ stopOwnedDaemon: true })
+      await Promise.resolve()
+
+      releaseEnsure(makeEnsureResult(false, { pid: 4242, wsUrl: null, activeCores: [] }))
+      await Promise.all([startPromise, stopPromise])
+
+      expect(stopDaemon).not.toHaveBeenCalled()
+      expect(host.isOwnedDaemon()).toBe(false)
+      expect(host.current()).toBeUndefined()
+    })
   })
 })

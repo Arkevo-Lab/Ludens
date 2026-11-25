@@ -184,4 +184,114 @@ describe('ActiveCoreQuitGuard', () => {
     expect(triggerQuit).toHaveBeenCalledTimes(1)
     expect(guard.isQuitConfirmed()).toBe(true)
   })
+
+  it('still confirms and triggers quit when onConfirmQuit throws synchronously', async () => {
+    const onConfirmQuit = vi.fn(() => {
+      throw new Error('sync cleanup failure')
+    })
+    const triggerQuit = vi.fn()
+    const guard = new ActiveCoreQuitGuard({
+      getLocale: () => 'en-US',
+      queryStatus: async () => mockStatus(['ws-1']),
+      stopAllCores: vi.fn(),
+      promptUser: async () => 'keep-background',
+      onConfirmQuit,
+      triggerQuit,
+    })
+
+    guard.handleBeforeQuit({ preventDefault: vi.fn() })
+    await guard.pendingCheck()
+
+    expect(onConfirmQuit).toHaveBeenCalledWith({ keepDaemonAlive: true })
+    expect(triggerQuit).toHaveBeenCalledTimes(1)
+    expect(guard.isQuitConfirmed()).toBe(true)
+  })
+
+  it('still confirms and triggers quit when onConfirmQuit returns a rejected promise', async () => {
+    const onConfirmQuit = vi.fn(async () => {
+      throw new Error('async cleanup failure')
+    })
+    const triggerQuit = vi.fn()
+    const guard = new ActiveCoreQuitGuard({
+      getLocale: () => 'en-US',
+      queryStatus: async () => mockStatus([]),
+      stopAllCores: vi.fn(),
+      promptUser: vi.fn(),
+      onConfirmQuit,
+      triggerQuit,
+    })
+
+    guard.handleBeforeQuit({ preventDefault: vi.fn() })
+    await guard.pendingCheck()
+
+    expect(onConfirmQuit).toHaveBeenCalledWith({ keepDaemonAlive: false })
+    expect(triggerQuit).toHaveBeenCalledTimes(1)
+    expect(guard.isQuitConfirmed()).toBe(true)
+  })
+
+  it('times out a hanging onConfirmQuit at 5000ms and still triggers quit', async () => {
+    vi.useFakeTimers()
+    const onConfirmQuit = vi.fn(() => new Promise<void>(() => {}))
+    const triggerQuit = vi.fn()
+    const guard = new ActiveCoreQuitGuard({
+      getLocale: () => 'en-US',
+      queryStatus: async () => mockStatus(['ws-1']),
+      stopAllCores: vi.fn(),
+      promptUser: async () => 'keep-background',
+      onConfirmQuit,
+      triggerQuit,
+    })
+
+    guard.handleBeforeQuit({ preventDefault: vi.fn() })
+    await vi.advanceTimersByTimeAsync(5_000)
+    await guard.pendingCheck()
+
+    expect(onConfirmQuit).toHaveBeenCalledWith({ keepDaemonAlive: true })
+    expect(triggerQuit).toHaveBeenCalledTimes(1)
+    expect(guard.isQuitConfirmed()).toBe(true)
+    vi.useRealTimers()
+  })
+
+  it('bounds hanging or throwing stopAllCores and proceeds to confirmAndQuit with keepDaemonAlive=false', async () => {
+    vi.useFakeTimers()
+    const onConfirmQuit = vi.fn()
+    const triggerQuit = vi.fn()
+    const hangingGuard = new ActiveCoreQuitGuard({
+      getLocale: () => 'en-US',
+      queryStatus: async () => mockStatus(['ws-1']),
+      stopAllCores: () => new Promise(() => {}),
+      promptUser: async () => 'stop-all',
+      onConfirmQuit,
+      triggerQuit,
+    })
+
+    hangingGuard.handleBeforeQuit({ preventDefault: vi.fn() })
+    await vi.advanceTimersByTimeAsync(8_500)
+    await hangingGuard.pendingCheck()
+
+    expect(onConfirmQuit).toHaveBeenCalledWith({ keepDaemonAlive: false })
+    expect(triggerQuit).toHaveBeenCalledTimes(1)
+    expect(hangingGuard.isQuitConfirmed()).toBe(true)
+    vi.useRealTimers()
+
+    const onConfirmAfterThrow = vi.fn()
+    const triggerAfterThrow = vi.fn()
+    const throwingGuard = new ActiveCoreQuitGuard({
+      getLocale: () => 'en-US',
+      queryStatus: async () => mockStatus(['ws-1']),
+      stopAllCores: () => {
+        throw new Error('sync stopAllCores boom')
+      },
+      promptUser: async () => 'stop-all',
+      onConfirmQuit: onConfirmAfterThrow,
+      triggerQuit: triggerAfterThrow,
+    })
+
+    throwingGuard.handleBeforeQuit({ preventDefault: vi.fn() })
+    await throwingGuard.pendingCheck()
+
+    expect(onConfirmAfterThrow).toHaveBeenCalledWith({ keepDaemonAlive: false })
+    expect(triggerAfterThrow).toHaveBeenCalledTimes(1)
+    expect(throwingGuard.isQuitConfirmed()).toBe(true)
+  })
 })

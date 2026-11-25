@@ -60,6 +60,7 @@ export interface RpcWorkerClient {
 export interface RpcSupervisorHandle extends WorkspaceSupervisorLike {
   managedWorkspaceIds(): string[];
   activeCoreWorkspaceIds(): string[];
+  reconcileOwned?(): Promise<void>;
   stopAllManaged(): Promise<string[]>;
   shutdownAll(options?: { emergency?: boolean }): Promise<void>;
 }
@@ -448,6 +449,7 @@ export class RpcRouter {
         return this.handleInitialize(rawParams, session);
 
       case "daemon/status": {
+        await this.ctx.supervisor.reconcileOwned?.();
         const info = this.ctx.getConnectionInfo();
         const activeCores = this.ctx.supervisor.activeCoreWorkspaceIds();
         const managedWorkspaces = this.ctx.supervisor.managedWorkspaceIds();

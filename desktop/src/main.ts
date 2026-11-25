@@ -34,6 +34,7 @@ import {
 } from './dialog-picker.js'
 import type { LudensPetSnapshot } from './ludens-source.js'
 import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
+import { installMainProcessSafety, installParentWatchdog } from './process-safety.js'
 import { ActiveCoreQuitGuard, mapDialogButtonToQuitAction } from './quit-guard.js'
 import { DesktopUdsRpcRelay } from './rpc-bridge.js'
 import { createLudensTrayIcon } from './tray-icon.js'
@@ -50,6 +51,15 @@ import {
 } from './window-chrome.js'
 import { loadWindowState, saveWindowState, saveWindowStateSync, type SavedWindowState } from './window-state.js'
 
+let appReady = false
+let quitting = false
+
+const processSafety = installMainProcessSafety({
+  isReady: () => appReady,
+  isQuitting: () => quitting,
+  forceExit: code => app.exit(code),
+})
+
 const rawArgs = process.argv
   .slice(app.isPackaged ? 1 : 2)
   .filter(arg => !arg.startsWith('-psn_'))
@@ -62,6 +72,7 @@ const { values } = parseArgs({
     profile: { type: 'string' },
     background: { type: 'boolean' },
     'show-window': { type: 'boolean' },
+    'parent-watchdog': { type: 'boolean' },
     help: { type: 'boolean' },
   },
 })
@@ -76,6 +87,7 @@ if (values.help) {
       '--profile PATH     Custom desktop profile directory (default: ~/.ludens/desktop/profile)',
       '--background       Start hidden in the system tray + Desktop Pet without opening the main window',
       '--show-window      Open the main window on launch (default unless --background is passed)',
+      '--parent-watchdog  Exit cleanly when parent stdin closes (used by dev launchers)',
       '--help             Show this help message',
       '',
       'By default, Ludens ensures a zero-port UDS `ludens-server` daemon for the active LUDENS_HOME and serves `client/dist` (or packaged `Resources/client`) via `ludens-app://console/`.',
@@ -119,6 +131,7 @@ if (values.help) {
   app.setName('Ludens')
   app.setPath('userData', resolve(values.profile ?? join(ludensHome(), 'desktop', 'profile')))
   mkdirSync(app.getPath('userData'), { recursive: true })
+  processSafety.setLogDir(join(app.getPath('userData'), 'logs'))
 
   if (!app.requestSingleInstanceLock()) {
     app.exit(0)
@@ -132,7 +145,6 @@ if (values.help) {
     // Prevent unhandled rejection noise before app.whenReady() handles daemon readiness.
     void daemonReadyPromise.catch(() => {})
 
-    let quitting = false
     let owner: BrowserWindow | undefined
     let tray: Tray | undefined
     let source: PetSessionCoordinator | undefined
@@ -145,9 +157,56 @@ if (values.help) {
     let syncTrayTheme: (() => void) | undefined
     let captureWindowState: (() => SavedWindowState | undefined) | undefined
     let appliedInitialPlacement = false
+    let immediateShutdownStarted = false
+    let disposeParentWatchdog: (() => void) | undefined
 
     const windowStatePath = join(app.getPath('userData'), 'window-state.json')
     let persistedState: SavedWindowState | undefined
+
+    const cleanupDesktopResources = async (cleanupOptions: {
+      saveWindow: boolean
+      stopOwnedDaemon: boolean
+    }): Promise<void> => {
+      try { clearInterval(dashboardTimer) } catch {}
+      try { clearTimeout(saveStateTimer) } catch {}
+      try { if (syncTrayTheme) nativeTheme.off('updated', syncTrayTheme) } catch {}
+      if (cleanupOptions.saveWindow) {
+        try {
+          const nextState = captureWindowState?.()
+          if (nextState) saveWindowStateSync(windowStatePath, nextState)
+        } catch {}
+      }
+      try { source?.stop() } catch {}
+      try { rpcRelay?.dispose() } catch {}
+      try { if (tray && !tray.isDestroyed()) tray.destroy() } catch {}
+      try { await mainMediaClient?.close().catch(() => {}) } catch {}
+      mainMediaClient = undefined
+      try {
+        disposeParentWatchdog?.()
+        disposeParentWatchdog = undefined
+      } catch {}
+      try { await appServerHost.stop({ stopOwnedDaemon: cleanupOptions.stopOwnedDaemon }).catch(() => {}) } catch {}
+    }
+
+    const forceImmediateShutdown = async (code = 0): Promise<void> => {
+      if (immediateShutdownStarted) return
+      immediateShutdownStarted = true
+      quitting = true
+      const forceExitTimer = setTimeout(() => app.exit(code), 3_500)
+      forceExitTimer.unref()
+      try {
+        await cleanupDesktopResources({ saveWindow: false, stopOwnedDaemon: true })
+      } finally {
+        clearTimeout(forceExitTimer)
+        app.exit(code)
+      }
+    }
+
+    if (values['parent-watchdog']) {
+      disposeParentWatchdog = installParentWatchdog(process.stdin, () => {
+        void forceImmediateShutdown(0)
+      })
+    }
 
     const showOwner = () => {
       if (!owner || owner.isDestroyed()) return
@@ -210,23 +269,18 @@ if (values.help) {
       },
       onConfirmQuit: async ({ keepDaemonAlive }) => {
         quitting = true
-        clearInterval(dashboardTimer)
-        clearTimeout(saveStateTimer)
-        if (syncTrayTheme) nativeTheme.off('updated', syncTrayTheme)
-        const nextState = captureWindowState?.()
-        if (nextState) {
-          try {
-            saveWindowStateSync(windowStatePath, nextState)
-          } catch {}
-        }
-        source?.stop()
-        rpcRelay?.dispose()
-        await mainMediaClient?.close().catch(() => {})
-        mainMediaClient = undefined
-        await appServerHost.stop({ stopOwnedDaemon: !keepDaemonAlive }).catch(() => {})
+        await cleanupDesktopResources({
+          saveWindow: true,
+          stopOwnedDaemon: !keepDaemonAlive,
+        })
       },
       triggerQuit: () => {
-        app.quit()
+        setTimeout(() => app.exit(0), 3_000).unref()
+        try {
+          app.quit()
+        } catch {
+          app.exit(0)
+        }
       },
     })
 
@@ -238,6 +292,7 @@ if (values.help) {
     app.on('window-all-closed', () => app.quit())
 
     void app.whenReady().then(async () => {
+      appReady = true
       const staticDir = resolveStaticDir({
         here,
         resourcesPath: process.resourcesPath,
@@ -352,6 +407,7 @@ if (values.help) {
       let dashboardTarget = initial.href
       let loadingDashboard = false
       let dashboardReady = false
+      let lastLoadFailureKey: string | null = null
 
       const desktopPlatform = normalizeDesktopPlatform(process.platform)
       const captionStyle = resolveCaptionStyle(process.platform)
@@ -441,7 +497,10 @@ if (values.help) {
       }
       owner.webContents.on('did-navigate', (event, url, status) => {
         rememberDashboard(event, url)
-        if (status > 0 && isDashboardUrl(url, serverOrigin)) dashboardReady = true
+        if (status > 0 && isDashboardUrl(url, serverOrigin)) {
+          dashboardReady = true
+          lastLoadFailureKey = null
+        }
         publishWindowState()
       })
       owner.webContents.on('did-navigate-in-page', (event, url, isMainFrame) => {
@@ -467,7 +526,11 @@ if (values.help) {
         if (!isMainFrame || code === -3 || !isDashboardUrl(url, serverOrigin)) return
         dashboardTarget = url
         dashboardReady = false
-        console.error(`[ludens] console load failed: ${description} (${code})`)
+        const failureKey = `${code}:${description}`
+        if (failureKey !== lastLoadFailureKey) {
+          lastLoadFailureKey = failureKey
+          console.error(`[ludens] console load failed: ${description} (${code})`)
+        }
         if (!loadingDashboard && !quitting) {
           void showOfflineWaitingPage()
         }
@@ -684,6 +747,7 @@ if (values.help) {
         try {
           await owner.loadURL(dashboardTarget)
           dashboardReady = true
+          lastLoadFailureKey = null
         } catch (error) {
           const failure = error as { code?: string; errno?: number }
           if (failure.code === 'ERR_ABORTED' || failure.errno === -3) return
@@ -728,10 +792,7 @@ if (values.help) {
       )
     }).catch(async error => {
       console.error(error)
-      rpcRelay?.dispose()
-      await mainMediaClient?.close().catch(() => {})
-      await appServerHost.stop({ stopOwnedDaemon: true }).catch(() => {})
-      app.exit(1)
+      await forceImmediateShutdown(1)
     })
   }
 }
