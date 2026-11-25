@@ -1,5 +1,7 @@
 /** Pure, client-safe types and validators for Baseware Machines and Workspace Machine Bindings. */
 
+import { isDeviceStageKind, type DeviceStageKind } from "./viewport.ts";
+
 export const MACHINE_TRANSPORT_KINDS = ["stdio", "bridge", "ssh", "http", "sse"] as const;
 export type MachineTransportKind = (typeof MACHINE_TRANSPORT_KINDS)[number];
 
@@ -44,9 +46,13 @@ export interface BasewareMachineSpec {
   driver: string;
   driverPackage?: string;
   transport: MachineTransportConfig;
+  stageKind?: DeviceStageKind;
+  initialUrl?: string;
   description?: string;
   tags?: string[];
   builtin?: boolean;
+  runtimeInjected?: boolean;
+  available?: boolean;
   updatedAt: string;
 }
 
@@ -65,11 +71,35 @@ export const BUILTIN_LOCAL_DESKTOP_MACHINE: BasewareMachineSpec = {
   name: "Local Desktop (CUA)",
   driver: "cua",
   transport: { kind: "stdio", command: "cua-driver" },
+  stageKind: "computer",
   description: "Built-in local desktop CUA controller over stdio MCP",
   tags: ["local", "desktop", "cua"],
   builtin: true,
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
+
+export const BUILTIN_LOCAL_BROWSER_MACHINE: BasewareMachineSpec = {
+  id: "builtin-browser",
+  name: "Built-in Browser",
+  driver: "browser",
+  transport: { kind: "stdio" },
+  stageKind: "browser",
+  description: "Desktop runtime-injected isolated Chromium WebContentsView space",
+  tags: ["local", "desktop", "browser", "webgl"],
+  builtin: true,
+  runtimeInjected: true,
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
+export function resolveMachineStageKind(
+  machine: Pick<BasewareMachineSpec, "driver" | "stageKind"> | null | undefined,
+): DeviceStageKind {
+  if (!machine) return "observe";
+  if (machine.stageKind && isDeviceStageKind(machine.stageKind)) return machine.stageKind;
+  if (machine.driver === "browser") return "browser";
+  if (machine.driver === "cua") return "computer";
+  return "observe";
+}
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
@@ -214,7 +244,21 @@ export function validateMachineSpec(value: unknown, path = "machine"): BasewareM
     }
     spec.tags = [...new Set(value.tags.map(tag => tag.trim()).filter(Boolean))];
   }
+  if (value.stageKind !== undefined && value.stageKind !== null && value.stageKind !== "") {
+    if (!isDeviceStageKind(value.stageKind)) {
+      throw new Error(`${path}.stageKind must be browser, computer, or observe`);
+    }
+    spec.stageKind = value.stageKind;
+  }
+  if (value.initialUrl !== undefined && value.initialUrl !== null && value.initialUrl !== "") {
+    if (typeof value.initialUrl !== "string" || !value.initialUrl.trim()) {
+      throw new Error(`${path}.initialUrl must be a non-empty URL string`);
+    }
+    spec.initialUrl = value.initialUrl.trim();
+  }
   if (value.builtin === true) spec.builtin = true;
+  if (value.runtimeInjected === true) spec.runtimeInjected = true;
+  if (typeof value.available === "boolean") spec.available = value.available;
   return spec;
 }
 

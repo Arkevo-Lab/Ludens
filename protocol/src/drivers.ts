@@ -39,6 +39,7 @@ export interface DiscoveredDriver {
 }
 
 export const BUILTIN_CUA_DRIVER_SPEC = "builtin:cua";
+export const BUILTIN_BROWSER_DRIVER_SPEC = "builtin:browser";
 
 export const BUILTIN_CUA_DRIVER: RegisteredDriverSpec = {
   id: "cua",
@@ -52,6 +53,18 @@ export const BUILTIN_CUA_DRIVER: RegisteredDriverSpec = {
   updatedAt: "2026-01-01T00:00:00.000Z",
 };
 
+export const BUILTIN_BROWSER_DRIVER: RegisteredDriverSpec = {
+  id: "browser",
+  spec: BUILTIN_BROWSER_DRIVER_SPEC,
+  name: "Built-in Browser",
+  version: "builtin",
+  description: "Runtime-injected desktop WebContentsView browser controller over local UDS",
+  transport: "stdio",
+  needsGame: false,
+  launchHint: "Runs inside Ludens Desktop App BrowserHost with per-workspace isolated WebContentsView spaces.",
+  updatedAt: "2026-01-01T00:00:00.000Z",
+};
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
@@ -61,6 +74,9 @@ export function driverRegistryKey(id: string, spec?: string): string {
   const cleanSpec = (spec ?? "").trim();
   if (cleanId === "cua" && (!cleanSpec || cleanSpec === BUILTIN_CUA_DRIVER_SPEC)) {
     return BUILTIN_CUA_DRIVER_SPEC;
+  }
+  if (cleanId === "browser" && (!cleanSpec || cleanSpec === BUILTIN_BROWSER_DRIVER_SPEC)) {
+    return BUILTIN_BROWSER_DRIVER_SPEC;
   }
   return `${cleanId}::${cleanSpec}`;
 }
@@ -77,8 +93,8 @@ export function validateRegisteredDriverSpec(value: unknown, path = "driver"): R
   if (specText.length > 500) {
     throw new Error(`${path}.spec must be at most 500 characters`);
   }
-  if (specText === BUILTIN_CUA_DRIVER_SPEC) {
-    throw new Error(`${path}.spec cannot overwrite built-in cua driver`);
+  if (specText === BUILTIN_CUA_DRIVER_SPEC || specText === BUILTIN_BROWSER_DRIVER_SPEC) {
+    throw new Error(`${path}.spec cannot overwrite built-in ${value.id} driver`);
   }
 
   const out: RegisteredDriverSpec = {
