@@ -5,7 +5,10 @@ import type { AvailableModelsCatalog } from "@/components/model-picker-dialog";
 import type { DiscoveredDriver } from "@ludens/protocol/drivers";
 import type { WorkspaceBasewareSnapshot } from "@ludens/protocol/workspaces";
 import type { OmpEffort, OmpServiceTier, WorkspaceDefaults } from "@ludens/protocol/workspaces";
-import { BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
+import {
+  BUILTIN_BROWSER_DRIVER_SPEC,
+  BUILTIN_CUA_DRIVER_SPEC,
+} from "@ludens/protocol/drivers";
 import { useLudensEvent, useOptionalLudensRpc } from "@/lib/ludens-rpc";
 
 export interface ResolvedCreationModelDefaults {
@@ -143,6 +146,15 @@ export function useWorkspaceCreationCatalog(options: { enabled: boolean }) {
           needsGame: false,
         };
       }
+      if (spec === BUILTIN_BROWSER_DRIVER_SPEC) {
+        return {
+          id: "browser",
+          spec: BUILTIN_BROWSER_DRIVER_SPEC,
+          version: "builtin",
+          transport: "stdio",
+          needsGame: false,
+        };
+      }
       if (discoveredCache[spec]) {
         return discoveredCache[spec]!;
       }
@@ -174,6 +186,7 @@ export function useWorkspaceCreationCatalog(options: { enabled: boolean }) {
 
   return {
     baseware,
+    browserHost: baseware?.browserHost ?? null,
     machines: baseware?.machines ?? [],
     drivers: baseware?.drivers ?? [],
     modelsCatalog,

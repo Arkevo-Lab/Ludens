@@ -1,4 +1,8 @@
 import type { LogBlock } from "@ludens/protocol/activity";
+import type {
+  DesktopViewportAttachInput,
+  NativeViewportBounds,
+} from "@ludens/protocol/viewport";
 
 export type BlockKind = LogBlock["kind"];
 export interface PetSoundSettings {
@@ -121,14 +125,39 @@ export interface DesktopDialogBridge {
   pickPath(options: DesktopPickPathOptions): Promise<string | null>;
 }
 
+export interface DesktopViewportHostInfo {
+  readonly available: boolean;
+  readonly hostId?: string;
+  readonly socketPath?: string;
+}
+
+export interface DesktopViewportUpdateBoundsInput {
+  readonly sessionId: string;
+  readonly bounds: NativeViewportBounds;
+  readonly visible: boolean;
+  readonly interactive: boolean;
+}
+
+export interface DesktopViewportBridge {
+  getHostInfo(): Promise<DesktopViewportHostInfo>;
+  attach(input: DesktopViewportAttachInput): Promise<void | { ok: boolean; error?: string }>;
+  updateBounds(
+    input: DesktopViewportUpdateBoundsInput,
+  ): Promise<void | { ok: boolean; error?: string }>;
+  detach(sessionId?: string): Promise<void | { ok: boolean }>;
+}
+
+export interface LudensDesktopBridge {
+  readonly companion?: DesktopCompanion;
+  readonly window?: DesktopWindowBridge;
+  readonly rpc?: DesktopRpcBridge;
+  readonly dialog?: DesktopDialogBridge;
+  readonly viewport?: DesktopViewportBridge;
+}
+
 declare global {
   interface Window {
-    readonly ludens?: {
-      readonly companion?: DesktopCompanion;
-      readonly window?: DesktopWindowBridge;
-      readonly rpc?: DesktopRpcBridge;
-      readonly dialog?: DesktopDialogBridge;
-    };
+    readonly ludens?: LudensDesktopBridge;
     readonly ludensPet?: {
       getSnapshot(): Promise<DesktopSnapshot>;
       onSnapshot(callback: (snapshot: DesktopSnapshot) => void): () => void;

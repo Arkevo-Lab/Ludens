@@ -7,7 +7,9 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import {
@@ -23,6 +25,8 @@ import {
   Inbox,
   Infinity as InfinityIcon,
   Lock,
+  Maximize2,
+  Minimize2,
   PanelRight,
   Play,
   Plus,
@@ -74,6 +78,8 @@ import {
   type StreamSegment,
   type SystemStepCategory,
 } from "@/features/live/shiori-segments";
+import { DeviceViewport } from "@/features/live/device-viewport";
+import { useDeviceViewport } from "@/features/live/use-device-viewport";
 import { useLiveAutoScroll } from "@/features/live/use-live-auto-scroll";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
 import {
@@ -88,6 +94,14 @@ import type { Call, Observation, RunData, RunInfo } from "@ludens/protocol/types
 
 // The countdown timer is drawn as this many pixel blocks.
 const TIMER_BLOCKS = 24;
+const MIN_CHAT_WIDTH_PX = 360;
+const MIN_DOCK_WIDTH_PX = 360;
+const COMPACT_DOCK_WIDTH_PX = 400;
+
+function clampDockWidth(desired: number, containerWidth: number): number {
+  const maxAllowed = Math.max(MIN_DOCK_WIDTH_PX, containerWidth - MIN_CHAT_WIDTH_PX);
+  return Math.round(Math.max(MIN_DOCK_WIDTH_PX, Math.min(maxAllowed, desired)));
+}
 
 export type RuntimeControlAction = RuntimeControlCommand;
 export type EventPoolClientCommand = EventPoolCommand;
@@ -2670,12 +2684,19 @@ export function ShioriWorkbench({
     actions,
   } = session;
 
+  const workbenchRef = useRef<HTMLDivElement | null>(null);
   const scrollRafRef = useRef<number | null>(null);
   const lastReportedSegmentRef = useRef("");
+  const lastAutoOpenedBrowserProjectRef = useRef<string | null>(null);
   const { flags: verbosityFlags } = useInfoVerbosity();
   const [desktopDockOpen, setDesktopDockOpen] = useState(true);
   const [drawerDockOpen, setDrawerDockOpen] = useState(false);
   const [isOverlayDock, setIsOverlayDock] = useState(false);
+  const [customDockWidth, setCustomDockWidth] = useState<number | null>(null);
+  const [resizingDock, setResizingDock] = useState(false);
+  const [viewportWidthPx, setViewportWidthPx] = useState<number>(() =>
+    typeof window !== "undefined" ? window.innerWidth : 1440,
+  );
   const dockOpen = isOverlayDock ? drawerDockOpen : desktopDockOpen;
   const openDock = useCallback(() => {
     setDesktopDockOpen(true);
@@ -2737,8 +2758,116 @@ export function ShioriWorkbench({
     setFocusedPoolEventId(null);
     setPendingPoolLocateEvent(null);
     setPoolFlashId(null);
+    setCustomDockWidth(null);
     lastReportedSegmentRef.current = "";
   }, [project]);
+
+  const viewportSuspended = Boolean(inspectedTurn || dockTab !== "stage" || !dockOpen);
+  const deviceViewport = useDeviceViewport({
+    project,
+    workspace,
+    isAuto,
+    hostOnline,
+    suspended: viewportSuspended,
+    enabled: isLiveRun && Boolean(project),
+  });
+  const effectiveStageKind = isLiveRun ? deviceViewport.effectiveStageKind : "observe";
+  const isInteractiveStage =
+    effectiveStageKind === "browser" || effectiveStageKind === "computer";
+
+  useEffect(() => {
+    if (
+      effectiveStageKind === "browser" &&
+      !isOverlayDock &&
+      project &&
+      lastAutoOpenedBrowserProjectRef.current !== project
+    ) {
+      lastAutoOpenedBrowserProjectRef.current = project;
+      setDesktopDockOpen(true);
+      setDockTab("stage");
+    }
+  }, [effectiveStageKind, isOverlayDock, project]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => setViewportWidthPx(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const containerWidth = workbenchRef.current?.clientWidth || viewportWidthPx;
+  const resolvedDockWidth = useMemo(() => {
+    if (!dockOpen || isOverlayDock) return null;
+    if (customDockWidth != null) {
+      return clampDockWidth(customDockWidth, containerWidth);
+    }
+    if (isInteractiveStage) {
+      const preferred = Math.min(680, Math.max(540, Math.round(containerWidth * 0.44)));
+      return clampDockWidth(preferred, containerWidth);
+    }
+    return null;
+  }, [dockOpen, isOverlayDock, customDockWidth, isInteractiveStage, containerWidth]);
+
+  const isDockExpanded = resolvedDockWidth != null && resolvedDockWidth >= 500;
+
+  const toggleDockWidth = useCallback(() => {
+    const widthNow = workbenchRef.current?.clientWidth || viewportWidthPx;
+    if (isDockExpanded) {
+      setCustomDockWidth(COMPACT_DOCK_WIDTH_PX);
+      return;
+    }
+    const expandedTarget = Math.min(680, Math.max(560, Math.round(widthNow * 0.48)));
+    setCustomDockWidth(clampDockWidth(expandedTarget, widthNow));
+  }, [isDockExpanded, viewportWidthPx]);
+
+  const dockResizeCleanupRef = useRef<(() => void) | null>(null);
+  useEffect(
+    () => () => {
+      dockResizeCleanupRef.current?.();
+    },
+    [],
+  );
+
+  const handleDockResizeStart = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (isOverlayDock || !dockOpen || event.button !== 0) return;
+      event.preventDefault();
+      dockResizeCleanupRef.current?.();
+      setResizingDock(true);
+
+      const handleMove = (moveEvent: globalThis.PointerEvent) => {
+        const host = workbenchRef.current;
+        const rect = host?.getBoundingClientRect();
+        const totalWidth = rect?.width || window.innerWidth;
+        const rightEdge = rect?.right ?? window.innerWidth;
+        const desired = rightEdge - moveEvent.clientX;
+        setCustomDockWidth(clampDockWidth(desired, totalWidth));
+      };
+
+      const finish = () => {
+        setResizingDock(false);
+        window.removeEventListener("pointermove", handleMove);
+        window.removeEventListener("pointerup", finish);
+        window.removeEventListener("pointercancel", finish);
+        dockResizeCleanupRef.current = null;
+      };
+
+      dockResizeCleanupRef.current = finish;
+      window.addEventListener("pointermove", handleMove);
+      window.addEventListener("pointerup", finish);
+      window.addEventListener("pointercancel", finish);
+    },
+    [dockOpen, isOverlayDock],
+  );
+
+  const handleReclaimControl = useCallback(async () => {
+    if (!project || !workspace) return;
+    try {
+      await actions.stopAuto();
+    } catch {
+      // Transient / stale-epoch errors are reconciled by live session state polling.
+    }
+  }, [actions, project, workspace]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
@@ -3471,7 +3600,18 @@ export function ShioriWorkbench({
   const backdropPresence = useAnimatedPresence(dockOpen && isOverlayDock, 180);
 
   return (
-    <div className="codex-workbench" data-dock-open={dockOpen || undefined}>
+    <div
+      ref={workbenchRef}
+      className="codex-workbench"
+      data-dock-open={dockOpen || undefined}
+      data-stage-kind={effectiveStageKind}
+      data-dock-resizing={resizingDock ? "true" : undefined}
+      style={
+        resolvedDockWidth != null
+          ? ({ "--codex-dock-width": `${resolvedDockWidth}px` } as CSSProperties)
+          : undefined
+      }
+    >
       {/* Unified Single-Row Topbar Slots */}
       <TopbarSlot slot="primary">
         {runPicker && <div className="codex-thread-run-picker">{runPicker}</div>}
@@ -4039,11 +4179,23 @@ export function ShioriWorkbench({
       <aside
         className="codex-right-dock"
         data-dock-state={dockOpen ? "open" : "closed"}
+        data-stage-kind={effectiveStageKind}
         data-overlay={isOverlayDock ? "true" : undefined}
         aria-hidden={!dockOpen || undefined}
         inert={!dockOpen || undefined}
         aria-label={t("stageColumnAria")}
       >
+          {!isOverlayDock && dockOpen && (
+            <div
+              className="codex-dock-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label={t("resizeDockAria")}
+              title={t("resizeDockHint")}
+              onPointerDown={handleDockResizeStart}
+              onDoubleClick={() => setCustomDockWidth(null)}
+            />
+          )}
           <header className="codex-dock-header">
             <div className="codex-dock-seg" role="tablist" aria-label={t("stageColumnAria")}>
               <button
@@ -4077,6 +4229,22 @@ export function ShioriWorkbench({
                 )}
               </button>
             </div>
+            {!isOverlayDock && (
+              <button
+                type="button"
+                className="codex-dock-width-btn"
+                data-expanded={isDockExpanded ? "true" : "false"}
+                title={t(isDockExpanded ? "dockCompactWidthHint" : "dockExpandWidthHint")}
+                aria-label={t(isDockExpanded ? "dockCompactWidthHint" : "dockExpandWidthHint")}
+                onClick={toggleDockWidth}
+              >
+                {isDockExpanded ? (
+                  <Minimize2 className="size-3.5" aria-hidden="true" />
+                ) : (
+                  <Maximize2 className="size-3.5" aria-hidden="true" />
+                )}
+              </button>
+            )}
           </header>
           {dockTab === "pool" && (
             <div className="codex-dock-body codex-dock-scroll" data-dock-tab="pool" role="tabpanel">
@@ -4091,46 +4259,62 @@ export function ShioriWorkbench({
           <div className="codex-dock-body" data-dock-tab="stage" role="tabpanel" hidden={dockTab !== "stage"}>
             {/* 1. Primary Live Game / Device Viewport */}
             <div className="codex-dock-viewport">
-              {inspectedTurn && (
-                <div className="codex-inspected-banner" role="status">
-                  <span>
-                    {t("inspectingCallBanner").replace(
-                      "{number}",
-                      String(inspectedCall?.index ?? "—").padStart(3, "0"),
-                    )}{" "}
-                    · {clockTime(inspectedTurn.at)}
-                  </span>
-                  <button
-                    type="button"
-                    className="codex-inspected-clear"
-                    onClick={() => setInspectedTurn(null)}
-                  >
-                    <X className="size-3" aria-hidden="true" />
-                    <span>{t("clearInspectedBtn")}</span>
-                  </button>
+              {isInteractiveStage && (
+                <div className="codex-dock-live-stage" hidden={Boolean(inspectedTurn)}>
+                  <DeviceViewport
+                    viewport={deviceViewport}
+                    stageKind={effectiveStageKind}
+                    isAuto={isAuto}
+                    reclaiming={sessionSubmitting}
+                    suspended={viewportSuspended}
+                    onReclaimControl={handleReclaimControl}
+                  />
                 </div>
               )}
-              {renderObservation
-                ? renderObservation({
-                    data: inspectedRunData,
-                    call: inspectedCall,
-                    selectedImage: inspectedTurn?.imageId ?? undefined,
-                    onSelectImage: id =>
-                      setInspectedTurn(prev =>
-                        prev
-                          ? { ...prev, imageId: id || null }
-                          : id
-                            ? {
-                                runId: data.run,
-                                blockId: "manual-image",
-                                callId: null,
-                                imageId: id,
-                                at: data.updatedAt,
-                              }
-                            : null,
-                      ),
-                  })
-                : observationSlot}
+              {(!isInteractiveStage || inspectedTurn) && (
+                <>
+                  {inspectedTurn && (
+                    <div className="codex-inspected-banner" role="status">
+                      <span>
+                        {t("inspectingCallBanner").replace(
+                          "{number}",
+                          String(inspectedCall?.index ?? "—").padStart(3, "0"),
+                        )}{" "}
+                        · {clockTime(inspectedTurn.at)}
+                      </span>
+                      <button
+                        type="button"
+                        className="codex-inspected-clear"
+                        onClick={() => setInspectedTurn(null)}
+                      >
+                        <X className="size-3" aria-hidden="true" />
+                        <span>{t("clearInspectedBtn")}</span>
+                      </button>
+                    </div>
+                  )}
+                  {renderObservation
+                    ? renderObservation({
+                        data: inspectedRunData,
+                        call: inspectedCall,
+                        selectedImage: inspectedTurn?.imageId ?? undefined,
+                        onSelectImage: id =>
+                          setInspectedTurn(prev =>
+                            prev
+                              ? { ...prev, imageId: id || null }
+                              : id
+                                ? {
+                                    runId: data.run,
+                                    blockId: "manual-image",
+                                    callId: null,
+                                    imageId: id,
+                                    at: data.updatedAt,
+                                  }
+                                : null,
+                          ),
+                      })
+                    : observationSlot}
+                </>
+              )}
             </div>
 
             {/* 2. Session Runtime & Live Stop-Timer + OMP Telemetry */}
