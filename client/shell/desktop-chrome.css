@@ -231,9 +231,64 @@
   text-overflow: ellipsis;
 }
 
+/* Merged 38px Immersive Viewport Chrome inside DesktopTitlebar */
+.desktop-titlebar-center-slot {
+  flex: 0 1 520px;
+  width: 100%;
+  max-width: 520px;
+  min-width: 140px;
+  height: 27px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-titlebar-center-slot .device-viewport-omnibox {
+  width: 100%;
+  height: 27px;
+  padding: 0 12px;
+  border-radius: 999px;
+}
+
+.desktop-titlebar-center-slot .device-viewport-omnibox:not(:focus-within) .device-viewport-omnibox-input {
+  text-align: center;
+  padding-right: 16px;
+}
+
+.desktop-titlebar-center-slot .device-viewport-computer-id {
+  justify-content: center;
+  height: 25px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-inset);
+}
+
+.desktop-titlebar .device-viewport-icon-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: #aeb5c4;
+  -webkit-app-region: no-drag;
+}
+
+.desktop-titlebar .device-viewport-icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.065);
+  color: var(--text);
+}
+
+.desktop-titlebar .device-viewport-control-capsule {
+  height: 23px;
+  font-size: 11px;
+  -webkit-app-region: no-drag;
+}
+
 /* Native macOS Sequoia / Windows 11 unfocused titlebar dimming */
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-nav-group,
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-breadcrumb,
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-center-slot,
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-tools,
 .desktop-titlebar[data-focused="false"] .desktop-win-controls,
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-app-icon {
@@ -241,6 +296,7 @@
 }
 
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-nav-group:hover,
+.desktop-titlebar[data-focused="false"] .desktop-titlebar-center-slot:hover,
 .desktop-titlebar[data-focused="false"] .desktop-titlebar-tools:hover,
 .desktop-titlebar[data-focused="false"] .desktop-win-controls:hover {
   opacity: 1;

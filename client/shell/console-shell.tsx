@@ -7,6 +7,7 @@ import { PixelMark } from "@/components/ui/pixel-mark";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ShioriWorkbench } from "@/features/live/shiori-cockpit";
+import type { ViewportTopbarSlots } from "@/features/live/device-viewport";
 import { EventPoolOverviewPanel } from "@/features/live/event-pool-panel";
 import { WorkspaceStudioView } from "@/features/workspaces/workspace-studio-view";
 import { ConsoleSidebar } from "@/shell/console-sidebar";
@@ -73,6 +74,7 @@ export default function ConsoleShell() {
     stopCore,
   } = useActiveCores({ projects, onRefresh: refreshCatalog });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [immersiveTitlebarSlots, setImmersiveTitlebarSlots] = useState<ViewportTopbarSlots | null>(null);
   const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const desktop = useDesktopWindow({
     search,
@@ -329,6 +331,9 @@ export default function ConsoleShell() {
         canGoForward={desktop.canGoForward}
         companionAvailable={desktop.companionAvailable}
         companionVisible={desktop.companionVisible}
+        centerSlot={view === "live" ? immersiveTitlebarSlots?.centerSlot : undefined}
+        leadingExtraSlot={view === "live" ? immersiveTitlebarSlots?.leadingExtraSlot : undefined}
+        trailingExtraSlot={view === "live" ? immersiveTitlebarSlots?.trailingExtraSlot : undefined}
         onToggleSidebar={desktop.toggleSidebar}
         onGoBack={() => void desktop.goBack()}
         onGoForward={() => void desktop.goForward()}
@@ -544,6 +549,10 @@ export default function ConsoleShell() {
                   runs={effectiveLiveSnapshot ? effectiveLiveSnapshot.runs : (project?.runs ?? [])}
                   runPicker={liveRunPicker}
                   mobileNavSlot={mobileNavButton}
+                  desktopActive={desktop.active}
+                  sidebarCollapsed={desktop.sidebarCollapsed}
+                  onSetSidebarCollapsed={collapsed => desktop.setSidebarCollapsed(collapsed, { persist: false })}
+                  onImmersiveChromeChange={setImmersiveTitlebarSlots}
                   renderEventPoolPanel={props => <EventPoolOverviewPanel {...props} />}
                   jumpTarget={liveJumpTarget}
                   onClearJumpTarget={clearLiveJumpTarget}

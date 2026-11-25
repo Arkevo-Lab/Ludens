@@ -138,6 +138,24 @@ export interface DesktopViewportUpdateBoundsInput {
   readonly interactive: boolean;
 }
 
+export interface DesktopViewportFramePayload {
+  readonly sessionId: string;
+  readonly format: "jpeg" | "png" | "webp";
+  readonly dataBase64: string;
+  readonly width: number;
+  readonly height: number;
+  readonly timestampMs: number;
+  readonly seq: number;
+  readonly pointerLocked: boolean;
+}
+
+export interface DesktopViewportFrameStreamInput {
+  readonly sessionId: string;
+  readonly active: boolean;
+  readonly maxFps?: number;
+  readonly quality?: number;
+}
+
 export interface DesktopViewportBridge {
   getHostInfo(): Promise<DesktopViewportHostInfo>;
   attach(input: DesktopViewportAttachInput): Promise<void | { ok: boolean; error?: string }>;
@@ -145,6 +163,8 @@ export interface DesktopViewportBridge {
     input: DesktopViewportUpdateBoundsInput,
   ): Promise<void | { ok: boolean; error?: string }>;
   detach(sessionId?: string): Promise<void | { ok: boolean }>;
+  setFrameStream?(input: DesktopViewportFrameStreamInput): Promise<void | { ok: boolean }>;
+  onFrame?(callback: (frame: DesktopViewportFramePayload) => void): () => void;
 }
 
 export interface LudensDesktopBridge {

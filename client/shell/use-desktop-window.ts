@@ -390,7 +390,10 @@ export interface DesktopWindowController extends ResolvedDesktopChromeState {
   companionVisible: boolean;
   toggleCompanion(): Promise<void>;
   sidebarCollapsed: boolean;
-  setSidebarCollapsed(next: boolean | ((prev: boolean) => boolean)): void;
+  setSidebarCollapsed(
+    next: boolean | ((prev: boolean) => boolean),
+    options?: { persist?: boolean },
+  ): void;
   toggleSidebar(): void;
   quickSwitcherOpen: boolean;
   setQuickSwitcherOpen(next: boolean | ((prev: boolean) => boolean)): void;
@@ -561,16 +564,21 @@ export function useDesktopWindow({
   }, []);
 
   const setSidebarCollapsed = useCallback(
-    (next: boolean | ((prev: boolean) => boolean)) => {
+    (
+      next: boolean | ((prev: boolean) => boolean),
+      options?: { persist?: boolean },
+    ) => {
       setSidebarCollapsedState((prev) => {
         const resolved = typeof next === "function" ? next(prev) : next;
-        try {
-          window.localStorage.setItem(
-            SIDEBAR_COLLAPSED_STORAGE_KEY,
-            resolved ? "1" : "0",
-          );
-        } catch {
-          // Ignore storage write errors.
+        if (options?.persist !== false) {
+          try {
+            window.localStorage.setItem(
+              SIDEBAR_COLLAPSED_STORAGE_KEY,
+              resolved ? "1" : "0",
+            );
+          } catch {
+            // Ignore storage write errors.
+          }
         }
         return resolved;
       });

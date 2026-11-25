@@ -78,7 +78,15 @@ import {
   type StreamSegment,
   type SystemStepCategory,
 } from "@/features/live/shiori-segments";
-import { DeviceViewport } from "@/features/live/device-viewport";
+import {
+  DeviceViewport,
+  ViewportTopbarControls,
+  type ViewportTopbarSlots,
+} from "@/features/live/device-viewport";
+import {
+  ImmersiveFloatingPod,
+  type ImmersivePodTier,
+} from "@/features/live/immersive-floating-pod";
 import { useDeviceViewport } from "@/features/live/use-device-viewport";
 import { useLiveAutoScroll } from "@/features/live/use-live-auto-scroll";
 import type { ActivityFeedData } from "@/features/live/use-activity-feed";
@@ -1479,6 +1487,10 @@ export function ShioriComposer({
   externalMode,
   externalDraft,
   onExternalConsumed,
+  compactImmersive = false,
+  hideOutboundTray = false,
+  draftValue,
+  onDraftValueChange,
   onReturnLatest,
   onMessageSubmitted,
   onUpdated,
@@ -1509,6 +1521,10 @@ export function ShioriComposer({
   externalMode?: ComposerMode | null;
   externalDraft?: string | null;
   onExternalConsumed?(): void;
+  compactImmersive?: boolean;
+  hideOutboundTray?: boolean;
+  draftValue?: string;
+  onDraftValueChange?: (value: string) => void;
   onReturnLatest?(): void;
   onMessageSubmitted?(): void;
   onUpdated(): void;
@@ -1519,7 +1535,18 @@ export function ShioriComposer({
   }
   const composerDockRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const [draft, setDraft] = useState("");
+  const [internalDraft, setInternalDraft] = useState("");
+  const draft = draftValue !== undefined ? draftValue : internalDraft;
+  const setDraft = useCallback(
+    (next: string) => {
+      if (onDraftValueChange) {
+        onDraftValueChange(next);
+      } else {
+        setInternalDraft(next);
+      }
+    },
+    [onDraftValueChange],
+  );
   const [selectedTab, setSelectedTab] = useState<ComposerMode | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [durationMenuOpen, setDurationMenuOpen] = useState(false);
@@ -2018,7 +2045,7 @@ export function ShioriComposer({
   const menuPresence = useAnimatedPresence(Boolean(isLiveRun && menuOpen), 140);
   const durationPresence = useAnimatedPresence(Boolean(isLiveRun && durationMenuOpen), 140);
   const outboundTrayPresence = useAnimatedPresence(
-    Boolean(isLiveRun && pendingOutboundEvents.length > 0),
+    Boolean(isLiveRun && !hideOutboundTray && pendingOutboundEvents.length > 0),
     140,
   );
   const retainedOutboundEventsRef = useRef<PoolEvent[]>([]);
@@ -2041,7 +2068,12 @@ export function ShioriComposer({
 
   if (!isLiveRun) {
     return (
-      <div ref={composerDockRef} className="codex-composer-wrap" data-shiori-composer="readonly">
+      <div
+        ref={composerDockRef}
+        className="codex-composer-wrap"
+        data-shiori-composer="readonly"
+        data-compact-immersive={compactImmersive ? "true" : undefined}
+      >
         <div className="codex-pill-composer">
           <div className="codex-composer-notice codex-composer-notice-standalone">
             <span>{t("readonlyHint")}</span>
@@ -2057,7 +2089,12 @@ export function ShioriComposer({
   }
 
   return (
-    <div ref={composerDockRef} className="codex-composer-wrap" data-shiori-composer={effectiveTab}>
+    <div
+      ref={composerDockRef}
+      className="codex-composer-wrap"
+      data-shiori-composer={effectiveTab}
+      data-compact-immersive={compactImmersive ? "true" : undefined}
+    >
       {menuPresence.mounted && (
         <div
           className="codex-preset-popover"
@@ -2314,7 +2351,7 @@ export function ShioriComposer({
 
         <textarea
           ref={textareaRef}
-          rows={2}
+          rows={compactImmersive ? 1 : 2}
           className="codex-pill-textarea"
           placeholder={
             replyTarget
@@ -2594,6 +2631,11 @@ export interface ShioriWorkbenchProps {
   runPicker?: ReactNode;
   /** Mobile <=680px sidebar drawer trigger rendered at the start of .codex-thread-header */
   mobileNavSlot?: ReactNode;
+  /** Desktop chrome integration for auto-collapsing left sidebar & single merged 38px DesktopTitlebar */
+  desktopActive?: boolean;
+  sidebarCollapsed?: boolean;
+  onSetSidebarCollapsed?: (collapsed: boolean) => void;
+  onImmersiveChromeChange?: (slots: ViewportTopbarSlots | null) => void;
   /** Col 3 `事件池` tab body (wired to `EventPoolOverviewPanel` by ConsoleShell); falls back to a minimal list. */
   renderEventPoolPanel?: (props: EventPoolOverviewPanelProps) => ReactNode;
 }
@@ -2630,6 +2672,10 @@ export function ShioriWorkbench({
   observationSlot,
   runPicker,
   mobileNavSlot,
+  desktopActive = false,
+  sidebarCollapsed = false,
+  onSetSidebarCollapsed,
+  onImmersiveChromeChange,
   renderEventPoolPanel,
 }: ShioriWorkbenchProps) {
   const t = useTranslations("shioriCockpit");
@@ -2737,7 +2783,8 @@ export function ShioriWorkbench({
 
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
   const [immersiveMode, setImmersiveMode] = useState<boolean>(false);
-  const [immersiveComposerCollapsed, setImmersiveComposerCollapsed] = useState<boolean>(false);
+  const [immersivePodTier, setImmersivePodTier] = useState<ImmersivePodTier>("compact");
+  const [sharedComposerDraft, setSharedComposerDraft] = useState<string>("");
   const [inspectedTurn, setInspectedTurn] = useState<{
     runId: string;
     blockId: string;
@@ -2772,6 +2819,7 @@ export function ShioriWorkbench({
     workspace,
     isAuto,
     hostOnline,
+    immersive: immersiveMode,
     suspended: viewportSuspended,
     enabled: isLiveRun && Boolean(project),
   });
@@ -2785,12 +2833,43 @@ export function ShioriWorkbench({
       if (next) {
         setDockTab("stage");
         setInspectedTurn(null);
-        setImmersiveComposerCollapsed(false);
+        setImmersivePodTier("compact");
         setDesktopDockOpen(true);
       }
       return next;
     });
   }, []);
+
+  // Auto-collapse left sidebar on entering Immersive Mode and restore previous state on exit
+  const sidebarCollapsedRef = useRef(sidebarCollapsed);
+  sidebarCollapsedRef.current = sidebarCollapsed;
+  const onSetSidebarCollapsedRef = useRef(onSetSidebarCollapsed);
+  onSetSidebarCollapsedRef.current = onSetSidebarCollapsed;
+  const wasSidebarCollapsedRef = useRef(false);
+  const immersiveAutoCollapsedRef = useRef(false);
+
+  useEffect(() => {
+    const setter = onSetSidebarCollapsedRef.current;
+    if (!setter) return;
+    if (immersiveMode && !immersiveAutoCollapsedRef.current) {
+      immersiveAutoCollapsedRef.current = true;
+      wasSidebarCollapsedRef.current = sidebarCollapsedRef.current;
+      setter(true);
+    } else if (!immersiveMode && immersiveAutoCollapsedRef.current) {
+      immersiveAutoCollapsedRef.current = false;
+      setter(wasSidebarCollapsedRef.current);
+    }
+  }, [immersiveMode]);
+
+  useEffect(
+    () => () => {
+      if (immersiveAutoCollapsedRef.current) {
+        immersiveAutoCollapsedRef.current = false;
+        onSetSidebarCollapsedRef.current?.(wasSidebarCollapsedRef.current);
+      }
+    },
+    [],
+  );
 
   const exitImmersiveToPool = useCallback(() => {
     setImmersiveMode(false);
@@ -3626,19 +3705,131 @@ export function ShioriWorkbench({
     !isLiveRun || isSpawningCore || consolidating || (isAuto && hostOnline),
   );
   const immersiveBusy = Boolean(isSpawningCore || consolidating || (isAuto && thinking));
+  const immersiveStatusTone: "busy" | "auto" | "idle" = immersiveBusy
+    ? "busy"
+    : isAuto && hostOnline
+      ? "auto"
+      : "idle";
   const latestImmersivePreview = useMemo(() => {
     if (consolidating) return t("stateConsolidating");
     if (isSpawningCore) return t("spawningCoreStatus");
-    if (hostOnline && thinking) return t("stateAutoThinking");
     for (let i = segments.length - 1; i >= 0; i--) {
       const seg = segments[i]!;
+      if (seg.kind === "outbound_event") {
+        const liveEv = resolveLivePoolEvent(seg.event);
+        if (liveEv.status === "pending") {
+          const text = (liveEv.title || liveEv.text).trim();
+          if (text) return `🆘 ${text.replace(/\s+/g, " ").slice(0, 100)}`;
+        }
+      }
       if (seg.kind === "turn") {
         const text = seg.responseText?.trim();
         if (text) return text.replace(/\s+/g, " ").slice(0, 110);
+        const latestStep = seg.steps.at(-1);
+        if (latestStep && latestStep.kind !== "system") {
+          const { badge, detail } = summarizeStepBlock(latestStep);
+          return `${badge} ${detail}`.replace(/\s+/g, " ").slice(0, 110);
+        }
       }
     }
+    if (hostOnline && thinking) return t("stateAutoThinking");
     return workspaceTitle || project;
-  }, [consolidating, isSpawningCore, hostOnline, thinking, segments, workspaceTitle, project, t]);
+  }, [
+    consolidating,
+    isSpawningCore,
+    hostOnline,
+    thinking,
+    segments,
+    resolveLivePoolEvent,
+    workspaceTitle,
+    project,
+    t,
+  ]);
+
+  const mergeViewportIntoDesktopTitlebar = Boolean(
+    immersiveMode &&
+      desktopActive &&
+      isInteractiveStage &&
+      !inspectedTurn &&
+      onImmersiveChromeChange,
+  );
+
+  const desktopTitlebarSlots = useMemo<ViewportTopbarSlots | null>(() => {
+    if (!mergeViewportIntoDesktopTitlebar || !isInteractiveStage) return null;
+    return ViewportTopbarControls({
+      stageKind: effectiveStageKind,
+      state: deviceViewport.state,
+      isAuto,
+      reclaiming: sessionSubmitting,
+      immersive: true,
+      stageRef: deviceViewport.stageRef,
+      onAction: deviceViewport.performAction,
+      onToggleImmersive: toggleImmersiveMode,
+      onReclaimControl: handleReclaimControl,
+    });
+  }, [
+    mergeViewportIntoDesktopTitlebar,
+    isInteractiveStage,
+    effectiveStageKind,
+    deviceViewport.state,
+    deviceViewport.stageRef,
+    deviceViewport.performAction,
+    isAuto,
+    sessionSubmitting,
+    toggleImmersiveMode,
+    handleReclaimControl,
+  ]);
+
+  const onImmersiveChromeChangeRef = useRef(onImmersiveChromeChange);
+  onImmersiveChromeChangeRef.current = onImmersiveChromeChange;
+
+  useEffect(() => {
+    onImmersiveChromeChangeRef.current?.(desktopTitlebarSlots);
+  }, [desktopTitlebarSlots]);
+
+  useEffect(
+    () => () => {
+      onImmersiveChromeChangeRef.current?.(null);
+    },
+    [],
+  );
+
+  const renderSharedComposer = (compactImmersive: boolean, hideOutboundTray = false) => (
+    <ShioriComposer
+      project={project}
+      workspace={workspace}
+      data={data}
+      isLiveRun={isLiveRun}
+      sessionActions={actions}
+      hostStatusOverride={live as Record<string, unknown> | null}
+      activeModelOverride={activeModel}
+      activeServiceTierOverride={activeServiceTier}
+      activeEffortOverride={activeEffort}
+      submittingOverride={sessionSubmitting}
+      spawningCore={spawningCore}
+      preemptSuccessSeq={preemptSuccessSeq}
+      liveTimerSpec={liveTimerSpec}
+      onApplyLiveTimer={applyLiveStopTimer}
+      onExtendLiveTimer={extendLiveStopTimer}
+      poolSnapshot={poolSnapshot}
+      replyTarget={replyTarget}
+      replyAutoResumeDefault={replyAutoResumeDefault}
+      onSelectReplyTarget={(event, autoResume) => {
+        setReplyTarget(event);
+        setReplyAutoResumeDefault(autoResume);
+      }}
+      externalMode={workflowCommand?.mode ?? null}
+      externalDraft={workflowCommand?.prompt ?? null}
+      onExternalConsumed={() => setWorkflowCommand(null)}
+      compactImmersive={compactImmersive}
+      hideOutboundTray={hideOutboundTray}
+      draftValue={sharedComposerDraft}
+      onDraftValueChange={setSharedComposerDraft}
+      onMessageSubmitted={() => scrollToBottom(prefersSmoothScrollBehavior())}
+      onReturnLatest={onReturnLatest}
+      onUpdated={onUpdated}
+    />
+  );
 
   return (
     <div
@@ -4189,104 +4380,12 @@ export function ShioriWorkbench({
         </div>
       </section>
 
-      {/* Shared Bottom Floating Pill Composer (Split left-bottom OR Immersive full-stage bottom) */}
-      <div
-        className="codex-composer-slot"
-        data-immersive={immersiveMode ? "true" : undefined}
-        data-collapsed={immersiveMode && immersiveComposerCollapsed ? "true" : undefined}
-      >
-        {immersiveMode && (
-          <div className="codex-immersive-composer-bar">
-            <div className="codex-immersive-composer-head">
-              <button
-                type="button"
-                className="codex-immersive-collapse-btn"
-                data-immersive-composer-collapse=""
-                aria-expanded={!immersiveComposerCollapsed}
-                title={t(
-                  immersiveComposerCollapsed
-                    ? "immersiveExpandComposer"
-                    : "immersiveCollapseComposer",
-                )}
-                onClick={() => setImmersiveComposerCollapsed(prev => !prev)}
-              >
-                {immersiveComposerCollapsed ? (
-                  <Plus className="size-3.5 shrink-0" aria-hidden="true" />
-                ) : (
-                  <Minus className="size-3.5 shrink-0" aria-hidden="true" />
-                )}
-                {immersiveBusy && <span className="codex-thinking-dot shrink-0" aria-hidden="true" />}
-                <span className="codex-immersive-preview-text">{latestImmersivePreview}</span>
-              </button>
-
-              <div className="codex-immersive-head-actions">
-                {pendingPoolCount > 0 && (
-                  <button
-                    type="button"
-                    className="codex-immersive-chip-btn"
-                    data-tone={pendingOutboundCount > 0 ? "warn" : undefined}
-                    onClick={exitImmersiveToPool}
-                  >
-                    {pendingOutboundCount > 0 ? (
-                      <span aria-hidden="true">🆘</span>
-                    ) : (
-                      <Inbox className="size-3 shrink-0" aria-hidden="true" />
-                    )}
-                    <span>{pendingPoolCount}</span>
-                  </button>
-                )}
-                {!isInteractiveStage && (
-                  <button
-                    type="button"
-                    className="codex-immersive-chip-btn"
-                    data-immersive-split-btn=""
-                    title={t("exitImmersiveHint")}
-                    onClick={toggleImmersiveMode}
-                  >
-                    <Columns2 className="size-3 shrink-0" aria-hidden="true" />
-                    <span>{t("exitImmersiveBtn")}</span>
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-        <div
-          className="codex-composer-body"
-          hidden={Boolean(immersiveMode && immersiveComposerCollapsed)}
-        >
-          <ShioriComposer
-            project={project}
-            workspace={workspace}
-            data={data}
-            isLiveRun={isLiveRun}
-            sessionActions={actions}
-            hostStatusOverride={live as Record<string, unknown> | null}
-            activeModelOverride={activeModel}
-            activeServiceTierOverride={activeServiceTier}
-            activeEffortOverride={activeEffort}
-            submittingOverride={sessionSubmitting}
-            spawningCore={spawningCore}
-            preemptSuccessSeq={preemptSuccessSeq}
-            liveTimerSpec={liveTimerSpec}
-            onApplyLiveTimer={applyLiveStopTimer}
-            onExtendLiveTimer={extendLiveStopTimer}
-            poolSnapshot={poolSnapshot}
-            replyTarget={replyTarget}
-            replyAutoResumeDefault={replyAutoResumeDefault}
-            onSelectReplyTarget={(event, autoResume) => {
-              setReplyTarget(event);
-              setReplyAutoResumeDefault(autoResume);
-            }}
-            externalMode={workflowCommand?.mode ?? null}
-            externalDraft={workflowCommand?.prompt ?? null}
-            onExternalConsumed={() => setWorkflowCommand(null)}
-            onMessageSubmitted={() => scrollToBottom(prefersSmoothScrollBehavior())}
-            onReturnLatest={onReturnLatest}
-            onUpdated={onUpdated}
-          />
+      {/* Split Mode Bottom Pill Composer (Left Column); Immersive Mode mounts <ImmersiveFloatingPod /> */}
+      {!immersiveMode && (
+        <div className="codex-composer-slot">
+          <div className="codex-composer-body">{renderSharedComposer(false, false)}</div>
         </div>
-      </div>
+      )}
 
       {/* ── RIGHT WORKBENCH DOCK: LIVE VIEWPORT + COMPACT HOST OPS + TELEMETRY ── */}
       {backdropPresence.mounted && (
@@ -4415,7 +4514,8 @@ export function ShioriWorkbench({
                     reclaiming={sessionSubmitting}
                     suspended={viewportSuspended}
                     immersive={immersiveMode}
-                    leadingSlot={immersiveMode ? mobileNavSlot : undefined}
+                    hideChrome={mergeViewportIntoDesktopTitlebar}
+                    leadingSlot={immersiveMode && !desktopActive ? mobileNavSlot : undefined}
                     onToggleImmersive={toggleImmersiveMode}
                     onReclaimControl={handleReclaimControl}
                   />
@@ -4625,6 +4725,36 @@ export function ShioriWorkbench({
             )}
           </div>
         </aside>
+
+      {immersiveMode && (
+        <ImmersiveFloatingPod
+          previewText={latestImmersivePreview}
+          statusTone={immersiveStatusTone}
+          segments={segments}
+          poolSnapshot={poolSnapshot}
+          resolveLivePoolEvent={resolveLivePoolEvent}
+          pendingPoolCount={pendingPoolCount}
+          pendingOutboundCount={pendingOutboundCount}
+          isLiveRun={isLiveRun}
+          hostOnline={hostOnline}
+          thinking={thinking}
+          consolidating={consolidating}
+          canResumeAuto={canResumeAuto}
+          poolSubmitting={poolSubmitting}
+          showExitImmersiveButton={!isInteractiveStage}
+          onTierChange={setImmersivePodTier}
+          onOpenPoolOverview={exitImmersiveToPool}
+          onExitImmersive={toggleImmersiveMode}
+          onReplyPoolEvent={(event, resumeAuto) => {
+            setReplyTarget(event);
+            setReplyAutoResumeDefault(resumeAuto);
+          }}
+          onDismissPoolEvent={ackPoolEvent}
+        >
+          {renderSharedComposer(true, immersivePodTier === "stream")}
+        </ImmersiveFloatingPod>
+      )}
+
       <DeviceContentionDialog
         conflict={pendingContention}
         busy={spawningCore || sessionSubmitting}
