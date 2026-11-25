@@ -46,8 +46,20 @@ import {
   controlWorkspaceService,
   type WorkspaceSupervisorLike,
 } from "../query/workspaces.ts";
+import {
+  invalidateBrowserHostCache,
+  probeBrowserHost,
+  updateBrowserHostCache,
+} from "../daemon/browser-host-client.ts";
 import type { EventHub } from "./event-hub.ts";
 import { DEFAULT_MEDIA_TICKET_TTL_MS, mintMediaTicket } from "./media-ticket.ts";
+import {
+  describeWorkspaceViewport,
+  performWorkspaceViewportAction,
+  sendWorkspaceViewportInput,
+  validateViewportControlAction,
+  validateViewportHumanInput,
+} from "./viewport-ws.ts";
 
 export interface RpcWorkerClient {
   call<M extends DashboardMethod>(
@@ -803,6 +815,139 @@ export class RpcRouter {
       case "baseware/mutate":
         return this.handleBasewareMutate(rawParams, session, signal);
 
+      case "browserHost/notify": {
+        const params = asObject(rawParams, "browserHost/notify requires { status }");
+        const status = params.status;
+        if (status !== "online" && status !== "offline") {
+          throw invalidParams("browserHost/notify status must be 'online' or 'offline'");
+        }
+        const hostId =
+          typeof params.hostId === "string" && params.hostId.trim() ? params.hostId.trim() : undefined;
+        const socketPath =
+          typeof params.socketPath === "string" && params.socketPath.trim()
+            ? params.socketPath.trim()
+            : undefined;
+        const pid =
+          typeof params.pid === "number" && Number.isInteger(params.pid) && params.pid > 0
+            ? params.pid
+            : undefined;
+
+        let available: boolean;
+        let resolvedHostId: string | null = hostId ?? null;
+        if (status === "offline") {
+          const updated = updateBrowserHostCache(this.ctx.home, {
+            available: false,
+            ...(socketPath ? { socketPath } : {}),
+          });
+          available = updated.available;
+          resolvedHostId = updated.hostId;
+        } else {
+          invalidateBrowserHostCache(this.ctx.home);
+          const probed = await probeBrowserHost(this.ctx.home, {
+            force: true,
+            ...(socketPath ? { socketPathOverride: socketPath } : {}),
+          });
+          if (probed.available) {
+            available = true;
+            resolvedHostId = probed.hostId ?? hostId ?? null;
+            if (!probed.hostId && (hostId || pid !== undefined)) {
+              updateBrowserHostCache(this.ctx.home, {
+                available: true,
+                hostId: resolvedHostId,
+                socketPath: probed.socketPath,
+                ...(pid !== undefined ? { pid } : {}),
+              });
+            }
+          } else {
+            available = false;
+            resolvedHostId = null;
+          }
+        }
+
+        await this.ctx.worker.call("invalidateBrowserHostCache", [this.ctx.home]).catch(() => null);
+        this.ctx.eventHub.publish({
+          topic: "baseware",
+          payload: {
+            action: "browserHostNotify",
+            status,
+            available,
+            hostId: resolvedHostId,
+          },
+        });
+        this.ctx.eventHub.publish({
+          topic: "viewport",
+          payload: {
+            action: "browserHostNotify",
+            status,
+            available,
+            hostId: resolvedHostId,
+          },
+        });
+        return { ok: true as const, available };
+      }
+
+      case "viewport/describe": {
+        const params = asObject(rawParams, "viewport/describe requires { project }");
+        const project = requireNonEmptyString(params.project, "project");
+        const workspace =
+          typeof params.workspace === "string" && params.workspace.trim()
+            ? params.workspace.trim()
+            : undefined;
+        const machineId =
+          typeof params.machineId === "string" && params.machineId.trim()
+            ? params.machineId.trim()
+            : undefined;
+        return describeWorkspaceViewport(this.ctx.home, project, {
+          ...(workspace ? { workspace } : {}),
+          ...(machineId ? { machineId } : {}),
+          signal,
+        });
+      }
+
+      case "viewport/action": {
+        const params = asObject(rawParams, "viewport/action requires { project, action }");
+        const project = requireNonEmptyString(params.project, "project");
+        const workspace =
+          typeof params.workspace === "string" && params.workspace.trim()
+            ? params.workspace.trim()
+            : undefined;
+        const machineId =
+          typeof params.machineId === "string" && params.machineId.trim()
+            ? params.machineId.trim()
+            : undefined;
+        const action = validateViewportControlAction(params.action);
+        const state = await performWorkspaceViewportAction(this.ctx.home, project, action, {
+          ...(workspace ? { workspace } : {}),
+          ...(machineId ? { machineId } : {}),
+          signal,
+        });
+        this.ctx.eventHub.publish({
+          topic: "viewport",
+          workspaceId: project,
+          payload: { action: action.kind },
+        });
+        return state;
+      }
+
+      case "viewport/input": {
+        const params = asObject(rawParams, "viewport/input requires { project, input }");
+        const project = requireNonEmptyString(params.project, "project");
+        const workspace =
+          typeof params.workspace === "string" && params.workspace.trim()
+            ? params.workspace.trim()
+            : undefined;
+        const machineId =
+          typeof params.machineId === "string" && params.machineId.trim()
+            ? params.machineId.trim()
+            : undefined;
+        const input = validateViewportHumanInput(params.input);
+        return sendWorkspaceViewportInput(this.ctx.home, project, input, {
+          ...(workspace ? { workspace } : {}),
+          ...(machineId ? { machineId } : {}),
+          signal,
+        });
+      }
+
       case "drivers/discover": {
         const params = asObject(rawParams, "drivers/discover requires { spec }");
         const spec = requireNonEmptyString(params.spec, "spec");
@@ -1131,7 +1276,7 @@ export class RpcRouter {
     }
   }
 
-  private handleInitialize(rawParams: unknown, session: RpcSession): InitializeResult {
+  private async handleInitialize(rawParams: unknown, session: RpcSession): Promise<InitializeResult> {
     const params = asObject(rawParams, "initialize requires { clientInfo, protocolVersion }") as unknown as InitializeParams;
     if (!params.clientInfo || typeof params.clientInfo !== "object" || typeof params.clientInfo.name !== "string") {
       throw invalidParams("initialize requires clientInfo.name");
@@ -1148,6 +1293,7 @@ export class RpcRouter {
 
     session.markAuthenticated();
     const { runtimeProfile, capabilities } = this.getSessionCapabilities(session);
+    const hostProbe = await probeBrowserHost(this.ctx.home);
     const { ticket, expiresAt } = mintMediaTicket(this.ctx.mediaSecret, DEFAULT_MEDIA_TICKET_TTL_MS);
     const activeCores = this.ctx.supervisor.activeCoreWorkspaceIds();
     const managedWorkspaces = this.ctx.supervisor.managedWorkspaceIds();
@@ -1159,12 +1305,17 @@ export class RpcRouter {
       transport: session.transport,
       authenticated: session.isAuthenticated,
       runtimeProfile,
-      capabilities,
+      capabilities: {
+        ...capabilities,
+        builtinBrowser: hostProbe.available,
+        browserHostId: hostProbe.hostId ?? null,
+      },
       serverSeq: this.ctx.eventHub.currentSeq,
       activeCoreCount: activeCores.length,
       managedWorkspaces,
       media: {
         basePath: "/media",
+        viewportBasePath: "/viewport",
         ticket,
         ticketExpiresAt: expiresAt,
         liveStreamCapabilities: ["none"],

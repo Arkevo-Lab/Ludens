@@ -2,10 +2,12 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultSocket } from "@ludens/baseware/address";
+import { resolveBrowserHostSocketPath } from "@ludens/protocol/browser-host-paths";
 import {
   isOmpEffort,
   isOmpServiceTier,
   ludensHome,
+  readWorkspaceIdentity,
   validateConnectionConfig,
   type ModelConnectionConfig,
   type OmpEffort,
@@ -128,7 +130,7 @@ export async function launchPlan(
         break;
     }
   } else {
-    const bridge = manifest ? manifest.transport !== "stdio" : true;
+    const bridge = manifest ? manifest.transport !== "stdio" : effectiveDriver !== "browser";
     if (config.game && bridge && manifest?.launchCommand) {
       emulatorCmd = [
         "env",
@@ -144,6 +146,21 @@ export async function launchPlan(
     ];
   }
 
+  const browserArgs: string[] = [];
+  if (effectiveDriver === "browser") {
+    const sessionId = await readWorkspaceIdentity(workspace)
+      .then(identity => identity.id)
+      .catch(() => workspaceHash);
+    const effectiveUrl = activeMachine?.initialUrl ?? config.url;
+    browserArgs.push(
+      "--session-id",
+      sessionId,
+      "--browser-socket",
+      resolveBrowserHostSocketPath(ludensHome()),
+      ...(effectiveUrl ? ["--initial-url", effectiveUrl] : []),
+    );
+  }
+
   return {
     workspace, config, manifest, ...(activeMachine ? { activeMachine } : {}), background, sharedPet,
     launcher: join(repo, "server/src/daemon/process-manager.ts"), ludens, coreSocket, baseware, basewareSocket,
@@ -152,7 +169,7 @@ export async function launchPlan(
       baseware: [...cliCommand(baseware), "serve", "--driver", effectiveDriver,
         ...(activeMachine ? ["--machine-id", activeMachine.id] : []),
         ...(resolvedPackage ? ["--driver-package", resolvedPackage] : []),
-        ...transportArgs, "--socket", basewareSocket,
+        ...transportArgs, ...browserArgs, "--socket", basewareSocket,
         "--data-dir", join(workspace, "logs/baseware"), "--diagnostics", config.logging.diagnostics],
       host: [...cliCommand(ludens), "run", "--baseware-socket", basewareSocket, "--model", config.model,
         ...(config.compactionThreshold !== undefined
@@ -522,17 +539,17 @@ export class WorkspaceLauncher {
         if (!existing.pid) {
           const manifest = this.plan.manifest;
           const activeMachine = this.plan.activeMachine;
+          const effectiveDriver = activeMachine ? activeMachine.driver : this.plan.config.driver;
           const isLocalBridge = activeMachine
             ? activeMachine.transport.kind === "bridge" &&
               ["127.0.0.1", "localhost", "::1"].includes(activeMachine.transport.host ?? "127.0.0.1")
             : manifest
               ? manifest.transport !== "stdio"
-              : true;
+              : effectiveDriver !== "browser";
           if (isLocalBridge) {
             const port = activeMachine && activeMachine.transport.kind === "bridge"
               ? activeMachine.transport.port
               : this.plan.config.port!;
-            const effectiveDriver = activeMachine ? activeMachine.driver : this.plan.config.driver;
             if (this.plan.commands.emulator) {
               const emulator = await this.job("emulator");
               if (!emulator.pid) {

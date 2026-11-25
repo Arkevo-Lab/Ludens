@@ -86,6 +86,8 @@ test("desktop (UDS), web-dev (--dev WS), and non-loopback --dev refusal enforce 
         localFileDrivers: true,
         hostProcessOverrides: true,
         hostStorageConfig: true,
+        builtinBrowser: false,
+        browserHostId: null,
       });
 
       const wsDevInit = await wsDevClient.initialize({ clientInfo: { name: "vite-preview", version: "1.0.0" } });
@@ -95,6 +97,8 @@ test("desktop (UDS), web-dev (--dev WS), and non-loopback --dev refusal enforce 
         localFileDrivers: true,
         hostProcessOverrides: true,
         hostStorageConfig: true,
+        builtinBrowser: false,
+        browserHostId: null,
       });
 
       const status = await wsDevClient.call("daemon/status");
@@ -169,6 +173,8 @@ test("remote WS sessions enforce managed-sandbox capability restrictions across 
       localFileDrivers: false,
       hostProcessOverrides: false,
       hostStorageConfig: false,
+      builtinBrowser: false,
+      browserHostId: null,
     });
 
     const daemonStatus = await remoteClient.call("daemon/status");

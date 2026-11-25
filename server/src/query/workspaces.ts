@@ -8,6 +8,7 @@ import { repoRoot } from "./repo";
 import { discoverDriver } from "./drivers";
 import { initializeWorkspace } from "./workspace-init";
 import { cliCommand, jobStateFilePath, jobTargetLabel, ludensSocketPath, readBackgroundJobState } from "../daemon/background-jobs";
+import { probeBrowserHost } from "../daemon/browser-host-client";
 import {
   readGlobalConfig,
   updateGlobalConfig,
@@ -26,8 +27,12 @@ import {
   validateWorkspaceMachinesBinding,
   validateMachineSpec,
   BUILTIN_LOCAL_DESKTOP_MACHINE,
+  BUILTIN_LOCAL_BROWSER_MACHINE,
   BUILTIN_CUA_DRIVER,
   BUILTIN_CUA_DRIVER_SPEC,
+  BUILTIN_BROWSER_DRIVER,
+  BUILTIN_BROWSER_DRIVER_SPEC,
+  resolveMachineStageKind,
   driverRegistryKey,
   validDriverId,
   validateConnectionConfig,
@@ -35,6 +40,7 @@ import {
   isOmpServiceTier,
   withWorkspaceRegistrationLock,
   type BasewareMachineSpec,
+  type DeviceStageKind,
   type WorkspaceMachinesBinding,
   type MachineTransportConfig,
   type MachineTransportKind,
@@ -61,6 +67,7 @@ export interface CreateWorkspaceInput {
   driverPackage?: string;
   machineId?: string;
   game?: string;
+  url?: string;
   port?: number;
   cuaCommand?: string;
   model?: string;
@@ -75,6 +82,7 @@ export interface WorkspaceConfigSummary {
   driver: string;
   driverPackage?: string;
   game?: string;
+  url?: string;
   port?: number;
   cuaCommand?: string;
   model: string;
@@ -116,6 +124,8 @@ export interface BasewareDriverOverviewItem {
   sourceKind: DriverSourceKind;
   registrationStatus: DriverRegistrationStatus;
   available: boolean;
+  runtimeInjected?: boolean;
+  stageKind?: DeviceStageKind;
   localPath?: string;
   cacheKey?: string;
   packageName?: string;
@@ -159,6 +169,8 @@ export interface WorkspaceBasewareSnapshot {
         label: string;
         driver: string;
         transport: string;
+        stageKind?: DeviceStageKind;
+        hasViewport?: boolean;
         connected: boolean;
         reason: string;
         isPrimary: boolean;
@@ -170,6 +182,11 @@ export interface WorkspaceBasewareSnapshot {
   };
   machines: BasewareMachineRuntimeStatus[];
   drivers: BasewareDriverOverviewItem[];
+  browserHost?: {
+    available: boolean;
+    hostId?: string;
+    socketPath?: string;
+  };
 }
 
 export interface WorkspaceSessionEntry {
@@ -239,6 +256,7 @@ async function readWorkspaceConfigSummary(workspacePath: string): Promise<Worksp
       driver: typeof raw.driver === "string" && raw.driver.trim() ? raw.driver.trim() : "cua",
       ...(typeof raw.driverPackage === "string" && raw.driverPackage.trim() ? { driverPackage: raw.driverPackage.trim() } : {}),
       ...(typeof raw.game === "string" && raw.game.trim() ? { game: raw.game.trim() } : {}),
+      ...(typeof raw.url === "string" && raw.url.trim() ? { url: raw.url.trim() } : {}),
       ...(typeof raw.port === "number" && Number.isInteger(raw.port) ? { port: raw.port } : {}),
       ...(typeof raw.cuaCommand === "string" && raw.cuaCommand.trim() ? { cuaCommand: raw.cuaCommand.trim() } : {}),
       model: typeof raw.model === "string" && raw.model.trim() ? raw.model.trim() : "openai-codex/gpt-6.2-sol",
@@ -565,7 +583,7 @@ function normalizeDriverPackageForWorkspace(workspacePath: string | null | undef
 
 function classifyDriverSourceKind(spec: string, fromCache = false): DriverSourceKind {
   const trimmed = spec.trim();
-  if (trimmed === BUILTIN_CUA_DRIVER_SPEC) return "builtin";
+  if (trimmed === BUILTIN_CUA_DRIVER_SPEC || trimmed === BUILTIN_BROWSER_DRIVER_SPEC) return "builtin";
   if (trimmed.startsWith("file:")) return "file";
   if (
     trimmed.startsWith("github:")
@@ -603,7 +621,7 @@ async function readPackageJsonSummary(directory: string): Promise<{ packageName?
 }
 
 async function inspectLocalDriverMetadata(spec: string, cachePath?: string): Promise<LocalDriverPackageMeta> {
-  if (spec === BUILTIN_CUA_DRIVER_SPEC) {
+  if (spec === BUILTIN_CUA_DRIVER_SPEC || spec === BUILTIN_BROWSER_DRIVER_SPEC) {
     return { available: true };
   }
   if (spec.startsWith("file:")) {
@@ -641,7 +659,41 @@ function normalizedDriverSpec(id: string, spec?: string, workspacePath?: string 
   const normalizedPkg = normalizeDriverPackageForWorkspace(workspacePath, spec);
   if (normalizedPkg) return normalizedPkg;
   if (id === "cua") return BUILTIN_CUA_DRIVER_SPEC;
+  if (id === "browser") return BUILTIN_BROWSER_DRIVER_SPEC;
   return `driver:${id}`;
+}
+
+function buildRuntimeBrowserMachine(available: boolean): BasewareMachineSpec {
+  return {
+    ...BUILTIN_LOCAL_BROWSER_MACHINE,
+    available,
+    runtimeInjected: true,
+    stageKind: "browser",
+  };
+}
+
+function workspaceUsesBuiltinBrowser(cfg: WorkspaceConfigSummary | null | undefined): boolean {
+  if (!cfg) return false;
+  if (cfg.driver === "browser") return true;
+  if (cfg.machines?.active === BUILTIN_LOCAL_BROWSER_MACHINE.id) return true;
+  if (cfg.machines?.allowed.includes(BUILTIN_LOCAL_BROWSER_MACHINE.id)) return true;
+  return false;
+}
+
+function withRuntimeBrowserMachine(
+  registryMachines: BasewareMachineSpec[],
+  available: boolean,
+): BasewareMachineSpec[] {
+  const existing = registryMachines.find(machine => machine.id === BUILTIN_LOCAL_BROWSER_MACHINE.id);
+  const runtimeMachine = buildRuntimeBrowserMachine(available);
+  if (existing) {
+    return registryMachines.map(machine =>
+      machine.id === BUILTIN_LOCAL_BROWSER_MACHINE.id
+        ? { ...runtimeMachine, ...machine, available, runtimeInjected: true, stageKind: "browser" }
+        : machine,
+    );
+  }
+  return [...registryMachines, runtimeMachine];
 }
 
 function matchGlobalMachine(
@@ -650,6 +702,9 @@ function matchGlobalMachine(
   workspacePath?: string | null,
 ): BasewareMachineSpec | null {
   if (!cfg) return registryMachines.find(machine => machine.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id) ?? null;
+  if (cfg.driver === "browser" && !cfg.driverPackage) {
+    return registryMachines.find(machine => machine.id === BUILTIN_LOCAL_BROWSER_MACHINE.id) ?? null;
+  }
   if (cfg.driver === "cua" && !cfg.driverPackage && !cfg.cuaCommand && cfg.port === undefined) {
     return registryMachines.find(machine => machine.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id) ?? null;
   }
@@ -753,11 +808,12 @@ function resolveEffectiveBinding(
 }
 
 export async function basewareOverview(workspaceId?: unknown, home = globalHome): Promise<WorkspaceBasewareSnapshot> {
-  const [registry, driverRegistry, workspaces, cachedDrivers] = await Promise.all([
+  const [registry, driverRegistry, workspaces, cachedDrivers, hostProbe] = await Promise.all([
     readMachinesConfig(home),
     readDriversConfig(home),
     listRegisteredWorkspaces(home),
     listCachedDrivers(home),
+    probeBrowserHost(home),
   ]);
   const configs = new Map<string, WorkspaceConfigSummary | null>();
   await Promise.all(workspaces.map(async entry => {
@@ -767,31 +823,42 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
   const candidate = selectedId ? workspaces.find(item => item.id === selectedId) : undefined;
   const entry = candidate?.available ? candidate : undefined;
   const cfg = entry ? configs.get(entry.id) : null;
-  const implicitMachine = entry ? synthesizeImplicitMachine(entry, cfg, registry.machines) : null;
-  const binding = resolveEffectiveBinding(cfg, registry.machines, entry ?? null, implicitMachine);
-  const allMachinesForLookup = implicitMachine ? [implicitMachine, ...registry.machines] : registry.machines;
+
+  const queriedUsesBrowser = workspaceUsesBuiltinBrowser(cfg);
+  const exposeBuiltinBrowser = hostProbe.available || queriedUsesBrowser;
+  // Always include builtin-browser when resolving bindings across workspaces so browser
+  // workspaces stay bound to builtin-browser instead of synthesizing workspace-default.
+  const lookupMachines = withRuntimeBrowserMachine(registry.machines, hostProbe.available);
+  const visibleRegistryMachines = exposeBuiltinBrowser
+    ? lookupMachines
+    : registry.machines.filter(machine => machine.id !== BUILTIN_LOCAL_BROWSER_MACHINE.id);
+
+  const implicitMachine = entry ? synthesizeImplicitMachine(entry, cfg, lookupMachines) : null;
+  const binding = resolveEffectiveBinding(cfg, lookupMachines, entry ?? null, implicitMachine);
+  const allMachinesForLookup = implicitMachine ? [implicitMachine, ...lookupMachines] : lookupMachines;
   const activeMachine = binding.active
     ? allMachinesForLookup.find(machine => machine.id === binding.active) ?? null
     : null;
   const workspaceBindings = new Map<string, WorkspaceMachinesBinding>();
   for (const workspace of workspaces) {
     const wsCfg = configs.get(workspace.id);
-    const wsImplicit = workspace.available ? synthesizeImplicitMachine(workspace, wsCfg, registry.machines) : null;
+    const wsImplicit = workspace.available ? synthesizeImplicitMachine(workspace, wsCfg, lookupMachines) : null;
     workspaceBindings.set(
       workspace.id,
-      resolveEffectiveBinding(wsCfg, registry.machines, workspace, wsImplicit),
+      resolveEffectiveBinding(wsCfg, lookupMachines, workspace, wsImplicit),
     );
   }
   const usedBy = (machineId: string) => workspaces.filter(workspace =>
     workspaceBindings.get(workspace.id)?.allowed.includes(machineId) ?? false,
   ).map(workspace => workspace.id);
-  const machines: BasewareMachineRuntimeStatus[] = registry.machines.map(machine => ({
+  const machines: BasewareMachineRuntimeStatus[] = visibleRegistryMachines.map(machine => ({
     ...machine,
+    stageKind: resolveMachineStageKind(machine),
     usedByWorkspaceIds: usedBy(machine.id),
   }));
 
-  // Build unified driver catalog merging built-in cua, registered drivers.json,
-  // workspace/machine references, and cached driver packages.
+  // Build unified driver catalog merging built-in cua, runtime-injected browser,
+  // registered drivers.json, workspace/machine references, and cached driver packages.
   interface DriverSeed {
     key: string;
     id: string;
@@ -799,6 +866,7 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
     registered?: RegisteredDriverSpec;
     cached?: CachedDriverEntry;
     builtin?: boolean;
+    runtimeInjected?: boolean;
     machineIds: Set<string>;
     workspaceIds: Set<string>;
   }
@@ -825,6 +893,13 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
     cua.registered = BUILTIN_CUA_DRIVER;
   }
 
+  if (exposeBuiltinBrowser) {
+    const browser = ensureSeed(BUILTIN_BROWSER_DRIVER.id, BUILTIN_BROWSER_DRIVER.spec);
+    browser.builtin = true;
+    browser.runtimeInjected = true;
+    browser.registered = BUILTIN_BROWSER_DRIVER;
+  }
+
   for (const registered of driverRegistry.drivers) {
     const seed = ensureSeed(registered.id, registered.spec);
     seed.registered = registered;
@@ -841,9 +916,15 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
     seed.cached = cached;
   }
 
-  for (const machine of registry.machines) {
+  for (const machine of visibleRegistryMachines) {
     const spec = normalizedDriverSpec(machine.driver, machine.driverPackage);
+    if (spec === BUILTIN_BROWSER_DRIVER_SPEC && !exposeBuiltinBrowser) continue;
     const seed = ensureSeed(machine.driver, spec);
+    if (spec === BUILTIN_BROWSER_DRIVER_SPEC) {
+      seed.builtin = true;
+      seed.runtimeInjected = true;
+      seed.registered = BUILTIN_BROWSER_DRIVER;
+    }
     seed.machineIds.add(machine.id);
     for (const wsId of usedBy(machine.id)) {
       seed.workspaceIds.add(wsId);
@@ -854,7 +935,13 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
     const wsCfg = configs.get(workspace.id);
     if (!wsCfg) continue;
     const spec = normalizedDriverSpec(wsCfg.driver, wsCfg.driverPackage, workspace.workspace);
+    if (spec === BUILTIN_BROWSER_DRIVER_SPEC && !exposeBuiltinBrowser) continue;
     const seed = ensureSeed(wsCfg.driver, spec);
+    if (spec === BUILTIN_BROWSER_DRIVER_SPEC) {
+      seed.builtin = true;
+      seed.runtimeInjected = true;
+      seed.registered = BUILTIN_BROWSER_DRIVER;
+    }
     seed.workspaceIds.add(workspace.id);
     if (entry?.id === workspace.id && implicitMachine && implicitMachine.driver === wsCfg.driver) {
       seed.machineIds.add(implicitMachine.id);
@@ -864,6 +951,7 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
   const driversRaw: BasewareDriverOverviewItem[] = await Promise.all(
     [...seeds.values()].map(async (seed): Promise<BasewareDriverOverviewItem> => {
       const localMeta = await inspectLocalDriverMetadata(seed.spec, seed.cached?.path);
+      const isBuiltinBrowser = seed.spec === BUILTIN_BROWSER_DRIVER_SPEC;
       const registrationStatus: DriverRegistrationStatus = seed.builtin
         ? "builtin"
         : seed.registered
@@ -872,7 +960,7 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
       const sourceKind = seed.builtin
         ? "builtin"
         : classifyDriverSourceKind(seed.spec, Boolean(seed.cached));
-      const sampleMachine = registry.machines.find(m => seed.machineIds.has(m.id));
+      const sampleMachine = visibleRegistryMachines.find(m => seed.machineIds.has(m.id));
       const fallbackTransport = seed.registered?.transport ?? sampleMachine?.transport.kind;
       const fallbackDefaultPort =
         seed.registered?.defaultPort
@@ -883,7 +971,9 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
         spec: seed.spec,
         sourceKind,
         registrationStatus,
-        available: localMeta.available,
+        available: isBuiltinBrowser ? hostProbe.available : localMeta.available,
+        ...(seed.runtimeInjected || isBuiltinBrowser ? { runtimeInjected: true } : {}),
+        stageKind: resolveMachineStageKind({ driver: seed.id }),
         ...(localMeta.localPath ? { localPath: localMeta.localPath } : {}),
         ...(seed.cached?.cacheKey ? { cacheKey: seed.cached.cacheKey } : {}),
         ...(localMeta.packageName ? { packageName: localMeta.packageName } : {}),
@@ -949,7 +1039,7 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
               connected: value.connected,
               epoch: typeof value.epoch === "string" ? value.epoch : null,
               ...(typeof value.activeMachineId === "string" ? { activeMachineId: value.activeMachineId } : {}),
-              ...(Array.isArray(value.machines) ? { mountedMachines: value.machines as Array<{ id: string; label: string; driver: string; transport: string; connected: boolean; reason: string; isPrimary: boolean; controllers: string[] }> } : {}),
+              ...(Array.isArray(value.machines) ? { mountedMachines: value.machines as NonNullable<WorkspaceBasewareSnapshot["daemon"]["status"]>["mountedMachines"] } : {}),
             };
           }
         } catch {
@@ -976,6 +1066,11 @@ export async function basewareOverview(workspaceId?: unknown, home = globalHome)
     daemon,
     machines,
     drivers,
+    browserHost: {
+      available: hostProbe.available,
+      ...(hostProbe.hostId ? { hostId: hostProbe.hostId } : {}),
+      ...(hostProbe.socketPath ? { socketPath: hostProbe.socketPath } : {}),
+    },
   };
 }
 
@@ -1202,14 +1297,21 @@ export async function controlWorkspaceMachine(
     throw new Error("不支持的受控节点操作");
   }
   if (typeof machineId !== "string" || !machineId.trim()) throw new Error("请选择受控节点");
-  const registry = await readMachinesConfig(home);
-  const entry = await registeredWorkspace(id, home);
+  const [registry, entry, hostProbe] = await Promise.all([
+    readMachinesConfig(home),
+    registeredWorkspace(id, home),
+    probeBrowserHost(home),
+  ]);
   const workspace = entry.workspace;
   const cfg = await readWorkspaceConfigSummary(workspace);
-  const implicitMachine = synthesizeImplicitMachine(entry, cfg, registry.machines);
-  const machineExists = registry.machines.some(machine => machine.id === machineId) || implicitMachine?.id === machineId;
+  const effectiveRegistryMachines =
+    hostProbe.available || workspaceUsesBuiltinBrowser(cfg) || machineId === BUILTIN_LOCAL_BROWSER_MACHINE.id
+      ? withRuntimeBrowserMachine(registry.machines, hostProbe.available)
+      : registry.machines;
+  const implicitMachine = synthesizeImplicitMachine(entry, cfg, effectiveRegistryMachines);
+  const machineExists = effectiveRegistryMachines.some(machine => machine.id === machineId) || implicitMachine?.id === machineId;
   if (!machineExists) throw new Error(`Unknown machine: ${machineId}`);
-  const current = resolveEffectiveBinding(cfg, registry.machines, entry, implicitMachine);
+  const current = resolveEffectiveBinding(cfg, effectiveRegistryMachines, entry, implicitMachine);
   let active = current.active;
   const allowed = [...current.allowed];
   const persist = async () => {
@@ -1460,12 +1562,26 @@ export async function probeBasewareMachine(input: unknown, home = globalHome): P
   if (input && typeof input === "object" && !Array.isArray(input) && Object.keys(input).length === 1 && "id" in input) {
     const id = input.id;
     if (typeof id !== "string") throw new Error("Invalid machine ID");
-    const registry = await readMachinesConfig(home);
-    const found = registry.machines.find(item => item.id === id);
-    if (!found) throw new Error(`Unknown machine: ${id}`);
-    machine = found;
+    if (id === BUILTIN_LOCAL_BROWSER_MACHINE.id) {
+      machine = BUILTIN_LOCAL_BROWSER_MACHINE;
+    } else {
+      const registry = await readMachinesConfig(home);
+      const found = registry.machines.find(item => item.id === id);
+      if (!found) throw new Error(`Unknown machine: ${id}`);
+      machine = found;
+    }
   } else {
     machine = validateMachineSpec(input);
+  }
+  if (machine.driver === "browser" || machine.id === BUILTIN_LOCAL_BROWSER_MACHINE.id) {
+    const hostProbe = await probeBrowserHost(home, { force: true });
+    return {
+      ok: hostProbe.available,
+      latencyMs: Date.now() - started,
+      detail: hostProbe.available
+        ? `Connected to Ludens Desktop BrowserHost${hostProbe.hostId ? ` (${hostProbe.hostId})` : ""}`
+        : "Start Ludens Desktop App to enable Built-in Browser",
+    };
   }
   try {
     const transport: MachineTransportConfig = machine.transport;
@@ -1615,6 +1731,7 @@ export async function updateWorkspaceStudioConfig(
     "pet",
     "port",
     "game",
+    "url",
     "cuaCommand",
     "connection",
     "machines",
@@ -1685,6 +1802,11 @@ export async function updateWorkspaceStudioConfig(
       if (patch.game === null || patch.game === undefined || patch.game === "") delete next.game;
       else if (typeof patch.game === "string" && patch.game.trim()) next.game = patch.game.trim();
       else throw new Error("game 必须是非空字符串或 null");
+    }
+    if ("url" in patch) {
+      if (patch.url === null || patch.url === undefined || patch.url === "") delete next.url;
+      else if (typeof patch.url === "string" && patch.url.trim()) next.url = patch.url.trim();
+      else throw new Error("url 必须是非空字符串或 null");
     }
     if ("cuaCommand" in patch) {
       if (patch.cuaCommand === null || patch.cuaCommand === undefined || patch.cuaCommand === "") delete next.cuaCommand;
