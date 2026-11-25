@@ -5,6 +5,7 @@ import {
   type DesktopRpcBridge,
   type DesktopRpcStatus,
   type DesktopViewportBridge,
+  type DesktopViewportFramePayload,
 } from './rpc-channels.js'
 import {
   DESKTOP_TITLEBAR_HEIGHT,
@@ -80,6 +81,11 @@ const viewportBridge: DesktopViewportBridge = {
   attach: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.attach, input),
   updateBounds: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.updateBounds, input),
   detach: sessionId => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.detach, sessionId),
+  setFrameStream: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.setFrameStream, input),
+  onFrame: callback =>
+    on(LUDENS_VIEWPORT_CHANNELS.frame, value => {
+      if (value && typeof value === 'object') callback(value as DesktopViewportFramePayload)
+    }),
 }
 
 // Narrow UDS RPC relay, Pet settings, activity, viewport, and window-chrome IPC bridge; no node:net or fs exposure.

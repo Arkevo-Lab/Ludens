@@ -33,6 +33,7 @@ import {
   type BrowserSessionRelativeMouseInput,
 } from './browser-host.js'
 import { buildBrowserStartPageHtml } from './browser-start-page.js'
+import type { DesktopViewportFramePayload } from './rpc-channels.js'
 
 class FakeSessionBackend implements BrowserSessionBackend {
   readonly sessionId: string
@@ -208,10 +209,22 @@ class FakeSessionBackend implements BrowserSessionBackend {
 
   async attachToOwner(owner: unknown, input: DesktopViewportAttachInput): Promise<void> {
     this.attachCalls.push({ owner, input })
+    if (input.bounds.width > 0 && input.bounds.height > 0) {
+      const changed = input.bounds.width !== this.width || input.bounds.height !== this.height
+      this.width = input.bounds.width
+      this.height = input.bounds.height
+      if (changed) this.emitState()
+    }
   }
 
   async updateOwnerBounds(owner: unknown, input: DesktopViewportAttachInput): Promise<void> {
     this.updateBoundsCalls.push({ owner, input })
+    if (input.bounds.width > 0 && input.bounds.height > 0) {
+      const changed = input.bounds.width !== this.width || input.bounds.height !== this.height
+      this.width = input.bounds.width
+      this.height = input.bounds.height
+      if (changed) this.emitState()
+    }
   }
 
   async detachFromOwner(owner: unknown): Promise<void> {
@@ -681,5 +694,128 @@ describe('BrowserHost UDS protocol, sessions, inputs, and native attachment', ()
 
     await host.detachFromOwner(fakeOwner)
     expect(b2.detachCalls).toHaveLength(2)
+  })
+
+  it('syncs logical viewport dimensions on owner bounds updates so CDP mouse coordinates are not clamped to 1280x720', async () => {
+    const { host, backends } = await createTempHost()
+    const client = await TestUdsClient.connect(host.socketPath)
+    const fakeOwner = { id: 'owner-immersive-1' }
+
+    // Initial session created at default 1280x720
+    const initial = await client.call<ViewportState>({
+      kind: 'session.ensure',
+      sessionId: 'ws-immersive',
+      width: 1280,
+      height: 720,
+    })
+    expect(initial.width).toBe(1280)
+    expect(initial.height).toBe(720)
+
+    await host.attachToOwner(fakeOwner, {
+      sessionId: 'ws-immersive',
+      bounds: { x: 0, y: 38, width: 1280, height: 720 },
+      visible: true,
+      interactive: true,
+    })
+
+    // Expand native viewport bounds to 1600x900 (e.g. Immersive Mode 2.0)
+    await host.updateOwnerBounds(fakeOwner, {
+      sessionId: 'ws-immersive',
+      bounds: { x: 0, y: 38, width: 1600, height: 900 },
+      visible: true,
+      interactive: true,
+    })
+
+    const described = await client.call<ViewportState>({
+      kind: 'session.describe',
+      sessionId: 'ws-immersive',
+    })
+    expect(described.width).toBe(1600)
+    expect(described.height).toBe(900)
+
+    await client.call({
+      kind: 'session.input',
+      sessionId: 'ws-immersive',
+      input: { type: 'mouseDown', x: 1500, y: 820, button: 'left' },
+    })
+
+    const backend = backends.get('ws-immersive')!
+    expect(backend.mouseEvents).toHaveLength(1)
+    expect(backend.mouseEvents[0]).toMatchObject({
+      type: 'mousePressed',
+      x: 1500,
+      y: 820,
+      button: 'left',
+    })
+
+    await client.close()
+  })
+
+  it('subscribes to in-process session frames with immediate initial frame, live updates, and clean unsubscribe', async () => {
+    const { host, backends } = await createTempHost()
+    const client = await TestUdsClient.connect(host.socketPath)
+
+    // Unknown session returns clean no-op unsubscribe
+    const missingFrames: DesktopViewportFramePayload[] = []
+    const noopUnsub = await host.subscribeSessionFrames('does-not-exist', f => missingFrames.push(f))
+    noopUnsub()
+    expect(missingFrames).toEqual([])
+
+    await client.call({
+      kind: 'session.ensure',
+      sessionId: 'ws-stream',
+      width: 1440,
+      height: 900,
+    })
+    const backend = backends.get('ws-stream')!
+
+    // 1) No cached frame yet -> triggers one-shot capture in background for zero black flash
+    const frames: DesktopViewportFramePayload[] = []
+    const unsubscribe = await host.subscribeSessionFrames(
+      'ws-stream',
+      frame => frames.push(frame),
+      { maxFps: 60, quality: 82 },
+    )
+    expect(backend.streaming).toBe(true)
+
+    // Wait briefly for background capture promise to flush
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(frames).toHaveLength(1)
+    expect(frames[0]).toMatchObject({
+      sessionId: 'ws-stream',
+      format: 'jpeg',
+      dataBase64: 'Y2FwdHVyZWQtZnJhbWU=',
+      width: 1440,
+      height: 900,
+    })
+
+    // 2) Subsequent live frames are delivered cleanly
+    backend.pushFrame('bGl2ZS1mcmFtZS0x')
+    expect(frames).toHaveLength(2)
+    expect(frames[1]).toMatchObject({
+      sessionId: 'ws-stream',
+      format: 'jpeg',
+      dataBase64: 'bGl2ZS1mcmFtZS0x',
+      width: 1440,
+      height: 900,
+    })
+
+    // 3) After unsubscribe, no further frames arrive
+    unsubscribe()
+    await new Promise(resolve => setTimeout(resolve, 25))
+    backend.pushFrame('bGl2ZS1mcmFtZS0y')
+    expect(frames).toHaveLength(2)
+
+    // 4) New subscriber receives latest cached frame immediately synchronously
+    const secondFrames: DesktopViewportFramePayload[] = []
+    const unsub2 = await host.subscribeSessionFrames('ws-stream', frame => secondFrames.push(frame))
+    expect(secondFrames).toHaveLength(1)
+    expect(secondFrames[0]).toMatchObject({
+      sessionId: 'ws-stream',
+      dataBase64: 'bGl2ZS1mcmFtZS0y',
+    })
+    unsub2()
+
+    await client.close()
   })
 })
