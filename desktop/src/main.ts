@@ -39,7 +39,7 @@ import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
 import { installMainProcessSafety, installParentWatchdog } from './process-safety.js'
 import { ActiveCoreQuitGuard, mapDialogButtonToQuitAction } from './quit-guard.js'
 import { DesktopUdsRpcRelay } from './rpc-bridge.js'
-import { LUDENS_VIEWPORT_CHANNELS } from './rpc-channels.js'
+import { LUDENS_VIEWPORT_CHANNELS, type DesktopViewportFrameStreamInput } from './rpc-channels.js'
 import { createLudensTrayIcon } from './tray-icon.js'
 import {
   buildOfflineWaitingHtml,
@@ -153,7 +153,29 @@ if (values.help) {
     let source: PetSessionCoordinator | undefined
     let rpcRelay: DesktopUdsRpcRelay | undefined
     let browserHost: BrowserHost | undefined
+    let activeFrameStream: { sessionId: string; unsubscribe: () => void } | undefined
+    let pendingFrameStreamSessionId: string | undefined
+    let frameStreamGeneration = 0
     let mainMediaClient: NodeUdsRpcClient | undefined
+
+    const stopActiveFrameStream = (onlySessionId?: string) => {
+      const matchesActive = activeFrameStream && (!onlySessionId || activeFrameStream.sessionId === onlySessionId)
+      const matchesPending =
+        pendingFrameStreamSessionId && (!onlySessionId || pendingFrameStreamSessionId === onlySessionId)
+      if (!onlySessionId || matchesActive || matchesPending) {
+        frameStreamGeneration += 1
+      }
+      if (matchesPending) {
+        pendingFrameStreamSessionId = undefined
+      }
+      if (matchesActive && activeFrameStream) {
+        const current = activeFrameStream
+        activeFrameStream = undefined
+        try {
+          current.unsubscribe()
+        } catch {}
+      }
+    }
     let mainMediaSocketPath: string | undefined
     let retryDashboard: (() => void) | undefined
     let dashboardTimer: ReturnType<typeof setInterval> | undefined
@@ -199,6 +221,7 @@ if (values.help) {
       try { clearInterval(dashboardTimer) } catch {}
       try { clearTimeout(saveStateTimer) } catch {}
       try { if (syncTrayTheme) nativeTheme.off('updated', syncTrayTheme) } catch {}
+      stopActiveFrameStream()
       if (cleanupOptions.saveWindow) {
         try {
           const nextState = captureWindowState?.()
@@ -583,6 +606,7 @@ if (values.help) {
       })
       owner.webContents.on('render-process-gone', (_event, details) => {
         dashboardReady = false
+        stopActiveFrameStream()
         console.error(`[ludens] console renderer exited: ${details.reason}`)
       })
       owner.on('close', event => {
@@ -592,6 +616,7 @@ if (values.help) {
         }
       })
       owner.on('hide', () => {
+        stopActiveFrameStream()
         if (owner) void browserHost?.suspendOwnerView(owner)
       })
       owner.on('show', () => {
@@ -761,8 +786,59 @@ if (values.help) {
             sessionId = candidate.sessionId.trim()
           }
         }
+        stopActiveFrameStream(sessionId)
         await browserHost.detachFromOwner(owner, sessionId)
         return { ok: true as const }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.setFrameStream, async (event, rawInput: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!rawInput || typeof rawInput !== 'object') {
+          throw new Error('Invalid viewport frame stream payload')
+        }
+        const candidate = rawInput as Partial<DesktopViewportFrameStreamInput>
+        const sessionId = typeof candidate.sessionId === 'string' ? candidate.sessionId.trim() : ''
+        const active = candidate.active === true
+        if (!active) {
+          stopActiveFrameStream(sessionId || undefined)
+          return { ok: true }
+        }
+        if (!sessionId) {
+          throw new Error('Viewport frame stream requires sessionId')
+        }
+        stopActiveFrameStream()
+        if (!browserHost?.isRunning() || !owner || owner.isDestroyed()) {
+          return { ok: false }
+        }
+        const maxFps =
+          typeof candidate.maxFps === 'number' && Number.isFinite(candidate.maxFps) && candidate.maxFps > 0
+            ? candidate.maxFps
+            : undefined
+        const quality =
+          typeof candidate.quality === 'number' && Number.isFinite(candidate.quality)
+            ? candidate.quality
+            : undefined
+        const generation = ++frameStreamGeneration
+        pendingFrameStreamSessionId = sessionId
+        const unsubscribe = await browserHost.subscribeSessionFrames(
+          sessionId,
+          frame => {
+            if (owner && !owner.isDestroyed() && isDashboardUrl(owner.webContents.getURL(), serverOrigin)) {
+              owner.webContents.send(LUDENS_VIEWPORT_CHANNELS.frame, frame)
+            }
+          },
+          { maxFps, quality },
+        )
+        if (pendingFrameStreamSessionId === sessionId) {
+          pendingFrameStreamSessionId = undefined
+        }
+        if (generation !== frameStreamGeneration || !owner || owner.isDestroyed() || !browserHost?.isRunning()) {
+          try {
+            unsubscribe()
+          } catch {}
+          return { ok: false }
+        }
+        activeFrameStream = { sessionId, unsubscribe }
+        return { ok: true }
       })
       ipcMain.handle('ludens-pet:snapshot', event => {
         if (!trusted(event)) throw new Error('Unauthorized pet access')

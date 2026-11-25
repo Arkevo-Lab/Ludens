@@ -32,6 +32,7 @@ import {
 } from '@ludens/protocol/viewport'
 import type { BrowserWindow, WebContentsView } from 'electron'
 import { buildBrowserStartPageHtml } from './browser-start-page.js'
+import type { DesktopViewportFramePayload } from './rpc-channels.js'
 
 export const BROWSER_HOST_VERSION = '1.0.0'
 
@@ -318,6 +319,13 @@ interface SubscriberRecord {
   lastFrameSentMs: number
 }
 
+interface InProcessFrameSubscriber {
+  listener: (frame: DesktopViewportFramePayload) => void
+  maxFps: number
+  lastFrameSentMs: number
+  receivedLiveFrame: boolean
+}
+
 export interface BrowserReleaseAllResult {
   ok: true
   releasedKeys: string[]
@@ -367,6 +375,7 @@ class ManagedBrowserSession {
   private readonly heldKeys = new Map<string, HeldKeyEntry>()
   private readonly heldButtons = new Set<MouseButtonName>()
   private readonly subscribers = new Map<Socket, SubscriberRecord>()
+  private readonly frameSubscribers = new Set<InProcessFrameSubscriber>()
   private latestState: ViewportState | undefined
   private latestFrame: BrowserSessionFrame | undefined
   private readonly unsubFrame: () => void
@@ -413,12 +422,16 @@ class ManagedBrowserSession {
           ? await this.backend.loadStartPage(initialTarget.targetUrl, initialTarget.logicalUrl)
           : await this.backend.navigate(initialTarget.targetUrl)
       this.latestState = state
+      if (state.width > 0) this.width = state.width
+      if (state.height > 0) this.height = state.height
       await this.backend.setStreaming(true).catch(() => {})
       return state
     }
 
     const current = await this.backend.describe()
     this.latestState = current
+    if (current.width > 0) this.width = current.width
+    if (current.height > 0) this.height = current.height
     return current
   }
 
@@ -428,6 +441,34 @@ class ManagedBrowserSession {
     if (state.width > 0) this.width = state.width
     if (state.height > 0) this.height = state.height
     return state
+  }
+
+  async attachOwner(owner: unknown, input: DesktopViewportAttachInput): Promise<void> {
+    if (this.backend.attachToOwner) {
+      await this.backend.attachToOwner(owner, input)
+    }
+    await this.syncDimensionsAfterOwnerBounds(input)
+  }
+
+  async updateOwnerBounds(owner: unknown, input: DesktopViewportAttachInput): Promise<void> {
+    if (this.backend.updateOwnerBounds) {
+      await this.backend.updateOwnerBounds(owner, input)
+    } else if (this.backend.attachToOwner) {
+      await this.backend.attachToOwner(owner, input)
+    }
+    await this.syncDimensionsAfterOwnerBounds(input)
+  }
+
+  private async syncDimensionsAfterOwnerBounds(input: DesktopViewportAttachInput): Promise<void> {
+    await this.describe().catch(() => {})
+    if (input.bounds.width > 0 && input.bounds.height > 0) {
+      const nextW = clampDimension(input.bounds.width, this.width)
+      const nextH = clampDimension(input.bounds.height, this.height)
+      this.width = nextW
+      this.height = nextH
+      this.cursorX = clampCoord(this.cursorX, nextW)
+      this.cursorY = clampCoord(this.cursorY, nextH)
+    }
   }
 
   async action(action: ViewportControlAction): Promise<ViewportState> {
@@ -462,6 +503,8 @@ class ManagedBrowserSession {
       }
     }
     this.latestState = state
+    if (state.width > 0) this.width = state.width
+    if (state.height > 0) this.height = state.height
     this.broadcastState(state)
     return state
   }
@@ -805,8 +848,105 @@ class ManagedBrowserSession {
     this.subscribers.delete(socket)
   }
 
+  getLatestFrame(): BrowserSessionFrame | undefined {
+    return this.latestFrame
+  }
+
+  async enableStreaming(options?: { maxFps?: number; quality?: number }): Promise<void> {
+    await this.backend.setStreaming(true, options).catch(() => {})
+  }
+
+  private toFramePayload(frame: BrowserSessionFrame): DesktopViewportFramePayload {
+    return {
+      sessionId: this.sessionId,
+      format: frame.format,
+      dataBase64: frame.dataBase64,
+      width: frame.width,
+      height: frame.height,
+      timestampMs: frame.timestampMs,
+      seq: frame.seq,
+      pointerLocked: frame.pointerLocked,
+    }
+  }
+
+  async subscribeFrames(
+    listener: (frame: DesktopViewportFramePayload) => void,
+    options?: { maxFps?: number; quality?: number },
+  ): Promise<() => void> {
+    if (this.closed) return () => {}
+    const maxFps =
+      typeof options?.maxFps === 'number' && Number.isFinite(options.maxFps) && options.maxFps > 0
+        ? options.maxFps
+        : 60
+    const sub: InProcessFrameSubscriber = {
+      listener,
+      maxFps,
+      lastFrameSentMs: 0,
+      receivedLiveFrame: false,
+    }
+    let active = true
+    this.frameSubscribers.add(sub)
+
+    await this.enableStreaming(options)
+    if (!active || this.closed) {
+      this.frameSubscribers.delete(sub)
+      return () => {}
+    }
+
+    const latest = this.getLatestFrame()
+    if (latest && !sub.receivedLiveFrame) {
+      try {
+        sub.listener(this.toFramePayload(latest))
+      } catch {
+        // Ignore subscriber errors.
+      }
+    } else if (!sub.receivedLiveFrame) {
+      const quality = options?.quality ?? 80
+      void this.capture({ format: 'jpeg', quality })
+        .then(captured => {
+          if (!active || this.closed || sub.receivedLiveFrame) return
+          try {
+            sub.listener({
+              sessionId: this.sessionId,
+              format: captured.format,
+              dataBase64: captured.dataBase64,
+              width: captured.width,
+              height: captured.height,
+              timestampMs: captured.timestampMs,
+              seq: captured.seq,
+              pointerLocked: captured.pointerLocked,
+            })
+          } catch {
+            // Ignore subscriber errors.
+          }
+        })
+        .catch(() => {})
+    }
+
+    return () => {
+      active = false
+      this.frameSubscribers.delete(sub)
+    }
+  }
+
   private sendEvent(socket: Socket, event: BrowserHostEvent): void {
     writeWireMessage(socket, { event })
+  }
+
+  private sendFrameToInProcessSubscriber(sub: InProcessFrameSubscriber, frame: BrowserSessionFrame): void {
+    if (sub.maxFps > 0 && sub.lastFrameSentMs > 0) {
+      const minIntervalMs = Math.floor(1000 / sub.maxFps)
+      if (frame.timestampMs - sub.lastFrameSentMs < minIntervalMs) {
+        return
+      }
+    }
+    sub.lastFrameSentMs = frame.timestampMs
+    sub.receivedLiveFrame = true
+    try {
+      sub.listener(this.toFramePayload(frame))
+    } catch {
+      // Ignore subscriber errors.
+    }
   }
 
   private sendFrameToSubscriber(sub: SubscriberRecord, frame: BrowserSessionFrame): void {
@@ -841,6 +981,9 @@ class ManagedBrowserSession {
     for (const sub of Array.from(this.subscribers.values())) {
       this.sendFrameToSubscriber(sub, frame)
     }
+    for (const sub of Array.from(this.frameSubscribers)) {
+      this.sendFrameToInProcessSubscriber(sub, frame)
+    }
   }
 
   private broadcastState(state: ViewportState): void {
@@ -861,6 +1004,7 @@ class ManagedBrowserSession {
     if (this.closed) return
     this.closed = true
     this.subscribers.clear()
+    this.frameSubscribers.clear()
     this.unsubFrame()
     this.unsubState()
     await this.releaseAll().catch(() => {})
@@ -1215,9 +1359,29 @@ function createProductionElectronSessionFactory(): {
     const applyOwnerSlot = async (ownerWin: BrowserWindow, input: DesktopViewportAttachInput) => {
       if (closed || wc.isDestroyed() || ownerWin.isDestroyed()) return
       const bounds = normalizeViewportBounds(input.bounds)
-      if (!input.visible || bounds.width <= 0 || bounds.height <= 0) {
+      const hasValidSize = bounds.width > 0 && bounds.height > 0
+      let sizeChanged = false
+      if (hasValidSize) {
+        const nextW = clampDimension(bounds.width, width)
+        const nextH = clampDimension(bounds.height, height)
+        sizeChanged = nextW !== width || nextH !== height
+        width = nextW
+        height = nextH
+      }
+
+      if (!input.visible || !hasValidSize) {
+        const wasAttached = attachedOwner === ownerWin
         await detachFromWindowInternal(ownerWin)
+        if (!wasAttached && sizeChanged && !attachedOwner && keepaliveWindow && !keepaliveWindow.isDestroyed()) {
+          view.setBounds({ x: 0, y: 0, width, height })
+        }
         await applyInteractiveState(input.interactive, ownerWin)
+        if (sizeChanged) {
+          emitState()
+          if (screencastRunning) {
+            await startScreencast(screencastQuality)
+          }
+        }
         return
       }
 
@@ -1244,6 +1408,12 @@ function createProductionElectronSessionFactory(): {
       view.setBounds(bounds)
       view.setVisible?.(true)
       await applyInteractiveState(input.interactive, ownerWin)
+      if (sizeChanged) {
+        emitState()
+        if (screencastRunning) {
+          await startScreencast(screencastQuality)
+        }
+      }
     }
 
     const backend: BrowserSessionBackend = {
@@ -1745,9 +1915,7 @@ export class BrowserHost {
       height: normalizedBounds.height > 0 ? normalizedBounds.height : this.defaultHeight,
     })
 
-    if (session.backend.attachToOwner) {
-      await session.backend.attachToOwner(owner, normalizedInput)
-    }
+    await session.attachOwner(owner, normalizedInput)
     this.ownerAttachedSession.set(owner, {
       sessionId: normalizedInput.sessionId,
       lastInput: normalizedInput,
@@ -1774,12 +1942,27 @@ export class BrowserHost {
       await this.attachToOwner(owner, nextInput)
       return
     }
-    if (session.backend.updateOwnerBounds) {
-      await session.backend.updateOwnerBounds(owner, nextInput)
-    } else if (session.backend.attachToOwner) {
-      await session.backend.attachToOwner(owner, nextInput)
-    }
+    await session.updateOwnerBounds(owner, nextInput)
     this.ownerAttachedSession.set(owner, { sessionId, lastInput: nextInput })
+  }
+
+  /** Subscribe an in-process listener (e.g. Electron IPC) to live viewport frames for a session. */
+  async subscribeSessionFrames(
+    sessionId: string,
+    listener: (frame: DesktopViewportFramePayload) => void,
+    options?: { maxFps?: number; quality?: number },
+  ): Promise<() => void> {
+    const trimmedId = sessionId.trim()
+    if (!trimmedId) return () => {}
+    let session = this.sessions.get(trimmedId)
+    if (!session) {
+      const pending = this.sessionCreations.get(trimmedId)
+      if (pending) {
+        session = await pending.catch(() => undefined)
+      }
+    }
+    if (!session) return () => {}
+    return session.subscribeFrames(listener, options)
   }
 
   /** Detach the session from `owner` and park it back in the background keepalive host. */
@@ -1811,8 +1994,8 @@ export class BrowserHost {
     const current = this.ownerAttachedSession.get(owner)
     if (!current) return
     const session = this.sessions.get(current.sessionId)
-    if (session?.backend.attachToOwner && current.lastInput.visible) {
-      await session.backend.attachToOwner(owner, current.lastInput).catch(() => {})
+    if (session && current.lastInput.visible) {
+      await session.attachOwner(owner, current.lastInput).catch(() => {})
     }
   }
 
