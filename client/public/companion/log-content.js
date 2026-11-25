@@ -16,6 +16,56 @@ function renderLogContent(target, input, copy) {
     return node;
   }
   function format(value) { return typeof value === 'string' ? value : JSON.stringify(value, null, 2); }
+  function formatToolArgs(args) {
+    if (args == null) return '';
+    if (typeof args === 'string') return args.trim() ? args : '';
+    if (Array.isArray(args)) return args.length ? JSON.stringify(args, null, 2) : '';
+    if (typeof args === 'object') {
+      const keys = Object.keys(args);
+      if (!keys.length) return '';
+      if (typeof args.command === 'string') {
+        const cmd = args.command.trim();
+        const extraKeys = keys.filter(k =>
+          k !== 'command' && args[k] !== undefined && args[k] !== null && (typeof args[k] !== 'string' || args[k].trim() !== ''));
+        if (!cmd && !extraKeys.length) return '';
+        if (cmd && !extraKeys.length) return `$ ${cmd}`;
+        const extras = extraKeys.map(k => `# ${k}: ${typeof args[k] === 'string' ? args[k] : JSON.stringify(args[k])}`);
+        return cmd ? `$ ${cmd}\n${extras.join('\n')}` : extras.join('\n');
+      }
+      const json = JSON.stringify(args, null, 2);
+      return json && json !== '{}' ? json : '';
+    }
+    return String(args);
+  }
+  function formatToolResult(result) {
+    if (result == null) return '';
+    if (typeof result === 'string') return result.trim() ? result : '';
+    if (Array.isArray(result)) return result.length ? JSON.stringify(result, null, 2) : '';
+    if (typeof result === 'object') {
+      const keys = Object.keys(result);
+      if (!keys.length) return '';
+      const shellKeys = new Set(['stdout', 'stderr', 'exitCode', 'output', 'code']);
+      if (keys.every(k => shellKeys.has(k))) {
+        const parts = [];
+        for (const field of ['stdout', 'output', 'stderr']) {
+          if (typeof result[field] === 'string' && result[field].trim()) parts.push(result[field].trimEnd());
+        }
+        const exit = typeof result.exitCode === 'number' ? result.exitCode
+          : typeof result.code === 'number' ? result.code : undefined;
+        if (exit !== undefined && exit !== 0) parts.push(`exit ${exit}`);
+        return parts.join('\n');
+      }
+      if (Array.isArray(result.content)) {
+        return result.content
+          .map(item => (item && typeof item.text === 'string' ? item.text.trimEnd() : ''))
+          .filter(text => text.trim().length > 0)
+          .join('\n');
+      }
+      const json = JSON.stringify(result, null, 2);
+      return json && json !== '{}' ? json : '';
+    }
+    return String(result);
+  }
   const paths = {
     thinking: 'M5 16a4 4 0 0 1-1-7.8A5 5 0 0 1 13 5a4 4 0 0 1 6 3 4 4 0 0 1-1 8H5M6 20h.01M3 22h.01',
     text: 'M4 4h16v12H9l-5 4V4m4 4h8m-8 4h5',
@@ -53,13 +103,15 @@ function renderLogContent(target, input, copy) {
   content.setAttribute('aria-label', copy.content.replace('{title}', title));
   if (kind === 'tool' && block.tool) {
     const tool = block.tool;
-    if (tool.intent) content.append(el('p', 'log-intent', tool.intent));
-    if (tool.args !== undefined) {
-      const args = el('pre', 'log-code', typeof tool.args === 'string' ? tool.args : JSON.stringify(tool.args));
+    if (typeof tool.intent === 'string' && tool.intent.trim()) content.append(el('p', 'log-intent', tool.intent));
+    const formattedArgs = formatToolArgs(tool.args);
+    if (formattedArgs.trim().length > 0) {
+      const args = el('pre', 'log-code', formattedArgs);
       args.setAttribute('aria-label', copy.arguments);
       content.append(args);
     }
-    if (tool.result !== undefined) {
+    const formattedResult = formatToolResult(tool.result);
+    if (formattedResult.trim().length > 0) {
       const details = el('details', 'log-result');
       details.open = resultOpen ?? status === 'error';
       const summary = el('summary', '', copy.result);
@@ -68,8 +120,11 @@ function renderLogContent(target, input, copy) {
         details.open = !details.open;
         if (details.open) content.scrollTop += details.getBoundingClientRect().top - content.getBoundingClientRect().top;
       });
-      details.append(summary, el('pre', 'log-code', format(tool.result)));
+      details.append(summary, el('pre', 'log-code', formattedResult));
       content.append(details);
+    }
+    if (content.childElementCount === 0 && status === 'running') {
+      content.append(el('p', 'log-pending', copy.executing));
     }
   } else if ((kind === 'system' || kind === 'diagnostic') && block.data && Object.keys(block.data).length) {
     if (kind === 'system' && block.title === 'control') {
@@ -81,6 +136,8 @@ function renderLogContent(target, input, copy) {
       fields.append(el('dt', '', key), el('dd', '', format(value)));
     }
     content.append(fields);
+  } else if (kind === 'tool' && !(block?.text ?? input.description ?? '').trim()) {
+    if (status === 'running') content.append(el('p', 'log-pending', copy.executing));
   } else {
     content.append(el('p', 'log-prose', block?.text ?? input.description ?? ''));
   }

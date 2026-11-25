@@ -34,7 +34,7 @@ describe('pet log content', () => {
     expect(target.querySelector('.log-title')?.textContent).toBe(`${kind} title`)
     expect(target.querySelector('.log-icon path')?.getAttribute('d')).toBeTruthy()
     expect(target.querySelector('.log-body')?.getAttribute('role')).toBe('region')
-    if (kind === 'tool') expect(JSON.parse(target.querySelector('.log-code')!.textContent!)).toEqual({ command: 'inspect' })
+    if (kind === 'tool') expect(target.querySelector('.log-code')?.textContent).toBe('$ inspect')
     else if (kind === 'system' || kind === 'diagnostic') {
       expect(target.querySelector('dt')?.textContent).toBe('elapsedMs')
       expect(target.querySelector('dd')?.textContent).toBe('1300')
@@ -68,13 +68,88 @@ describe('pet log content', () => {
       result: { exitCode: 0, stdout: 'captured' },
     } }))
     expect(target.querySelector('.log-intent')?.textContent).toBe('Inspect the nearby area')
-    expect(JSON.parse(target.querySelector('pre[aria-label="参数"]')!.textContent!)).toEqual({ command: 'sensor screen capture', delayMs: 200 })
+    expect(target.querySelector('pre[aria-label="参数"]')?.textContent).toBe('$ sensor screen capture\n# delayMs: 200')
     const result = target.querySelector('details')!
     expect(result.open).toBe(false)
     expect(result.querySelector('summary')?.textContent).toBe('结果')
-    expect(result.querySelector('pre')?.textContent).toBe(JSON.stringify({ exitCode: 0, stdout: 'captured' }, null, 2))
+    expect(result.querySelector('pre')?.textContent).toBe('captured')
     expect(target.querySelector('.log-status')?.textContent).toBe('完成')
     expect(target.querySelector('.log-prose')).toBeNull()
+  })
+
+  it('omits empty tool args/results and shows localized executing fallback while running', () => {
+    const emptyVariants = [
+      { args: '', result: '' },
+      { args: {}, result: { stdout: '' } },
+      { args: null, result: { stdout: '  \n', stderr: '', exitCode: 0 } },
+      { args: { command: '   ' }, result: { content: [] } },
+    ]
+    for (const tool of emptyVariants) {
+      render(target, notification('tool', { id: 'bash-empty', title: 'bash', status: 'running', tool }))
+      expect(target.querySelector('.log-code')).toBeNull()
+      expect(target.querySelector('details')).toBeNull()
+      expect(target.querySelector('.log-pending')?.textContent).toBe('正在执行…')
+
+      render(target, notification('tool', { id: 'bash-empty-en', title: 'bash', status: 'running', tool }), 'en')
+      expect(target.querySelector('.log-code')).toBeNull()
+      expect(target.querySelector('details')).toBeNull()
+      expect(target.querySelector('.log-pending')?.textContent).toBe('Executing…')
+
+      render(target, notification('tool', { id: 'bash-done', title: 'bash', status: 'complete', tool }))
+      expect(target.querySelector('.log-code')).toBeNull()
+      expect(target.querySelector('details')).toBeNull()
+      expect(target.querySelector('.log-pending')).toBeNull()
+    }
+  })
+
+  it('formats shell command args and structured shell or MCP results cleanly', () => {
+    render(target, notification('tool', {
+      title: 'bash',
+      tool: {
+        args: { command: 'ludens-core controller' },
+        result: { exitCode: 0, stdout: 'Controller released.\n', stderr: '' },
+      },
+    }))
+    const argsText = target.querySelector('pre[aria-label="参数"]')?.textContent
+    expect(argsText).toBe('$ ludens-core controller')
+    expect(argsText).not.toContain('{')
+    expect(argsText).not.toContain('}')
+    expect(target.querySelector('details pre')?.textContent).toBe('Controller released.')
+
+    render(target, notification('tool', {
+      id: 'bash-fail',
+      title: 'bash',
+      status: 'error',
+      tool: {
+        args: { command: 'false' },
+        result: { exitCode: 2, stdout: '', stderr: 'command failed\n' },
+      },
+    }))
+    expect(target.querySelector('details')?.open).toBe(true)
+    expect(target.querySelector('details pre')?.textContent).toBe('command failed\nexit 2')
+
+    render(target, notification('tool', {
+      id: 'mcp-tool',
+      title: 'read',
+      tool: {
+        args: { path: '/tmp/notes.md', limit: 20 },
+        result: { content: [{ type: 'text', text: 'first' }, { type: 'text', text: 'second' }] },
+      },
+    }))
+    expect(JSON.parse(target.querySelector('pre[aria-label="参数"]')!.textContent!)).toEqual({ path: '/tmp/notes.md', limit: 20 })
+    expect(target.querySelector('details pre')?.textContent).toBe('first\nsecond')
+  })
+
+  it('keeps XSS payloads in command, intent, and structured tool results as pure text', () => {
+    const html = '<img src=x onerror="window.pwned=true"><script>window.pwned=true</script>'
+    for (const tool of [
+      { intent: html, args: { command: html, note: html }, result: { stdout: html, stderr: html, exitCode: 1 } },
+      { args: { command: html }, result: { content: [{ type: 'text', text: html }] } },
+    ]) {
+      render(target, notification('tool', { id: 'xss-tool', tool }))
+      expect(target.textContent).toContain(html)
+      expect(target.querySelectorAll('img, script, [onerror]')).toHaveLength(0)
+    }
   })
 
   it('expands errors on first display and shows live status without inventing results', () => {
