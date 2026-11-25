@@ -12,7 +12,9 @@ Baseware takes the CUA Driver's native tool contract as the structural model and
 ```mermaid
 flowchart LR
     W[Workspace Program / Ludens] --> C[CLI · TS/Python API · MCP]
-    C --> B[Baseware: Capability Catalog + Control Arbitration + Device Log]
+    C --> B[Baseware: Capability Catalog + Viewport + Control Arbitration + Device Log]
+    B --> BR[Built-in Browser Adapter]
+    BR --> BH[Desktop BrowserHost UDS: browser-host.sock]
     B --> U[CUA Adapter]
     U --> N[Upstream CUA Driver Subprocess]
     B --> E[External Bridge Adapter]
@@ -93,7 +95,7 @@ Each Baseware service instance independently maintains `source.json`, `events/`,
 
 ## Driver packages and launch description
 
-Baseware loads external driver packages via `--driver <id> --driver-package <spec>`; emulator drivers load only from external packages, and only the `cua` desktop adapter keeps a built-in registration.
+Baseware loads external driver packages via `--driver <id> --driver-package <spec>`; emulator drivers load only from external packages, while the `cua` desktop adapter and runtime-injected `browser` (`builtin:browser`) adapter keep built-in registrations.
 
 ### 1. Package addresses and caching
 
@@ -138,6 +140,43 @@ baseware driver discover --package 'github:org/repo#rev'
 ## Upstream contract and upgrades
 
 The [baseware/contracts/cua-driver/](../../../baseware/contracts/cua-driver/) directory pins the upstream CUA Driver's version, source hashes, license, and tool snapshot. The snapshot is used for offline auditing of atomic capabilities and for running the `python3 baseware/scripts/sync-cua-contract.py --check` regression test; at runtime the snapshot never trims newly added upstream platform tools. Because the MCP SDK's default schema parsing clips unknown nested fields, Baseware validates structure at the protocol boundary while preserving the original fields verbatim, and guarantees fidelity through MCP round-trip tests.
+
+## Built-in Browser Driver (`builtin:browser`) & Generic `Viewport` Capability
+
+When **Ludens Desktop (`ludens-app`)** is running, `ludens-server` probes the local `BrowserHost` at runtime and dynamically injects the built-in **`browser`** (`builtin:browser`) driver and **`builtin-browser`** controlled node. Unlike DOM-scripting automation frameworks, `builtin:browser` preserves Baseware's pure visual/input device boundary—exposing game-grade visual capture and input controllers alongside a generic `Viewport` capability shared across device classes.
+
+### 1. `builtin:browser` Controllers & `release(epoch)` Guarantee
+
+| Controller | `requiresControl` | `readOnlyHint` | Contract & Semantics |
+| --- | --- | --- | --- |
+| `screen.capture` | `false` | `true` | Captures the latest screencast or instant frame (`image/jpeg` / `image/png`), returning an MCP `CallToolResult` `image` block, `structuredContent: { width, height, seq, url, title, pointerLocked }`, and an `Observation` that feeds `ObservationStreamSpool` for 30 Hz `perception.py`. |
+| `page.state` | `false` | `true` | Returns navigation and viewport metadata (`url`, `title`, `loading`, `canGoBack`, `canGoForward`, dimensions, `pointerLocked`). Never evaluates DOM or page JS state. |
+| `page.open` / `page.reload` / `page.back` / `page.forward` | `true` | `false` | Navigates the workspace's isolated `WebContentsView` (`page.open` enforces a URL guard blocking `ludens-app:`, `ludens-media:`, and `file:` schemes). |
+| `viewport.resize` | `true` | `false` | Updates the viewport logical dimensions (`{ width, height }`, default `1280×720`). |
+| `keyboard.down` / `keyboard.up` / `keyboard.press` / `keyboard.type` | `true` | `false` | Low-level keyboard dispatch (`{ key, code?, text?, modifiers?, durationMs? }`) with held-key tracking inside `BrowserHost`. |
+| `mouse.move` / `mouse.moveRelative` / `mouse.down` / `mouse.up` / `mouse.click` / `mouse.wheel` | `true` | `false` | Absolute pointer, button, and wheel dispatch plus **`mouse.moveRelative` (`{ dx, dy, buttons?, modifiers? }`)** for Three.js / WebGL Pointer Lock 3D camera control. |
+| `input.play` | `true` | `false` | Executes a millisecond-scheduled `BrowserInputStep[]` batch sequence (`atMs`, `durationMs`, `keys`, `mouseButton`, `x`/`y`, `dx`/`dy`, `wheelX`/`wheelY`) with cooperative abort cancellation (`cancel`). |
+
+- **Idempotent `acquire(epoch)` / `release(epoch)` auto key-up**: all controllers on a `builtin:browser` provider share a single connection lease. When control is revoked (`auto off` / `revoke`), a timer expires, or the holder disconnects, `release(epoch)` immediately aborts any in-flight `input.play` operation and sends `session.releaseAll` to `BrowserHost`, releasing every held key and mouse button so no input remains stuck.
+- **Session persistence across reloads**: `close()` detaches the UDS client without destroying the underlying `BrowserHost` session (`sessionId = workspaceId`), so restarting Baseware preserves the open game or web page.
+
+### 2. Generic `Viewport` Capability & 3-Mode Right Workbench
+
+Baseware generalizes live interactive device stages through an optional `capabilities.viewport` (`ViewportProvider`) interface on `DriverProvider` (contract in [viewport.ts](../../../protocol/src/viewport.ts)):
+
+- **Core RPCs**: `BasewareCore` handles `viewport.describe`, `viewport.action`, `viewport.input`, and `viewport.subscribe` (routing to the requested `machine` or the active primary machine).
+- **Strict `Manual` control gate**: `viewport.describe` projects `controlMode` as `"offline"` (disconnected), `"manual"`, or `"auto"`. `viewport.action` and `viewport.input` **strictly require `mode === "manual"`** and reject calls while under agent control (`Auto Run`), preventing human UI events from colliding with Shiori's active `epoch` lease.
+- **3-mode right workbench (`DeviceStageKind`)**: mounted machines advertise `stageKind` (`"browser" | "computer" | "observe"`) and `hasViewport`. The Console's resizable right workbench renders:
+  1. **`browser`**: full `<DeviceViewport />` with address bar, navigation controls, viewport size, control badge, and one-click **Reclaim Control**;
+  2. **`computer`**: first-class host viewport stage without a browser address bar (reserved for CUA / remote desktop streams; smoothly falls back to `observe` when no live viewport stream is connected);
+  3. **`observe`**: the classic sampled `ObservationPanel` view for traditional hardware, sensor, or emulator targets.
+
+### 3. Zero-Port Local `BrowserHost` UDS & `/viewport` Binary WebSocket Stream
+
+- **Zero-port local `BrowserHost` (`@ludens/desktop`)**: Electron's main process runs `BrowserHost` over a local Unix Domain Socket (`<LUDENS_HOME>/run/browser-host.sock`, with Windows Named Pipe `\\.\pipe\ludens-browser-<sha256_12>` and 96-byte BSD `sun_path` `/tmp/ludens-browser-<uid>-<sha256_12>.sock` fallback, plus atomic `browser-host.json` runtime discovery metadata; see [browser-host-paths.ts](../../../protocol/src/browser-host-paths.ts)). It manages per-workspace isolated `WebContentsView` instances (`sessionId = workspaceId`, `persist:ludens-browser-<sessionId>`, `sandbox: true`, `contextIsolation: true`, `nodeIntegration: false`, `backgroundThrottling: false`, background keepalive) and speaks NDJSON `BrowserHostEnvelope` / `BrowserHostWireMessage` over UDS.
+- **Dual-mode rendering & `/viewport` HMAC binary WebSocket**:
+  - In **Electron local mode (`electron-local` matching `nativeHostId`)**, `<DeviceViewport />` attaches the native `WebContentsView` directly via `window.ludens.viewport` (`attach` / `updateBounds` / `detach`) for 0ms WebGL rendering and native audio, falling back to the latest static frame when a modal overlays the window.
+  - For **Web Console, mobile, and remote clients**, `ludens-server` exposes `GET /viewport` WebSocket authenticated via the same HMAC capability-ticket mechanism as `/media`. Video frames are sent as compact binary packets (`encodeViewportFrame` / `decodeViewportFrame`: **20-byte header** carrying magic `0x4c`, version `0x01`, format `jpeg|webp|png`, `pointerLocked` flag, `width`, `height`, `timestampMs`, and `seq`, followed by raw image bytes) using drop-oldest single-slot backpressure so high-frequency perception sampling and JSON-RPC are never blocked.
 
 ## Controlled node pool, multi-transport, and multi-device mounting
 

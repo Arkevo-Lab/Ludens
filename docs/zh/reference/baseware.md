@@ -12,7 +12,9 @@ Baseware 以 CUA Driver 的原生工具契约为结构蓝本，在仓库内独�
 ```mermaid
 flowchart LR
     W[Workspace 程序 / Ludens] --> C[CLI · TS/Python API · MCP]
-    C --> B[Baseware：能力目录 + 控制权仲裁 + 设备日志]
+    C --> B[Baseware：能力目录 + Viewport + 控制权仲裁 + 设备日志]
+    B --> BR[内置浏览器 Adapter]
+    BR --> BH[桌面端 BrowserHost UDS：browser-host.sock]
     B --> U[CUA Adapter]
     U --> N[原装 CUA Driver 子进程]
     B --> E[External Bridge Adapter]
@@ -93,7 +95,7 @@ Baseware 启动时通过 `--diagnostics normal|full`（默认 `normal`）设定�
 
 ## Driver 包与启动描述
 
-Baseware 支持通过 `--driver <id> --driver-package <spec>` 加载外部驱动包；模拟器驱动只从外部包加载，当前仅 `cua` 桌面适配器保留内置注册。
+Baseware 支持通过 `--driver <id> --driver-package <spec>` 加载外部驱动包；模拟器驱动只从外部包加载，当前仅 `cua` 桌面适配器与运行态注入的 `browser`（`builtin:browser`）适配器保留内置注册。
 
 ### 1. 包地址与缓存机制
 
@@ -138,6 +140,43 @@ baseware driver discover --package 'github:org/repo#rev'
 ## 上游契约与升级
 
 [baseware/contracts/cua-driver/](../../../baseware/contracts/cua-driver/) 目录固定保存了上游 CUA Driver 的版本、来源哈希、许可证与工具快照。该快照用于离线审计原子能力与运行 `python3 baseware/scripts/sync-cua-contract.py --check` 回归测试，运行期不会用快照裁剪上游新增的平台工具。由于 MCP SDK 默认 schema 解析会裁剪未知嵌套字段，Baseware 在协议边界校验结构后原样保留原始字段，并通过 MCP 往返测试保障保真度。
+
+## 内置浏览器驱动（`builtin:browser`）与通用 `Viewport` 能力
+
+当 **Ludens 桌面端（`ludens-app`）** 运行时，`ludens-server` 在运行期自动探测本地 `BrowserHost` 并动态注入内置 **`browser`**（`builtin:browser`）驱动与 **`builtin-browser`** 受控节点。与传统 DOM 脚本自动化不同，`builtin:browser` 严格保持 Baseware 纯视觉与输入设备边界——同时暴露游戏级视觉采集/输入控制器与跨设备通用的 `Viewport` 能力。
+
+### 1. `builtin:browser` 控制器与 `release(epoch)` 自动抬键保障
+
+| 控制器 | `requiresControl` | `readOnlyHint` | 契约与语义 |
+| --- | --- | --- | --- |
+| `screen.capture` | `false` | `true` | 抓取最新 Screencast 帧或即时抓帧（`image/jpeg` / `image/png`），返回 MCP `CallToolResult` 图像块、`structuredContent: { width, height, seq, url, title, pointerLocked }` 与 `Observation`，直接进入 `ObservationStreamSpool` 供 30 Hz `perception.py` 消费。 |
+| `page.state` | `false` | `true` | 返回导航与视口元数据（`url`、`title`、`loading`、`canGoBack`、`canGoForward`、宽高、`pointerLocked`）；绝不执行 DOM 或页面 JS 内存求值。 |
+| `page.open` / `page.reload` / `page.back` / `page.forward` | `true` | `false` | 控制工作区独立 `WebContentsView` 的页面导航（`page.open` 内置安全 URL 守卫，阻止跳转 `ludens-app:`、`ludens-media:`、`file:` 协议）。 |
+| `viewport.resize` | `true` | `false` | 调整视口逻辑分辨率（`{ width, height }`，默认 `1280×720`）。 |
+| `keyboard.down` / `keyboard.up` / `keyboard.press` / `keyboard.type` | `true` | `false` | 底层键盘事件派发（`{ key, code?, text?, modifiers?, durationMs? }`），由 `BrowserHost` 维护按键按下状态表。 |
+| `mouse.move` / `mouse.moveRelative` / `mouse.down` / `mouse.up` / `mouse.click` / `mouse.wheel` | `true` | `false` | 绝对坐标指针、按键、滚轮派发，以及专为 Three.js / WebGL Pointer Lock 3D 视角设计的 **`mouse.moveRelative`（`{ dx, dy, buttons?, modifiers? }`）**。 |
+| `input.play` | `true` | `false` | 执行毫秒级排程的 `BrowserInputStep[]` 批量输入序列（`atMs`、`durationMs`、`keys`、`mouseButton`、`x`/`y`、`dx`/`dy`、`wheelX`/`wheelY`），支持协作取消（`cancel`）。 |
+
+- **幂等 `acquire(epoch)` / `release(epoch)` 自动抬键**：同一 `builtin:browser` Provider 下的所有控制器共享单一连接租约。发生撤权（`auto off` / `revoke`）、计时器到期或持有者断联时，`release(epoch)` 会立即中止在途 `input.play` 序列并向 `BrowserHost` 发送 `session.releaseAll`，抬起全部按住的键盘按键与鼠标键，确保绝不卡键。
+- **跨重载保留页面会话**：`close()` 仅断开 UDS 客户端连接而不会销毁 `BrowserHost` 中的持久会话（`sessionId = workspaceId`），因此重启或重载 Baseware 不会丢失当前打开的游戏或网页状态。
+
+### 2. 通用 `Viewport` 能力与三态右侧工作台
+
+Baseware 通过 `DriverProvider` 上的可选 `capabilities.viewport`（`ViewportProvider`）接口统一抽象可交互设备视口（协议契约见 [viewport.ts](../../../protocol/src/viewport.ts)）：
+
+- **核心 RPC**：`BasewareCore` 处理 `viewport.describe`、`viewport.action`、`viewport.input` 与 `viewport.subscribe`（按指定 `machine` 或当前主控节点路由）。
+- **严格 `Manual` 控制门禁**：`viewport.describe` 将 `controlMode` 投影为 `"offline"`（未连接）、`"manual"` 或 `"auto"`。`viewport.action` 与 `viewport.input` **严格要求 `mode === "manual"`**，在智能体控制（`Auto Run`）期间拒绝人工透传操作，防止人工输入与 Shiori 的活跃 `epoch` 租约冲突。
+- **三态右侧工作台（`DeviceStageKind`）**：挂载节点暴露 `stageKind`（`"browser" | "computer" | "observe"`）与 `hasViewport`，控制台可拖拽调宽的右侧工作台据此统一呈现三种形态：
+  1. **`browser`**：完整 `<DeviceViewport />`，包含地址栏、前进/后退/刷新、分辨率、控制权胶囊与一键**收回控制权**；
+  2. **`computer`**：无地址栏的一等公民主机视口形态（面向 CUA / 远程受控主机，未提供实时视口流时平滑回退至 `observe`）；
+  3. **`observe`**：传统硬件、传感器或模拟器目标的经典采样观测面板（`ObservationPanel`）。
+
+### 3. 零端口本地 `BrowserHost` UDS 与 `/viewport` 二进制 WebSocket 串流
+
+- **零端口本地 `BrowserHost`（`@ludens/desktop`）**：Electron 主进程在本地 Unix Domain Socket 监听 `BrowserHost`（`<LUDENS_HOME>/run/browser-host.sock`，Windows 下使用 Named Pipe `\\.\pipe\ludens-browser-<sha256_12>`，路径触及 96 字节 BSD `sun_path` 上限时回退 `/tmp/ludens-browser-<uid>-<sha256_12>.sock`，并原子写入 `browser-host.json` 供运行态发现；详见 [browser-host-paths.ts](../../../protocol/src/browser-host-paths.ts)）。它维护按工作区隔离的 `WebContentsView` 实例池（`sessionId = workspaceId`、`persist:ludens-browser-<sessionId>`、`sandbox: true`、`contextIsolation: true`、`nodeIntegration: false`、`backgroundThrottling: false` 与后台保活），通过 UDS 收发 NDJSON 格式的 `BrowserHostEnvelope` / `BrowserHostWireMessage`。
+- **双模渲染与 `/viewport` HMAC 二进制 WebSocket**：
+  - 在 **Electron 本地模式（`electron-local` 且 `nativeHostId` 匹配本机）** 下，`<DeviceViewport />` 经 `window.ludens.viewport`（`attach` / `updateBounds` / `detach`）直接贴合原生 `WebContentsView`，获得 0ms WebGL 渲染与原生音频；主窗口弹出 Modal 遮挡时自动降级为最新静态帧占位。
+  - 面向 **Web 控制台、手机端与远端客户端**，`ludens-server` 暴露复用 `/media` 同套 HMAC capability ticket 鉴权的 `GET /viewport` WebSocket，将画面打包为紧凑二进制帧（`encodeViewportFrame` / `decodeViewportFrame`：**20 字节包头**含魔数 `0x4c`、版本 `0x01`、格式 `jpeg|webp|png`、`pointerLocked` 标志、`width`、`height`、`timestampMs`、`seq`，紧接裸图像字节），并采用单槽丢旧帧（drop-oldest）背压策略，绝不阻塞 30 Hz 感知采样与 JSON-RPC。
 
 ## 受控节点池、多传输协议与多设备并发挂载
 
