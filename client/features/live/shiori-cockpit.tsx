@@ -20,13 +20,16 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Columns2,
   CornerUpLeft,
   Cpu,
+  Expand,
   Inbox,
   Infinity as InfinityIcon,
   Lock,
   Maximize2,
   Minimize2,
+  Minus,
   PanelRight,
   Play,
   Plus,
@@ -2736,6 +2739,8 @@ export function ShioriWorkbench({
   }, [dockOpen, dockTab, closeDock, openPoolOverview]);
 
   const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
+  const [immersiveMode, setImmersiveMode] = useState<boolean>(false);
+  const [immersiveComposerCollapsed, setImmersiveComposerCollapsed] = useState<boolean>(false);
   const [inspectedTurn, setInspectedTurn] = useState<{
     runId: string;
     blockId: string;
@@ -2762,7 +2767,9 @@ export function ShioriWorkbench({
     lastReportedSegmentRef.current = "";
   }, [project]);
 
-  const viewportSuspended = Boolean(inspectedTurn || dockTab !== "stage" || !dockOpen);
+  const viewportSuspended = Boolean(
+    inspectedTurn || (!immersiveMode && (dockTab !== "stage" || !dockOpen)),
+  );
   const deviceViewport = useDeviceViewport({
     project,
     workspace,
@@ -2774,6 +2781,25 @@ export function ShioriWorkbench({
   const effectiveStageKind = isLiveRun ? deviceViewport.effectiveStageKind : "observe";
   const isInteractiveStage =
     effectiveStageKind === "browser" || effectiveStageKind === "computer";
+
+  const toggleImmersiveMode = useCallback(() => {
+    setImmersiveMode(prev => {
+      const next = !prev;
+      if (next) {
+        setDockTab("stage");
+        setInspectedTurn(null);
+        setImmersiveComposerCollapsed(false);
+        setDesktopDockOpen(true);
+      }
+      return next;
+    });
+  }, []);
+
+  const exitImmersiveToPool = useCallback(() => {
+    setImmersiveMode(false);
+    setDockTab("pool");
+    openDock();
+  }, [openDock]);
 
   useEffect(() => {
     if (
@@ -3597,17 +3623,32 @@ export function ShioriWorkbench({
 
   const showFollowPill = !isFollowing || feed.historical;
   const followPillPresence = useAnimatedPresence(showFollowPill, 140);
-  const backdropPresence = useAnimatedPresence(dockOpen && isOverlayDock, 180);
+  const backdropPresence = useAnimatedPresence(!immersiveMode && dockOpen && isOverlayDock, 180);
+  const effectiveDockOpen = immersiveMode || dockOpen;
+
+  const latestImmersivePreview = useMemo(() => {
+    if (consolidating) return t("stateConsolidating");
+    if (hostOnline && thinking) return t("stateAutoThinking");
+    for (let i = segments.length - 1; i >= 0; i--) {
+      const seg = segments[i]!;
+      if (seg.kind === "turn") {
+        const text = seg.responseText?.trim();
+        if (text) return text.replace(/\s+/g, " ").slice(0, 110);
+      }
+    }
+    return stateTitle;
+  }, [consolidating, hostOnline, thinking, segments, stateTitle, t]);
 
   return (
     <div
       ref={workbenchRef}
       className="codex-workbench"
-      data-dock-open={dockOpen || undefined}
+      data-dock-open={effectiveDockOpen || undefined}
+      data-immersive={immersiveMode ? "true" : undefined}
       data-stage-kind={effectiveStageKind}
       data-dock-resizing={resizingDock ? "true" : undefined}
       style={
-        resolvedDockWidth != null
+        !immersiveMode && resolvedDockWidth != null
           ? ({ "--codex-dock-width": `${resolvedDockWidth}px` } as CSSProperties)
           : undefined
       }
@@ -3640,16 +3681,35 @@ export function ShioriWorkbench({
         )}
       </TopbarSlot>
 
+      <TopbarSlot slot="actions">
+        <button
+          type="button"
+          className="codex-immersive-topbar-btn"
+          data-immersive-toggle=""
+          data-active={immersiveMode ? "true" : undefined}
+          aria-pressed={immersiveMode}
+          title={t(immersiveMode ? "exitImmersiveHint" : "immersiveModeHint")}
+          onClick={toggleImmersiveMode}
+        >
+          {immersiveMode ? (
+            <Columns2 className="size-3.5 shrink-0" aria-hidden="true" />
+          ) : (
+            <Expand className="size-3.5 shrink-0" aria-hidden="true" />
+          )}
+          <span>{t(immersiveMode ? "exitImmersiveBtn" : "immersiveModeBtn")}</span>
+        </button>
+      </TopbarSlot>
+
       <TopbarSlot slot="dockToggle">
         <button
           type="button"
           className="desktop-chrome-icon-btn codex-dock-toggle-btn"
           data-action="toggle-dock"
-          data-active={String(dockOpen)}
-          aria-pressed={dockOpen}
-          title={t("toggleDockHint")}
-          aria-label={t("toggleDockHint")}
-          onClick={toggleDock}
+          data-active={String(effectiveDockOpen)}
+          aria-pressed={effectiveDockOpen}
+          title={t(immersiveMode ? "exitImmersiveHint" : "toggleDockHint")}
+          aria-label={t(immersiveMode ? "exitImmersiveHint" : "toggleDockHint")}
+          onClick={immersiveMode ? toggleImmersiveMode : toggleDock}
         >
           <PanelRight className="size-[15px]" strokeWidth={1.75} aria-hidden="true" />
           {!dockOpen && pendingPoolCount > 0 && (
@@ -4132,39 +4192,114 @@ export function ShioriWorkbench({
             </button>
           )}
         </div>
-
-        {/* Bottom Floating Pill Composer */}
-        <ShioriComposer
-          project={project}
-          workspace={workspace}
-          data={data}
-          isLiveRun={isLiveRun}
-          sessionActions={actions}
-          hostStatusOverride={live as Record<string, unknown> | null}
-          activeModelOverride={activeModel}
-          activeServiceTierOverride={activeServiceTier}
-          activeEffortOverride={activeEffort}
-          submittingOverride={sessionSubmitting}
-          spawningCore={spawningCore}
-          preemptSuccessSeq={preemptSuccessSeq}
-          liveTimerSpec={liveTimerSpec}
-          onApplyLiveTimer={applyLiveStopTimer}
-          onExtendLiveTimer={extendLiveStopTimer}
-          poolSnapshot={poolSnapshot}
-          replyTarget={replyTarget}
-          replyAutoResumeDefault={replyAutoResumeDefault}
-          onSelectReplyTarget={(event, autoResume) => {
-            setReplyTarget(event);
-            setReplyAutoResumeDefault(autoResume);
-          }}
-          externalMode={workflowCommand?.mode ?? null}
-          externalDraft={workflowCommand?.prompt ?? null}
-          onExternalConsumed={() => setWorkflowCommand(null)}
-          onMessageSubmitted={() => scrollToBottom(prefersSmoothScrollBehavior())}
-          onReturnLatest={onReturnLatest}
-          onUpdated={onUpdated}
-        />
       </section>
+
+      {/* Shared Bottom Floating Pill Composer (Split left-bottom OR Immersive full-stage bottom) */}
+      <div
+        className="codex-composer-slot"
+        data-immersive={immersiveMode ? "true" : undefined}
+        data-collapsed={immersiveMode && immersiveComposerCollapsed ? "true" : undefined}
+      >
+        {immersiveMode && (
+          <div className="codex-immersive-composer-bar">
+            <div className="codex-immersive-composer-head">
+              <button
+                type="button"
+                className="codex-immersive-collapse-btn"
+                data-immersive-composer-collapse=""
+                aria-expanded={!immersiveComposerCollapsed}
+                title={t(
+                  immersiveComposerCollapsed
+                    ? "immersiveExpandComposer"
+                    : "immersiveCollapseComposer",
+                )}
+                onClick={() => setImmersiveComposerCollapsed(prev => !prev)}
+              >
+                {immersiveComposerCollapsed ? (
+                  <Plus className="size-3.5 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Minus className="size-3.5 shrink-0" aria-hidden="true" />
+                )}
+                <PixelMark
+                  size={12}
+                  state={
+                    isSpawningCore || consolidating || (isAuto && thinking)
+                      ? "reasoning"
+                      : !hostOnline
+                        ? "waiting"
+                        : "idle"
+                  }
+                  filled={hostOnline && !isAuto}
+                />
+                <span className="codex-immersive-preview-text">{latestImmersivePreview}</span>
+              </button>
+
+              <div className="codex-immersive-head-actions">
+                {pendingPoolCount > 0 && (
+                  <button
+                    type="button"
+                    className="codex-immersive-chip-btn"
+                    data-tone={pendingOutboundCount > 0 ? "warn" : undefined}
+                    onClick={exitImmersiveToPool}
+                  >
+                    {pendingOutboundCount > 0 ? (
+                      <span aria-hidden="true">🆘</span>
+                    ) : (
+                      <Inbox className="size-3 shrink-0" aria-hidden="true" />
+                    )}
+                    <span>{pendingPoolCount}</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="codex-immersive-chip-btn"
+                  data-immersive-split-btn=""
+                  title={t("exitImmersiveHint")}
+                  onClick={toggleImmersiveMode}
+                >
+                  <Columns2 className="size-3 shrink-0" aria-hidden="true" />
+                  <span>{t("exitImmersiveBtn")}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        <div
+          className="codex-composer-body"
+          hidden={Boolean(immersiveMode && immersiveComposerCollapsed)}
+        >
+          <ShioriComposer
+            project={project}
+            workspace={workspace}
+            data={data}
+            isLiveRun={isLiveRun}
+            sessionActions={actions}
+            hostStatusOverride={live as Record<string, unknown> | null}
+            activeModelOverride={activeModel}
+            activeServiceTierOverride={activeServiceTier}
+            activeEffortOverride={activeEffort}
+            submittingOverride={sessionSubmitting}
+            spawningCore={spawningCore}
+            preemptSuccessSeq={preemptSuccessSeq}
+            liveTimerSpec={liveTimerSpec}
+            onApplyLiveTimer={applyLiveStopTimer}
+            onExtendLiveTimer={extendLiveStopTimer}
+            poolSnapshot={poolSnapshot}
+            replyTarget={replyTarget}
+            replyAutoResumeDefault={replyAutoResumeDefault}
+            onSelectReplyTarget={(event, autoResume) => {
+              setReplyTarget(event);
+              setReplyAutoResumeDefault(autoResume);
+            }}
+            externalMode={workflowCommand?.mode ?? null}
+            externalDraft={workflowCommand?.prompt ?? null}
+            onExternalConsumed={() => setWorkflowCommand(null)}
+            onMessageSubmitted={() => scrollToBottom(prefersSmoothScrollBehavior())}
+            onReturnLatest={onReturnLatest}
+            onUpdated={onUpdated}
+          />
+        </div>
+      </div>
 
       {/* ── RIGHT WORKBENCH DOCK: LIVE VIEWPORT + COMPACT HOST OPS + TELEMETRY ── */}
       {backdropPresence.mounted && (
@@ -4178,14 +4313,15 @@ export function ShioriWorkbench({
       )}
       <aside
         className="codex-right-dock"
-        data-dock-state={dockOpen ? "open" : "closed"}
+        data-dock-state={effectiveDockOpen ? "open" : "closed"}
+        data-immersive={immersiveMode ? "true" : undefined}
         data-stage-kind={effectiveStageKind}
-        data-overlay={isOverlayDock ? "true" : undefined}
-        aria-hidden={!dockOpen || undefined}
-        inert={!dockOpen || undefined}
+        data-overlay={!immersiveMode && isOverlayDock ? "true" : undefined}
+        aria-hidden={!effectiveDockOpen || undefined}
+        inert={!effectiveDockOpen || undefined}
         aria-label={t("stageColumnAria")}
       >
-          {!isOverlayDock && dockOpen && (
+          {!immersiveMode && !isOverlayDock && dockOpen && (
             <div
               className="codex-dock-resizer"
               role="separator"
@@ -4196,7 +4332,10 @@ export function ShioriWorkbench({
               onDoubleClick={() => setCustomDockWidth(null)}
             />
           )}
-          <header className="codex-dock-header">
+          <header
+            className="codex-dock-header"
+            hidden={Boolean(immersiveMode && isInteractiveStage && !inspectedTurn)}
+          >
             <div className="codex-dock-seg" role="tablist" aria-label={t("stageColumnAria")}>
               <button
                 type="button"
@@ -4208,45 +4347,65 @@ export function ShioriWorkbench({
               >
                 <span className="codex-dock-header-title">{t("dockTabStageTelemetry")}</span>
               </button>
-              <button
-                type="button"
-                role="tab"
-                className="codex-dock-seg-tab"
-                aria-selected={dockTab === "pool"}
-                data-active={dockTab === "pool" || undefined}
-                data-dock-tab-pool
-                onClick={() => setDockTab("pool")}
-              >
-                <span className="codex-dock-seg-label">{t("dockTabEventPool")}</span>
-                {pendingPoolCount > 0 && (
-                  <span
-                    className="codex-dock-seg-badge"
-                    data-tone={pendingOutboundCount > 0 ? "warn" : "ok"}
-                  >
-                    <i aria-hidden="true" />
-                    {pendingPoolCount}
-                  </span>
-                )}
-              </button>
+              {!immersiveMode && (
+                <button
+                  type="button"
+                  role="tab"
+                  className="codex-dock-seg-tab"
+                  aria-selected={dockTab === "pool"}
+                  data-active={dockTab === "pool" || undefined}
+                  data-dock-tab-pool
+                  onClick={() => setDockTab("pool")}
+                >
+                  <span className="codex-dock-seg-label">{t("dockTabEventPool")}</span>
+                  {pendingPoolCount > 0 && (
+                    <span
+                      className="codex-dock-seg-badge"
+                      data-tone={pendingOutboundCount > 0 ? "warn" : "ok"}
+                    >
+                      <i aria-hidden="true" />
+                      {pendingPoolCount}
+                    </span>
+                  )}
+                </button>
+              )}
             </div>
-            {!isOverlayDock && (
+            <div className="inline-flex items-center gap-1">
               <button
                 type="button"
                 className="codex-dock-width-btn"
-                data-expanded={isDockExpanded ? "true" : "false"}
-                title={t(isDockExpanded ? "dockCompactWidthHint" : "dockExpandWidthHint")}
-                aria-label={t(isDockExpanded ? "dockCompactWidthHint" : "dockExpandWidthHint")}
-                onClick={toggleDockWidth}
+                data-dock-immersive-btn=""
+                data-active={immersiveMode ? "true" : undefined}
+                aria-pressed={immersiveMode}
+                title={t(immersiveMode ? "exitImmersiveHint" : "immersiveModeHint")}
+                aria-label={t(immersiveMode ? "exitImmersiveHint" : "immersiveModeHint")}
+                onClick={toggleImmersiveMode}
               >
-                {isDockExpanded ? (
-                  <Minimize2 className="size-3.5" aria-hidden="true" />
+                {immersiveMode ? (
+                  <Columns2 className="size-3.5" aria-hidden="true" />
                 ) : (
-                  <Maximize2 className="size-3.5" aria-hidden="true" />
+                  <Expand className="size-3.5" aria-hidden="true" />
                 )}
               </button>
-            )}
+              {!immersiveMode && !isOverlayDock && (
+                <button
+                  type="button"
+                  className="codex-dock-width-btn"
+                  data-expanded={isDockExpanded ? "true" : "false"}
+                  title={t(isDockExpanded ? "dockCompactWidthHint" : "dockExpandWidthHint")}
+                  aria-label={t(isDockExpanded ? "dockCompactWidthHint" : "dockExpandWidthHint")}
+                  onClick={toggleDockWidth}
+                >
+                  {isDockExpanded ? (
+                    <Minimize2 className="size-3.5" aria-hidden="true" />
+                  ) : (
+                    <Maximize2 className="size-3.5" aria-hidden="true" />
+                  )}
+                </button>
+              )}
+            </div>
           </header>
-          {dockTab === "pool" && (
+          {!immersiveMode && dockTab === "pool" && (
             <div className="codex-dock-body codex-dock-scroll" data-dock-tab="pool" role="tabpanel">
               {renderEventPoolPanel ? (
                 renderEventPoolPanel(eventPoolPanelProps)
@@ -4256,7 +4415,12 @@ export function ShioriWorkbench({
             </div>
           )}
           {/* Stage stays mounted while the pool tab is shown so live frames/streams are not torn down. */}
-          <div className="codex-dock-body" data-dock-tab="stage" role="tabpanel" hidden={dockTab !== "stage"}>
+          <div
+            className="codex-dock-body"
+            data-dock-tab="stage"
+            role="tabpanel"
+            hidden={!immersiveMode && dockTab !== "stage"}
+          >
             {/* 1. Primary Live Game / Device Viewport */}
             <div className="codex-dock-viewport">
               {isInteractiveStage && (
@@ -4267,6 +4431,8 @@ export function ShioriWorkbench({
                     isAuto={isAuto}
                     reclaiming={sessionSubmitting}
                     suspended={viewportSuspended}
+                    immersive={immersiveMode}
+                    onToggleImmersive={toggleImmersiveMode}
                     onReclaimControl={handleReclaimControl}
                   />
                 </div>

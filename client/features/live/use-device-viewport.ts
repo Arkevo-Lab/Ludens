@@ -109,6 +109,9 @@ export function normalizeBrowserNavigationUrl(raw: string): string | null {
   if (trimmed === BUILTIN_BROWSER_START_URL) {
     return BUILTIN_BROWSER_START_URL;
   }
+  if (trimmed.toLowerCase() === "about:blank") {
+    return "about:blank";
+  }
 
   if (/^https?:\/\//i.test(trimmed)) {
     try {

@@ -1,4 +1,5 @@
 import {
+  BUILTIN_LOCAL_BROWSER_MACHINE,
   BUILTIN_LOCAL_DESKTOP_MACHINE,
   validMachineId,
   type BasewareMachineSpec,
@@ -6,7 +7,7 @@ import {
   type MachineTransportKind,
   type WorkspaceMachinesBinding,
 } from "@ludens/protocol/machines";
-import { BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
+import { BUILTIN_BROWSER_DRIVER_SPEC, BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
 import type {
   BasewareDriverOverviewItem,
   BasewareMachineRuntimeStatus,
@@ -191,7 +192,10 @@ export function buildDisplayMachines(snapshot: WorkspaceBasewareSnapshot | null 
   const items: DisplayMachineItem[] = rawItems.map(({ spec, implicit }) => {
     const registrationStatus: MachineRegistrationStatus = implicit
       ? "unregistered"
-      : spec.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id
+      : spec.builtin ||
+          spec.runtimeInjected ||
+          spec.id === BUILTIN_LOCAL_DESKTOP_MACHINE.id ||
+          spec.id === BUILTIN_LOCAL_BROWSER_MACHINE.id
         ? "builtin"
         : "registered";
     const mountedInfo = mountedById.get(spec.id) ?? null;
@@ -324,17 +328,21 @@ export function draftFromDriver(
   driver: Pick<BasewareDriverOverviewItem, "id" | "spec" | "name" | "transport" | "defaultPort">,
   existingIds: Iterable<string> = [],
 ): MachineDraft {
-  const isBuiltinCua = driver.spec === BUILTIN_CUA_DRIVER_SPEC || driver.spec.startsWith("driver:");
-  const transportKind: MachineTransportKind = driver.transport ?? (driver.id === "cua" ? "stdio" : "bridge");
+  const isBuiltin =
+    driver.spec === BUILTIN_CUA_DRIVER_SPEC ||
+    driver.spec === BUILTIN_BROWSER_DRIVER_SPEC ||
+    driver.spec.startsWith("driver:");
+  const transportKind: MachineTransportKind =
+    driver.transport ?? (driver.id === "cua" || driver.id === "browser" ? "stdio" : "bridge");
   const defaultPort = driver.defaultPort ?? 47663;
   return {
     ...createEmptyMachineDraft("primary"),
     id: suggestMachineId(driver.id === "cua" ? "desktop-node" : driver.id, existingIds),
     name: driver.name ? `${driver.name}` : `${driver.id} Node`,
     driver: driver.id,
-    driverPackage: isBuiltinCua ? "" : driver.spec,
+    driverPackage: isBuiltin ? "" : driver.spec,
     transportKind,
-    stdioCommand: driver.id === "cua" ? "cua-driver" : driver.id,
+    stdioCommand: driver.id === "cua" ? "cua-driver" : driver.id === "browser" ? "" : driver.id,
     bridgePort: String(defaultPort),
   };
 }
@@ -534,9 +542,12 @@ export function validateMachineDraft(
   };
 }
 
-export function formatTransportSummary(transport: MachineTransportConfig): string {
+export function formatTransportSummary(transport: MachineTransportConfig, driver?: string): string {
   switch (transport.kind) {
     case "stdio":
+      if (driver === "browser" && !transport.command) {
+        return "browser-host.sock (WebContentsView)";
+      }
       return [transport.command || "cua-driver", ...(transport.args ?? [])].join(" ");
     case "bridge":
       return `${transport.host ?? "127.0.0.1"}:${transport.port}${transport.game ? ` · ${transport.game.split("/").pop()}` : ""}`;

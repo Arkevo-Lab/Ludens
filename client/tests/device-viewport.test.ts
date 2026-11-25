@@ -230,6 +230,8 @@ test("buildViewportWsUrl builds authenticated /viewport WS URLs and skips pure I
 
 test("normalizeBrowserNavigationUrl and input coordinate/modifier helpers behave accurately", () => {
   assert.equal(normalizeBrowserNavigationUrl(BUILTIN_BROWSER_START_URL), BUILTIN_BROWSER_START_URL);
+  assert.equal(normalizeBrowserNavigationUrl("about:blank"), "about:blank");
+  assert.equal(normalizeBrowserNavigationUrl("ABOUT:BLANK"), "about:blank");
   assert.equal(normalizeBrowserNavigationUrl("threejs.org/examples/"), "https://threejs.org/examples/");
   assert.equal(normalizeBrowserNavigationUrl("localhost:5173/game"), "http://localhost:5173/game");
   assert.equal(normalizeBrowserNavigationUrl("127.0.0.1:8080"), "http://127.0.0.1:8080/");
@@ -377,11 +379,15 @@ test("DeviceViewport renders browser chrome, auto reclaim overlay, offline card,
         viewport: makeStubViewportResult(makeViewportState({ controlMode: "auto" })),
         stageKind: "browser",
         isAuto: true,
+        immersive: true,
+        onToggleImmersive() {},
         onReclaimControl() {},
       }),
     ),
   );
   assert.match(browserAutoHtml, /device-viewport-omnibox/);
+  assert.match(browserAutoHtml, /data-immersive="true"/);
+  assert.match(browserAutoHtml, /data-viewport-immersive-toggle=""/);
   assert.match(browserAutoHtml, /1280×720/);
   assert.match(browserAutoHtml, /data-viewport-reclaim=""/);
   assert.match(browserAutoHtml, /data-viewport-auto-overlay=""/);

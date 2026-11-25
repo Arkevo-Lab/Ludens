@@ -1786,7 +1786,7 @@
     "envBrowserOfflineSubtitle": "需在 Ludens 桌面端（Desktop App）运行以自动启用",
     "envRecommendedBadge": "推荐",
     "envDesktopAppBadge": "需桌面端",
-    "envComputerTitle": "受控计算机 (CUA)",
+    "envComputerTitle": "受控计算机",
     "envComputerSubtitle": "通过 stdio MCP 控制本机桌面应用",
     "envExternalTitle": "扩展设备 / 驱动",
     "envExternalSubtitle": "模拟器、SSH/HTTP 节点或社区驱动包",
@@ -2226,6 +2226,12 @@
     "resizeDockHint": "拖拽调整右侧工作台宽度（双击重置）",
     "dockExpandWidthHint": "加宽右侧舞台",
     "dockCompactWidthHint": "收窄右侧舞台",
+    "immersiveModeBtn": "沉浸模式",
+    "exitImmersiveBtn": "分栏视图",
+    "immersiveModeHint": "进入沉浸模式：最大化设备视口并将输入栏置底",
+    "exitImmersiveHint": "退出沉浸模式，返回左右分栏对话与舞台视图",
+    "immersiveCollapseComposer": "收起底部输入栏",
+    "immersiveExpandComposer": "展开底部输入栏",
     "dockTabStageTelemetry": "画面与遥测",
     "dockTabEventPool": "事件池",
     "poolHeaderTrigger": "事件池",
@@ -2958,6 +2964,8 @@
     "browserOfflineDesc": "内置浏览器运行在 Ludens 桌面端（Desktop App）中。请启动桌面端后点击重试以连接此工作区的独立浏览器空间。",
     "computerOfflineTitle": "计算机视口暂不可用",
     "computerOfflineDesc": "当前受控计算机节点尚未建立实时视口流。",
+    "immersiveModeHint": "最大化视口进入沉浸模式",
+    "exitImmersiveHint": "切回分栏视图",
     "retryBtn": "重试"
   }
 }

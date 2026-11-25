@@ -28,6 +28,7 @@ ludens workspace up
 - **Unified `<DeviceViewport />` & Web Console `/viewport` Streaming**:
   - In **Ludens Desktop (`electron-local`)**, `<DeviceViewport />` attaches the native `WebContentsView` directly into the resizable right workbench (`0ms` WebGL rendering + native audio) and automatically falls back to the latest static frame whenever a modal dialog overlays the window.
   - In **Web Console, mobile browsers, or remote clients**, `<DeviceViewport />` connects to `ludens-server`'s HMAC-authenticated `/viewport` binary WebSocket stream (rendering frames via `createImageBitmap` with drop-oldest backpressure) and forwards `Manual` mouse, wheel, keyboard, and Pointer Lock input back to the host.
+  - **Immersive Mode**: Click **Immersive** in the **Live** top bar or viewport header to maximize the built-in browser (or computer/observation stage) across the main workspace with a centered pill address bar and place the existing Shiori composer bar along the bottom (with one-click minimize/expand and live status preview). Toggle **Split View** at any time without dropping frames, reconnecting streams, or losing composer drafts.
 
 ## 2. Built-in Desktop Target (`cua`)
 

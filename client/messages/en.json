@@ -1786,7 +1786,7 @@
     "envBrowserOfflineSubtitle": "Available automatically when running in Ludens Desktop App",
     "envRecommendedBadge": "Recommended",
     "envDesktopAppBadge": "Desktop App",
-    "envComputerTitle": "Computer (CUA)",
+    "envComputerTitle": "Computer",
     "envComputerSubtitle": "Control local desktop apps over stdio MCP",
     "envExternalTitle": "External Device / Driver",
     "envExternalSubtitle": "Emulators, SSH/HTTP nodes, or community packages",
@@ -2226,6 +2226,12 @@
     "resizeDockHint": "Drag to resize right stage panel (double-click to reset)",
     "dockExpandWidthHint": "Expand right stage width",
     "dockCompactWidthHint": "Compact right stage width",
+    "immersiveModeBtn": "Immersive",
+    "exitImmersiveBtn": "Split View",
+    "immersiveModeHint": "Enter Immersive Mode: maximize device viewport with bottom composer",
+    "exitImmersiveHint": "Exit Immersive Mode and return to split chat & stage view",
+    "immersiveCollapseComposer": "Minimize bottom composer",
+    "immersiveExpandComposer": "Expand bottom composer",
     "dockTabStageTelemetry": "Stage & Telemetry",
     "dockTabEventPool": "Event Pool",
     "poolHeaderTrigger": "Event Pool",
@@ -2958,6 +2964,8 @@
     "browserOfflineDesc": "Built-in Browser runs inside Ludens Desktop App. Launch Ludens Desktop App and retry to attach this workspace's browser space.",
     "computerOfflineTitle": "Computer Viewport Unavailable",
     "computerOfflineDesc": "No active live viewport stream is connected for this computer target.",
+    "immersiveModeHint": "Maximize viewport in Immersive Mode",
+    "exitImmersiveHint": "Return to Split View",
     "retryBtn": "Retry"
   }
 }

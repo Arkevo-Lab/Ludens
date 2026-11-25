@@ -921,6 +921,8 @@ export function WorkspaceCreateForm({
               </div>
             ) : null}
 
+            {activeFirstClassEnv !== "browser" ? (
+              <>
             <RadioGroup
               value={mode}
               onValueChange={val => selectTargetMode(val as WorkspaceTargetMode)}
@@ -1408,6 +1410,8 @@ export function WorkspaceCreateForm({
                   <p className="text-xs text-muted-foreground">{t("verifyFirstHint")}</p>
                 )}
               </div>
+            ) : null}
+              </>
             ) : null}
           </div>
 

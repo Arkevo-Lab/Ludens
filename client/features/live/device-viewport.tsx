@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import {
   ArrowLeft,
   ArrowRight,
+  Columns2,
   Crosshair,
+  Expand,
   Globe,
   Hand,
   Monitor,
@@ -31,6 +33,8 @@ export interface DeviceViewportProps {
   isAuto: boolean;
   reclaiming?: boolean;
   suspended?: boolean;
+  immersive?: boolean;
+  onToggleImmersive?: () => void;
   onReclaimControl?: () => void | Promise<void>;
 }
 
@@ -40,6 +44,8 @@ export function DeviceViewport({
   isAuto,
   reclaiming = false,
   suspended = false,
+  immersive = false,
+  onToggleImmersive,
   onReclaimControl,
 }: DeviceViewportProps) {
   const t = useTranslations("deviceViewport");
@@ -106,6 +112,7 @@ export function DeviceViewport({
       data-stage-kind={stageKind}
       data-control-mode={controlMode}
       data-transport={transportMode}
+      data-immersive={immersive ? "true" : undefined}
       data-suspended={suspended ? "true" : undefined}
       aria-label={t(stageKind === "browser" ? "browserAria" : "computerAria")}
     >
@@ -237,6 +244,25 @@ export function DeviceViewport({
               </button>
             )}
           </div>
+
+          {onToggleImmersive && (
+            <button
+              type="button"
+              className="device-viewport-icon-btn device-viewport-immersive-btn"
+              data-viewport-immersive-toggle=""
+              data-active={immersive ? "true" : undefined}
+              aria-pressed={immersive}
+              title={t(immersive ? "exitImmersiveHint" : "immersiveModeHint")}
+              aria-label={t(immersive ? "exitImmersiveHint" : "immersiveModeHint")}
+              onClick={onToggleImmersive}
+            >
+              {immersive ? (
+                <Columns2 className="size-3.5" aria-hidden="true" />
+              ) : (
+                <Expand className="size-3.5" aria-hidden="true" />
+              )}
+            </button>
+          )}
         </div>
       </header>
 
@@ -254,7 +280,12 @@ export function DeviceViewport({
         <div
           ref={slotRef}
           className="device-viewport-slot"
-          style={{ aspectRatio: `${width} / ${height}` }}
+          style={
+            {
+              aspectRatio: `${width} / ${height}`,
+              "--vp-aspect": String(width / Math.max(1, height)),
+            } as CSSProperties
+          }
         >
           <canvas
             ref={canvasRef}

@@ -28,6 +28,7 @@ ludens workspace up
 - **统一 `<DeviceViewport />` 与 Web 控制台 `/viewport` 串流**：
   - 在 **Ludens 桌面端（`electron-local`）**，`<DeviceViewport />` 将原生 `WebContentsView` 直接贴合到可拖拽调宽的右侧工作台槽位（0ms WebGL 渲染 + 原生音频），主窗口弹出 Modal 遮挡时自动降级为最新静态帧占位。
   - 在 **Web 控制台、手机端或远端客户端**，`<DeviceViewport />` 连接 `ludens-server` 的 HMAC 鉴权 `/viewport` 二进制 WebSocket 帧流（通过 `createImageBitmap` 渲染并采用单槽丢旧帧背压），并在 `Manual` 模式下将鼠标、滚轮、键盘与 Pointer Lock 输入回传给宿主。
+  - **沉浸模式（Immersive Mode）**：在 **运行（Live）** 顶栏或视口右上角点击 **沉浸模式**，可将内置浏览器（以及计算机视口或设备观测舞台）全屏最大化为主工作区、顶部居中展示胶囊地址栏，并将原有的 Shiori 胶囊输入栏（支持一键收起/展开与最新动态预览）置于屏幕最下方；点击 **分栏视图** 即可零中断切回左右分栏，过程中不重建连接、不丢帧、不丢失输入草稿。
 
 ## 2. 开箱即用的桌面目标（`cua`）
 
