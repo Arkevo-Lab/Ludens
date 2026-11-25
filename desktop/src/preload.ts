@@ -1,8 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   LUDENS_RPC_CHANNELS,
+  LUDENS_VIEWPORT_CHANNELS,
   type DesktopRpcBridge,
   type DesktopRpcStatus,
+  type DesktopViewportBridge,
 } from './rpc-channels.js'
 import {
   DESKTOP_TITLEBAR_HEIGHT,
@@ -73,9 +75,17 @@ const rpcBridge: DesktopRpcBridge = {
   },
 }
 
-// Narrow UDS RPC relay, Pet settings, activity, and window-chrome IPC bridge; no node:net or fs exposure.
+const viewportBridge: DesktopViewportBridge = {
+  getHostInfo: () => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.getHostInfo),
+  attach: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.attach, input),
+  updateBounds: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.updateBounds, input),
+  detach: sessionId => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.detach, sessionId),
+}
+
+// Narrow UDS RPC relay, Pet settings, activity, viewport, and window-chrome IPC bridge; no node:net or fs exposure.
 contextBridge.exposeInMainWorld('ludens', {
   rpc: rpcBridge,
+  viewport: viewportBridge,
   dialog: {
     pickPath: (options: unknown) => ipcRenderer.invoke(LUDENS_DIALOG_PICK_PATH_CHANNEL, options),
   },
