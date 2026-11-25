@@ -403,7 +403,11 @@
   transition: grid-template-columns 160ms var(--ease-out-expo);
 }
 .codex-workbench[data-dock-open] {
-  grid-template-columns: minmax(0, 1fr) clamp(380px, 26vw, 410px);
+  grid-template-columns: minmax(0, 1fr) var(--codex-dock-width, clamp(380px, 26vw, 410px));
+}
+.codex-workbench[data-dock-resizing="true"] {
+  transition: none;
+  user-select: none;
 }
 
 /* ── Left / Center Main Chat Pane ── */
@@ -2173,11 +2177,12 @@ details.codex-step-group:not([open])::details-content {
 }
 
 .codex-right-dock {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
   min-height: 0;
-  min-width: clamp(380px, 26vw, 410px);
+  min-width: var(--codex-dock-width, clamp(380px, 26vw, 410px));
   overflow: clip;
   border-left: 1px solid var(--border);
   background: color-mix(in srgb, var(--surface-inset, var(--muted)) 35%, var(--background));
@@ -2187,6 +2192,44 @@ details.codex-step-group:not([open])::details-content {
     opacity 160ms var(--ease-out-expo),
     visibility 160ms step-start,
     border-left-color 160ms var(--ease-out-expo);
+}
+.codex-dock-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  inset-inline-start: 0;
+  width: 6px;
+  z-index: 25;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+.codex-dock-resizer:hover,
+.codex-workbench[data-dock-resizing="true"] .codex-dock-resizer {
+  background: color-mix(in srgb, var(--primary) 42%, transparent);
+}
+.codex-dock-width-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted-foreground);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 120ms ease, color 120ms ease, border-color 120ms ease;
+}
+.codex-dock-width-btn:hover {
+  border-color: var(--border);
+  background: var(--card);
+  color: var(--foreground);
+}
+.codex-dock-live-stage[hidden] {
+  display: none;
 }
 .codex-right-dock[data-dock-state="closed"] {
   opacity: 0;
@@ -3305,10 +3348,10 @@ details.codex-input-payload-details:not([open])::details-content {
 
 @media (max-width: 1439px) {
   .codex-workbench[data-dock-open] {
-    grid-template-columns: minmax(0, 1fr) clamp(330px, 26.5vw, 350px);
+    grid-template-columns: minmax(0, 1fr) var(--codex-dock-width, clamp(330px, 26.5vw, 350px));
   }
   .codex-right-dock {
-    min-width: clamp(330px, 26.5vw, 350px);
+    min-width: var(--codex-dock-width, clamp(330px, 26.5vw, 350px));
   }
   .codex-thread-header,
   .codex-cockpit-header {

@@ -5,11 +5,19 @@ import type {
   CreateWorkspaceInput,
 } from "@ludens/protocol/workspaces";
 import type { OmpEffort, OmpServiceTier, WorkspaceRegistration } from "@ludens/protocol/workspaces";
-import { BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
+import {
+  BUILTIN_BROWSER_DRIVER_SPEC,
+  BUILTIN_CUA_DRIVER_SPEC,
+} from "@ludens/protocol/drivers";
+import {
+  BUILTIN_LOCAL_BROWSER_MACHINE,
+  BUILTIN_LOCAL_DESKTOP_MACHINE,
+} from "@ludens/protocol/machines";
 import { VIDEO_QUALITY_SPECS, type VideoQualityPreset } from "@/lib/storage";
 
 export type WorkspaceEnvironment = "desktop" | "community";
 export type WorkspaceTargetMode = "machine" | "driver" | "package";
+export type FirstClassEnvironmentKind = "browser" | "computer" | "external";
 
 export interface WorkspaceDraft {
   name: string;
@@ -20,6 +28,7 @@ export interface WorkspaceDraft {
   driverId?: string;
   driverPackage: string;
   game: string;
+  url?: string;
   port?: string;
   cuaCommand: string;
   model?: string;
@@ -35,6 +44,7 @@ export const emptyWorkspaceDraft: WorkspaceDraft = {
   environment: "desktop",
   driverPackage: "",
   game: "",
+  url: "",
   cuaCommand: "",
 };
 
@@ -116,6 +126,138 @@ export function effectiveTargetMode(draft: WorkspaceDraft): WorkspaceTargetMode 
   return draft.environment === "community" ? "package" : "driver";
 }
 
+export function isBrowserTargetDraft(
+  draft: WorkspaceDraft,
+  context?: Pick<WorkspaceCreateResolutionContext, "machines" | "catalogDriver">,
+): boolean {
+  const mode = effectiveTargetMode(draft);
+  if (mode === "machine") {
+    const machineId = draft.machineId?.trim();
+    if (machineId === BUILTIN_LOCAL_BROWSER_MACHINE.id) return true;
+    const matched = context?.machines?.find(item => item.id === machineId);
+    if (matched) return matched.driver === "browser";
+    return draft.driverId === "browser";
+  }
+  if (mode === "driver") {
+    if (context?.catalogDriver) {
+      return (
+        context.catalogDriver.id === "browser" ||
+        context.catalogDriver.spec === BUILTIN_BROWSER_DRIVER_SPEC
+      );
+    }
+    return draft.driverId === "browser";
+  }
+  return false;
+}
+
+export function resolveFirstClassEnvironment(
+  draft: WorkspaceDraft,
+  context?: Pick<WorkspaceCreateResolutionContext, "machines" | "catalogDriver">,
+): FirstClassEnvironmentKind {
+  if (isBrowserTargetDraft(draft, context)) return "browser";
+  const mode = effectiveTargetMode(draft);
+  if (mode === "machine") {
+    const machineId = draft.machineId?.trim();
+    const matched = context?.machines?.find(item => item.id === machineId);
+    if (
+      machineId === BUILTIN_LOCAL_DESKTOP_MACHINE.id ||
+      matched?.driver === "cua" ||
+      (!matched && draft.driverId === "cua")
+    ) {
+      return "computer";
+    }
+    return "external";
+  }
+  if (mode === "driver") {
+    if (
+      context?.catalogDriver?.spec === BUILTIN_CUA_DRIVER_SPEC ||
+      (!context?.catalogDriver && (!draft.driverId || draft.driverId === "cua"))
+    ) {
+      return "computer";
+    }
+    return "external";
+  }
+  return "external";
+}
+
+export function selectFirstClassEnvironment(
+  draft: WorkspaceDraft,
+  env: FirstClassEnvironmentKind,
+  options?: {
+    externalMachine?: BasewareMachineRuntimeStatus | null;
+    externalDriver?: BasewareDriverOverviewItem | null;
+  },
+): WorkspaceDraft {
+  if (env === "browser") {
+    return {
+      ...draft,
+      targetMode: "machine",
+      environment: "desktop",
+      machineId: BUILTIN_LOCAL_BROWSER_MACHINE.id,
+      driverId: "browser",
+      driverPackage: "",
+      game: "",
+      port: undefined,
+      cuaCommand: "",
+    };
+  }
+  if (env === "computer") {
+    return {
+      ...draft,
+      targetMode: "machine",
+      environment: "desktop",
+      machineId: BUILTIN_LOCAL_DESKTOP_MACHINE.id,
+      driverId: "cua",
+      driverPackage: "",
+      game: "",
+      url: "",
+      port: undefined,
+      cuaCommand: "",
+    };
+  }
+  if (options?.externalMachine) {
+    return {
+      ...draft,
+      targetMode: "machine",
+      environment: options.externalMachine.transport.kind === "stdio" ? "desktop" : "community",
+      machineId: options.externalMachine.id,
+      driverId: options.externalMachine.driver,
+      driverPackage: options.externalMachine.driverPackage ?? "",
+      game: "",
+      url: "",
+      port: undefined,
+      cuaCommand: "",
+    };
+  }
+  if (options?.externalDriver) {
+    return {
+      ...draft,
+      targetMode: "driver",
+      environment: "community",
+      machineId: undefined,
+      driverId: options.externalDriver.id,
+      driverPackage: options.externalDriver.spec,
+      game: "",
+      url: "",
+      port: undefined,
+      cuaCommand: "",
+    };
+  }
+  return {
+    ...draft,
+    targetMode: "package",
+    environment: "community",
+    machineId: undefined,
+    driverId: undefined,
+    driverPackage: draft.environment === "community" ? draft.driverPackage : "",
+    registerDriver: draft.registerDriver ?? true,
+    game: "",
+    url: "",
+    port: undefined,
+    cuaCommand: "",
+  };
+}
+
 export function switchWorkspaceEnvironment(draft: WorkspaceDraft, environment: WorkspaceEnvironment): WorkspaceDraft {
   return {
     ...draft,
@@ -153,14 +295,19 @@ export function switchWorkspaceTargetMode(
   }
   if (mode === "driver") {
     const drv = options?.defaultDriver ?? null;
-    const isCua = !drv || drv.id === "cua" || drv.spec === BUILTIN_CUA_DRIVER_SPEC;
+    const isBuiltin =
+      !drv ||
+      drv.id === "cua" ||
+      drv.id === "browser" ||
+      drv.spec === BUILTIN_CUA_DRIVER_SPEC ||
+      drv.spec === BUILTIN_BROWSER_DRIVER_SPEC;
     return {
       ...draft,
       targetMode: "driver",
-      environment: isCua ? "desktop" : "community",
+      environment: isBuiltin ? "desktop" : "community",
       machineId: undefined,
       driverId: drv?.id ?? "cua",
-      driverPackage: isCua ? "" : drv.spec,
+      driverPackage: isBuiltin ? "" : drv.spec,
       game: "",
       port: undefined,
       cuaCommand: "",
@@ -279,8 +426,15 @@ export function workspaceCreateInput(
       return { ok: false, issue: { field: "machineId", message: "machineRequired" } };
     }
     const matched = context?.machines?.find(item => item.id === machineId);
-    const resolvedDriver = matched?.driver || draft.driverId?.trim() || "cua";
+    const resolvedDriver =
+      matched?.driver ||
+      (machineId === BUILTIN_LOCAL_BROWSER_MACHINE.id ? "browser" : undefined) ||
+      draft.driverId?.trim() ||
+      "cua";
     const resolvedPkg = matched?.driverPackage || (draft.driverPackage.trim() || undefined);
+    const trimmedUrl = draft.url?.trim() || "";
+    const isBuiltinPkg =
+      resolvedPkg === BUILTIN_CUA_DRIVER_SPEC || resolvedPkg === BUILTIN_BROWSER_DRIVER_SPEC;
     return {
       ok: true,
       input: {
@@ -288,7 +442,29 @@ export function workspaceCreateInput(
         driver: resolvedDriver,
         machineId,
         ...(location.custom ? { workspace: location.path! } : {}),
-        ...(resolvedPkg && resolvedPkg !== BUILTIN_CUA_DRIVER_SPEC ? { driverPackage: resolvedPkg } : {}),
+        ...(resolvedPkg && !isBuiltinPkg ? { driverPackage: resolvedPkg } : {}),
+        ...(resolvedDriver === "browser" && trimmedUrl ? { url: trimmedUrl } : {}),
+        ...modelFields,
+        ...storageFields,
+      },
+    };
+  }
+
+  // Mode 2: Built-in Browser driver from catalog
+  if (
+    mode === "driver" &&
+    (context?.catalogDriver?.spec === BUILTIN_BROWSER_DRIVER_SPEC ||
+      context?.catalogDriver?.id === "browser" ||
+      (!context?.catalogDriver && draft.driverId === "browser"))
+  ) {
+    const trimmedUrl = draft.url?.trim() || "";
+    return {
+      ok: true,
+      input: {
+        name: location.name,
+        driver: "browser",
+        ...(location.custom ? { workspace: location.path! } : {}),
+        ...(trimmedUrl ? { url: trimmedUrl } : {}),
         ...modelFields,
         ...storageFields,
       },
@@ -296,7 +472,12 @@ export function workspaceCreateInput(
   }
 
   // Mode 2: Installed / Cached Driver from catalog (when a non-custom catalog driver is selected)
-  if (mode === "driver" && context?.catalogDriver && context.catalogDriver.spec !== BUILTIN_CUA_DRIVER_SPEC) {
+  if (
+    mode === "driver" &&
+    context?.catalogDriver &&
+    context.catalogDriver.spec !== BUILTIN_CUA_DRIVER_SPEC &&
+    context.catalogDriver.spec !== BUILTIN_BROWSER_DRIVER_SPEC
+  ) {
     const catalogDriver = context.catalogDriver;
     const capabilities = workspaceDriverCapabilities("community", driver, catalogDriver);
     if (capabilities.missingPort && parsedPort === undefined) {

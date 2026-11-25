@@ -1779,7 +1779,20 @@
     "recordingQualityCustomBadge": "Workspace override",
     "recordingQualityResetGlobal": "Follow global",
     "recordingQualityHintInherited": "Matches your global preset — workspace will inherit ~/.ludens/storage.json.",
-    "recordingQualityHintOverride": "Sets workspace local ring buffer to {spec} in ludens.json."
+    "recordingQualityHintOverride": "Sets workspace local ring buffer to {spec} in ludens.json.",
+    "firstClassEnvAria": "Primary environment choices",
+    "envBrowserTitle": "Built-in Browser",
+    "envBrowserSubtitle": "Zero-config isolated Chromium space with WebGL & 30Hz perception",
+    "envBrowserOfflineSubtitle": "Available automatically when running in Ludens Desktop App",
+    "envRecommendedBadge": "Recommended",
+    "envDesktopAppBadge": "Desktop App",
+    "envComputerTitle": "Computer (CUA)",
+    "envComputerSubtitle": "Control local desktop apps over stdio MCP",
+    "envExternalTitle": "External Device / Driver",
+    "envExternalSubtitle": "Emulators, SSH/HTTP nodes, or community packages",
+    "initialUrlLabel": "Initial URL (optional)",
+    "initialUrlPlaceholder": "{startUrl} or any Three.js / web app URL",
+    "initialUrlHint": "Leave blank to launch the built-in interactive 3D WebGL start page (ludens-browser://start)."
   },
   "runPicker": {
     "description": "Choose a recorded run by its full ID. Timestamp summaries use the Asia/Shanghai time zone.",
@@ -2209,6 +2222,10 @@
     "stateCoreOffline": "Core Offline (Spawns on demand)",
     "coreOriginApp": "Launched by App",
     "coreOriginCli": "Launched by CLI",
+    "resizeDockAria": "Resize right stage panel",
+    "resizeDockHint": "Drag to resize right stage panel (double-click to reset)",
+    "dockExpandWidthHint": "Expand right stage width",
+    "dockCompactWidthHint": "Compact right stage width",
     "dockTabStageTelemetry": "Stage & Telemetry",
     "dockTabEventPool": "Event Pool",
     "poolHeaderTrigger": "Event Pool",
@@ -2913,5 +2930,34 @@
         "hint": "High-res evaluation & RL capture"
       }
     }
+  },
+  "deviceViewport": {
+    "browserAria": "Built-in browser live viewport",
+    "computerAria": "Controlled computer live viewport",
+    "navBack": "Back",
+    "navForward": "Forward",
+    "navReload": "Reload page",
+    "omniboxAria": "Browser address bar",
+    "omniboxPlaceholder": "Enter URL or ludens-browser://start",
+    "startPageDisplayLabel": "Ludens Start · 3D WebGL Arena",
+    "computerDefaultLabel": "Computer (CUA)",
+    "statusConnected": "Connected",
+    "statusDisconnected": "Disconnected",
+    "resolutionTitle": "Viewport resolution",
+    "pointerLockBtnHint": "Lock pointer for 3D camera control (Esc to release)",
+    "pointerLockActiveHint": "3D Pointer Lock active · Press Esc to release",
+    "controlManual": "Manual",
+    "controlAutoShiori": "Auto · Shiori",
+    "controlOffline": "Offline",
+    "reclaimControlBtn": "Reclaim Control",
+    "reclaimingBtn": "Reclaiming…",
+    "autoControlBanner": "Shiori controlling · Reclaim Control to interact",
+    "streamConnecting": "Connecting to live viewport…",
+    "streamReconnecting": "Reconnecting to live viewport…",
+    "browserOfflineTitle": "Built-in Browser Offline",
+    "browserOfflineDesc": "Built-in Browser runs inside Ludens Desktop App. Launch Ludens Desktop App and retry to attach this workspace's browser space.",
+    "computerOfflineTitle": "Computer Viewport Unavailable",
+    "computerOfflineDesc": "No active live viewport stream is connected for this computer target.",
+    "retryBtn": "Retry"
   }
 }

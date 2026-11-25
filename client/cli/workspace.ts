@@ -19,7 +19,7 @@ import {
 } from "./operator-rpc.ts";
 
 export const WORKSPACE_HELP = `Ludens workspace management & evaluations (RPC):
-ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--video-quality <compact|balanced|high>] [--register-driver] [--pet | --no-pet]
+ludens workspace init --name <name> [--workspace <path>] [--machine <id>] [--driver <id>] [--driver-package <spec>] [--url <url>] [--game <path>] [--port <n>] [--cua-command <path>] [--model <id>] [--effort <level>] [--service-tier <tier>] [--video-quality <compact|balanced|high>] [--register-driver] [--pet | --no-pet]
 ludens workspace list
 ludens workspace open <directory> [--new-id]
 ludens workspace forget <id>
@@ -280,6 +280,7 @@ export async function runWorkspaceWithClient(
         machine: { type: "string" },
         driver: { type: "string" },
         "driver-package": { type: "string" },
+        url: { type: "string" },
         game: { type: "string" },
         port: { type: "string" },
         "cua-command": { type: "string" },
@@ -351,6 +352,7 @@ export async function runWorkspaceWithClient(
       ...(typeof values["driver-package"] === "string"
         ? { driverPackage: values["driver-package"] }
         : {}),
+      ...(typeof values.url === "string" && values.url.trim() ? { url: values.url.trim() } : {}),
       ...(typeof values.game === "string" ? { game: values.game } : {}),
       ...(typeof values.port === "string" ? { port: Number(values.port) } : {}),
       ...(typeof values["cua-command"] === "string"
