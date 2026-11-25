@@ -3,6 +3,7 @@ import { readFile, realpath } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { defaultDriverCacheRoot, resolveDriver } from "@ludens/baseware/drivers/loader.ts";
 import {
+  BUILTIN_LOCAL_BROWSER_MACHINE,
   listRegisteredWorkspaces,
   ludensHome,
   readMachinesConfig,
@@ -67,6 +68,10 @@ function machineDeviceIdentity(machine: BasewareMachineSpec): WorkspaceDeviceIde
   }
   if (transport.kind === "stdio") {
     const cmd = transport.command?.trim();
+    if (machine.driver === "browser") {
+      // Built-in browser isolates each workspace in its own WebContentsView session.
+      return { deviceKey: null, deviceLabel: label };
+    }
     if (
       machine.driver === "cua" &&
       (!cmd || cmd === "cua-driver" || machine.id === "local-desktop")
@@ -113,6 +118,9 @@ export async function resolveWorkspaceDeviceIdentity(
       ? (raw.machines as Record<string, unknown>)
       : null;
   const activeMachineId = typeof machines?.active === "string" ? machines.active.trim() : "";
+  if (activeMachineId === BUILTIN_LOCAL_BROWSER_MACHINE.id) {
+    return { deviceKey: null, deviceLabel: BUILTIN_LOCAL_BROWSER_MACHINE.name };
+  }
   if (activeMachineId && activeMachineId !== "workspace-default") {
     try {
       const registry = await readMachinesConfig(home);
@@ -125,6 +133,10 @@ export async function resolveWorkspaceDeviceIdentity(
 
   const driver = typeof raw.driver === "string" ? raw.driver.trim() : "";
   if (!driver) return { deviceKey: null };
+
+  if (driver === "browser") {
+    return { deviceKey: null, deviceLabel: BUILTIN_LOCAL_BROWSER_MACHINE.name };
+  }
 
   if (driver === "cua") {
     const cuaCommand = typeof raw.cuaCommand === "string" ? raw.cuaCommand.trim() : "";

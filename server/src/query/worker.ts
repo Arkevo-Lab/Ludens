@@ -28,6 +28,7 @@ import {
   updateStorageSettings,
 } from "./storage";
 import { closeArchiveBuilds } from "./cold-build";
+import { invalidateBrowserHostCache } from "../daemon/browser-host-client";
 import {
   workspaceSettings,
   updateWorkspaceRoot,
@@ -114,6 +115,7 @@ const handlers: { [K in DashboardMethod]: (args: DashboardMethods[K]["args"], si
   storageTest: ([params], signal) => testStorageBackend(params, undefined, signal),
   storageMaintain: ([params], signal) => maintainStorage(params, undefined, undefined, signal),
   storagePin: ([params]) => pinTimelineSegment(params),
+  invalidateBrowserHostCache: ([home]) => { invalidateBrowserHostCache(home); return null; },
   clearCatalogCache: () => { clearCatalogCache(); return null; },
 };
 const requests = new Map<number, { abort: AbortController; work: Promise<void> }>();

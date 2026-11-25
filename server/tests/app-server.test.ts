@@ -208,9 +208,12 @@ test("app-server serves unified UDS/WS RPC, HTTP /media Range 206, zero /api/* r
       localFileDrivers: true,
       hostProcessOverrides: true,
       hostStorageConfig: true,
+      builtinBrowser: false,
+      browserHostId: null,
     });
     expect(udsInit.home).toBe(home);
     expect(udsInit.media.basePath).toBe("/media");
+    expect(udsInit.media.viewportBasePath).toBe("/viewport");
     expect(udsInit.media.liveStreamCapabilities).toEqual(["none"]);
 
     const wsInit = await wsClient.initialize({ clientInfo: { name: "test-ws", version: "1.0.0" } });
@@ -222,6 +225,8 @@ test("app-server serves unified UDS/WS RPC, HTTP /media Range 206, zero /api/* r
       localFileDrivers: false,
       hostProcessOverrides: false,
       hostStorageConfig: false,
+      builtinBrowser: false,
+      browserHostId: null,
     });
 
     // catalog/get via WS RPC

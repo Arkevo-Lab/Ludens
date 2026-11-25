@@ -124,6 +124,7 @@ export interface DashboardMethods {
   storageTest: { args: [params: StorageTestParams]; result: Awaited<ReturnType<typeof testStorageBackend>> };
   storageMaintain: { args: [params: StorageMaintainParams]; result: Awaited<ReturnType<typeof maintainStorage>> };
   storagePin: { args: [params: StoragePinParams]; result: Awaited<ReturnType<typeof pinTimelineSegment>> };
+  invalidateBrowserHostCache: { args: [home?: string]; result: null };
   clearCatalogCache: { args: []; result: null };
 }
 export type DashboardMethod = keyof DashboardMethods;

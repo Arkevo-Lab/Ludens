@@ -2,8 +2,11 @@ import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 import type { CreateWorkspaceInputDto } from "@ludens/protocol/app-rpc";
 import {
+  BUILTIN_BROWSER_DRIVER,
+  BUILTIN_BROWSER_DRIVER_SPEC,
   BUILTIN_CUA_DRIVER,
   BUILTIN_CUA_DRIVER_SPEC,
+  BUILTIN_LOCAL_BROWSER_MACHINE,
   ensureWorkspaceIdentity,
   isOmpEffort,
   isOmpServiceTier,
@@ -45,6 +48,7 @@ export interface LaunchConfig {
   driver: string;
   driverPackage?: string;
   game?: string;
+  url?: string;
   port?: number;
   cuaCommand?: string;
   model: string;
@@ -65,6 +69,7 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
     "driver",
     "driverPackage",
     "game",
+    "url",
     "port",
     "cuaCommand",
     "model",
@@ -90,7 +95,10 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
   if (config.game !== undefined && (typeof config.game !== "string" || !config.game.trim())) {
     throw new Error("game must be a non-empty path");
   }
-  const bridge = manifest ? manifest.transport !== "stdio" : true;
+  if (config.url !== undefined && (typeof config.url !== "string" || !config.url.trim())) {
+    throw new Error("url must be a non-empty URL string");
+  }
+  const bridge = manifest ? manifest.transport !== "stdio" : config.driver !== "browser";
   if (manifest && manifest.id !== config.driver) {
     throw new Error(`Driver manifest id ${JSON.stringify(manifest.id)} does not match ludens.json driver ${JSON.stringify(config.driver)}`);
   }
@@ -111,6 +119,9 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
     logging: { diagnostics: "normal" },
     ...cleanConfig,
   } as LaunchConfig;
+  if (typeof config.url === "string") {
+    result.url = config.url.trim();
+  }
   if (
     !result.logging
     || typeof result.logging !== "object"
@@ -183,6 +194,7 @@ const ALLOWED_CREATE_KEYS = new Set([
   "driverPackage",
   "machineId",
   "game",
+  "url",
   "port",
   "cuaCommand",
   "model",
@@ -200,9 +212,58 @@ const STRING_KEYS = new Set([
   "driverPackage",
   "machineId",
   "game",
+  "url",
   "cuaCommand",
   "model",
 ]);
+
+const BROWSER_STARTER_PERCEPTION_PY = `"""Built-in Browser starter perception. Customize freely, then run ludens-core perception reload."""
+
+from ludens_tools import Client, capability, observe, record
+
+
+class Perception:
+    def start(self, context):
+        """Initialize client once; discover device controllers in baseware.json."""
+        self.context = context
+        self.client = Client()
+
+    @observe
+    @record
+    @capability
+    def sample(self):
+        """Capture the live Built-in Browser viewport frame and page metadata at 30Hz."""
+        captured = self.client.call("controller/screen.capture", {})
+        outcome = captured.get("result") if isinstance(captured, dict) else None
+        content = outcome.get("content") if isinstance(outcome, dict) else None
+        structured = outcome.get("structuredContent") if isinstance(outcome, dict) else None
+
+        media = []
+        if isinstance(content, list):
+            for block in content:
+                if not isinstance(block, dict) or block.get("type") != "image":
+                    continue
+                mime = block.get("mimeType") or "image/jpeg"
+                if block.get("path"):
+                    media.append({"path": block["path"], "mediaType": mime})
+                elif block.get("data"):
+                    media.append({"data": block["data"], "mediaType": mime})
+                break
+
+        data = structured if isinstance(structured, dict) else {}
+        url = data.get("url") or ""
+        title = data.get("title") or ""
+        text = f"{title} ({url})" if title and url else (url or title or "Browser frame")
+        return {
+            "text": text,
+            "data": data,
+            "media": media,
+        }
+
+    def close(self):
+        """Release local resources."""
+        pass
+`;
 
 let cachedTemplatesPromise: Promise<{ agentsMd: string; perceptionPy: string }> | null = null;
 
@@ -343,6 +404,7 @@ export function validateCreateWorkspacePayload(
     ...(trimOpt(value.driverPackage) ? { driverPackage: trimOpt(value.driverPackage) } : {}),
     ...(trimOpt(value.machineId) ? { machineId: trimOpt(value.machineId) } : {}),
     ...(trimOpt(value.game) ? { game: trimOpt(value.game) } : {}),
+    ...(trimOpt(value.url) ? { url: trimOpt(value.url) } : {}),
     ...(port !== undefined ? { port } : {}),
     ...(trimOpt(value.cuaCommand) ? { cuaCommand: trimOpt(value.cuaCommand) } : {}),
     ...(trimOpt(value.model) ? { model: trimOpt(value.model) } : {}),
@@ -359,8 +421,12 @@ async function defaultResolveDriverManifest(
   resolvedPackage: string | undefined,
   signal?: AbortSignal,
 ): Promise<DriverManifest> {
-  if (!resolvedPackage || resolvedPackage === BUILTIN_CUA_DRIVER_SPEC) {
-    if (driver === "cua") {
+  if (
+    !resolvedPackage
+    || resolvedPackage === BUILTIN_CUA_DRIVER_SPEC
+    || resolvedPackage === BUILTIN_BROWSER_DRIVER_SPEC
+  ) {
+    if (driver === "cua" && resolvedPackage !== BUILTIN_BROWSER_DRIVER_SPEC) {
       return {
         id: "cua",
         version: "builtin",
@@ -369,8 +435,17 @@ async function defaultResolveDriverManifest(
         launchHint: BUILTIN_CUA_DRIVER.launchHint,
       };
     }
+    if (driver === "browser" && resolvedPackage !== BUILTIN_CUA_DRIVER_SPEC) {
+      return {
+        id: "browser",
+        version: "builtin",
+        transport: "stdio",
+        needsGame: false,
+        launchHint: BUILTIN_BROWSER_DRIVER.launchHint,
+      };
+    }
     throw new Error(
-      `Driver ${JSON.stringify(driver)} is not built in. Select its package with --driver-package <spec>. Built-in drivers: cua.`,
+      `Driver ${JSON.stringify(driver)} is not built in. Select its package with --driver-package <spec>. Built-in drivers: cua, browser.`,
     );
   }
   const discovered = await discoverDriver(resolvedPackage, signal);
@@ -402,10 +477,14 @@ export async function initializeWorkspace(
 
   let matchedMachine: BasewareMachineSpec | undefined;
   if (parsed.machineId) {
-    const machinesRegistry = await readMachinesConfig(home);
-    matchedMachine = machinesRegistry.machines.find(item => item.id === parsed.machineId);
-    if (!matchedMachine) {
-      throw new Error(`未找到已注册的受控节点：${parsed.machineId}`);
+    if (parsed.machineId === BUILTIN_LOCAL_BROWSER_MACHINE.id) {
+      matchedMachine = BUILTIN_LOCAL_BROWSER_MACHINE;
+    } else {
+      const machinesRegistry = await readMachinesConfig(home);
+      matchedMachine = machinesRegistry.machines.find(item => item.id === parsed.machineId);
+      if (!matchedMachine) {
+        throw new Error(`未找到已注册的受控节点：${parsed.machineId}`);
+      }
     }
   }
 
@@ -414,11 +493,13 @@ export async function initializeWorkspace(
     throw new Error("请输入有效的驱动 ID");
   }
 
-  const rawPackage =
-    parsed.driverPackage === BUILTIN_CUA_DRIVER_SPEC
-      ? undefined
-      : (parsed.driverPackage ?? matchedMachine?.driverPackage);
-  const normalizedPackage = rawPackage === BUILTIN_CUA_DRIVER_SPEC ? undefined : rawPackage;
+  const isBuiltinSpec = (spec: string | undefined): boolean =>
+    spec === BUILTIN_CUA_DRIVER_SPEC || spec === BUILTIN_BROWSER_DRIVER_SPEC;
+
+  const rawPackage = isBuiltinSpec(parsed.driverPackage)
+    ? undefined
+    : (parsed.driverPackage ?? matchedMachine?.driverPackage);
+  const normalizedPackage = isBuiltinSpec(rawPackage) ? undefined : rawPackage;
 
   const global = await readGlobalConfig(home);
   let targetDirectory: string | undefined;
@@ -483,9 +564,15 @@ export async function initializeWorkspace(
     ) {
       rawConfig.port = matchedMachine.transport.port;
     }
+  } else if (effectiveDriver === "browser") {
+    rawConfig.machines = {
+      active: BUILTIN_LOCAL_BROWSER_MACHINE.id,
+      allowed: [BUILTIN_LOCAL_BROWSER_MACHINE.id],
+    };
   }
 
   if (parsed.game !== undefined) rawConfig.game = parsed.game;
+  if (parsed.url !== undefined) rawConfig.url = parsed.url;
   if (parsed.port !== undefined) rawConfig.port = parsed.port;
   if (parsed.cuaCommand !== undefined) rawConfig.cuaCommand = parsed.cuaCommand;
   if (parsed.model !== undefined) rawConfig.model = parsed.model;
@@ -519,7 +606,9 @@ export async function initializeWorkspace(
   await writeFile(join(workspace, "AGENTS.md"), templates.agentsMd, { flag: "wx" }).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   });
-  await writeFile(join(workspace, "perception.py"), templates.perceptionPy, { flag: "wx" }).catch(error => {
+  const starterPerception =
+    effectiveDriver === "browser" ? BROWSER_STARTER_PERCEPTION_PY : templates.perceptionPy;
+  await writeFile(join(workspace, "perception.py"), starterPerception, { flag: "wx" }).catch(error => {
     if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
   });
 
@@ -528,7 +617,12 @@ export async function initializeWorkspace(
   const entry = await registeredWorkspace(registered.id, home);
 
   let registeredDriver: RegisteredDriverSpec | undefined;
-  if (parsed.registerDriver && resolvedPackage && resolvedPackage !== BUILTIN_CUA_DRIVER_SPEC) {
+  if (
+    parsed.registerDriver
+    && resolvedPackage
+    && resolvedPackage !== BUILTIN_CUA_DRIVER_SPEC
+    && resolvedPackage !== BUILTIN_BROWSER_DRIVER_SPEC
+  ) {
     const localMeta = await readLocalPackageMetadata(resolvedPackage);
     const driverSpec: RegisteredDriverSpec = {
       id: manifest.id,
