@@ -182,13 +182,21 @@ describe('pet log content', () => {
   })
 
   it('resets reading position and result expansion when switching blocks', () => {
-    render(target, notification('tool', { tool: { result: 'old' } }))
+    render(target, notification('tool', { tool: { args: 'cmd-1', result: 'old' } }))
     target.querySelector('details')!.open = true
     target.querySelector<HTMLElement>('.log-body')!.scrollTop = 99
-    render(target, notification('tool', { id: 'block-2', tool: { result: 'new' } }))
+    render(target, notification('tool', { id: 'block-2', tool: { args: 'cmd-2', result: 'new' } }))
     expect(target.dataset.blockId).toBe('block-2')
     expect(target.querySelector('details')!.open).toBe(false)
     expect(target.querySelector<HTMLElement>('.log-body')!.scrollTop).toBe(0)
+  })
+
+  it('auto-expands result details when a tool block has output but no intent or arguments', () => {
+    render(target, notification('tool', { title: 'bash', status: 'running', tool: { args: '', result: 'Battle completed' } }))
+    const details = target.querySelector('details')!
+    expect(details).not.toBeNull()
+    expect(details.open).toBe(true)
+    expect(details.querySelector('pre')?.textContent).toBe('Battle completed')
   })
 
   it('preserves keyboard focus and scroll position in the reading region during streaming updates', () => {

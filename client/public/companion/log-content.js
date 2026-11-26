@@ -110,10 +110,13 @@ function renderLogContent(target, input, copy) {
       args.setAttribute('aria-label', copy.arguments);
       content.append(args);
     }
+    const hasLeadingContext = Boolean(
+      (typeof tool.intent === 'string' && tool.intent.trim()) || formattedArgs.trim().length > 0,
+    );
     const formattedResult = formatToolResult(tool.result);
     if (formattedResult.trim().length > 0) {
       const details = el('details', 'log-result');
-      details.open = resultOpen ?? status === 'error';
+      details.open = resultOpen ?? (status === 'error' || !hasLeadingContext);
       const summary = el('summary', '', copy.result);
       summary.addEventListener('click', event => {
         event.preventDefault();
