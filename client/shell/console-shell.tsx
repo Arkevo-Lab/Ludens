@@ -7,12 +7,15 @@ import { PixelMark } from "@/components/ui/pixel-mark";
 import { RunAnalysis } from "@/features/live/run-analysis";
 import { WorkspaceRunEmpty } from "@/features/workspaces/workspace-run-empty";
 import { ShioriWorkbench } from "@/features/live/shiori-cockpit";
-import type { ViewportTopbarSlots } from "@/features/live/device-viewport";
 import { EventPoolOverviewPanel } from "@/features/live/event-pool-panel";
 import { WorkspaceStudioView } from "@/features/workspaces/workspace-studio-view";
 import { ConsoleSidebar } from "@/shell/console-sidebar";
 import { DesktopQuickSwitcher } from "@/shell/desktop-quick-switcher";
-import { DesktopTitlebar } from "@/shell/desktop-titlebar";
+import {
+  DesktopDragStrip,
+  DesktopLeadingControls,
+  DesktopTrailingControls,
+} from "@/shell/desktop-titlebar";
 import { formatDesktopShortcut, useDesktopWindow } from "@/shell/use-desktop-window";
 import { WorkspacePicker, workspaceName } from "@/features/workspaces/workspace-picker";
 import { RunPicker } from "@/features/workspaces/run-picker";
@@ -74,7 +77,6 @@ export default function ConsoleShell() {
     stopCore,
   } = useActiveCores({ projects, onRefresh: refreshCatalog });
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [immersiveTitlebarSlots, setImmersiveTitlebarSlots] = useState<ViewportTopbarSlots | null>(null);
   const mobileNavTriggerRef = useRef<HTMLButtonElement>(null);
   const desktop = useDesktopWindow({
     search,
@@ -206,8 +208,64 @@ export default function ConsoleShell() {
     "{shortcut}",
     formatDesktopShortcut(desktop.platform, "K"),
   );
+  const desktopSidebarLeading = desktop.active ? (
+    <DesktopLeadingControls
+      active={desktop.active}
+      platform={desktop.platform}
+      captionStyle={desktop.captionStyle}
+      fullScreen={desktop.fullScreen}
+      focused={desktop.focused}
+      isPreview={desktop.isPreview}
+      hasNativeMacTrafficLights={desktop.hasNativeMacTrafficLights}
+      sidebarCollapsed={desktop.sidebarCollapsed}
+      mobileNavOpen={mobileNavOpen}
+      variant="sidebar"
+      onToggleSidebar={desktop.toggleSidebar}
+      onOpenQuickSwitcher={() => desktop.setQuickSwitcherOpen(true)}
+      onMinimize={() => void desktop.minimize()}
+      onToggleMaximize={() => void desktop.toggleMaximize()}
+      onTogglePreviewFullScreen={desktop.togglePreviewFullScreen}
+      onClose={() => void desktop.close()}
+    />
+  ) : null;
+  const desktopInlineLeading = desktop.active && desktop.sidebarCollapsed ? (
+    <DesktopLeadingControls
+      active={desktop.active}
+      platform={desktop.platform}
+      captionStyle={desktop.captionStyle}
+      fullScreen={desktop.fullScreen}
+      focused={desktop.focused}
+      isPreview={desktop.isPreview}
+      hasNativeMacTrafficLights={desktop.hasNativeMacTrafficLights}
+      sidebarCollapsed={desktop.sidebarCollapsed}
+      mobileNavOpen={mobileNavOpen}
+      variant="inline"
+      onToggleSidebar={desktop.toggleSidebar}
+      onOpenQuickSwitcher={() => desktop.setQuickSwitcherOpen(true)}
+      onMinimize={() => void desktop.minimize()}
+      onToggleMaximize={() => void desktop.toggleMaximize()}
+      onTogglePreviewFullScreen={desktop.togglePreviewFullScreen}
+      onClose={() => void desktop.close()}
+    />
+  ) : null;
+  const desktopTrailingControls = desktop.active ? (
+    <DesktopTrailingControls
+      active={desktop.active}
+      platform={desktop.platform}
+      captionStyle={desktop.captionStyle}
+      maximized={desktop.maximized}
+      fullScreen={desktop.fullScreen}
+      focused={desktop.focused}
+      isPreview={desktop.isPreview}
+      onMinimize={() => void desktop.minimize()}
+      onToggleMaximize={() => void desktop.toggleMaximize()}
+      onClose={() => void desktop.close()}
+      onSelectPreviewPlatform={desktop.setPreviewPlatform}
+    />
+  ) : null;
   const mobileNavButton = (
     <>
+      {desktopInlineLeading}
       {!desktop.active && (
         <Button
           ref={mobileNavTriggerRef}
@@ -305,48 +363,13 @@ export default function ConsoleShell() {
       (entry === "ready" || allowZeroRunLive) &&
       (view === "live" ? liveRunPicker : contextualRunPicker),
   );
-  const activeWorkspaceLabel = workspaceScopedView ? workspaceName(project) : "";
   return (
     <div
       className="desktop-shell-root"
       data-desktop-chrome={desktop.active ? "true" : undefined}
       data-desktop-platform={desktop.active ? desktop.platform : undefined}
-      style={{ "--shell-topbar-height": `${desktop.layout.topbarHeightPx}px` } as CSSProperties}
+      style={{ "--shell-topbar-height": "0px" } as CSSProperties}
     >
-      <DesktopTitlebar
-        active={desktop.active}
-        platform={desktop.platform}
-        captionStyle={desktop.captionStyle}
-        titlebarHeight={desktop.titlebarHeight}
-        maximized={desktop.maximized}
-        fullScreen={desktop.fullScreen}
-        focused={desktop.focused}
-        isPreview={desktop.isPreview}
-        hasNativeMacTrafficLights={desktop.hasNativeMacTrafficLights}
-        sidebarCollapsed={desktop.sidebarCollapsed}
-        mobileNavOpen={mobileNavOpen}
-        workspaceTitle={activeWorkspaceLabel || undefined}
-        viewTitle={t(`nav.${view}`)}
-        canGoBack={desktop.canGoBack}
-        canGoForward={desktop.canGoForward}
-        companionAvailable={desktop.companionAvailable}
-        companionVisible={desktop.companionVisible}
-        centerSlot={view === "live" ? immersiveTitlebarSlots?.centerSlot : undefined}
-        leadingExtraSlot={view === "live" ? immersiveTitlebarSlots?.leadingExtraSlot : undefined}
-        trailingExtraSlot={view === "live" ? immersiveTitlebarSlots?.trailingExtraSlot : undefined}
-        onToggleSidebar={desktop.toggleSidebar}
-        onGoBack={() => void desktop.goBack()}
-        onGoForward={() => void desktop.goForward()}
-        onOpenQuickSwitcher={() => desktop.setQuickSwitcherOpen(true)}
-        onReload={() => void desktop.reload()}
-        onToggleCompanion={() => void desktop.toggleCompanion()}
-        onMinimize={() => void desktop.minimize()}
-        onToggleMaximize={() => void desktop.toggleMaximize()}
-        onTogglePreviewFullScreen={desktop.togglePreviewFullScreen}
-        onClose={() => void desktop.close()}
-        onTitlebarDoubleClick={() => void desktop.handleTitlebarDoubleClick()}
-        onSelectPreviewPlatform={desktop.setPreviewPlatform}
-      />
       <div
         className="console-shell"
         data-sidebar-collapsed={desktop.sidebarCollapsed ? "true" : undefined}
@@ -365,6 +388,11 @@ export default function ConsoleShell() {
           onToggleCollapse={desktop.toggleSidebar}
           collapseShortcut={formatDesktopShortcut(desktop.platform, "B")}
           desktopChrome={desktop.active}
+          desktopHeaderSlot={desktopSidebarLeading}
+          onDesktopHeaderDoubleClick={() => void desktop.handleTitlebarDoubleClick()}
+          companionAvailable={desktop.companionAvailable}
+          companionVisible={desktop.companionVisible}
+          onToggleCompanion={() => void desktop.toggleCompanion()}
           activeCores={activeCores}
           activeProjectId={selection.project}
           stoppingCoreId={stoppingProjectId}
@@ -374,6 +402,13 @@ export default function ConsoleShell() {
           onOpenConnectionDialog={() => setConnectionDialogOpen(true)}
         />
         <div className="console-main">
+          {!hasWorkbenchHeader && desktop.active && (
+            <DesktopDragStrip
+              leadingSlot={desktopInlineLeading}
+              trailingSlot={desktopTrailingControls}
+              onDoubleClick={() => void desktop.handleTitlebarDoubleClick()}
+            />
+          )}
           {!hasWorkbenchHeader && (!desktop.active || hasContextualBarPicker) && (
             <header className="mobile-shell-bar">
               {!desktop.active && (
@@ -549,10 +584,10 @@ export default function ConsoleShell() {
                   runs={effectiveLiveSnapshot ? effectiveLiveSnapshot.runs : (project?.runs ?? [])}
                   runPicker={liveRunPicker}
                   mobileNavSlot={mobileNavButton}
-                  desktopActive={desktop.active}
+                  desktopTrailingSlot={desktopTrailingControls}
+                  onHeaderDoubleClick={desktop.active ? () => void desktop.handleTitlebarDoubleClick() : undefined}
                   sidebarCollapsed={desktop.sidebarCollapsed}
                   onSetSidebarCollapsed={collapsed => desktop.setSidebarCollapsed(collapsed, { persist: false })}
-                  onImmersiveChromeChange={setImmersiveTitlebarSlots}
                   renderEventPoolPanel={props => <EventPoolOverviewPanel {...props} />}
                   jumpTarget={liveJumpTarget}
                   onClearJumpTarget={clearLiveJumpTarget}

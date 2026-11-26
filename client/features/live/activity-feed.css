@@ -3787,7 +3787,7 @@ details.codex-input-payload-details:not([open])::details-content {
     padding: 0 16px;
     gap: 10px;
   }
-  .codex-workbench:not([data-immersive="true"]) .codex-dock-body {
+  .codex-workbench:not([data-immersive="true"]) .codex-dock-body:not([data-flush-stage="true"]) {
     padding: 14px;
     gap: 16px;
   }

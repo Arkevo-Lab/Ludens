@@ -37,12 +37,6 @@ import {
   type UseDeviceViewportResult,
 } from "@/features/live/use-device-viewport";
 
-export interface ViewportTopbarSlots {
-  leadingExtraSlot?: ReactNode;
-  centerSlot: ReactNode;
-  trailingExtraSlot?: ReactNode;
-}
-
 export function ViewportBrowserNavButtons({
   state,
   isAuto,
@@ -263,51 +257,6 @@ export function ViewportMetaControls({
   );
 }
 
-export function ViewportTopbarControls({
-  stageKind,
-  state,
-  isAuto,
-  reclaiming = false,
-  immersive = true,
-  stageRef,
-  onAction,
-  onToggleImmersive,
-  onReclaimControl,
-}: {
-  stageKind: "browser" | "computer";
-  state: ViewportState | null;
-  isAuto: boolean;
-  reclaiming?: boolean;
-  immersive?: boolean;
-  stageRef?: RefObject<HTMLDivElement | null>;
-  onAction: (action: ViewportControlAction) => Promise<void> | void;
-  onToggleImmersive?: () => void;
-  onReclaimControl?: () => void | Promise<void>;
-}): ViewportTopbarSlots {
-  return {
-    leadingExtraSlot:
-      stageKind === "browser" ? (
-        <ViewportBrowserNavButtons state={state} isAuto={isAuto} onAction={onAction} />
-      ) : undefined,
-    centerSlot:
-      stageKind === "browser" ? (
-        <ViewportOmnibox state={state} isAuto={isAuto} stageRef={stageRef} onAction={onAction} />
-      ) : (
-        <ViewportComputerBadge state={state} />
-      ),
-    trailingExtraSlot: (
-      <ViewportMetaControls
-        state={state}
-        isAuto={isAuto}
-        reclaiming={reclaiming}
-        immersive={immersive}
-        onToggleImmersive={onToggleImmersive}
-        onReclaimControl={onReclaimControl}
-      />
-    ),
-  };
-}
-
 export interface DeviceViewportProps {
   viewport: UseDeviceViewportResult;
   stageKind: "browser" | "computer";
@@ -315,8 +264,9 @@ export interface DeviceViewportProps {
   reclaiming?: boolean;
   suspended?: boolean;
   immersive?: boolean;
-  hideChrome?: boolean;
   leadingSlot?: ReactNode;
+  trailingSlot?: ReactNode;
+  onChromeDoubleClick?: () => void;
   onToggleImmersive?: () => void;
   onReclaimControl?: () => void | Promise<void>;
 }
@@ -328,8 +278,9 @@ export function DeviceViewport({
   reclaiming = false,
   suspended = false,
   immersive = false,
-  hideChrome = false,
   leadingSlot,
+  trailingSlot,
+  onChromeDoubleClick,
   onToggleImmersive,
   onReclaimControl,
 }: DeviceViewportProps) {
@@ -409,35 +360,41 @@ export function DeviceViewport({
       data-control-mode={controlMode}
       data-transport={transportMode}
       data-immersive={immersive ? "true" : undefined}
-      data-hide-chrome={hideChrome ? "true" : undefined}
       data-suspended={suspended ? "true" : undefined}
       aria-label={t(stageKind === "browser" ? "browserAria" : "computerAria")}
     >
-      {/* Top Chrome Bar (hidden on Desktop Immersive when merged into 38px DesktopTitlebar) */}
-      {!hideChrome && (
-        <header className="device-viewport-chrome">
-          {stageKind === "browser" ? (
-            <>
-              <div className="device-viewport-nav-group">
-                {leadingSlot}
-                <ViewportBrowserNavButtons
-                  state={state}
-                  isAuto={isAuto}
-                  onAction={performAction}
-                />
-              </div>
-
-              <ViewportOmnibox
+      {/* Single 46px Top Chrome Bar (flush with left columns at y = 0, draggable on Desktop) */}
+      <header
+        className="device-viewport-chrome"
+        onDoubleClick={event => {
+          const target = event.target as HTMLElement | null;
+          if (target?.closest("button, a, input, form, [data-no-drag]")) return;
+          onChromeDoubleClick?.();
+        }}
+      >
+        {stageKind === "browser" ? (
+          <>
+            <div className="device-viewport-nav-group">
+              {leadingSlot}
+              <ViewportBrowserNavButtons
                 state={state}
                 isAuto={isAuto}
-                stageRef={stageRef}
                 onAction={performAction}
               />
-            </>
-          ) : (
-            <ViewportComputerBadge state={state} leadingSlot={leadingSlot} />
-          )}
+            </div>
 
+            <ViewportOmnibox
+              state={state}
+              isAuto={isAuto}
+              stageRef={stageRef}
+              onAction={performAction}
+            />
+          </>
+        ) : (
+          <ViewportComputerBadge state={state} leadingSlot={leadingSlot} />
+        )}
+
+        <div className="device-viewport-meta">
           <ViewportMetaControls
             state={state}
             isAuto={isAuto}
@@ -446,8 +403,9 @@ export function DeviceViewport({
             onToggleImmersive={onToggleImmersive}
             onReclaimControl={onReclaimControl}
           />
-        </header>
-      )}
+          {trailingSlot}
+        </div>
+      </header>
 
       {/* Stage Body */}
       <div

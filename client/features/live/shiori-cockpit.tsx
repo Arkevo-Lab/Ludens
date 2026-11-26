@@ -78,11 +78,7 @@ import {
   type StreamSegment,
   type SystemStepCategory,
 } from "@/features/live/shiori-segments";
-import {
-  DeviceViewport,
-  ViewportTopbarControls,
-  type ViewportTopbarSlots,
-} from "@/features/live/device-viewport";
+import { DeviceViewport } from "@/features/live/device-viewport";
 import {
   ImmersiveFloatingPod,
   type ImmersivePodTier,
@@ -2629,13 +2625,14 @@ export interface ShioriWorkbenchProps {
   observationSlot: ReactNode;
   /** Compact RunPicker (quickJump mode) rendered inside .codex-thread-header right actions */
   runPicker?: ReactNode;
-  /** Mobile <=680px sidebar drawer trigger rendered at the start of .codex-thread-header */
+  /** Mobile <=680px sidebar drawer trigger or collapsed desktop leading controls */
   mobileNavSlot?: ReactNode;
-  /** Desktop chrome integration for auto-collapsing left sidebar & single merged 38px DesktopTitlebar */
-  desktopActive?: boolean;
+  /** Trailing desktop window controls (Win32/Linux caption buttons or WCO spacer) */
+  desktopTrailingSlot?: ReactNode;
+  /** Native titlebar double-click handler for 46px column headers on Desktop */
+  onHeaderDoubleClick?: () => void;
   sidebarCollapsed?: boolean;
   onSetSidebarCollapsed?: (collapsed: boolean) => void;
-  onImmersiveChromeChange?: (slots: ViewportTopbarSlots | null) => void;
   /** Col 3 `事件池` tab body (wired to `EventPoolOverviewPanel` by ConsoleShell); falls back to a minimal list. */
   renderEventPoolPanel?: (props: EventPoolOverviewPanelProps) => ReactNode;
 }
@@ -2672,10 +2669,10 @@ export function ShioriWorkbench({
   observationSlot,
   runPicker,
   mobileNavSlot,
-  desktopActive = false,
+  desktopTrailingSlot,
+  onHeaderDoubleClick,
   sidebarCollapsed = false,
   onSetSidebarCollapsed,
-  onImmersiveChromeChange,
   renderEventPoolPanel,
 }: ShioriWorkbenchProps) {
   const t = useTranslations("shioriCockpit");
@@ -3746,54 +3743,6 @@ export function ShioriWorkbench({
     t,
   ]);
 
-  const mergeViewportIntoDesktopTitlebar = Boolean(
-    immersiveMode &&
-      desktopActive &&
-      isInteractiveStage &&
-      !inspectedTurn &&
-      onImmersiveChromeChange,
-  );
-
-  const desktopTitlebarSlots = useMemo<ViewportTopbarSlots | null>(() => {
-    if (!mergeViewportIntoDesktopTitlebar || !isInteractiveStage) return null;
-    return ViewportTopbarControls({
-      stageKind: effectiveStageKind,
-      state: deviceViewport.state,
-      isAuto,
-      reclaiming: sessionSubmitting,
-      immersive: true,
-      stageRef: deviceViewport.stageRef,
-      onAction: deviceViewport.performAction,
-      onToggleImmersive: toggleImmersiveMode,
-      onReclaimControl: handleReclaimControl,
-    });
-  }, [
-    mergeViewportIntoDesktopTitlebar,
-    isInteractiveStage,
-    effectiveStageKind,
-    deviceViewport.state,
-    deviceViewport.stageRef,
-    deviceViewport.performAction,
-    isAuto,
-    sessionSubmitting,
-    toggleImmersiveMode,
-    handleReclaimControl,
-  ]);
-
-  const onImmersiveChromeChangeRef = useRef(onImmersiveChromeChange);
-  onImmersiveChromeChangeRef.current = onImmersiveChromeChange;
-
-  useEffect(() => {
-    onImmersiveChromeChangeRef.current?.(desktopTitlebarSlots);
-  }, [desktopTitlebarSlots]);
-
-  useEffect(
-    () => () => {
-      onImmersiveChromeChangeRef.current?.(null);
-    },
-    [],
-  );
-
   const renderSharedComposer = (compactImmersive: boolean, hideOutboundTray = false) => (
     <ShioriComposer
       project={project}
@@ -3847,8 +3796,15 @@ export function ShioriWorkbench({
     >
       {/* ── LEFT / CENTER MAIN PANE: CODEX CHAT STREAM ── */}
       <section className="codex-chat-pane" aria-label={t("ariaLabel")}>
-        {/* Single 46px Thread Header (aligned with right-pane 46px header) */}
-        <header className="codex-thread-header codex-cockpit-header">
+        {/* Single 46px Thread Header (aligned with right-pane 46px header at y = 0) */}
+        <header
+          className="codex-thread-header codex-cockpit-header"
+          onDoubleClick={event => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button, a, input, select, [data-no-drag]")) return;
+            onHeaderDoubleClick?.();
+          }}
+        >
           <div className="codex-thread-title">
             {mobileNavSlot}
             <strong className="codex-thread-heading" title={workspaceTitle || project}>
@@ -3910,6 +3866,7 @@ export function ShioriWorkbench({
             >
               <PanelRight className="size-4 shrink-0" aria-hidden="true" />
             </button>
+            {!dockOpen && desktopTrailingSlot}
           </div>
         </header>
 
@@ -4484,6 +4441,7 @@ export function ShioriWorkbench({
                   <X className="size-4" aria-hidden="true" />
                 </button>
               )}
+              {desktopTrailingSlot}
             </div>
           </header>
           {!immersiveMode && dockTab === "pool" && (
@@ -4514,8 +4472,9 @@ export function ShioriWorkbench({
                     reclaiming={sessionSubmitting}
                     suspended={viewportSuspended}
                     immersive={immersiveMode}
-                    hideChrome={mergeViewportIntoDesktopTitlebar}
-                    leadingSlot={immersiveMode && !desktopActive ? mobileNavSlot : undefined}
+                    leadingSlot={immersiveMode ? mobileNavSlot : undefined}
+                    trailingSlot={desktopTrailingSlot}
+                    onChromeDoubleClick={onHeaderDoubleClick}
                     onToggleImmersive={toggleImmersiveMode}
                     onReclaimControl={handleReclaimControl}
                   />

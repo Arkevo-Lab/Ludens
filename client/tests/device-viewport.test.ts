@@ -31,7 +31,7 @@ import {
   resolveEffectiveStageKind,
   type UseDeviceViewportResult,
 } from "../features/live/use-device-viewport";
-import { DeviceViewport, ViewportTopbarControls } from "../features/live/device-viewport";
+import { DeviceViewport } from "../features/live/device-viewport";
 import {
   emptyWorkspaceDraft,
   isBrowserTargetDraft,
@@ -404,8 +404,8 @@ test("DeviceViewport renders browser chrome, clean auto shield without bottom-ri
     "Full-bleed immersive browser slot omits inline aspect-ratio lock",
   );
 
-  // Desktop merged topbar mode hides duplicate inner .device-viewport-chrome
-  const mergedDesktopHtml = renderToStaticMarkup(
+  // Leading & trailing slots mount cleanly inside the single 46px .device-viewport-chrome
+  const slottedDesktopHtml = renderToStaticMarkup(
     createElement(
       LocaleProvider,
       null,
@@ -414,32 +414,14 @@ test("DeviceViewport renders browser chrome, clean auto shield without bottom-ri
         stageKind: "browser",
         isAuto: false,
         immersive: true,
-        hideChrome: true,
+        leadingSlot: createElement("div", { "data-test-leading": "" }, "lead"),
+        trailingSlot: createElement("div", { "data-test-trailing": "" }, "trail"),
       }),
     ),
   );
-  assert.match(mergedDesktopHtml, /data-hide-chrome="true"/);
-  assert.doesNotMatch(mergedDesktopHtml, /device-viewport-chrome/);
-  assert.doesNotMatch(mergedDesktopHtml, /device-viewport-omnibox/);
-
-  // ViewportTopbarControls builds leading nav, center omnibox, and trailing reclaim + exit slots
-  const topbarSlots = ViewportTopbarControls({
-    stageKind: "browser",
-    state: makeViewportState({ controlMode: "auto" }),
-    isAuto: true,
-    immersive: true,
-    onAction() {},
-    onToggleImmersive() {},
-    onReclaimControl() {},
-  });
-  const centerHtml = renderToStaticMarkup(createElement(LocaleProvider, null, topbarSlots.centerSlot));
-  const leadingHtml = renderToStaticMarkup(createElement(LocaleProvider, null, topbarSlots.leadingExtraSlot));
-  const trailingHtml = renderToStaticMarkup(createElement(LocaleProvider, null, topbarSlots.trailingExtraSlot));
-  assert.match(centerHtml, /device-viewport-omnibox/);
-  assert.match(leadingHtml, /data-viewport-nav="back"/);
-  assert.match(leadingHtml, /data-viewport-nav="reload"/);
-  assert.match(trailingHtml, /data-viewport-reclaim=""/);
-  assert.match(trailingHtml, /data-viewport-immersive-toggle=""/);
+  assert.match(slottedDesktopHtml, /device-viewport-chrome/);
+  assert.match(slottedDesktopHtml, /data-test-leading=""/);
+  assert.match(slottedDesktopHtml, /data-test-trailing=""/);
 
   const browserOfflineHtml = renderToStaticMarkup(
     createElement(

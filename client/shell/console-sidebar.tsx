@@ -102,6 +102,11 @@ export interface ConsoleSidebarProps {
   onToggleCollapse?(): void;
   collapseShortcut?: string;
   desktopChrome?: boolean;
+  desktopHeaderSlot?: ReactNode;
+  onDesktopHeaderDoubleClick?(): void;
+  companionAvailable?: boolean;
+  companionVisible?: boolean;
+  onToggleCompanion?(): void;
   activeCores?: ActiveCoreItem[];
   activeProjectId?: string;
   stoppingCoreId?: string | null;
@@ -123,6 +128,11 @@ export function ConsoleSidebar({
   onToggleCollapse,
   collapseShortcut,
   desktopChrome = false,
+  desktopHeaderSlot,
+  onDesktopHeaderDoubleClick,
+  companionAvailable = false,
+  companionVisible = false,
+  onToggleCompanion,
   activeCores = [],
   activeProjectId,
   stoppingCoreId = null,
@@ -301,6 +311,19 @@ export function ConsoleSidebar({
       data-collapsed={collapsed ? "true" : undefined}
       data-desktop-chrome={desktopChrome ? "true" : undefined}
     >
+      {desktopChrome && desktopHeaderSlot && (
+        <div
+          className="sidebar-desktop-header"
+          data-sidebar-desktop-header=""
+          onDoubleClick={event => {
+            const target = event.target as HTMLElement | null;
+            if (target?.closest("button, a, input, [data-no-drag]")) return;
+            onDesktopHeaderDoubleClick?.();
+          }}
+        >
+          {desktopHeaderSlot}
+        </div>
+      )}
       <div className="sidebar-brand-row">
         <a className="brand" href={viewLink("live")} onClick={event => {
           if (!isPlainNavigationClick(event)) return;
@@ -595,7 +618,24 @@ export function ConsoleSidebar({
             </button>
           );
         })()}
-        <nav className="sidebar-settings" aria-label={t("nav.settings")}>{renderLink("settings")}</nav>
+        <div className="sidebar-footer-bottom">
+          <nav className="sidebar-settings" aria-label={t("nav.settings")}>{renderLink("settings")}</nav>
+          {companionAvailable && onToggleCompanion && (
+            <button
+              type="button"
+              className="desktop-pet-pill"
+              data-action="toggle-companion"
+              data-visible={String(companionVisible)}
+              aria-pressed={companionVisible}
+              aria-label={ct(companionVisible ? "companionHide" : "companionShow")}
+              title={ct(companionVisible ? "companionHide" : "companionShow")}
+              onClick={onToggleCompanion}
+            >
+              <span className="desktop-pet-dot" aria-hidden="true" />
+              <span>{ct("companionLabel")}</span>
+            </button>
+          )}
+        </div>
       </footer>
     </aside>
   </>;

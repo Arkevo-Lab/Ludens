@@ -18,7 +18,7 @@ import type {
 } from "@/lib/desktop";
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = "ludens:sidebar-collapsed";
-export const DEFAULT_DESKTOP_TITLEBAR_HEIGHT = 38;
+export const DEFAULT_DESKTOP_TITLEBAR_HEIGHT = 46;
 const MAX_SPA_HISTORY_ENTRIES = 200;
 const COMMAND_DEDUPE_MS = 45;
 
@@ -186,7 +186,7 @@ export interface DesktopTitlebarLayout {
   shortcutPrefix: string;
 }
 
-/** Pure platform geometry & shortcut formatting helper for `DesktopTitlebar`. */
+/** Pure platform geometry & shortcut formatting helper for full-height column desktop chrome. */
 export function computeTitlebarLayout(input: {
   active: boolean;
   platform: DesktopPlatform;
@@ -194,12 +194,10 @@ export function computeTitlebarLayout(input: {
   fullScreen: boolean;
   titlebarHeight?: number;
 }): DesktopTitlebarLayout {
-  const height = input.active
-    ? (input.titlebarHeight ?? DEFAULT_DESKTOP_TITLEBAR_HEIGHT)
-    : 0;
   const isMac = input.platform === "darwin";
   return {
-    topbarHeightPx: height,
+    // Full-height 3-column desktop chrome: zero T-shaped global top bar; every column starts at y = 0.
+    topbarHeightPx: 0,
     leftInsetPx: isMac ? (input.fullScreen ? 10 : 74) : 12,
     showTrafficLightZone: isMac && !input.fullScreen,
     showLeadingBrandMark: !isMac,

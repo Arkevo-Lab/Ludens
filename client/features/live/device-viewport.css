@@ -19,8 +19,8 @@
 }
 
 .device-viewport[data-immersive="true"] .device-viewport-chrome {
-  height: 40px;
-  min-height: 40px;
+  height: 46px;
+  min-height: 46px;
 }
 
 .device-viewport[data-immersive="true"][data-stage-kind="browser"] .device-viewport-chrome {
@@ -28,9 +28,9 @@
   grid-template-columns: minmax(0, 1fr) minmax(240px, 560px) minmax(0, 1fr);
   align-items: center;
   gap: 12px;
-  height: 40px;
-  min-height: 40px;
-  padding: 0 14px;
+  height: 46px;
+  min-height: 46px;
+  padding: 0 12px;
 }
 
 .device-viewport[data-immersive="true"][data-stage-kind="browser"] .device-viewport-omnibox {

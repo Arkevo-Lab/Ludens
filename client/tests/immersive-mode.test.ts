@@ -7,7 +7,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { PoolEvent } from "@ludens/protocol/event-pool";
 import { LocaleProvider } from "../lib/locale";
-import { DesktopTitlebar } from "../shell/desktop-titlebar";
+import {
+  DesktopLeadingControls,
+  DesktopTrailingControls,
+} from "../shell/desktop-titlebar";
 import {
   ImmersiveFloatingPod,
   resolveNearestPodAnchor,
@@ -50,7 +53,7 @@ test("Immersive Mode 2.0 CSS enforces full-bleed browser stage, CUA contain stag
   );
   assert.match(
     viewportCss,
-    /\.device-viewport\[data-immersive="true"\]\[data-stage-kind="browser"\]\s+\.device-viewport-chrome\s*\{[^}]*height:\s*40px;/,
+    /\.device-viewport\[data-immersive="true"\]\[data-stage-kind="browser"\]\s+\.device-viewport-chrome\s*\{[^}]*height:\s*46px;/,
   );
   assert.doesNotMatch(viewportCss, /\.device-viewport\[data-control-mode="auto"\]/);
   assert.doesNotMatch(viewportCss, /\.device-viewport-auto-pill\b/);
@@ -69,20 +72,48 @@ test("Immersive Mode 2.0 CSS enforces full-bleed browser stage, CUA contain stag
     /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock:not\(\[data-immersive="true"\]\)/,
   );
 
-  // DesktopTitlebar center slot keeps no-drag on pill while .desktop-titlebar-main stays drag
+  // Full-height 3-column desktop chrome turns each column's 46px header into a native drag region
   assert.match(
     desktopChromeCss,
-    /\.desktop-titlebar-center-slot\s*\{[^}]*max-width:\s*520px;[^}]*height:\s*27px;[^}]*-webkit-app-region:\s*no-drag;/,
+    /\.desktop-shell-root\[data-desktop-chrome="true"\]\s+\.device-viewport-chrome[\s\S]*?-webkit-app-region:\s*drag;/,
   );
 });
 
-test("DesktopTitlebar merges leadingExtraSlot, centerSlot, and trailingExtraSlot cleanly in 38px immersive mode", () => {
+test("Inline DesktopLeadingControls and DesktopTrailingControls mount cleanly inside immersive 46px chrome", () => {
   const noop = () => {};
-  const html = renderToStaticMarkup(
+  const leadingHtml = renderToStaticMarkup(
     createElement(
       LocaleProvider,
       null,
-      createElement(DesktopTitlebar, {
+      createElement(DesktopLeadingControls, {
+        active: true,
+        platform: "darwin",
+        captionStyle: "macos",
+        fullScreen: false,
+        focused: true,
+        isPreview: false,
+        hasNativeMacTrafficLights: true,
+        sidebarCollapsed: true,
+        variant: "inline",
+        onToggleSidebar: noop,
+        onOpenQuickSwitcher: noop,
+        onMinimize: noop,
+        onToggleMaximize: noop,
+        onClose: noop,
+      }),
+    ),
+  );
+
+  assert.match(leadingHtml, /data-desktop-leading="inline"/);
+  assert.match(leadingHtml, /padding-left:62px/);
+  assert.match(leadingHtml, /data-action="toggle-sidebar"/);
+  assert.match(leadingHtml, /data-action="quick-switcher"/);
+
+  const macTrailingHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(DesktopTrailingControls, {
         active: true,
         platform: "darwin",
         captionStyle: "macos",
@@ -90,44 +121,13 @@ test("DesktopTitlebar merges leadingExtraSlot, centerSlot, and trailingExtraSlot
         fullScreen: false,
         focused: true,
         isPreview: false,
-        hasNativeMacTrafficLights: true,
-        sidebarCollapsed: true,
-        workspaceTitle: "webgl-arena",
-        viewTitle: "Live",
-        canGoBack: true,
-        canGoForward: true,
-        companionAvailable: true,
-        companionVisible: true,
-        leadingExtraSlot: createElement("div", { "data-test-browser-nav": "" }, "nav"),
-        centerSlot: createElement("div", { "data-test-omnibox": "" }, "omnibox"),
-        trailingExtraSlot: createElement("div", { "data-test-reclaim-exit": "" }, "exit"),
-        onToggleSidebar: noop,
-        onGoBack: noop,
-        onGoForward: noop,
-        onOpenQuickSwitcher: noop,
-        onReload: noop,
-        onToggleCompanion: noop,
         onMinimize: noop,
         onToggleMaximize: noop,
         onClose: noop,
-        onTitlebarDoubleClick: noop,
       }),
     ),
   );
-
-  assert.match(html, /data-immersive-chrome="true"/);
-  assert.match(html, /data-action="toggle-sidebar"/);
-  assert.match(html, /data-test-browser-nav=""/);
-  assert.match(html, /class="desktop-titlebar-center-slot"[^>]*data-no-drag=""/);
-  assert.match(html, /data-test-omnibox=""/);
-  assert.match(html, /data-test-reclaim-exit=""/);
-  assert.match(html, /data-action="toggle-companion"/);
-  // App SPA breadcrumb, back/forward, search, and app reload are hidden while viewport chrome is merged
-  assert.doesNotMatch(html, /data-titlebar-breadcrumb=""/);
-  assert.doesNotMatch(html, /data-action="navigate-back"/);
-  assert.doesNotMatch(html, /data-action="navigate-forward"/);
-  assert.doesNotMatch(html, /data-action="quick-switcher"/);
-  assert.doesNotMatch(html, /data-action="reload"/);
+  assert.equal(macTrailingHtml, "");
 });
 
 test("ImmersiveFloatingPod renders compact, pill, and stream tiers, SOS actions, and snaps across all 5 anchors", () => {

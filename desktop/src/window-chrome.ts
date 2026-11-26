@@ -4,7 +4,7 @@ export type DesktopPlatform = 'darwin' | 'win32' | 'linux'
 export type DesktopCaptionStyle = 'macos' | 'win32-overlay' | 'custom'
 export type MacTitlebarDoubleClickAction = 'maximize' | 'minimize' | 'none'
 
-export const DESKTOP_TITLEBAR_HEIGHT = 38
+export const DESKTOP_TITLEBAR_HEIGHT = 46
 export const DESKTOP_BG_COLOR = '#090a0d'
 export const DESKTOP_SIDEBAR_BG_COLOR = '#0c0e12'
 export const DESKTOP_WIN_SYMBOL_COLOR = '#cfd5e2'
@@ -77,7 +77,7 @@ export function ownerBrowserWindowOptions(input: OwnerWindowOptionsInput): Brows
     return {
       ...base,
       titleBarStyle: 'hiddenInset',
-      trafficLightPosition: { x: 14, y: 12 },
+      trafficLightPosition: { x: 14, y: 17 },
     }
   }
 

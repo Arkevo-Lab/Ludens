@@ -271,8 +271,8 @@ h3 {
     border-right-color: transparent;
   }
   .sidebar[data-desktop-chrome="true"] {
-    padding-top: 10px;
-    gap: 14px;
+    padding-top: 0;
+    gap: 10px;
   }
   .sidebar[data-desktop-chrome="true"] > .sidebar-brand-row {
     display: none;
