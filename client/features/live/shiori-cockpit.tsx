@@ -2090,6 +2090,7 @@ export function ShioriComposer({
       className="codex-composer-wrap"
       data-shiori-composer={effectiveTab}
       data-compact-immersive={compactImmersive ? "true" : undefined}
+      data-auto={isAuto ? "true" : undefined}
     >
       {menuPresence.mounted && (
         <div

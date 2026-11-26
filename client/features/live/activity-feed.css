@@ -487,7 +487,8 @@
 
 .immersive-floating-pod[data-pod-tier="compact"],
 .immersive-floating-pod[data-pod-tier="stream"] {
-  width: clamp(340px, 34vw, 450px);
+  width: clamp(360px, 38vw, 480px);
+  max-width: calc(100% - 32px);
   border-radius: 18px;
   border: 1px solid color-mix(in srgb, var(--border) 88%, rgba(255, 255, 255, 0.1));
   background: color-mix(in srgb, var(--card) 86%, rgba(9, 11, 16, 0.88));
@@ -1851,31 +1852,79 @@ details.codex-step-group:not([open])::details-content {
 .codex-composer-wrap[data-compact-immersive="true"] {
   max-width: none;
   margin: 0;
-  padding: 4px 8px 8px;
+  padding: 6px 8px 8px;
 }
 .codex-composer-wrap[data-compact-immersive="true"] .codex-pill-composer {
-  gap: 4px;
-  padding: 7px 10px 7px;
+  gap: 6px;
+  padding: 8px 10px 7px;
   border-radius: 14px;
   box-shadow: none;
+  min-width: 0;
+  overflow: hidden;
   background: color-mix(in srgb, var(--surface-inset, #07080b) 65%, var(--card));
 }
 .codex-composer-wrap[data-compact-immersive="true"] .codex-pill-textarea {
-  min-height: 28px;
-  max-height: 96px;
+  min-height: 40px;
+  max-height: 104px;
   font-size: 13px;
   line-height: 1.45;
+}
+.codex-composer-wrap[data-compact-immersive="true"] .codex-pill-bar {
+  gap: 6px;
+  min-width: 0;
+}
+.codex-composer-wrap[data-compact-immersive="true"] .codex-pill-left {
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 4px;
+  overflow: hidden;
+}
+.codex-composer-wrap[data-compact-immersive="true"] .codex-pill-right {
+  flex: 0 0 auto;
+  gap: 4px;
+}
+.codex-composer-wrap[data-compact-immersive="true"] .codex-icon-btn {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+}
+.codex-composer-wrap[data-compact-immersive="true"] .codex-access-pill,
+.codex-composer-wrap[data-compact-immersive="true"] .codex-subtle-pill {
+  height: 26px;
+  padding: 0 8px;
+  font-size: 11.5px;
+}
+.codex-composer-wrap[data-compact-immersive="true"] .codex-access-pill {
+  min-width: 0;
+  max-width: 148px;
+  overflow: hidden;
+}
+.codex-composer-wrap[data-compact-immersive="true"] .codex-access-pill > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .codex-composer-wrap[data-compact-immersive="true"] .codex-send-circle {
   width: 28px;
   height: 28px;
+  flex-shrink: 0;
 }
 .codex-composer-wrap[data-compact-immersive="true"] .codex-preset-popover {
   left: 8px;
   width: min(380px, calc(100% - 16px));
 }
 .codex-composer-wrap[data-compact-immersive="true"] .codex-model-pill {
-  max-width: 168px;
+  height: 26px;
+  min-width: 0;
+  max-width: 124px;
+  padding: 0 7px;
+  font-size: 11.5px;
+}
+/* In compact immersive pod while Auto is running, hide the locked read-only model pill so
+   mode pill + live timer + stop + send never collide or clip at narrow widths. */
+.codex-composer-wrap[data-compact-immersive="true"][data-auto="true"] .codex-model-pill {
+  display: none;
 }
 
 .codex-preset-popover {
