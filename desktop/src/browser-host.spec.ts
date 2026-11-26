@@ -376,6 +376,12 @@ describe('URL security & bounds normalization', () => {
     expect(validateBrowserNavigationUrl('http://localhost:5173/game').logicalUrl).toBe(
       'http://localhost:5173/game',
     )
+    expect(validateBrowserNavigationUrl('jab-lao.itch.io/pokemon-overlord').logicalUrl).toBe(
+      'https://jab-lao.itch.io/pokemon-overlord',
+    )
+    expect(validateBrowserNavigationUrl('localhost:5173/arena').logicalUrl).toBe(
+      'http://localhost:5173/arena',
+    )
     expect(validateBrowserNavigationUrl('about:blank').logicalUrl).toBe('about:blank')
   })
 

@@ -86,9 +86,25 @@ export function validateBrowserNavigationUrl(rawUrl: string): ValidatedNavigatio
       targetUrl: 'about:blank',
     }
   }
+  let candidate = trimmed
+  const hasExplicitScheme =
+    /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(candidate) ||
+    /^(ludens-app|ludens-media|file|javascript|data|chrome|devtools|about|mailto|blob):/i.test(candidate)
+  if (!hasExplicitScheme) {
+    if (/\s/.test(candidate)) {
+      throw new Error(`Invalid browser navigation URL: ${rawUrl}`)
+    }
+    const isLoopback = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])(?::\d+)?(?:[/?#]|$)/i.test(candidate)
+    const isDomainLike = /^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+(?::\d+)?(?:[/?#]|$)/.test(candidate)
+    if (isLoopback) {
+      candidate = `http://${candidate}`
+    } else if (isDomainLike) {
+      candidate = `https://${candidate}`
+    }
+  }
   let parsed: URL
   try {
-    parsed = new URL(trimmed)
+    parsed = new URL(candidate)
   } catch {
     throw new Error(`Invalid browser navigation URL: ${rawUrl}`)
   }
