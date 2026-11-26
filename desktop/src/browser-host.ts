@@ -31,6 +31,10 @@ import {
   type ViewportState,
 } from '@ludens/protocol/viewport'
 import type { BrowserWindow, WebContentsView } from 'electron'
+import {
+  createBrowserUrlPreferenceStore,
+  type BrowserUrlPreferenceStore,
+} from './browser-preferences.js'
 import { buildBrowserStartPageHtml } from './browser-start-page.js'
 import type { DesktopViewportFramePayload } from './rpc-channels.js'
 
@@ -301,6 +305,7 @@ export interface BrowserHostOptions {
   hostId?: string
   version?: string
   sessionFactory?: BrowserSessionFactory
+  urlStore?: BrowserUrlPreferenceStore
   onCloseCleanup?: () => Promise<void> | void
   defaultWidth?: number
   defaultHeight?: number
@@ -380,15 +385,29 @@ class ManagedBrowserSession {
   private latestFrame: BrowserSessionFrame | undefined
   private readonly unsubFrame: () => void
   private readonly unsubState: () => void
+  private readonly resolveSavedUrl?: () => Promise<string | undefined>
+  private readonly onExternalUrl?: (url: string) => void
+  private lastPersistedUrl: string | undefined
   private closed = false
 
-  constructor(sessionId: string, backend: BrowserSessionBackend, width: number, height: number) {
+  constructor(
+    sessionId: string,
+    backend: BrowserSessionBackend,
+    width: number,
+    height: number,
+    options?: {
+      resolveSavedUrl?: () => Promise<string | undefined>
+      onExternalUrl?: (url: string) => void
+    },
+  ) {
     this.sessionId = sessionId
     this.backend = backend
     this.width = width
     this.height = height
     this.cursorX = Math.round(width / 2)
     this.cursorY = Math.round(height / 2)
+    this.resolveSavedUrl = options?.resolveSavedUrl
+    this.onExternalUrl = options?.onExternalUrl
 
     this.unsubFrame = backend.onFrame(frame => {
       if (this.closed) return
@@ -400,8 +419,22 @@ class ManagedBrowserSession {
       this.latestState = state
       if (state.width > 0) this.width = state.width
       if (state.height > 0) this.height = state.height
+      this.recordExternalNavigation(state.navigation?.url)
       this.broadcastState(state)
     })
+  }
+
+  private recordExternalNavigation(rawUrl: string | undefined): void {
+    if (!rawUrl || !this.onExternalUrl) return
+    try {
+      const parsed = validateBrowserNavigationUrl(rawUrl)
+      if (parsed.kind !== 'external') return
+      if (parsed.logicalUrl === this.lastPersistedUrl) return
+      this.lastPersistedUrl = parsed.logicalUrl
+      this.onExternalUrl(parsed.logicalUrl)
+    } catch {
+      // Ignore non-persistable / internal URLs (about:blank, chrome-error://, etc.).
+    }
   }
 
   async ensure(options: { initialUrl?: string; width?: number; height?: number }): Promise<ViewportState> {
@@ -416,7 +449,16 @@ class ManagedBrowserSession {
         this.cursorY = Math.round(targetHeight / 2)
         await this.backend.resize(targetWidth, targetHeight)
       }
-      const initialTarget = validateBrowserNavigationUrl(options.initialUrl?.trim() || BUILTIN_BROWSER_START_URL)
+      const explicitInitial = options.initialUrl?.trim()
+      const hasExplicitOverride = Boolean(explicitInitial && explicitInitial !== BUILTIN_BROWSER_START_URL)
+      let desiredUrl = explicitInitial || BUILTIN_BROWSER_START_URL
+      if (!hasExplicitOverride && this.resolveSavedUrl) {
+        const savedUrl = await this.resolveSavedUrl().catch(() => undefined)
+        if (savedUrl) {
+          desiredUrl = savedUrl
+        }
+      }
+      const initialTarget = validateBrowserNavigationUrl(desiredUrl)
       const state =
         initialTarget.kind === 'start'
           ? await this.backend.loadStartPage(initialTarget.targetUrl, initialTarget.logicalUrl)
@@ -424,6 +466,7 @@ class ManagedBrowserSession {
       this.latestState = state
       if (state.width > 0) this.width = state.width
       if (state.height > 0) this.height = state.height
+      this.recordExternalNavigation(state.navigation?.url)
       await this.backend.setStreaming(true).catch(() => {})
       return state
     }
@@ -505,6 +548,7 @@ class ManagedBrowserSession {
     this.latestState = state
     if (state.width > 0) this.width = state.width
     if (state.height > 0) this.height = state.height
+    this.recordExternalNavigation(state.navigation?.url)
     this.broadcastState(state)
     return state
   }
@@ -1743,6 +1787,7 @@ export class BrowserHost {
   private readonly defaultWidth: number
   private readonly defaultHeight: number
   private readonly sessionFactory: BrowserSessionFactory
+  private readonly urlStore: BrowserUrlPreferenceStore
   private readonly onCloseCleanup?: () => Promise<void> | void
 
   private server: Server | undefined
@@ -1762,6 +1807,7 @@ export class BrowserHost {
     this.version = options.version ?? BROWSER_HOST_VERSION
     this.defaultWidth = options.defaultWidth ?? DEFAULT_VIEWPORT_WIDTH
     this.defaultHeight = options.defaultHeight ?? DEFAULT_VIEWPORT_HEIGHT
+    this.urlStore = options.urlStore ?? createBrowserUrlPreferenceStore(this.home)
 
     if (options.sessionFactory) {
       this.sessionFactory = options.sessionFactory
@@ -2045,7 +2091,12 @@ export class BrowserHost {
           height,
           partition,
         })
-        const managed = new ManagedBrowserSession(params.sessionId, backend, width, height)
+        const managed = new ManagedBrowserSession(params.sessionId, backend, width, height, {
+          resolveSavedUrl: () => this.urlStore.readLastUrl(params.sessionId),
+          onExternalUrl: url => {
+            void this.urlStore.writeLastUrl(params.sessionId, url).catch(() => {})
+          },
+        })
         this.sessions.set(params.sessionId, managed)
         try {
           await managed.ensure(params)

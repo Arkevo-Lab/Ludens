@@ -167,12 +167,25 @@ export interface DesktopViewportBridge {
   onFrame?(callback: (frame: DesktopViewportFramePayload) => void): () => void;
 }
 
+export interface DesktopPowerState {
+  readonly preventAppSuspension: boolean;
+  readonly blocking: boolean;
+  readonly activeCoreCount: number;
+}
+
+export interface DesktopPowerBridge {
+  getState(): Promise<DesktopPowerState>;
+  setPreventAppSuspension(enabled: boolean): Promise<DesktopPowerState>;
+  onState(callback: (state: DesktopPowerState) => void): () => void;
+}
+
 export interface LudensDesktopBridge {
   readonly companion?: DesktopCompanion;
   readonly window?: DesktopWindowBridge;
   readonly rpc?: DesktopRpcBridge;
   readonly dialog?: DesktopDialogBridge;
   readonly viewport?: DesktopViewportBridge;
+  readonly power?: DesktopPowerBridge;
 }
 
 declare global {

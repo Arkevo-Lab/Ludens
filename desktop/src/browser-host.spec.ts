@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createConnection, type Socket } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -817,5 +817,88 @@ describe('BrowserHost UDS protocol, sessions, inputs, and native attachment', ()
     unsub2()
 
     await client.close()
+  })
+
+  it('persists last external navigation URL into workspace .ludens/settings.json and restores it on session.ensure rebuild', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'ludens-browser-url-home-'))
+    const workspaceDir = join(home, 'workspaces', 'pokemon-test')
+    const sessionId = 'ws-remember-url'
+    await mkdir(join(home, 'registry'), { recursive: true })
+    await mkdir(join(workspaceDir, '.ludens'), { recursive: true })
+    await writeFile(
+      join(home, 'registry', `${sessionId}.json`),
+      JSON.stringify({
+        id: sessionId,
+        workspace: workspaceDir,
+        name: 'Pokemon test',
+        updatedAt: '2026-11-26T00:00:00.000Z',
+      }),
+    )
+    await writeFile(
+      join(workspaceDir, '.ludens', 'settings.json'),
+      JSON.stringify({ hotSeconds: 180 }, null, 2) + '\n',
+    )
+
+    const makeHost = async () => {
+      const backends = new Map<string, FakeSessionBackend>()
+      const host = new BrowserHost({
+        home,
+        sessionFactory: ({ sessionId: sid, width, height }) => {
+          const backend = new FakeSessionBackend(sid, width, height)
+          backends.set(sid, backend)
+          return backend
+        },
+      })
+      await host.start()
+      return { host, backends }
+    }
+
+    try {
+      // 1) First host navigates to external URL -> persisted in workspace .ludens/settings.json
+      const first = await makeHost()
+      const client1 = await TestUdsClient.connect(first.host.socketPath)
+      await client1.call({ kind: 'session.ensure', sessionId, width: 1280, height: 720 })
+      await client1.call({
+        kind: 'session.action',
+        sessionId,
+        action: { kind: 'navigate', url: 'https://www.pokemonsurvivors.com/play' },
+      })
+      await new Promise(resolve => setTimeout(resolve, 40))
+      await client1.close()
+      await first.host.close()
+
+      const savedSettings = JSON.parse(
+        await readFile(join(workspaceDir, '.ludens', 'settings.json'), 'utf8'),
+      ) as { hotSeconds?: number; browser?: { lastUrl?: string; sessions?: Record<string, { lastUrl: string }> } }
+      expect(savedSettings.hotSeconds).toBe(180)
+      expect(savedSettings.browser?.lastUrl).toBe('https://www.pokemonsurvivors.com/play')
+      expect(savedSettings.browser?.sessions?.[sessionId]?.lastUrl).toBe('https://www.pokemonsurvivors.com/play')
+
+      // 2) Rebuilt host calls session.ensure without explicit external override -> restores saved URL
+      const second = await makeHost()
+      const client2 = await TestUdsClient.connect(second.host.socketPath)
+      const restored = await client2.call<ViewportState>({
+        kind: 'session.ensure',
+        sessionId,
+        initialUrl: BUILTIN_BROWSER_START_URL,
+      })
+      expect(restored.navigation?.url).toBe('https://www.pokemonsurvivors.com/play')
+      await client2.close()
+      await second.host.close()
+
+      // 3) Rebuilt host with explicit external initialUrl overrides the saved URL
+      const third = await makeHost()
+      const client3 = await TestUdsClient.connect(third.host.socketPath)
+      const overridden = await client3.call<ViewportState>({
+        kind: 'session.ensure',
+        sessionId,
+        initialUrl: 'https://override.example/arena',
+      })
+      expect(overridden.navigation?.url).toBe('https://override.example/arena')
+      await client3.close()
+      await third.host.close()
+    } finally {
+      await rm(home, { recursive: true, force: true })
+    }
   })
 })

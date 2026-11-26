@@ -6,6 +6,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  powerSaveBlocker,
   protocol,
   screen,
   session,
@@ -37,6 +38,11 @@ import {
 import type { LudensPetSnapshot } from './ludens-source.js'
 import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
 import { installMainProcessSafety, installParentWatchdog } from './process-safety.js'
+import {
+  createPowerSavePreferenceStore,
+  DesktopPowerSaveController,
+  LUDENS_POWER_CHANNELS,
+} from './power-save-blocker.js'
 import { ActiveCoreQuitGuard, mapDialogButtonToQuitAction } from './quit-guard.js'
 import { DesktopUdsRpcRelay } from './rpc-bridge.js'
 import { LUDENS_VIEWPORT_CHANNELS, type DesktopViewportFrameStreamInput } from './rpc-channels.js'
@@ -153,6 +159,7 @@ if (values.help) {
     let source: PetSessionCoordinator | undefined
     let rpcRelay: DesktopUdsRpcRelay | undefined
     let browserHost: BrowserHost | undefined
+    let powerSaveController: DesktopPowerSaveController | undefined
     let activeFrameStream: { sessionId: string; unsubscribe: () => void } | undefined
     let pendingFrameStreamSessionId: string | undefined
     let frameStreamGeneration = 0
@@ -236,6 +243,7 @@ if (values.help) {
         await closingHost.close().catch(() => {})
       }
       try { source?.stop() } catch {}
+      try { powerSaveController?.dispose(); powerSaveController = undefined } catch {}
       try { rpcRelay?.dispose() } catch {}
       try { if (tray && !tray.isDestroyed()) tray.destroy() } catch {}
       try { await mainMediaClient?.close().catch(() => {}) } catch {}
@@ -714,6 +722,35 @@ if (values.help) {
         return runDialogPickPath(owner, dialog.showOpenDialog.bind(dialog), rawOptions)
       })
 
+      const powerPrefsStore = createPowerSavePreferenceStore(
+        join(app.getPath('userData'), 'power-preferences.json'),
+      )
+      powerSaveController = new DesktopPowerSaveController({
+        blocker: powerSaveBlocker,
+        store: powerPrefsStore,
+        queryStatus: timeoutMs => appServerHost.probeStatus(timeoutMs),
+        onStateChange: state => {
+          if (owner && !owner.isDestroyed() && isDashboardUrl(owner.webContents.getURL(), serverOrigin)) {
+            owner.webContents.send(LUDENS_POWER_CHANNELS.state, state)
+          }
+        },
+      })
+      ipcMain.handle(LUDENS_POWER_CHANNELS.getState, async event => {
+        if (!trusted(event)) throw new Error('Unauthorized power access')
+        return powerSaveController ? powerSaveController.refresh() : {
+          preventAppSuspension: true,
+          blocking: false,
+          activeCoreCount: 0,
+        }
+      })
+      ipcMain.handle(LUDENS_POWER_CHANNELS.setPreventAppSuspension, async (event, rawEnabled: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized power access')
+        if (!powerSaveController) {
+          return { preventAppSuspension: Boolean(rawEnabled), blocking: false, activeCoreCount: 0 }
+        }
+        return powerSaveController.setPreventAppSuspension(Boolean(rawEnabled))
+      })
+
       const parseBounds = (raw: unknown): NativeViewportBounds => {
         if (!raw || typeof raw !== 'object') {
           throw new Error('Invalid viewport bounds')
@@ -983,12 +1020,15 @@ if (values.help) {
         socketPath: daemonInfo.socketPath,
         onTargetChanged: () => {
           if (source && companion) companion.configureActivity(source)
+          void powerSaveController?.refresh()
         },
         onSnapshot: value => {
           snapshot = value
           if (owner && !owner.isDestroyed()) owner.webContents.send('ludens-pet:snapshot', value)
+          void powerSaveController?.refresh()
         },
       })
+      powerSaveController?.start()
       if (companion) companion.configureActivity(source)
       source.setFocusedProject(extractProjectFromUrl(dashboardTarget, serverOrigin))
       void source.start(workspace)

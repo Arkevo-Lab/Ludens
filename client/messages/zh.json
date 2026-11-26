@@ -96,6 +96,12 @@
     "infoVerbosityLevel4Detail": "自动展开全部推理与工具调用步骤，系统动态与模型输入保持折叠。",
     "infoVerbosityLevel5Label": "全量",
     "infoVerbosityLevel5Detail": "调试模式：步骤、系统状态记录与模型输入原始载荷全部默认展开。",
+    "preventAppSuspension": "锁屏时防止后台休眠",
+    "preventAppSuspensionDescription": "当存在活跃 Core 或自主运行时自动开启系统防挂起（空闲时自动释放），确保锁屏后后端不被系统挂起。",
+    "preventAppSuspensionDesktopOnly": "仅在 Ludens 桌面端生效（默认开启）。",
+    "preventAppSuspensionBlocking": "防休眠生效中（{count} 个活跃 Core）",
+    "preventAppSuspensionStandby": "待命中 — 有活跃 Core 运行时自动开启",
+    "preventAppSuspensionDisabled": "已关闭 — 锁屏后系统可能挂起后台运行",
     "consoleDescription": "此控制台的显示偏好、新建工作区全局默认参数与多模态传输配置。",
     "consoleTitle": "控制台",
     "globalDefaults": {

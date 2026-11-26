@@ -13,6 +13,7 @@ import {
   resolveCaptionStyle,
 } from './window-chrome.js'
 import { LUDENS_DIALOG_PICK_PATH_CHANNEL } from './dialog-picker.js'
+import { LUDENS_POWER_CHANNELS } from './power-save-blocker.js'
 
 function on(channel: string, callback: (value: any) => void) {
   const listener = (_event: Electron.IpcRendererEvent, value: unknown) => callback(value)
@@ -94,6 +95,12 @@ contextBridge.exposeInMainWorld('ludens', {
   viewport: viewportBridge,
   dialog: {
     pickPath: (options: unknown) => ipcRenderer.invoke(LUDENS_DIALOG_PICK_PATH_CHANNEL, options),
+  },
+  power: {
+    getState: () => ipcRenderer.invoke(LUDENS_POWER_CHANNELS.getState),
+    setPreventAppSuspension: (enabled: boolean) =>
+      ipcRenderer.invoke(LUDENS_POWER_CHANNELS.setPreventAppSuspension, Boolean(enabled)),
+    onState: (callback: (value: unknown) => void) => on(LUDENS_POWER_CHANNELS.state, callback),
   },
   companion: {
     getSound: () => ipcRenderer.invoke('ludens:companion:sound:get'),

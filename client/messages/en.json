@@ -96,6 +96,12 @@
     "infoVerbosityLevel4Detail": "Auto-expand all reasoning and tool-call steps; keep system events and model inputs collapsed.",
     "infoVerbosityLevel5Label": "Full",
     "infoVerbosityLevel5Detail": "Debug mode: expand steps, system status events, and raw model input payloads by default.",
+    "preventAppSuspension": "Prevent suspension while active",
+    "preventAppSuspensionDescription": "Hold macOS/Windows app-suspension prevention while any Core or Auto run is active so lock screen does not pause background runs.",
+    "preventAppSuspensionDesktopOnly": "Available in the Ludens Desktop app (enabled by default).",
+    "preventAppSuspensionBlocking": "Active ({count} running)",
+    "preventAppSuspensionStandby": "Standby — activates automatically when a Core runs",
+    "preventAppSuspensionDisabled": "Off — system may suspend background runs when locked",
     "consoleDescription": "Display preferences for this Console, global creation defaults, and default multimodal transport.",
     "consoleTitle": "Console",
     "globalDefaults": {
