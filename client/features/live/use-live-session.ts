@@ -603,9 +603,11 @@ export function useLiveSession(options: {
   const dismissContention = useCallback(() => engine.dismissContention(), [engine]);
   const dismissStaleEpochNotice = useCallback(() => engine.dismissStaleEpochNotice(), [engine]);
 
+  const effectiveRunId =
+    typeof live?.runId === "string" && live.runId.trim() ? live.runId.trim() : data.run;
   const latestContextRef = useRef({
     workspace,
-    run: data.run,
+    run: effectiveRunId,
     baseUpdatedAt: rawData.updatedAt,
     baseServerModel: serverModel,
     expectedEpoch: live?.epoch ?? null,
@@ -613,7 +615,7 @@ export function useLiveSession(options: {
   });
   latestContextRef.current = {
     workspace,
-    run: data.run,
+    run: effectiveRunId,
     baseUpdatedAt: rawData.updatedAt,
     baseServerModel: serverModel,
     expectedEpoch: live?.epoch ?? null,

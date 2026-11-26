@@ -1915,7 +1915,7 @@ export function ShioriComposer({
           ? await sessionActions.steerOrStartAuto(text, durationSeconds)
           : await engine!.steerOrStartAuto({
               workspace,
-              run: data.run,
+              run: (typeof effectiveHost?.runId === "string" && effectiveHost.runId.trim()) || data.run,
               baseUpdatedAt: data.updatedAt,
               baseServerModel: serverModel,
               expectedEpoch: effectiveHost?.epoch ?? null,
@@ -1927,6 +1927,8 @@ export function ShioriComposer({
         if (fellBackToAutoOn) setSelectedTab(null);
         applyHostStatusObject(status);
       } else {
+        const effectiveRunId =
+          (typeof effectiveHost?.runId === "string" && effectiveHost.runId.trim()) || data.run;
         const { status } = sessionActions
           ? await sessionActions.startAuto({
               message: text || undefined,
@@ -1934,7 +1936,7 @@ export function ShioriComposer({
             })
           : await engine!.runRuntimeCommand({
               workspace,
-              run: data.run,
+              run: effectiveRunId,
               baseUpdatedAt: data.updatedAt,
               baseServerModel: serverModel,
               mightSpawnCore: !hostOnline,
@@ -1942,7 +1944,7 @@ export function ShioriComposer({
                 action: "auto_on",
                 ...(text ? { message: text } : {}),
                 seconds: durationSeconds,
-                ...(data.run ? { runId: data.run } : {}),
+                ...(effectiveRunId ? { runId: effectiveRunId } : {}),
                 expectedEpoch: effectiveHost?.epoch ?? null,
               },
               onUpdated,
@@ -2128,7 +2130,7 @@ export function ShioriComposer({
               void runComposerAction(
                 {
                   action: "consolidate",
-                  runId: data.run,
+                  runId: (typeof effectiveHost?.runId === "string" && effectiveHost.runId.trim()) || data.run,
                   expectedEpoch: effectiveHost?.epoch ?? null,
                 },
                 t("consolidateBtn"),
@@ -2503,7 +2505,7 @@ export function ShioriComposer({
                   void runComposerAction(
                     {
                       action: "auto_off",
-                      runId: data.run,
+                      runId: (typeof effectiveHost?.runId === "string" && effectiveHost.runId.trim()) || data.run,
                       expectedEpoch: effectiveHost?.epoch ?? undefined,
                     },
                     t("handbackStop"),
