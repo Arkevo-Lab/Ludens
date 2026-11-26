@@ -15,6 +15,36 @@ import {
 } from "@ludens/protocol/machines";
 import { VIDEO_QUALITY_SPECS, type VideoQualityPreset } from "@/lib/storage";
 
+function normalizeWorkspaceBrowserUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if (trimmed === "ludens-browser://start") return trimmed;
+  if (trimmed.toLowerCase() === "about:blank") return "about:blank";
+  if (
+    /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
+    || /^(javascript|data|blob|vbscript|file|about|mailto|chrome|devtools):/i.test(trimmed)
+    || /\s/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  const authority = trimmed.split(/[/?#]/, 1)[0] ?? "";
+  const hostOnly = authority.startsWith("[")
+    ? authority.slice(0, authority.indexOf("]") + 1)
+    : (authority.split(":")[0] ?? "");
+  const isLocal =
+    hostOnly === "localhost"
+    || hostOnly === "127.0.0.1"
+    || hostOnly === "[::1]"
+    || hostOnly === "::1"
+    || hostOnly === "0.0.0.0"
+    || /^\d+\.\d+\.\d+\.\d+$/.test(hostOnly);
+  try {
+    return new URL(`${isLocal ? "http" : "https"}://${trimmed}`).href;
+  } catch {
+    return trimmed;
+  }
+}
+
 export type WorkspaceEnvironment = "desktop" | "community";
 export type WorkspaceTargetMode = "machine" | "driver" | "package";
 export type FirstClassEnvironmentKind = "browser" | "computer" | "external";
@@ -432,7 +462,8 @@ export function workspaceCreateInput(
       draft.driverId?.trim() ||
       "cua";
     const resolvedPkg = matched?.driverPackage || (draft.driverPackage.trim() || undefined);
-    const trimmedUrl = draft.url?.trim() || "";
+    const rawUrl = draft.url?.trim() || "";
+    const trimmedUrl = rawUrl ? normalizeWorkspaceBrowserUrl(rawUrl) : "";
     const isBuiltinPkg =
       resolvedPkg === BUILTIN_CUA_DRIVER_SPEC || resolvedPkg === BUILTIN_BROWSER_DRIVER_SPEC;
     return {
@@ -457,7 +488,8 @@ export function workspaceCreateInput(
       context?.catalogDriver?.id === "browser" ||
       (!context?.catalogDriver && draft.driverId === "browser"))
   ) {
-    const trimmedUrl = draft.url?.trim() || "";
+    const rawUrl = draft.url?.trim() || "";
+    const trimmedUrl = rawUrl ? normalizeWorkspaceBrowserUrl(rawUrl) : "";
     return {
       ok: true,
       input: {

@@ -2605,10 +2605,6 @@ details.codex-step-group:not([open])::details-content {
 }
 
 /* ── RIGHT WORKBENCH DOCK (Matches the right pane in the screenshot) ── */
-.codex-dock-backdrop {
-  display: none;
-}
-
 .codex-right-dock {
   grid-area: dock;
   position: relative;
@@ -3876,57 +3872,21 @@ details.codex-input-payload-details:not([open])::details-content {
   .codex-workbench:not([data-immersive="true"]),
   .codex-workbench[data-dock-open]:not([data-immersive="true"]) {
     grid-template-columns: minmax(0, 1fr);
-  }
-  .codex-dock-backdrop {
-    display: block;
-    position: absolute;
-    inset: 0;
-    z-index: 35;
-    background: rgba(5, 7, 11, 0.54);
-    backdrop-filter: blur(2px);
-    opacity: 1;
-    transition: opacity var(--duration-normal) var(--ease-out-expo);
-  }
-  @starting-style {
-    .codex-dock-backdrop {
-      opacity: 0;
-    }
-  }
-  .codex-dock-backdrop[data-motion-state="closed"] {
-    opacity: 0;
-    pointer-events: none;
+    grid-template-areas:
+      "chat"
+      "composer";
   }
   .codex-right-dock:not([data-immersive="true"]) {
+    grid-area: auto;
     position: absolute;
     top: 0;
     right: 0;
     bottom: 0;
     height: 100%;
     min-width: 0;
-    width: min(370px, calc(100vw - 48px));
+    width: min(380px, calc(100% - 24px));
     max-width: 100%;
     z-index: 40;
-    background: var(--background);
-    border-left: 1px solid var(--border);
-    box-shadow: -12px 0 36px rgba(0, 0, 0, 0.42);
-    transform: translateX(0);
-    opacity: 1;
-    visibility: visible;
-    transition:
-      transform var(--duration-normal) var(--ease-out-expo),
-      opacity var(--duration-normal) var(--ease-out-expo),
-      visibility var(--duration-normal) step-start;
-  }
-  .codex-right-dock:not([data-immersive="true"])[data-dock-state="closed"] {
-    transform: translateX(100%);
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    border-left-color: transparent;
-    transition:
-      transform var(--duration-normal) var(--ease-out-expo),
-      opacity var(--duration-normal) var(--ease-out-expo),
-      visibility var(--duration-normal) step-end;
   }
   .codex-right-dock:not([data-immersive="true"]) .codex-dock-close-btn {
     display: inline-flex;

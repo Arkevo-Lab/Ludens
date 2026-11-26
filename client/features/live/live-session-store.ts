@@ -170,14 +170,14 @@ export const DEFAULT_STALE_EPOCH_MESSAGE =
   "Control cycle changed — status synced, please try again.";
 
 export function isStaleEpochError(cause: unknown): boolean {
-  if (
-    (cause instanceof RuntimeControlError || (cause && typeof cause === "object")) &&
-    (cause as { code?: unknown }).code === "STALE_EPOCH"
-  ) {
-    return true;
+  if (cause instanceof RuntimeControlError || (cause && typeof cause === "object")) {
+    const code = (cause as { code?: unknown }).code;
+    if (code === "STALE_EPOCH" || code === "STALE_RUN") {
+      return true;
+    }
   }
   const msg = cause instanceof Error ? cause.message : String(cause);
-  return msg.includes("STALE_EPOCH");
+  return msg.includes("STALE_EPOCH") || msg.includes("STALE_RUN");
 }
 
 export function isCoreOfflineError(cause: unknown): boolean {

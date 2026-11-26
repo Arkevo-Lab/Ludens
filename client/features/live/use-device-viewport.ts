@@ -42,7 +42,7 @@ export type ViewportTransportMode = "native-electron" | "stream" | "none";
 export type ViewportStreamStatus = "idle" | "connecting" | "connected" | "disconnected";
 
 const MODAL_OCCLUSION_SELECTOR =
-  '[role="dialog"], [data-slot="dialog-content"], .codex-dock-backdrop, [data-viewport-floating-overlay]';
+  '[role="dialog"], [data-slot="dialog-content"], [data-viewport-floating-overlay]';
 
 const PREVENT_DEFAULT_KEYS = new Set([
   "ArrowUp",
@@ -233,7 +233,8 @@ export function hasVisibleModalOcclusion(
   const slotRect = slotEl ? slotEl.getBoundingClientRect() : null;
   for (const node of nodes) {
     if (node.hidden) continue;
-    if (node.getAttribute("aria-hidden") === "true" && !node.classList.contains("codex-dock-backdrop")) {
+    if (slotEl && node.contains(slotEl)) continue;
+    if (node.getAttribute("aria-hidden") === "true") {
       continue;
     }
     if (node.dataset.motionState === "closed" || node.dataset.state === "closed") {
@@ -450,6 +451,26 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
     },
     { enabled: enabled && Boolean(project), workspaceId: project || undefined },
   );
+
+  // Automatically recover when a browser viewport transiently reports offline (e.g. cold startup or busy Desktop host)
+  useEffect(() => {
+    if (
+      !enabled ||
+      suspended ||
+      !project ||
+      !rpc ||
+      state?.stageKind !== "browser" ||
+      state.available
+    ) {
+      return;
+    }
+    const timer = setInterval(() => {
+      void refresh();
+    }, 2500);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [enabled, suspended, project, Boolean(rpc), state?.stageKind, state?.available, refresh]);
 
   const wsUrl = useMemo(() => {
     if (!rpc || !resolvedEndpoints || !project) return null;

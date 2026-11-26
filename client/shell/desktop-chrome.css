@@ -6,6 +6,8 @@
 .desktop-shell-root[data-desktop-chrome="true"] .codex-thread-header,
 .desktop-shell-root[data-desktop-chrome="true"] .codex-dock-header,
 .desktop-shell-root[data-desktop-chrome="true"] .device-viewport-chrome,
+.desktop-shell-root[data-desktop-chrome="true"] .replay-studio-topbar,
+.desktop-shell-root[data-desktop-chrome="true"] .replay-inspector-header,
 .desktop-shell-root[data-desktop-chrome="true"] .desktop-view-dragbar {
   -webkit-app-region: drag;
   user-select: none;
@@ -17,6 +19,8 @@
   .codex-thread-header,
   .codex-dock-header,
   .device-viewport-chrome,
+  .replay-studio-topbar,
+  .replay-inspector-header,
   .desktop-view-dragbar
 ) :is(button, a, input, select, form, [role="tab"], [data-no-drag]) {
   -webkit-app-region: no-drag;
@@ -71,6 +75,14 @@
 
 .codex-dock-header .desktop-trailing-controls {
   margin-right: -16px;
+}
+
+.replay-studio-topbar .desktop-trailing-controls {
+  margin-right: -14px;
+}
+
+.replay-inspector-header .desktop-trailing-controls {
+  margin-right: -8px;
 }
 
 .desktop-view-dragbar {

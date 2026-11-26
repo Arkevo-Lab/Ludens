@@ -353,13 +353,13 @@ export class WorkspaceSupervisor {
       }
     }
 
-    return launchPlan(config, workspace, this.repo, undefined, manifest, activeMachine);
+    return launchPlan(config, workspace, this.repo, undefined, manifest, activeMachine, this.home);
   }
 
   private async buildDownPlan(workspace: string): Promise<LaunchPlan> {
     const manifest = await resolveDriver("cua", undefined, join(this.home, "cache", "drivers"));
     const config = parseConfig({ driver: "cua", pet: false }, manifest);
-    return launchPlan(config, workspace, this.repo, undefined, manifest);
+    return launchPlan(config, workspace, this.repo, undefined, manifest, undefined, this.home);
   }
 
   private async ensureRegisteredWorkspace(workspace: string) {

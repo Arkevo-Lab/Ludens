@@ -30,10 +30,13 @@ import {
 } from "@ludens/protocol/viewport";
 import { NodeUdsRpcClient, WsAppRpcClient } from "../src/daemon/app-rpc-client.ts";
 import {
+  DEFAULT_BROWSER_HOST_NEGATIVE_CACHE_TTL_MS,
   invalidateBrowserHostCache,
   probeBrowserHost,
 } from "../src/daemon/browser-host-client.ts";
-import { launchPlan, parseConfig } from "../src/daemon/launcher.ts";
+import { resolveWorkspaceDeviceIdentity } from "../src/daemon/device-arbitration.ts";
+import { launchPlan, parseConfig, type LaunchIO, type LaunchPlan } from "../src/daemon/launcher.ts";
+import { WorkspaceSupervisor } from "../src/daemon/supervisor.ts";
 import { discoverDriver } from "../src/query/drivers.ts";
 import { initializeWorkspace } from "../src/query/workspace-init.ts";
 import {
@@ -892,3 +895,187 @@ test("viewport/* RPCs, browserHost/notify, and /viewport binary WebSocket stream
     await rm(root, { recursive: true, force: true });
   }
 }, 25_000);
+
+test("two builtin-browser workspaces bind, launch concurrently without DEVICE_BUSY, honor home/browser-host.json socket, and isolate viewport sessions", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-multi-browser-ws-")));
+  const home = join(root, "custom-home");
+
+  // Initialize two workspaces with two distinct web games (including schemeless URLs).
+  const wsGame1 = await initializeWorkspace(
+    { name: "web-game-1", driver: "browser", url: "game1.example/play" },
+    { home },
+  );
+  const wsGame2 = await initializeWorkspace(
+    { name: "web-game-2", driver: "browser", url: "localhost:5173/arena" },
+    { home },
+  );
+
+  expect(wsGame1.config.url).toBe("https://game1.example/play");
+  expect(wsGame2.config.url).toBe("http://localhost:5173/arena");
+
+  // Both workspaces resolve to non-exclusive deviceKey=null so they never contend.
+  expect((await resolveWorkspaceDeviceIdentity(wsGame1.workspace, home)).deviceKey).toBeNull();
+  expect((await resolveWorkspaceDeviceIdentity(wsGame2.workspace, home)).deviceKey).toBeNull();
+
+  const mockHost = await startMockBrowserHost(home, "multi-ws-host");
+  const server = await startAppServer({ home, wsListen: null });
+  const udsClient = new NodeUdsRpcClient({ socketPath: server.socketPath! });
+
+  const launchedCommands = new Map<string, string[]>();
+  const runningJobs = new Map<string, { pid: number; stateFile: string }>();
+  let nextPid = 40_000;
+
+  const supervisor = new WorkspaceSupervisor({
+    home,
+    ioFactory: (plan: LaunchPlan, note): LaunchIO => {
+      const stateKey = (file: string) => file;
+      return {
+        async run(argv) {
+          if (argv.includes("status")) {
+            const bwStateFile = join(plan.background, "baseware.job.json");
+            if (runningJobs.has(stateKey(bwStateFile))) {
+              return {
+                code: 0,
+                stdout: JSON.stringify({
+                  serviceId: `svc-${plan.workspace}`,
+                  mode: "auto",
+                  connected: true,
+                  epoch: "ep-live",
+                }),
+                stderr: "",
+              };
+            }
+          }
+          return { code: 1, stdout: "", stderr: "" };
+        },
+        async hostStatus() {
+          const hostStateFile = join(plan.background, "host.job.json");
+          if (!runningJobs.has(stateKey(hostStateFile))) return null;
+          return {
+            runId: `run-${plan.workspace}`,
+            epoch: "ep-live",
+            mode: "auto",
+            connected: true,
+            thinking: false,
+            consolidating: false,
+            timerSeconds: null,
+          };
+        },
+        async hostAutoOff() {},
+        async petReady() {
+          return false;
+        },
+        async sleep() {},
+        now: Date.now,
+        note,
+        async jobStatus(stateFile) {
+          const entry = runningJobs.get(stateKey(stateFile));
+          return entry
+            ? { registered: true, pid: entry.pid, state: "running", lastExitCode: null }
+            : { registered: false, pid: null, state: null, lastExitCode: null };
+        },
+        async stopJob(stateFile) {
+          runningJobs.delete(stateKey(stateFile));
+        },
+        async startJob(opts) {
+          const stateFile = join(opts.logDir ?? plan.background, `${opts.name}.job.json`);
+          if (opts.name === "baseware") {
+            launchedCommands.set(plan.workspace, [...opts.command]);
+          }
+          runningJobs.set(stateKey(stateFile), { pid: ++nextPid, stateFile });
+        },
+      };
+    },
+  });
+
+  try {
+    await udsClient.connect();
+    await udsClient.call("browserHost/notify", {
+      status: "online",
+      hostId: mockHost.hostId,
+      socketPath: mockHost.socketPath,
+      pid: process.pid,
+    });
+
+    // Launch BOTH browser workspaces concurrently — neither contends nor preempts the other.
+    const [up1, up2] = await Promise.all([
+      supervisor.up({ workspace: wsGame1.workspace, workspaceId: wsGame1.entry.id, launchedBy: "app" }),
+      supervisor.up({ workspace: wsGame2.workspace, workspaceId: wsGame2.entry.id, launchedBy: "app" }),
+    ]);
+
+    expect(up1.notes.some(n => n.includes("holder"))).toBe(false);
+    expect(up2.notes.some(n => n.includes("holder"))).toBe(false);
+
+    const cmd1 = launchedCommands.get(wsGame1.workspace)!;
+    const cmd2 = launchedCommands.get(wsGame2.workspace)!;
+    expect(cmd1[cmd1.indexOf("--session-id") + 1]).toBe(wsGame1.entry.id);
+    expect(cmd2[cmd2.indexOf("--session-id") + 1]).toBe(wsGame2.entry.id);
+    expect(cmd1[cmd1.indexOf("--browser-socket") + 1]).toBe(mockHost.socketPath);
+    expect(cmd2[cmd2.indexOf("--browser-socket") + 1]).toBe(mockHost.socketPath);
+    expect(cmd1[cmd1.indexOf("--initial-url") + 1]).toBe("https://game1.example/play");
+    expect(cmd2[cmd2.indexOf("--initial-url") + 1]).toBe("http://localhost:5173/arena");
+
+    // Describe both viewports concurrently via App-Server RPC -> both online with isolated sessions & URLs!
+    const [vp1, vp2] = await Promise.all([
+      udsClient.call("viewport/describe", { project: wsGame1.entry.id }),
+      udsClient.call("viewport/describe", { project: wsGame2.entry.id }),
+    ]);
+    expect(vp1).toMatchObject({
+      stageKind: "browser",
+      available: true,
+      connected: true,
+      sessionId: wsGame1.entry.id,
+      navigation: { url: "https://game1.example/play" },
+    });
+    expect(vp2).toMatchObject({
+      stageKind: "browser",
+      available: true,
+      connected: true,
+      sessionId: wsGame2.entry.id,
+      navigation: { url: "http://localhost:5173/arena" },
+    });
+
+    // Navigate game 1 independently without affecting game 2.
+    await udsClient.call("viewport/action", {
+      project: wsGame1.entry.id,
+      action: { kind: "navigate", url: "https://game1.example/level-2" },
+    });
+    const [vp1After, vp2After] = await Promise.all([
+      udsClient.call("viewport/describe", { project: wsGame1.entry.id }),
+      udsClient.call("viewport/describe", { project: wsGame2.entry.id }),
+    ]);
+    expect(vp1After.navigation?.url).toBe("https://game1.example/level-2");
+    expect(vp2After.navigation?.url).toBe("http://localhost:5173/arena");
+  } finally {
+    await supervisor.shutdownAll({ emergency: true }).catch(() => {});
+    await udsClient.close().catch(() => {});
+    await server.close({ emergency: true }).catch(() => {});
+    await mockHost.close().catch(() => {});
+    invalidateBrowserHostCache(home);
+    await rm(root, { recursive: true, force: true });
+  }
+}, 20_000);
+
+test("probeBrowserHost expires transient negative misses rapidly without poisoning recovery", async () => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), "ludens-bh-neg-ttl-")));
+  const home = join(root, "home");
+  invalidateBrowserHostCache(home);
+
+  let mockHost: MockBrowserHostHandle | null = null;
+  try {
+    // 1. Offline probe records a transient negative cache entry.
+    const miss = await probeBrowserHost(home);
+    expect(miss.available).toBe(false);
+
+    // 2. Start BrowserHost and wait just past the short negative TTL -> recovers automatically without force!
+    mockHost = await startMockBrowserHost(home, "recovered-host");
+    await Bun.sleep(DEFAULT_BROWSER_HOST_NEGATIVE_CACHE_TTL_MS + 40);
+    const recovered = await probeBrowserHost(home);
+    expect(recovered.available).toBe(true);
+    expect(recovered.hostId).toBe("recovered-host");
+  } finally {
+    if (mockHost) await mockHost.close().catch(() => {});
+    invalidateBrowserHostCache(home);
+    await rm(root, { recursive: true, force: true });
+  }
+});

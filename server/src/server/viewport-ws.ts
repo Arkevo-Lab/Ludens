@@ -29,6 +29,7 @@ import {
 import {
   BrowserHostClient,
   connectBasewareViewport,
+  invalidateBrowserHostCache,
   probeBrowserHost,
   type BasewareViewportClient,
 } from "../daemon/browser-host-client.ts";
@@ -37,10 +38,60 @@ import type { EventHub } from "./event-hub.ts";
 import { localRequest } from "./local-request.ts";
 import { verifyMediaTicket } from "./media-ticket.ts";
 
-export const VIEWPORT_WS_BACKPRESSURE_BYTES = 512 * 1024;
+const VIEWPORT_WS_BACKPRESSURE_BYTES = 512 * 1024;
+export { VIEWPORT_WS_BACKPRESSURE_BYTES };
 const STANDBY_POLL_INTERVAL_MS = 1500;
 const RECONNECT_DELAY_MS = 250;
+const BROWSER_ENSURE_SESSION_TIMEOUT_MS = 10_000;
 const BROWSER_OFFLINE_REASON = "Start Ludens Desktop App to enable Built-in Browser";
+
+function isBrowserHostTransportError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === "ENOENT" || code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EPIPE") {
+    return true;
+  }
+  const msg = error instanceof Error ? error.message : String(error);
+  return (
+    msg.includes("Timed out connecting to socket")
+    || msg.includes("BrowserHost disconnected")
+    || msg.includes("BrowserHost client closed")
+    || msg.includes("BrowserHost socket is not writable")
+    || msg.includes("ENOENT")
+    || msg.includes("ECONNREFUSED")
+  );
+}
+
+/** Normalize user-entered schemeless URLs (e.g. `localhost:3000`, `poki.com`) without relaxing blocked schemes. */
+function normalizeBrowserInitialUrl(raw: string | undefined): string {
+  const trimmed = raw?.trim();
+  if (!trimmed) return BUILTIN_BROWSER_START_URL;
+  if (trimmed === BUILTIN_BROWSER_START_URL) return BUILTIN_BROWSER_START_URL;
+  if (trimmed.toLowerCase() === "about:blank") return "about:blank";
+  if (
+    /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
+    || /^(javascript|data|blob|vbscript|file|about|mailto|chrome|devtools):/i.test(trimmed)
+    || /\s/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  const authority = trimmed.split(/[/?#]/, 1)[0] ?? "";
+  const hostOnly = authority.startsWith("[")
+    ? authority.slice(0, authority.indexOf("]") + 1)
+    : (authority.split(":")[0] ?? "");
+  const isLocal =
+    hostOnly === "localhost"
+    || hostOnly === "127.0.0.1"
+    || hostOnly === "[::1]"
+    || hostOnly === "::1"
+    || hostOnly === "0.0.0.0"
+    || /^\d+\.\d+\.\d+\.\d+$/.test(hostOnly);
+  const candidate = `${isLocal ? "http" : "https"}://${trimmed}`;
+  try {
+    return new URL(candidate).href;
+  } catch {
+    return trimmed;
+  }
+}
 
 export interface ResolvedWorkspaceViewportTarget {
   workspaceId: string;
@@ -300,7 +351,7 @@ export async function resolveWorkspaceViewportTarget(
     matchedMachine?.id
     ?? candidateMachineId
     ?? (stageKind === "browser" ? BUILTIN_LOCAL_BROWSER_MACHINE.id : null);
-  const initialUrl = matchedMachine?.initialUrl ?? configUrl ?? BUILTIN_BROWSER_START_URL;
+  const initialUrl = normalizeBrowserInitialUrl(matchedMachine?.initialUrl ?? configUrl);
 
   return {
     workspaceId: entry.id,
@@ -359,11 +410,16 @@ export async function describeWorkspaceViewport(
           width: DEFAULT_VIEWPORT_WIDTH,
           height: DEFAULT_VIEWPORT_HEIGHT,
         },
-        { timeoutMs: 5000, signal: options?.signal },
+        { timeoutMs: BROWSER_ENSURE_SESSION_TIMEOUT_MS, signal: options?.signal },
       );
       return normalizeBrowserStandbyState(state, target, hostProbe.hostId);
-    } catch {
-      return makeUnavailableViewportState(target, BROWSER_OFFLINE_REASON);
+    } catch (error) {
+      if (isBrowserHostTransportError(error)) {
+        invalidateBrowserHostCache(home);
+        return makeUnavailableViewportState(target, BROWSER_OFFLINE_REASON);
+      }
+      const message = error instanceof Error ? error.message : String(error);
+      return makeUnavailableViewportState(target, message || BROWSER_OFFLINE_REASON);
     } finally {
       bhClient?.close();
     }
@@ -416,7 +472,7 @@ export async function performWorkspaceViewportAction(
           width: DEFAULT_VIEWPORT_WIDTH,
           height: DEFAULT_VIEWPORT_HEIGHT,
         },
-        { timeoutMs: 5000, signal: options?.signal },
+        { timeoutMs: BROWSER_ENSURE_SESSION_TIMEOUT_MS, signal: options?.signal },
       );
       const state = await bhClient.performAction(target.workspaceId, action, {
         timeoutMs: 10_000,
@@ -477,7 +533,7 @@ export async function sendWorkspaceViewportInput(
           width: DEFAULT_VIEWPORT_WIDTH,
           height: DEFAULT_VIEWPORT_HEIGHT,
         },
-        { timeoutMs: 5000, signal: options?.signal },
+        { timeoutMs: BROWSER_ENSURE_SESSION_TIMEOUT_MS, signal: options?.signal },
       );
       return await bhClient.sendHumanInput(target.workspaceId, input, {
         timeoutMs: 5000,
@@ -904,7 +960,7 @@ export class ViewportWsBridge<TData = unknown> {
             width: DEFAULT_VIEWPORT_WIDTH,
             height: DEFAULT_VIEWPORT_HEIGHT,
           },
-          { timeoutMs: 5000 },
+          { timeoutMs: BROWSER_ENSURE_SESSION_TIMEOUT_MS },
         );
         await bhClient.subscribeFrames(
           target.workspaceId,
@@ -928,12 +984,15 @@ export class ViewportWsBridge<TData = unknown> {
           state: normalizeBrowserStandbyState(ensuredState, target, hostProbe.hostId),
         });
         return;
-      } catch {
+      } catch (error) {
         bhClient?.close();
         this.closeUpstream();
+        const reason = isBrowserHostTransportError(error)
+          ? (invalidateBrowserHostCache(this.options.home), BROWSER_OFFLINE_REASON)
+          : (error instanceof Error ? error.message : String(error)) || BROWSER_OFFLINE_REASON;
         this.sendJson({
           type: "state",
-          state: makeUnavailableViewportState(target, BROWSER_OFFLINE_REASON),
+          state: makeUnavailableViewportState(target, reason),
         });
         return;
       }

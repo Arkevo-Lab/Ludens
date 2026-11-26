@@ -1,0 +1,129 @@
+@layer components {
+/* ── Unified 3-Column Workbench Right Dock (Shared by Live & Replay) ── */
+
+.workbench-dock-backdrop {
+  display: none;
+}
+
+.workbench-right-dock {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  overflow: clip;
+  border-inline-start: 1px solid var(--border);
+  background: color-mix(in srgb, var(--surface-inset, var(--muted)) 35%, var(--background));
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity 160ms var(--ease-out-expo),
+    visibility 160ms step-start,
+    border-color 160ms var(--ease-out-expo);
+}
+
+.workbench-right-dock[data-dock-state="closed"] {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  border-inline-start-color: transparent;
+  transition:
+    opacity 160ms var(--ease-out-expo),
+    visibility 160ms step-end,
+    border-color 160ms var(--ease-out-expo);
+}
+
+.workbench-dock-resizer {
+  position: absolute;
+  inset-block: 0;
+  inset-inline-start: 0;
+  width: 6px;
+  z-index: 25;
+  cursor: col-resize;
+  background: transparent;
+  transition: background-color 120ms ease;
+}
+
+.workbench-dock-resizer:hover,
+[data-dock-resizing="true"] .workbench-dock-resizer {
+  background: color-mix(in srgb, var(--primary) 42%, transparent);
+}
+
+/* <1100px Responsive Slide-Over Overlay Drawer */
+@media (max-width: 1099px) {
+  .workbench-dock-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 35;
+    background: rgba(4, 6, 10, 0.56);
+    backdrop-filter: blur(2px);
+    opacity: 1;
+    transition: opacity var(--duration-normal, 180ms) var(--ease-out-expo);
+  }
+
+  @starting-style {
+    .workbench-dock-backdrop {
+      opacity: 0;
+    }
+  }
+
+  .workbench-dock-backdrop[data-motion-state="closed"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .workbench-right-dock:not([data-immersive="true"]) {
+    /* CRITICAL: Reset grid-area to auto so CSS Grid parents with named areas
+       use the workbench padding box — never an implicit 0px grid column — as containing block. */
+    grid-area: auto;
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    height: 100%;
+    min-width: 0;
+    width: min(380px, calc(100% - 24px));
+    max-width: 100%;
+    z-index: 40;
+    background: var(--background);
+    border-inline-start: 1px solid var(--border);
+    box-shadow: -12px 0 36px rgba(0, 0, 0, 0.48);
+    transform: translateX(0);
+    opacity: 1;
+    visibility: visible;
+    will-change: transform;
+    transition:
+      transform var(--duration-normal, 180ms) var(--ease-out-expo),
+      opacity var(--duration-normal, 180ms) var(--ease-out-expo),
+      visibility var(--duration-normal, 180ms) step-start;
+  }
+
+  .workbench-right-dock:not([data-immersive="true"])[data-dock-state="closed"] {
+    transform: translateX(100%);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    border-inline-start-color: transparent;
+    box-shadow: none;
+    transition:
+      transform var(--duration-normal, 180ms) var(--ease-out-expo),
+      opacity var(--duration-normal, 180ms) var(--ease-out-expo),
+      visibility var(--duration-normal, 180ms) step-end;
+  }
+}
+
+@media (max-width: 680px) {
+  .workbench-right-dock:not([data-immersive="true"]) {
+    width: min(380px, 100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .workbench-right-dock,
+  .workbench-right-dock[data-dock-state="closed"],
+  .workbench-dock-backdrop {
+    transition: none;
+  }
+}
+}

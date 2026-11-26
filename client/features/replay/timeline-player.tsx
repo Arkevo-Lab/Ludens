@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -22,16 +22,7 @@ import { ReplayTimeJump } from "@/features/replay/replay-time-jump";
 import { ReplayEventSearch } from "@/features/replay/replay-event-search";
 import { ReplayEvidencePanel, type ReplayEvidenceSelection } from "@/features/replay/replay-evidence-panel";
 import { replayElapsedInput, replayEvidenceKey, replayEvidencePatch } from "@/features/replay/replay-navigation";
-import { useAnimatedPresence } from "@/components/use-motion-preferences";
-
-const DESKTOP_DOCK_QUERY = "(min-width: 1100px)";
-
-const subscribeDesktopDock = (listener: () => void) => {
-  const query = window.matchMedia(DESKTOP_DOCK_QUERY);
-  query.addEventListener("change", listener);
-  return () => query.removeEventListener("change", listener);
-};
-const isDesktopDock = () => window.matchMedia(DESKTOP_DOCK_QUERY).matches;
+import { useWorkbenchRightDock, WorkbenchRightDock } from "@/components/workbench-right-dock";
 
 /** Render 3 ticks on narrow lanes (<420px) and 5 ticks on wider lanes. */
 export function replayRulerRatios(laneWidth: number): readonly number[] {
@@ -241,6 +232,10 @@ export interface TimelinePlayerProps {
   runPicker?: ReactNode;
   /** Mobile <=680px sidebar drawer trigger rendered at the start of .replay-studio-topbar-left */
   mobileNavSlot?: ReactNode;
+  /** Desktop trailing window controls (Windows/Linux caption buttons / WCO spacer / preview switcher) */
+  desktopTrailingSlot?: ReactNode;
+  /** Double-click handler on draggable 46px headers (Desktop zoom/maximize) */
+  onHeaderDoubleClick?(): void;
 }
 
 export function TimelinePlayer({
@@ -256,25 +251,28 @@ export function TimelinePlayer({
   initialOverview = null,
   runPicker,
   mobileNavSlot,
+  desktopTrailingSlot,
+  onHeaderDoubleClick,
 }: TimelinePlayerProps) {
   const t = useTranslations("timelinePlayer");
   const nt = useTranslations("replayNavigation");
   const controlsId = useId();
-  const desktopDock = useSyncExternalStore(subscribeDesktopDock, isDesktopDock, () => true);
   const evidenceKey = replayEvidenceKey(evidence);
-  const initialEvidenceKeyRef = useRef(evidenceKey);
-  const [dockOpen, setDockOpen] = useState(() =>
-    typeof window === "undefined" ? true : window.matchMedia(DESKTOP_DOCK_QUERY).matches || Boolean(evidence),
-  );
-  const { mounted: overlayBackdropMounted, state: overlayBackdropState } = useAnimatedPresence(!desktopDock && dockOpen, 180);
-  const userDesktopPrefRef = useRef<boolean | null>(null);
-  const prevDesktopDockRef = useRef<boolean | null>(null);
+  const workbenchRef = useRef<HTMLDivElement>(null);
+  const dock = useWorkbenchRightDock({
+    workbenchRef,
+    defaultInlineOpen: true,
+    defaultOverlayOpen: Boolean(evidence),
+    minDockWidthPx: 300,
+    minMainWidthPx: 420,
+    resetKey: project,
+  });
+  const { dockOpen, isOverlay: isOverlayDock, openDock, closeDock, toggleDock } = dock;
   const [inspectorTab, setInspectorTab] = useState("events");
   const evidencePanel = useRef<HTMLElement>(null);
   const evidenceOpener = useRef<HTMLElement | null>(null);
   const eventsTab = useRef<HTMLButtonElement>(null);
   const eventSearchInput = useRef<HTMLInputElement>(null);
-  const dockToggleRef = useRef<HTMLButtonElement>(null);
   const player = useRef<HTMLDivElement>(null);
   const stageMainRef = useRef<HTMLElement>(null);
   const timeAxisRef = useRef<HTMLDivElement>(null);
@@ -283,31 +281,6 @@ export function TimelinePlayer({
   const evidencePresentation = useRef({ dockOpen, evidenceKey, inspectorTab });
   evidencePresentation.current = { dockOpen, evidenceKey, inspectorTab };
   const lastEvidence = useRef("");
-
-  useEffect(() => {
-    if (prevDesktopDockRef.current === null) {
-      prevDesktopDockRef.current = desktopDock;
-      setDockOpen(desktopDock || Boolean(initialEvidenceKeyRef.current));
-      return;
-    }
-    if (prevDesktopDockRef.current !== desktopDock) {
-      prevDesktopDockRef.current = desktopDock;
-      setDockOpen(desktopDock ? (userDesktopPrefRef.current ?? true) : false);
-    }
-  }, [desktopDock]);
-
-  useEffect(() => {
-    if (desktopDock || !dockOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        event.preventDefault();
-        setDockOpen(false);
-        requestAnimationFrame(() => dockToggleRef.current?.focus());
-      }
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [desktopDock, dockOpen]);
 
   const restoreEvidenceFocus = () => {
     const opener = evidenceOpener.current;
@@ -320,7 +293,7 @@ export function TimelinePlayer({
     if (evidenceKey) {
       const newEvidence = evidenceKey !== lastEvidence.current;
       if (newEvidence) {
-        setDockOpen(true);
+        openDock();
         setInspectorTab("details");
       }
       if (newEvidence || evidencePresentation.current.inspectorTab === "details") {
@@ -488,14 +461,14 @@ export function TimelinePlayer({
   };
   const selectFrame = (frame: ReplayFrame, trigger: HTMLElement) => {
     evidenceOpener.current = trigger;
-    setDockOpen(true);
+    openDock();
     setInspectorTab("details");
     seek(frame.at, true, { kind: "frame", record: frame.id, sequence: frame.sequence });
     requestAnimationFrame(() => evidencePanel.current?.focus({ preventScroll: true }));
   };
   const selectItem = (item: ReplayItem, trigger: HTMLElement) => {
     evidenceOpener.current = trigger;
-    setDockOpen(true);
+    openDock();
     setInspectorTab("details");
     seek(item.startAt, true, { kind: "item", id: item.id });
     requestAnimationFrame(() => evidencePanel.current?.focus({ preventScroll: true }));
@@ -511,12 +484,10 @@ export function TimelinePlayer({
     onEvidence(null);
     requestAnimationFrame(restoreEvidenceFocus);
   };
-  const toggleDock = () => {
-    setDockOpen(previous => {
-      const next = !previous;
-      if (desktopDock) userDesktopPrefRef.current = next;
-      return next;
-    });
+  const handleHeaderDoubleClick = (event: MouseEvent<HTMLElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest("button, a, input, select, [role='tab'], [data-no-drag]")) return;
+    onHeaderDoubleClick?.();
   };
   const evidenceUrl = (item: ReplayItem) => {
     const url = new URL(typeof window === "undefined" ? "http://localhost/" : window.location.href);
@@ -629,17 +600,25 @@ export function TimelinePlayer({
     {overviewError && <Alert variant="destructive"><AlertDescription>{overviewError}{t("keepLoaded")}</AlertDescription></Alert>}
 
     <div
+      ref={workbenchRef}
       className="replay-workbench"
       data-dock-open={dockOpen ? "true" : undefined}
-      data-overlay-dock={!desktopDock ? "true" : undefined}
+      data-overlay-dock={isOverlayDock ? "true" : undefined}
+      data-dock-resizing={dock.resizing ? "true" : undefined}
+      style={
+        dock.resolvedWidthPx != null
+          ? ({ "--replay-dock-width": `${dock.resolvedWidthPx}px` } as CSSProperties)
+          : undefined
+      }
     >
       <section
         ref={stageMainRef}
         className="surface replay-studio-main"
         data-compact-stage={compactStage ? "true" : undefined}
+        inert={dock.mainInert || undefined}
         aria-label={t("stageTitle")}
       >
-        <header className="replay-studio-topbar">
+        <header className="replay-studio-topbar" onDoubleClick={handleHeaderDoubleClick}>
           <div className="replay-studio-topbar-left">
             {mobileNavSlot}
             {runPicker}
@@ -682,7 +661,7 @@ export function TimelinePlayer({
               title={nt("findEvent")}
               aria-label={nt("findEvent")}
               onClick={() => {
-                setDockOpen(true);
+                openDock();
                 setInspectorTab("events");
                 requestAnimationFrame(() => eventSearchInput.current?.focus());
               }}
@@ -716,7 +695,7 @@ export function TimelinePlayer({
               <span className="replay-topbar-btn-label">{t("shareMoment")}</span>
             </Button>
             <Button
-              ref={dockToggleRef}
+              ref={dock.toggleButtonRef}
               type="button"
               variant="ghost"
               size="icon-xs"
@@ -724,12 +703,14 @@ export function TimelinePlayer({
               data-replay-dock-toggle=""
               data-active={dockOpen ? "true" : undefined}
               aria-expanded={dockOpen}
+              aria-controls={dock.dockId}
               title={dockToggleLabel}
               aria-label={dockToggleLabel}
               onClick={toggleDock}
             >
               <PanelRight className="size-3.5" aria-hidden="true" />
             </Button>
+            {(!dockOpen || isOverlayDock) && desktopTrailingSlot}
           </div>
         </header>
 
@@ -952,25 +933,15 @@ export function TimelinePlayer({
         </div>
       </section>
 
-      {overlayBackdropMounted && (
-        <div
-          className="replay-inspector-backdrop"
-          data-state={overlayBackdropState}
-          aria-hidden="true"
-          onClick={() => setDockOpen(false)}
-        />
-      )}
-
-      <aside
+      <WorkbenchRightDock
+        dock={dock}
         className="replay-inspector"
-        data-dock-open={dockOpen ? "true" : undefined}
-        data-dock-state={dockOpen ? "open" : "closed"}
+        backdropClassName="replay-inspector-backdrop"
+        ariaLabel={nt("inspectorTabs")}
         data-evidence-open={dockOpen && !!evidence && inspectorTab === "details"}
-        aria-hidden={!dockOpen || undefined}
-        inert={!dockOpen || undefined}
       >
         <Tabs value={inspectorTab} onValueChange={setInspectorTab} className="replay-inspector-tabs gap-0">
-          <div className="replay-inspector-header">
+          <div className="replay-inspector-header" onDoubleClick={handleHeaderDoubleClick}>
             <TabsList
               variant="line"
               aria-label={nt("inspectorTabs")}
@@ -993,13 +964,11 @@ export function TimelinePlayer({
               className="replay-inspector-close shrink-0"
               title={nt("closeInspector")}
               aria-label={nt("closeInspector")}
-              onClick={() => {
-                setDockOpen(false);
-                requestAnimationFrame(() => dockToggleRef.current?.focus());
-              }}
+              onClick={() => closeDock({ restoreFocus: true })}
             >
               <X className="size-3.5" aria-hidden="true" />
             </Button>
+            {!isOverlayDock && desktopTrailingSlot}
           </div>
 
           <TabsContent value="events" forceMount className="replay-inspector-content data-[state=inactive]:hidden">
@@ -1085,7 +1054,7 @@ export function TimelinePlayer({
             )}
           </TabsContent>
         </Tabs>
-      </aside>
+      </WorkbenchRightDock>
     </div>
   </div>;
 }

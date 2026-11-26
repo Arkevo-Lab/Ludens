@@ -48,6 +48,10 @@
   background: var(--background);
   transition: grid-template-columns 160ms var(--ease-out-expo);
 }
+.replay-workbench[data-dock-resizing="true"] {
+  transition: none;
+  user-select: none;
+}
 
 /* ── Left Studio Column (Stage + Transport + Multi-Track Timeline) ── */
 .replay-studio-main {

@@ -62,6 +62,37 @@ export interface LaunchConfig {
   logging: { diagnostics: "normal" | "full" };
 }
 
+export function normalizeWorkspaceBrowserUrl(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  if (trimmed === "ludens-browser://start" || trimmed.toLowerCase() === "about:blank") {
+    return trimmed.toLowerCase() === "about:blank" ? "about:blank" : trimmed;
+  }
+  if (
+    /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
+    || /^(javascript|data|blob|vbscript|file|about|mailto|chrome|devtools):/i.test(trimmed)
+    || /\s/.test(trimmed)
+  ) {
+    return trimmed;
+  }
+  const authority = trimmed.split(/[/?#]/, 1)[0] ?? "";
+  const hostOnly = authority.startsWith("[")
+    ? authority.slice(0, authority.indexOf("]") + 1)
+    : (authority.split(":")[0] ?? "");
+  const isLocal =
+    hostOnly === "localhost"
+    || hostOnly === "127.0.0.1"
+    || hostOnly === "[::1]"
+    || hostOnly === "::1"
+    || hostOnly === "0.0.0.0"
+    || /^\d+\.\d+\.\d+\.\d+$/.test(hostOnly);
+  try {
+    return new URL(`${isLocal ? "http" : "https"}://${trimmed}`).href;
+  } catch {
+    return trimmed;
+  }
+}
+
 export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverManifest): LaunchConfig {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("ludens.json must be an object");
   const config = value as Record<string, unknown>;
@@ -120,7 +151,7 @@ export function parseWorkspaceLaunchConfig(value: unknown, manifest?: DriverMani
     ...cleanConfig,
   } as LaunchConfig;
   if (typeof config.url === "string") {
-    result.url = config.url.trim();
+    result.url = normalizeWorkspaceBrowserUrl(config.url);
   }
   if (
     !result.logging

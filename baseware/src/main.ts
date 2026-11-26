@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
-import { ludensHome, readMachinesConfig } from "@ludens/protocol/ludens";
+import { createHash } from "node:crypto";
+import { BUILTIN_LOCAL_BROWSER_MACHINE, ludensHome, readMachinesConfig, readWorkspaceIdentity } from "@ludens/protocol/ludens";
 import { parseArgs } from "node:util";
 import { basename, join, resolve } from "node:path";
 import { MACHINE_TRANSPORT_KINDS as TRANSPORTS, type BasewareMachineSpec, type MachineTransportKind } from "@ludens/protocol/machines";
@@ -112,8 +113,12 @@ export async function main(args = process.argv.slice(2)) {
       startResync(runtime.spec.id);
     });
   };
+  const fallbackBrowserSessionId = values["session-id"]?.trim()
+    || await readWorkspaceIdentity(process.cwd())
+      .then(identity => identity.id)
+      .catch(() => createHash("sha256").update(resolve(values.socket!)).digest("hex").slice(0, 16));
   const browserRuntimeParams = (spec: BasewareMachineSpec): Partial<DriverCreateOptions> => ({
-    ...(values["session-id"] ? { sessionId: values["session-id"] } : {}),
+    sessionId: fallbackBrowserSessionId,
     ...(values["browser-socket"] ? { browserSocket: values["browser-socket"] } : {}),
     ...(!spec.initialUrl && values["initial-url"] ? { initialUrl: values["initial-url"] } : {}),
   });
@@ -156,6 +161,12 @@ export async function main(args = process.argv.slice(2)) {
   };
   const machinesSnapshot = () => ({ activeMachineId: core!.status().activeMachineId ?? null, machines: core!.getMountedMachines() });
   const findSpec = async (id: string): Promise<BasewareMachineSpec> => {
+    if (id === BUILTIN_LOCAL_BROWSER_MACHINE.id) {
+      return {
+        ...BUILTIN_LOCAL_BROWSER_MACHINE,
+        ...(values["initial-url"] ? { initialUrl: values["initial-url"] } : {}),
+      };
+    }
     const spec = (await readMachinesConfig(ludensHome())).machines.find(machine => machine.id === id);
     if (!spec) throw new Error(`Unknown machine: ${id}; register it in ~/.ludens/machines.json`);
     return spec;
@@ -222,7 +233,7 @@ export async function main(args = process.argv.slice(2)) {
       return ok;
     };
     const provider = await registration.load({ port, host: values.host, command: values["cua-command"],
-      transportMode, ssh, url: values.url, sessionId: values["session-id"], initialUrl: values["initial-url"],
+      transportMode, ssh, url: values.url, sessionId: fallbackBrowserSessionId, initialUrl: values["initial-url"],
       browserSocket: values["browser-socket"], clock });
     core = new BasewareCore({ capabilities: provider.capabilities, record: log.record, serviceId, source: log.source,
       diagnostics: values.diagnostics, streamDir: join(dataDir, "stream"),

@@ -739,3 +739,104 @@ test("baseware serve --driver browser forwards --session-id, --initial-url, and 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("two concurrent baseware browser daemons run isolated sessions on one BrowserHost and support dynamic builtin-browser mount", async () => {
+  const dir = await realpath(await mkdtemp(join(tmpdir(), "browser-multi-baseware-")));
+  const host = await startMockBrowserHost(join(dir, "browser-host.sock"));
+  const bwSock1 = join(dir, "baseware-1.sock");
+  const bwSock2 = join(dir, "baseware-2.sock");
+  const entry = join(import.meta.dir, "../src/main.ts");
+
+  const spawnBrowserBaseware = (opts: { socket: string; dataDir: string; sessionId: string; initialUrl: string }) =>
+    Bun.spawn(
+      [
+        process.execPath,
+        entry,
+        "serve",
+        "--driver",
+        "browser",
+        "--machine-id",
+        "builtin-browser",
+        "--session-id",
+        opts.sessionId,
+        "--initial-url",
+        opts.initialUrl,
+        "--browser-socket",
+        host.socketPath,
+        "--socket",
+        opts.socket,
+        "--data-dir",
+        opts.dataDir,
+      ],
+      { stdout: "pipe", stderr: "pipe" },
+    );
+
+  const child1 = spawnBrowserBaseware({
+    socket: bwSock1,
+    dataDir: join(dir, "data-1"),
+    sessionId: "ws-game-1",
+    initialUrl: "https://game-1.example/play",
+  });
+  const child2 = spawnBrowserBaseware({
+    socket: bwSock2,
+    dataDir: join(dir, "data-2"),
+    sessionId: "ws-game-2",
+    initialUrl: "https://game-2.example/play",
+  });
+
+  const waitReady = async (child: ReturnType<typeof Bun.spawn>) => {
+    const reader = (child.stdout as ReadableStream<Uint8Array>).getReader();
+    const first = await reader.read();
+    reader.releaseLock();
+    if (first.done) {
+      throw new Error(`baseware exited early: ${await new Response(child.stderr as ReadableStream).text()}`);
+    }
+    return JSON.parse(new TextDecoder().decode(first.value)) as { ready: boolean };
+  };
+
+  try {
+    const [r1, r2] = await Promise.all([waitReady(child1), waitReady(child2)]);
+    expect(r1.ready).toBe(true);
+    expect(r2.ready).toBe(true);
+
+    const client1 = await BasewareClient.connect(bwSock1);
+    const client2 = await BasewareClient.connect(bwSock2);
+    try {
+      const [s1, s2] = await Promise.all([client1.viewportDescribe(), client2.viewportDescribe()]);
+      expect(s1.sessionId).toBe("ws-game-1");
+      expect(s1.navigation?.url).toBe("https://game-1.example/play");
+      expect(s2.sessionId).toBe("ws-game-2");
+      expect(s2.navigation?.url).toBe("https://game-2.example/play");
+
+      // Acquiring auto control on workspace 1 must NOT lock workspace 2's manual viewport!
+      await client1.request({ kind: "acquire", epoch: "ep-ws1", seconds: 60 });
+      expect((await client1.viewportDescribe()).controlMode).toBe("auto");
+      expect((await client2.viewportDescribe()).controlMode).toBe("manual");
+
+      const nav2 = await client2.viewportAction({ kind: "navigate", url: "https://game-2.example/stage-2" });
+      expect(nav2.navigation?.url).toBe("https://game-2.example/stage-2");
+      expect((await client1.viewportDescribe()).navigation?.url).toBe("https://game-1.example/play");
+
+      // Re-selecting runtime-injected builtin-browser via machines.use succeeds without machines.json entry.
+      await client2.request({ kind: "machines", action: "disconnect", id: "builtin-browser" });
+      const switched = await client2.request<{ activeMachineId: string }>({
+        kind: "machines",
+        action: "use",
+        id: "builtin-browser",
+      });
+      expect(switched.activeMachineId).toBe("builtin-browser");
+      expect((await client2.viewportDescribe()).sessionId).toBe("ws-game-2");
+
+      await client1.request({ kind: "release", epoch: "ep-ws1" });
+    } finally {
+      client1.close();
+      client2.close();
+    }
+  } finally {
+    child1.kill("SIGTERM");
+    child2.kill("SIGTERM");
+    await Promise.all([child1.exited, child2.exited]);
+    await host.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
