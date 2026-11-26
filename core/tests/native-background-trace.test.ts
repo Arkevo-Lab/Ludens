@@ -46,6 +46,13 @@ test("native background deliveries retain launch traces across turns and reused 
     start("suppressed", { async: { jobId: "suppressed", type: "bash", state: "running" } });
     epoch = "third";
     await turn();
+    emit!({
+      type: "tool_execution_update",
+      toolName: "bash",
+      toolCallId: "job-first",
+      args,
+      partialResult: { content: [{ type: "text", text: "Battle completed" }] },
+    });
     delivered("async-result", { jobs: [
       { jobId: "job-one", type: "bash", status: "completed", durationMs: 100,
         schema: { status: "valid", data: { proof: "structured body only in artifact" } } },
@@ -86,6 +93,9 @@ test("native background deliveries retain launch traces across turns and reused 
     expect(JSON.stringify(events)).not.toContain("structured body only in artifact");
     expect(results[0].data).not.toHaveProperty("schema");
     expect(events.some(event => event.type === "exec" || event.type === "exec_result")).toBe(false);
+    const lateUpdate = events.find(event => event.type === "tool_update" && event.trace.toolCallId === "job-first");
+    expect(lateUpdate).toBeTruthy();
+    expect(lateUpdate.trace).toMatchObject({ epoch: first.epoch, modelCallId: first.modelCallId, toolCallId: "job-first" });
   } finally {
     detach();
     await trace.shiori.close();

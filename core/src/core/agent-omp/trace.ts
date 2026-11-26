@@ -169,6 +169,7 @@ export function installCompactionHttpTrace(log: EventLog, context: () => EventTr
 
 /** Observe the existing OMP stream without replacing its loop or consuming its iterator. */
 export class ModelTrace {
+  private static readonly MAX_TRACKED_TOOLS = 256;
   private active: EventTrace = {};
   private tools = new Map<string, EventTrace>();
   readonly shiori: ShioriTelemetry;
@@ -183,21 +184,37 @@ export class ModelTrace {
         this.active = { ...trace };
         this.nativeRun = { ...trace };
         this.nativeChat = {};
-        this.tools.clear();
       } else if (event.kind === "execute_tool" && event.toolCallId) {
         // Keep the producing model/request IDs, but the native tool owns its
         // own span. Nested CLI/API calls inherit this actual execute_tool span.
-        this.tools.set(event.toolCallId, { ...this.current(event.toolCallId), ...trace });
+        const existing = this.tools.get(event.toolCallId);
+        const base = existing && (!this.active.modelCallId || existing.modelCallId === this.active.modelCallId)
+          ? existing
+          : { ...this.active, toolCallId: event.toolCallId };
+        this.rememberTool(event.toolCallId, { ...base, ...trace });
       } else if (event.kind === "chat" && this.nativeRun.spanId && trace.parentSpanId === this.nativeRun.spanId) {
         this.nativeChat = { ...trace };
       }
     });
   }
 
+  private rememberTool(toolCallId: string, trace: EventTrace): void {
+    this.tools.delete(toolCallId);
+    this.tools.set(toolCallId, trace);
+    while (this.tools.size > ModelTrace.MAX_TRACKED_TOOLS) {
+      const oldest = this.tools.keys().next().value;
+      if (oldest === undefined) break;
+      this.tools.delete(oldest);
+    }
+  }
+
   current = (toolCallId?: string): EventTrace => {
     if (!toolCallId) return { ...this.active };
     let trace = this.tools.get(toolCallId);
-    if (!trace) { trace = { ...this.active, toolCallId }; this.tools.set(toolCallId, trace); }
+    if (!trace) {
+      trace = { ...this.active, toolCallId };
+      this.rememberTool(toolCallId, trace);
+    }
     return { ...trace };
   };
 
@@ -220,6 +237,10 @@ export class ModelTrace {
     const serviceKey = (name: string, pid?: number) => JSON.stringify(["service", name, pid]);
     const unsubscribe = session.subscribe((event) => {
       if (event.type === "tool_execution_start") {
+        const existing = this.tools.get(event.toolCallId);
+        if (existing && this.active.modelCallId && existing.modelCallId !== this.active.modelCallId) {
+          this.rememberTool(event.toolCallId, { ...this.active, toolCallId: event.toolCallId });
+        }
         const { args, ...metadata } = event;
         this.record("tool_start", this.log.archive && args !== undefined
           ? { ...metadata, argsRef: this.log.artifact(args) } : event, this.current(event.toolCallId));
@@ -285,7 +306,8 @@ export class ModelTrace {
     return async (model, context, options) => {
       const source = this.context();
       const trace: EventTrace = { ...this.nativeChat, epoch: source.epoch, modelCallId: crypto.randomUUID() };
-      this.tools.clear();
+      // Preserve in-flight / async toolCallId -> trace mappings across model turns so
+      // delayed `tool_execution_update` / `tool_execution_end` events stay bound to their originating turn.
       this.active = trace;
       const started = this.log.clock.now();
       const streamPath = `streams/${trace.modelCallId}.jsonl`;
@@ -301,8 +323,11 @@ export class ModelTrace {
         contextMessages,
         transportDetails: transportDetails() }, trace);
       const finish = (message: AssistantMessage) => {
-        for (const block of message.content) if (block.type === "toolCall" && !this.tools.has(block.id)) {
-          this.tools.set(block.id, { ...trace, toolCallId: block.id });
+        for (const block of message.content) if (block.type === "toolCall") {
+          const existing = this.tools.get(block.id);
+          if (!existing || existing.modelCallId !== trace.modelCallId) {
+            this.rememberTool(block.id, { ...trace, toolCallId: block.id });
+          }
         }
         const durationMs = this.log.clock.now() - started;
         const afterFirstStreamMs = firstStreamAtMs === undefined ? undefined : this.log.clock.now() - firstStreamAtMs;

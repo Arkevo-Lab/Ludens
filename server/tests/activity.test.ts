@@ -295,3 +295,31 @@ test("mixed WS/SSE runs merge tools and readable summaries without inventing ass
     assert.ok(blocks.some(b => b.kind === "diagnostic" && b.title === "model_http_dispatch"));
   } finally { await rm(temporary, { recursive: true, force: true }); }
 });
+
+test("late async bash tool_update keeps complete status and ignores orphan updates under later model turns", async () => {
+  const temporary = await mkdtemp(join(tmpdir(), "ludens-activity-async-bash-"));
+  const root = await realpath(temporary);
+  try {
+    const events: Event[] = [];
+    const push = (modelCallId: string, type: string, data: Record<string, unknown>, toolCallId?: string) => {
+      const entry = event(type, events.length, data, "cycle", toolCallId);
+      entry.trace.modelCallId = modelCallId;
+      events.push(entry);
+    };
+    push("m1", "tool_start", { toolName: "bash", intent: "Play battle", args: { command: "python3 play.py", async: true } }, "call_async|fc_1");
+    push("m1", "tool_end", { toolName: "bash", isError: false, result: { content: [{ type: "text", text: "Started bg_1" }] } }, "call_async|fc_1");
+    // Late streaming update attached to the originating turn must not regress complete -> running
+    push("m1", "tool_update", { toolName: "bash", result: { content: [{ type: "text", text: "Battle completed" }] } }, "call_async|fc_1");
+    // Legacy orphan update stamped with a later modelCallId must not create a blank running block
+    push("m2", "tool_update", { toolName: "bash", result: { content: [{ type: "text", text: "Orphan chunk" }] } }, "call_async|fc_1");
+
+    const blocks = await activityBlocks(root, events);
+    const toolBlocks = blocks.filter(b => b.kind === "tool");
+    assert.equal(toolBlocks.length, 1);
+    assert.equal(toolBlocks[0].id, "m1:tool:call_async");
+    assert.equal(toolBlocks[0].status, "complete");
+    assert.equal(toolBlocks[0].tool?.intent, "Play battle");
+    assert.deepEqual(toolBlocks[0].tool?.args, { command: "python3 play.py", async: true });
+    assert.equal(toolBlocks[0].tool?.result, "Battle completed");
+  } finally { await rm(temporary, { recursive: true, force: true }); }
+});

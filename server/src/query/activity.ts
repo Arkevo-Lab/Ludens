@@ -297,6 +297,11 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
     const id = trace.modelCallId && trace.toolCallId ? toolId(trace.modelCallId, trace.toolCallId) : null;
     if (id && ["tool_start", "tool_update", "tool_end", "exec", "exec_result"].includes(event.type)) {
       const previous = blocks.get(id);
+      // Ignore orphan late `tool_update` events that have no originating stream/start block
+      // (e.g., async bash updates recorded under a later turn's modelCallId in legacy logs).
+      if (event.type === "tool_update" && !previous && !tools.has(id)) {
+        continue;
+      }
       const tool = tools.get(id) ?? { name: previous?.title ?? "工具", intent: "", args: previous?.text ?? "", result: "" };
       if (data.toolName) tool.name = data.toolName;
       if (data.intent) tool.intent = data.intent;
@@ -307,11 +312,17 @@ async function overlayEvents(path: string, events: Event[], blocks: Map<string, 
       if (["tool_update", "tool_end"].includes(event.type) && data.result !== undefined)
         tool.result = await payloadText(path, data.result, index, workspace);
       tools.set(id, tool);
+      const nextStatus =
+        data.isError || previous?.status === "error" || (event.type === "exec_result" && data.exitCode !== 0)
+          ? "error"
+          : event.type === "tool_end" || (event.type === "tool_update" && previous?.status === "complete")
+            ? "complete"
+            : "running";
       blocks.set(id, { id, kind: "tool", at: previous?.at ?? event.at, title: tool.name, ...provenance(event),
         text: [tool.intent && `意图：${tool.intent}`, tool.args && `参数：\n${tool.args}`, tool.result && `结果：\n${tool.result}`].filter(Boolean).join("\n\n"),
         tool: { ...(tool.intent ? { intent: tool.intent } : {}), args: structuredText(tool.args),
           ...(tool.result ? { result: structuredText(tool.result) } : {}) },
-        status: data.isError || previous?.status === "error" || (event.type === "exec_result" && data.exitCode !== 0) ? "error" : event.type === "tool_end" ? "complete" : "running" });
+        status: nextStatus });
       continue;
     }
     const header = eventHeader(path, event);
