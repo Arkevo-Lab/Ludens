@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { repoRoot } from "./repo";
 import { discoverDriver } from "./drivers";
-import { initializeWorkspace } from "./workspace-init";
+import { initializeWorkspace, normalizeWorkspaceBrowserUrl } from "./workspace-init";
 import { cliCommand, jobStateFilePath, jobTargetLabel, ludensSocketPath, readBackgroundJobState } from "../daemon/background-jobs";
 import { probeBrowserHost } from "../daemon/browser-host-client";
 import {
@@ -1805,7 +1805,7 @@ export async function updateWorkspaceStudioConfig(
     }
     if ("url" in patch) {
       if (patch.url === null || patch.url === undefined || patch.url === "") delete next.url;
-      else if (typeof patch.url === "string" && patch.url.trim()) next.url = patch.url.trim();
+      else if (typeof patch.url === "string" && patch.url.trim()) next.url = normalizeWorkspaceBrowserUrl(patch.url);
       else throw new Error("url 必须是非空字符串或 null");
     }
     if ("cuaCommand" in patch) {

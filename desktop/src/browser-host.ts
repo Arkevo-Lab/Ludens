@@ -459,10 +459,17 @@ class ManagedBrowserSession {
         }
       }
       const initialTarget = validateBrowserNavigationUrl(desiredUrl)
-      const state =
-        initialTarget.kind === 'start'
-          ? await this.backend.loadStartPage(initialTarget.targetUrl, initialTarget.logicalUrl)
-          : await this.backend.navigate(initialTarget.targetUrl)
+      let state: ViewportState
+      try {
+        state =
+          initialTarget.kind === 'start'
+            ? await this.backend.loadStartPage(initialTarget.targetUrl, initialTarget.logicalUrl)
+            : await this.backend.navigate(initialTarget.targetUrl)
+      } catch {
+        // Keep the isolated browser session alive even if the initial remote URL
+        // redirects (ERR_ABORTED) or fails to load — the tab is still online.
+        state = await this.backend.describe()
+      }
       this.latestState = state
       if (state.width > 0) this.width = state.width
       if (state.height > 0) this.height = state.height
@@ -1065,6 +1072,9 @@ function createProductionElectronSessionFactory(): {
   dispose: () => Promise<void>
 } {
   let keepaliveWindow: BrowserWindow | undefined
+  let keepaliveWindowPromise: Promise<BrowserWindow> | undefined
+  let keepaliveWidth = DEFAULT_VIEWPORT_WIDTH
+  let keepaliveHeight = DEFAULT_VIEWPORT_HEIGHT
   let electronModule: typeof import('electron') | undefined
 
   const getElectron = async (): Promise<typeof import('electron')> => {
@@ -1074,32 +1084,74 @@ function createProductionElectronSessionFactory(): {
     return electronModule
   }
 
-  const ensureKeepaliveWindow = async (): Promise<BrowserWindow> => {
-    if (keepaliveWindow && !keepaliveWindow.isDestroyed()) return keepaliveWindow
-    const electron = await getElectron()
-    keepaliveWindow = new electron.BrowserWindow({
-      show: false,
-      width: DEFAULT_VIEWPORT_WIDTH,
-      height: DEFAULT_VIEWPORT_HEIGHT,
-      paintWhenInitiallyHidden: true,
-      focusable: false,
-      skipTaskbar: true,
-      webPreferences: {
-        backgroundThrottling: false,
-        contextIsolation: true,
-        sandbox: true,
-        nodeIntegration: false,
-      },
-    })
-    keepaliveWindow.on('closed', () => {
-      keepaliveWindow = undefined
-    })
-    return keepaliveWindow
+  const ensureKeepaliveWindow = async (
+    minWidth = DEFAULT_VIEWPORT_WIDTH,
+    minHeight = DEFAULT_VIEWPORT_HEIGHT,
+  ): Promise<BrowserWindow> => {
+    if (keepaliveWindow && !keepaliveWindow.isDestroyed()) {
+      const nextW = Math.max(keepaliveWidth, minWidth)
+      const nextH = Math.max(keepaliveHeight, minHeight)
+      if (nextW > keepaliveWidth || nextH > keepaliveHeight) {
+        keepaliveWidth = nextW
+        keepaliveHeight = nextH
+        try {
+          keepaliveWindow.setContentSize(keepaliveWidth, keepaliveHeight)
+        } catch {
+          // Ignore resize errors during shutdown.
+        }
+      }
+      return keepaliveWindow
+    }
+    if (!keepaliveWindowPromise) {
+      keepaliveWindowPromise = (async () => {
+        const electron = await getElectron()
+        keepaliveWidth = Math.max(keepaliveWidth, minWidth)
+        keepaliveHeight = Math.max(keepaliveHeight, minHeight)
+        const win = new electron.BrowserWindow({
+          show: false,
+          width: keepaliveWidth,
+          height: keepaliveHeight,
+          paintWhenInitiallyHidden: true,
+          focusable: false,
+          skipTaskbar: true,
+          webPreferences: {
+            backgroundThrottling: false,
+            contextIsolation: true,
+            sandbox: true,
+            nodeIntegration: false,
+          },
+        })
+        win.on('closed', () => {
+          if (keepaliveWindow === win) {
+            keepaliveWindow = undefined
+          }
+        })
+        keepaliveWindow = win
+        return win
+      })().finally(() => {
+        keepaliveWindowPromise = undefined
+      })
+    }
+    const win = await keepaliveWindowPromise
+    if (!win.isDestroyed()) {
+      const nextW = Math.max(keepaliveWidth, minWidth)
+      const nextH = Math.max(keepaliveHeight, minHeight)
+      if (nextW > keepaliveWidth || nextH > keepaliveHeight) {
+        keepaliveWidth = nextW
+        keepaliveHeight = nextH
+        try {
+          win.setContentSize(keepaliveWidth, keepaliveHeight)
+        } catch {
+          // Ignore resize errors during shutdown.
+        }
+      }
+    }
+    return win
   }
 
   const parkInKeepalive = async (view: WebContentsView, width: number, height: number): Promise<void> => {
     try {
-      const keepalive = await ensureKeepaliveWindow()
+      const keepalive = await ensureKeepaliveWindow(width, height)
       if (keepalive.isDestroyed()) return
       try {
         keepalive.contentView.addChildView(view)
@@ -1140,6 +1192,7 @@ function createProductionElectronSessionFactory(): {
     let latestFrame: BrowserSessionFrame | undefined
     let lastFrameAt = 0
     let fallbackPumpTimer: ReturnType<typeof setInterval> | undefined
+    let fallbackCaptureInFlight = false
     let closed = false
 
     const frameListeners = new Set<(frame: BrowserSessionFrame) => void>()
@@ -1352,11 +1405,16 @@ function createProductionElectronSessionFactory(): {
     const startFallbackPump = () => {
       if (fallbackPumpTimer) return
       fallbackPumpTimer = setInterval(() => {
-        if (closed || wc.isDestroyed()) return
+        if (closed || wc.isDestroyed() || fallbackCaptureInFlight) return
         if (Date.now() - lastFrameAt < SCREENCAST_STALL_MS) return
-        void captureFallbackFrame('jpeg', screencastQuality).then(frame => {
-          if (frame) emitFrame(frame)
-        })
+        fallbackCaptureInFlight = true
+        void captureFallbackFrame('jpeg', screencastQuality)
+          .then(frame => {
+            if (frame) emitFrame(frame)
+          })
+          .finally(() => {
+            fallbackCaptureInFlight = false
+          })
       }, FALLBACK_PUMP_INTERVAL_MS)
       fallbackPumpTimer.unref()
     }
@@ -1397,6 +1455,9 @@ function createProductionElectronSessionFactory(): {
           }
         }
         await parkInKeepalive(view, width, height)
+        if (screencastRunning) {
+          await startScreencast(screencastQuality)
+        }
       }
     }
 
@@ -1443,6 +1504,7 @@ function createProductionElectronSessionFactory(): {
           // Ignore.
         }
       }
+      const wasAttachedToSameOwner = attachedOwner === ownerWin
       try {
         ownerWin.contentView.addChildView(view)
       } catch {
@@ -1454,10 +1516,39 @@ function createProductionElectronSessionFactory(): {
       await applyInteractiveState(input.interactive, ownerWin)
       if (sizeChanged) {
         emitState()
-        if (screencastRunning) {
-          await startScreencast(screencastQuality)
-        }
       }
+      if (screencastRunning && (sizeChanged || !wasAttachedToSameOwner)) {
+        await startScreencast(screencastQuality)
+      }
+    }
+
+    // Initiate navigation without blocking indefinitely on slow WebGL subresources
+    // or failing the session on redirects (ERR_ABORTED / -3).
+    const loadUrlGracefully = async (url: string, commitGraceMs = 1_500): Promise<void> => {
+      if (closed || wc.isDestroyed()) return
+      let settled = false
+      await new Promise<void>(resolveLoad => {
+        const done = () => {
+          if (settled) return
+          settled = true
+          clearTimeout(timer)
+          wc.off('did-navigate', onCommit)
+          wc.off('dom-ready', onCommit)
+          wc.off('did-fail-load', onCommit)
+          resolveLoad()
+        }
+        const onCommit = () => done()
+        const timer = setTimeout(done, commitGraceMs)
+        timer.unref?.()
+        wc.once('did-navigate', onCommit)
+        wc.once('dom-ready', onCommit)
+        wc.once('did-fail-load', onCommit)
+        void wc.loadURL(url).then(done, () => {
+          // Non-fatal: redirects (ERR_ABORTED) or network failures leave the session alive
+          // so the user/agent can inspect or navigate elsewhere.
+          done()
+        })
+      })
     }
 
     const backend: BrowserSessionBackend = {
@@ -1466,14 +1557,14 @@ function createProductionElectronSessionFactory(): {
       async loadStartPage(dataUrl: string) {
         startPageDataUrl = dataUrl
         logicalStartPage = true
-        await wc.loadURL(dataUrl)
+        await loadUrlGracefully(dataUrl, 2_000)
         await syncPageInteractiveGuard()
         return buildState()
       },
 
       async navigate(url: string) {
         logicalStartPage = false
-        await wc.loadURL(url)
+        await loadUrlGracefully(url, 1_500)
         await syncPageInteractiveGuard()
         return buildState()
       },
@@ -1798,6 +1889,7 @@ export class BrowserHost {
   private readonly sessionCreations = new Map<string, Promise<ManagedBrowserSession>>()
   private readonly activeOperations = new Map<string, AbortController>()
   private readonly ownerAttachedSession = new Map<unknown, { sessionId: string; lastInput: DesktopViewportAttachInput }>()
+  private readonly ownerAttachGen = new Map<unknown, number>()
 
   constructor(options: BrowserHostOptions = {}) {
     this.home = options.home ?? ludensHome()
@@ -1915,6 +2007,7 @@ export class BrowserHost {
     this.sessions.clear()
     this.sessionCreations.clear()
     this.ownerAttachedSession.clear()
+    this.ownerAttachGen.clear()
 
     const srv = this.server
     this.server = undefined
@@ -1937,6 +2030,9 @@ export class BrowserHost {
     if (!input.sessionId || typeof input.sessionId !== 'string') {
       throw new Error('attachToOwner requires a valid sessionId')
     }
+    const gen = (this.ownerAttachGen.get(owner) ?? 0) + 1
+    this.ownerAttachGen.set(owner, gen)
+
     const normalizedBounds = normalizeViewportBounds(input.bounds)
     const normalizedInput: DesktopViewportAttachInput = {
       sessionId: input.sessionId,
@@ -1952,6 +2048,10 @@ export class BrowserHost {
       if (prevSession?.backend.detachFromOwner) {
         await prevSession.backend.detachFromOwner(owner).catch(() => {})
       }
+      if (this.ownerAttachedSession.get(owner)?.sessionId === previous.sessionId) {
+        this.ownerAttachedSession.delete(owner)
+      }
+      if (this.ownerAttachGen.get(owner) !== gen) return
     }
 
     const session = await this.getOrCreateSession({
@@ -1960,8 +2060,24 @@ export class BrowserHost {
       width: normalizedBounds.width > 0 ? normalizedBounds.width : this.defaultWidth,
       height: normalizedBounds.height > 0 ? normalizedBounds.height : this.defaultHeight,
     })
+    if (this.ownerAttachGen.get(owner) !== gen) return
+
+    const latestPrevious = this.ownerAttachedSession.get(owner)
+    if (latestPrevious && latestPrevious.sessionId !== normalizedInput.sessionId) {
+      const prevSession = this.sessions.get(latestPrevious.sessionId)
+      if (prevSession?.backend.detachFromOwner) {
+        await prevSession.backend.detachFromOwner(owner).catch(() => {})
+      }
+      if (this.ownerAttachGen.get(owner) !== gen) return
+    }
 
     await session.attachOwner(owner, normalizedInput)
+    if (this.ownerAttachGen.get(owner) !== gen) {
+      if (session.backend.detachFromOwner) {
+        await session.backend.detachFromOwner(owner).catch(() => {})
+      }
+      return
+    }
     this.ownerAttachedSession.set(owner, {
       sessionId: normalizedInput.sessionId,
       lastInput: normalizedInput,
@@ -2016,6 +2132,9 @@ export class BrowserHost {
     const current = this.ownerAttachedSession.get(owner)
     const targetSessionId = sessionId || current?.sessionId
     if (!targetSessionId) return
+    if (!sessionId || current?.sessionId === targetSessionId) {
+      this.ownerAttachGen.set(owner, (this.ownerAttachGen.get(owner) ?? 0) + 1)
+    }
     const session = this.sessions.get(targetSessionId)
     if (session?.backend.detachFromOwner) {
       await session.backend.detachFromOwner(owner).catch(() => {})
@@ -2097,14 +2216,13 @@ export class BrowserHost {
             void this.urlStore.writeLastUrl(params.sessionId, url).catch(() => {})
           },
         })
-        this.sessions.set(params.sessionId, managed)
         try {
           await managed.ensure(params)
         } catch (error) {
-          this.sessions.delete(params.sessionId)
           await managed.close().catch(() => {})
           throw error
         }
+        this.sessions.set(params.sessionId, managed)
         return managed
       })().finally(() => {
         this.sessionCreations.delete(params.sessionId)

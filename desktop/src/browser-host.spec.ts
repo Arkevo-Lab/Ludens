@@ -901,4 +901,141 @@ describe('BrowserHost UDS protocol, sessions, inputs, and native attachment', ()
       await rm(home, { recursive: true, force: true })
     }
   })
+
+  it('runs two isolated web game sessions concurrently, deduplicates racing session.ensure calls, and keeps session alive on initial load error', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ludens-bh-multi-'))
+    tempDirs.push(dir)
+    const factoryCalls: string[] = []
+    const backends = new Map<string, FakeSessionBackend>()
+
+    const host = new BrowserHost({
+      home: dir,
+      hostId: 'multi-host-001',
+      sessionFactory: params => {
+        factoryCalls.push(params.sessionId)
+        const backend = new FakeSessionBackend(params)
+        if (params.sessionId === 'ws-game-2') {
+          const origNavigate = backend.navigate.bind(backend)
+          backend.navigate = async url => {
+            await new Promise(resolve => setTimeout(resolve, 45))
+            return origNavigate(url)
+          }
+        } else if (params.sessionId === 'ws-redirect-err') {
+          backend.navigate = async () => {
+            throw new Error('ERR_ABORTED (-3)')
+          }
+        }
+        backends.set(params.sessionId, backend)
+        return backend
+      },
+    })
+    hosts.push(host)
+    await host.start()
+
+    const client1 = await TestUdsClient.connect(host.socketPath)
+    const client2 = await TestUdsClient.connect(host.socketPath)
+    const client3 = await TestUdsClient.connect(host.socketPath)
+
+    try {
+      // Launch game 1, and concurrently race two session.ensure calls for slow-loading game 2
+      const [g1, g2a, g2b] = await Promise.all([
+        client1.call<ViewportState>({
+          kind: 'session.ensure',
+          sessionId: 'ws-game-1',
+          initialUrl: 'https://game-one.example/play',
+          width: 1280,
+          height: 720,
+        }),
+        client2.call<ViewportState>({
+          kind: 'session.ensure',
+          sessionId: 'ws-game-2',
+          initialUrl: 'https://game-two.example/arena',
+          width: 1280,
+          height: 720,
+        }),
+        client3.call<ViewportState>({
+          kind: 'session.ensure',
+          sessionId: 'ws-game-2',
+          initialUrl: 'https://game-two.example/arena',
+          width: 1280,
+          height: 720,
+        }),
+      ])
+
+      expect(factoryCalls.filter(id => id === 'ws-game-1')).toHaveLength(1)
+      expect(factoryCalls.filter(id => id === 'ws-game-2')).toHaveLength(1)
+      expect(g1.navigation?.url).toBe('https://game-one.example/play')
+      expect(g2a.navigation?.url).toBe('https://game-two.example/arena')
+      expect(g2b.navigation?.url).toBe('https://game-two.example/arena')
+      expect(backends.get('ws-game-1')?.partition).toBe('persist:ludens-browser-ws-game-1')
+      expect(backends.get('ws-game-2')?.partition).toBe('persist:ludens-browser-ws-game-2')
+
+      // Independent frame streaming & inputs across both sessions simultaneously
+      await client1.call({ kind: 'session.subscribe', sessionId: 'ws-game-1' })
+      await client2.call({ kind: 'session.subscribe', sessionId: 'ws-game-2' })
+      backends.get('ws-game-1')!.pushFrame('Z2FtZTEtZnJhbWU=')
+      backends.get('ws-game-2')!.pushFrame('Z2FtZTItZnJhbWU=')
+
+      const f1 = await client1.waitForEvent(e => e.event === 'frame')
+      const f2 = await client2.waitForEvent(e => e.event === 'frame')
+      expect(f1.event === 'frame' && f1.sessionId === 'ws-game-1' && f1.dataBase64 === 'Z2FtZTEtZnJhbWU=').toBe(true)
+      expect(f2.event === 'frame' && f2.sessionId === 'ws-game-2' && f2.dataBase64 === 'Z2FtZTItZnJhbWU=').toBe(true)
+
+      // Initial navigation error (e.g. ERR_ABORTED on redirect) must NOT destroy the session
+      const errSession = await client3.call<ViewportState>({
+        kind: 'session.ensure',
+        sessionId: 'ws-redirect-err',
+        initialUrl: 'https://redirect.example/game',
+      })
+      expect(errSession.available).toBe(true)
+      expect(errSession.connected).toBe(true)
+      expect(host.listSessions()).toContain('ws-redirect-err')
+      expect(backends.get('ws-redirect-err')?.closed).toBe(false)
+    } finally {
+      await client1.close()
+      await client2.close()
+      await client3.close()
+    }
+  })
+
+  it('prevents stale async attachToOwner from overwriting a newer workspace session on owner window', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ludens-bh-attach-race-'))
+    tempDirs.push(dir)
+    const backends = new Map<string, FakeSessionBackend>()
+
+    const host = new BrowserHost({
+      home: dir,
+      hostId: 'attach-race-host',
+      sessionFactory: async params => {
+        if (params.sessionId === 'ws-slow') {
+          await new Promise(resolve => setTimeout(resolve, 60))
+        }
+        const backend = new FakeSessionBackend(params)
+        backends.set(params.sessionId, backend)
+        return backend
+      },
+    })
+    hosts.push(host)
+    await host.start()
+
+    const fakeOwner = { id: 'owner-race-1' }
+    const slowAttach = host.attachToOwner(fakeOwner, {
+      sessionId: 'ws-slow',
+      bounds: { x: 0, y: 0, width: 800, height: 600 },
+      visible: true,
+      interactive: true,
+    })
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const fastAttach = host.attachToOwner(fakeOwner, {
+      sessionId: 'ws-fast',
+      bounds: { x: 0, y: 0, width: 800, height: 600 },
+      visible: true,
+      interactive: true,
+    })
+
+    await Promise.all([slowAttach, fastAttach])
+
+    expect(backends.get('ws-fast')?.attachCalls).toHaveLength(1)
+    expect(backends.get('ws-slow')?.attachCalls).toHaveLength(0)
+  })
 })

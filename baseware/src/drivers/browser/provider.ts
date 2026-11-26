@@ -1,4 +1,5 @@
-import { resolveBrowserHostSocketPath } from "@ludens/protocol/browser-host-paths";
+import { readFile } from "node:fs/promises";
+import { browserHostRuntimeFilePath, resolveBrowserHostSocketPath } from "@ludens/protocol/browser-host-paths";
 import { ludensHome } from "@ludens/protocol/ludens";
 import {
   DEFAULT_VIEWPORT_HEIGHT,
@@ -66,9 +67,25 @@ function asRecord(value: unknown): Record<string, unknown> {
   return { value };
 }
 
+async function resolveDefaultBrowserHostSocket(): Promise<string> {
+  const home = ludensHome();
+  try {
+    const raw = JSON.parse(await readFile(browserHostRuntimeFilePath(home), "utf8")) as unknown;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      const candidate = (raw as { socketPath?: unknown }).socketPath;
+      if (typeof candidate === "string" && candidate.trim()) {
+        return candidate.trim();
+      }
+    }
+  } catch {
+    // Fall back to deterministic socket path when runtime file is absent.
+  }
+  return resolveBrowserHostSocketPath(home);
+}
+
 export async function createBrowserProvider(options: BrowserProviderOptions): Promise<DriverProvider> {
   const sessionId = options.sessionId?.trim() || "default";
-  const socketPath = options.browserSocket?.trim() || resolveBrowserHostSocketPath(ludensHome());
+  const socketPath = options.browserSocket?.trim() || await resolveDefaultBrowserHostSocket();
   const width = options.width ?? DEFAULT_VIEWPORT_WIDTH;
   const height = options.height ?? DEFAULT_VIEWPORT_HEIGHT;
   const { clock } = options;

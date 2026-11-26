@@ -452,6 +452,26 @@ export function useDeviceViewport(options: UseDeviceViewportOptions): UseDeviceV
     { enabled: enabled && Boolean(project), workspaceId: project || undefined },
   );
 
+  // Automatically recover when a browser viewport transiently reports offline (e.g. cold startup or busy Desktop host)
+  useEffect(() => {
+    if (
+      !enabled ||
+      suspended ||
+      !project ||
+      !rpc ||
+      state?.stageKind !== "browser" ||
+      state.available
+    ) {
+      return;
+    }
+    const timer = setInterval(() => {
+      void refresh();
+    }, 2500);
+    return () => {
+      clearInterval(timer);
+    };
+  }, [enabled, suspended, project, Boolean(rpc), state?.stageKind, state?.available, refresh]);
+
   const wsUrl = useMemo(() => {
     if (!rpc || !resolvedEndpoints || !project) return null;
     return buildViewportWsUrl({

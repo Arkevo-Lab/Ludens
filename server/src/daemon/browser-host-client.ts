@@ -19,8 +19,9 @@ import type {
   ViewportState,
 } from "@ludens/protocol/viewport";
 
-export const DEFAULT_BROWSER_HOST_PROBE_TIMEOUT_MS = 400;
+export const DEFAULT_BROWSER_HOST_PROBE_TIMEOUT_MS = 1500;
 export const DEFAULT_BROWSER_HOST_CACHE_TTL_MS = 1500;
+export const DEFAULT_BROWSER_HOST_NEGATIVE_CACHE_TTL_MS = 300;
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
 export interface BrowserHostProbeResult {
@@ -64,7 +65,13 @@ interface PendingTask {
   cleanup: () => void;
 }
 
-const probeCache = new Map<string, BrowserHostProbeResult>();
+interface CachedProbeEntry {
+  result: BrowserHostProbeResult;
+  authoritative: boolean;
+}
+
+const probeCache = new Map<string, CachedProbeEntry>();
+const inFlightProbes = new Map<string, Promise<BrowserHostProbeResult>>();
 
 function cacheKeyForHome(home: string): string {
   return resolve(home);
@@ -74,9 +81,12 @@ function cacheKeyForHome(home: string): string {
 export function invalidateBrowserHostCache(home?: string): void {
   if (home === undefined) {
     probeCache.clear();
+    inFlightProbes.clear();
     return;
   }
-  probeCache.delete(cacheKeyForHome(home));
+  const key = cacheKeyForHome(home);
+  probeCache.delete(key);
+  inFlightProbes.delete(key);
 }
 
 /** Immediately update cached BrowserHost availability (used by `browserHost/notify` RPC). */
@@ -101,11 +111,11 @@ export function updateBrowserHostCache(
     ...(update.available && update.sessions ? { sessions: update.sessions } : {}),
     checkedAt: Date.now(),
   };
-  probeCache.set(key, result);
+  probeCache.set(key, { result, authoritative: true });
   return result;
 }
 
-async function readBrowserHostRuntimeInfo(home: string): Promise<BrowserHostRuntimeInfo | null> {
+export async function readBrowserHostRuntimeInfo(home: string): Promise<BrowserHostRuntimeInfo | null> {
   try {
     const raw = JSON.parse(await readFile(browserHostRuntimeFilePath(home), "utf8")) as unknown;
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
@@ -124,9 +134,17 @@ async function readBrowserHostRuntimeInfo(home: string): Promise<BrowserHostRunt
   }
 }
 
+/** Resolve the active Desktop BrowserHost socket path, preferring `<home>/run/browser-host.json` when present. */
+export async function resolveActiveBrowserHostSocketPath(home: string): Promise<string> {
+  const key = cacheKeyForHome(home);
+  const runtimeInfo = await readBrowserHostRuntimeInfo(key);
+  return runtimeInfo?.socketPath || resolveBrowserHostSocketPath(key);
+}
+
 /**
  * Probe local Desktop BrowserHost via `<home>/run/browser-host.json` + UDS `ping`.
- * Uses a short ~400ms timeout and 1.5s TTL cache that `browserHost/notify` can immediately invalidate/update.
+ * Deduplicates concurrent probes, uses a 1.5s timeout resilient to multi-WebContentsView creation,
+ * and expires transient negative probe misses rapidly (300ms) while honoring authoritative notifications.
  */
 export async function probeBrowserHost(
   home: string,
@@ -136,55 +154,79 @@ export async function probeBrowserHost(
   const now = Date.now();
   if (!options.force) {
     const cached = probeCache.get(key);
-    if (cached && now - cached.checkedAt < DEFAULT_BROWSER_HOST_CACHE_TTL_MS) {
-      return cached;
+    if (cached) {
+      const ttlMs =
+        cached.result.available || cached.authoritative
+          ? DEFAULT_BROWSER_HOST_CACHE_TTL_MS
+          : DEFAULT_BROWSER_HOST_NEGATIVE_CACHE_TTL_MS;
+      if (now - cached.result.checkedAt < ttlMs) {
+        return cached.result;
+      }
+    }
+    const existingInFlight = inFlightProbes.get(key);
+    if (existingInFlight && !options.socketPathOverride) {
+      return existingInFlight;
     }
   }
 
-  const timeoutMs = options.timeoutMs ?? DEFAULT_BROWSER_HOST_PROBE_TIMEOUT_MS;
-  const runtimeInfo = await readBrowserHostRuntimeInfo(key);
-  const socketPath =
-    options.socketPathOverride?.trim()
-    || runtimeInfo?.socketPath
-    || resolveBrowserHostSocketPath(key);
+  const runProbe = async (): Promise<BrowserHostProbeResult> => {
+    const timeoutMs = options.timeoutMs ?? DEFAULT_BROWSER_HOST_PROBE_TIMEOUT_MS;
+    const runtimeInfo = await readBrowserHostRuntimeInfo(key);
+    const socketPath =
+      options.socketPathOverride?.trim()
+      || runtimeInfo?.socketPath
+      || resolveBrowserHostSocketPath(key);
 
-  let client: BrowserHostClient | null = null;
-  try {
-    client = await BrowserHostClient.connect(socketPath, { timeoutMs });
-    const ping = await client.ping(timeoutMs);
-    const result: BrowserHostProbeResult = {
-      available: true,
-      hostId: (typeof ping.hostId === "string" && ping.hostId.trim())
-        ? ping.hostId.trim()
-        : (runtimeInfo?.hostId || null),
-      socketPath,
-      ...(typeof ping.pid === "number" && ping.pid > 0
-        ? { pid: ping.pid }
-        : runtimeInfo?.pid
-          ? { pid: runtimeInfo.pid }
-          : {}),
-      ...(typeof ping.version === "string" && ping.version
-        ? { version: ping.version }
-        : runtimeInfo?.version
-          ? { version: runtimeInfo.version }
-          : {}),
-      ...(Array.isArray(ping.sessions) ? { sessions: ping.sessions } : {}),
-      checkedAt: Date.now(),
-    };
-    probeCache.set(key, result);
-    return result;
-  } catch {
-    const result: BrowserHostProbeResult = {
-      available: false,
-      hostId: null,
-      socketPath,
-      checkedAt: Date.now(),
-    };
-    probeCache.set(key, result);
-    return result;
-  } finally {
-    client?.close();
+    let client: BrowserHostClient | null = null;
+    try {
+      client = await BrowserHostClient.connect(socketPath, { timeoutMs });
+      const ping = await client.ping(timeoutMs);
+      const result: BrowserHostProbeResult = {
+        available: true,
+        hostId: (typeof ping.hostId === "string" && ping.hostId.trim())
+          ? ping.hostId.trim()
+          : (runtimeInfo?.hostId || null),
+        socketPath,
+        ...(typeof ping.pid === "number" && ping.pid > 0
+          ? { pid: ping.pid }
+          : runtimeInfo?.pid
+            ? { pid: runtimeInfo.pid }
+            : {}),
+        ...(typeof ping.version === "string" && ping.version
+          ? { version: ping.version }
+          : runtimeInfo?.version
+            ? { version: runtimeInfo.version }
+            : {}),
+        ...(Array.isArray(ping.sessions) ? { sessions: ping.sessions } : {}),
+        checkedAt: Date.now(),
+      };
+      probeCache.set(key, { result, authoritative: false });
+      return result;
+    } catch {
+      const result: BrowserHostProbeResult = {
+        available: false,
+        hostId: null,
+        socketPath,
+        checkedAt: Date.now(),
+      };
+      probeCache.set(key, { result, authoritative: false });
+      return result;
+    } finally {
+      client?.close();
+    }
+  };
+
+  if (options.force || options.socketPathOverride) {
+    return runProbe();
   }
+
+  const promise = runProbe().finally(() => {
+    if (inFlightProbes.get(key) === promise) {
+      inFlightProbes.delete(key);
+    }
+  });
+  inFlightProbes.set(key, promise);
+  return promise;
 }
 
 function connectSocketWithTimeout(socketPath: string, timeoutMs: number): Promise<Socket> {

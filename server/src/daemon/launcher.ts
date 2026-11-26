@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { defaultSocket } from "@ludens/baseware/address";
-import { resolveBrowserHostSocketPath } from "@ludens/protocol/browser-host-paths";
+import { resolveActiveBrowserHostSocketPath } from "./browser-host-client.ts";
 import {
   isOmpEffort,
   isOmpServiceTier,
@@ -68,6 +68,7 @@ export async function launchPlan(
   socket?: string,
   manifest?: DriverManifest,
   activeMachine?: BasewareMachineSpec,
+  home = ludensHome(),
 ): Promise<LaunchPlan> {
   const ludens = join(repo, "core/bin/ludens-core");
   const baseware = join(repo, "baseware/bin/baseware");
@@ -75,7 +76,7 @@ export async function launchPlan(
   const coreSocket = ludensSocketPath("core", workspaceHash);
   const basewareSocket = socket ?? await defaultSocket(workspace);
   const background = join(workspace, "logs/background");
-  const sharedPet = { cwd: repo, background: join(ludensHome(), "pet/background") };
+  const sharedPet = { cwd: repo, background: join(home, "pet/background") };
 
   const effectiveDriver = activeMachine ? activeMachine.driver : config.driver;
   const effectivePackage = activeMachine ? activeMachine.driverPackage : config.driverPackage;
@@ -152,11 +153,12 @@ export async function launchPlan(
       .then(identity => identity.id)
       .catch(() => workspaceHash);
     const effectiveUrl = activeMachine?.initialUrl ?? config.url;
+    const browserSocketPath = await resolveActiveBrowserHostSocketPath(home);
     browserArgs.push(
       "--session-id",
       sessionId,
       "--browser-socket",
-      resolveBrowserHostSocketPath(ludensHome()),
+      browserSocketPath,
       ...(effectiveUrl ? ["--initial-url", effectiveUrl] : []),
     );
   }
