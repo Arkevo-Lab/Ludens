@@ -43,6 +43,10 @@ import { DeviceContentionDialog } from "@/components/device-contention-dialog";
 import { PixelMark } from "@/components/ui/pixel-mark";
 import { prefersSmoothScrollBehavior, useAnimatedPresence } from "@/components/use-motion-preferences";
 import {
+  useWorkbenchRightDock,
+  WorkbenchRightDock,
+} from "@/components/workbench-right-dock";
+import {
   ModelEffortBadge,
   ModelPickerDialog,
   ServiceTierBadge,
@@ -101,11 +105,6 @@ const TIMER_BLOCKS = 24;
 const MIN_CHAT_WIDTH_PX = 360;
 const MIN_DOCK_WIDTH_PX = 360;
 const COMPACT_DOCK_WIDTH_PX = 400;
-
-function clampDockWidth(desired: number, containerWidth: number): number {
-  const maxAllowed = Math.max(MIN_DOCK_WIDTH_PX, containerWidth - MIN_CHAT_WIDTH_PX);
-  return Math.round(Math.max(MIN_DOCK_WIDTH_PX, Math.min(maxAllowed, desired)));
-}
 
 export type RuntimeControlAction = RuntimeControlCommand;
 export type EventPoolClientCommand = EventPoolCommand;
@@ -2733,32 +2732,59 @@ export function ShioriWorkbench({
   const lastReportedSegmentRef = useRef("");
   const lastAutoOpenedBrowserProjectRef = useRef<string | null>(null);
   const { flags: verbosityFlags } = useInfoVerbosity();
-  const [desktopDockOpen, setDesktopDockOpen] = useState(true);
-  const [drawerDockOpen, setDrawerDockOpen] = useState(false);
-  const [isOverlayDock, setIsOverlayDock] = useState(false);
-  const [customDockWidth, setCustomDockWidth] = useState<number | null>(null);
-  const [resizingDock, setResizingDock] = useState(false);
-  const [viewportWidthPx, setViewportWidthPx] = useState<number>(() =>
-    typeof window !== "undefined" ? window.innerWidth : 1440,
-  );
-  const dockOpen = isOverlayDock ? drawerDockOpen : desktopDockOpen;
-  const openDock = useCallback(() => {
-    setDesktopDockOpen(true);
-    setDrawerDockOpen(true);
-  }, []);
-  const closeDock = useCallback(() => {
-    if (isOverlayDock) setDrawerDockOpen(false);
-    else setDesktopDockOpen(false);
-  }, [isOverlayDock]);
-  const toggleDock = useCallback(() => {
-    if (isOverlayDock) setDrawerDockOpen(prev => !prev);
-    else setDesktopDockOpen(prev => !prev);
-  }, [isOverlayDock]);
   const [dockTab, setDockTab] = useState<"stage" | "pool">("stage");
   const [focusedPoolEventId, setFocusedPoolEventId] = useState<string | null>(null);
   const [pendingPoolLocateEvent, setPendingPoolLocateEvent] = useState<PoolEvent | null>(null);
   const [poolFlashId, setPoolFlashId] = useState<string | null>(null);
   const poolFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
+  const [immersiveMode, setImmersiveMode] = useState<boolean>(false);
+  const [immersivePodTier, setImmersivePodTier] = useState<ImmersivePodTier>("compact");
+  const [sharedComposerDraft, setSharedComposerDraft] = useState<string>("");
+  const [inspectedTurn, setInspectedTurn] = useState<{
+    runId: string;
+    blockId: string;
+    callId: string | null;
+    imageId: string | null;
+    at: string;
+  } | null>(null);
+  const [workflowCommand, setWorkflowCommand] = useState<{
+    mode: ComposerMode;
+    prompt: string | null;
+  } | null>(null);
+  const [replyTarget, setReplyTarget] = useState<PoolEvent | null>(null);
+  const [replyAutoResumeDefault, setReplyAutoResumeDefault] = useState<boolean | undefined>(undefined);
+
+  const [isInteractiveStageHint, setIsInteractiveStageHint] = useState(false);
+  const preferredLiveDockWidth = useCallback(
+    (width: number) =>
+      isInteractiveStageHint ? Math.min(680, Math.max(540, Math.round(width * 0.44))) : null,
+    [isInteractiveStageHint],
+  );
+  const dock = useWorkbenchRightDock({
+    workbenchRef,
+    defaultInlineOpen: true,
+    defaultOverlayOpen: false,
+    forceInlineMode: immersiveMode,
+    preferredWidthPx: preferredLiveDockWidth,
+    minDockWidthPx: MIN_DOCK_WIDTH_PX,
+    minMainWidthPx: MIN_CHAT_WIDTH_PX,
+    compactWidthPx: COMPACT_DOCK_WIDTH_PX,
+    resetKey: project,
+  });
+  const {
+    isOverlay: isOverlayDock,
+    dockOpen,
+    openDock,
+    closeDock,
+    toggleDock,
+    resizing: resizingDock,
+    resolvedWidthPx: resolvedDockWidth,
+    isExpandedWidth: isDockExpanded,
+    toggleWidthPreset: toggleDockWidth,
+  } = dock;
+
   const openDockOnStage = useCallback(() => {
     setDockTab("stage");
     openDock();
@@ -2779,24 +2805,6 @@ export function ShioriWorkbench({
     openPoolOverview();
   }, [dockOpen, dockTab, closeDock, openPoolOverview]);
 
-  const [highlightedSegmentId, setHighlightedSegmentId] = useState<string | null>(null);
-  const [immersiveMode, setImmersiveMode] = useState<boolean>(false);
-  const [immersivePodTier, setImmersivePodTier] = useState<ImmersivePodTier>("compact");
-  const [sharedComposerDraft, setSharedComposerDraft] = useState<string>("");
-  const [inspectedTurn, setInspectedTurn] = useState<{
-    runId: string;
-    blockId: string;
-    callId: string | null;
-    imageId: string | null;
-    at: string;
-  } | null>(null);
-  const [workflowCommand, setWorkflowCommand] = useState<{
-    mode: ComposerMode;
-    prompt: string | null;
-  } | null>(null);
-  const [replyTarget, setReplyTarget] = useState<PoolEvent | null>(null);
-  const [replyAutoResumeDefault, setReplyAutoResumeDefault] = useState<boolean | undefined>(undefined);
-
   useEffect(() => {
     setHighlightedSegmentId(null);
     setInspectedTurn(null);
@@ -2805,7 +2813,6 @@ export function ShioriWorkbench({
     setFocusedPoolEventId(null);
     setPendingPoolLocateEvent(null);
     setPoolFlashId(null);
-    setCustomDockWidth(null);
     lastReportedSegmentRef.current = "";
   }, [project]);
 
@@ -2825,6 +2832,10 @@ export function ShioriWorkbench({
   const isInteractiveStage =
     effectiveStageKind === "browser" || effectiveStageKind === "computer";
 
+  useEffect(() => {
+    setIsInteractiveStageHint(isInteractiveStage);
+  }, [isInteractiveStage]);
+
   const toggleImmersiveMode = useCallback(() => {
     setImmersiveMode(prev => {
       const next = !prev;
@@ -2832,11 +2843,11 @@ export function ShioriWorkbench({
         setDockTab("stage");
         setInspectedTurn(null);
         setImmersivePodTier("compact");
-        setDesktopDockOpen(true);
+        openDock();
       }
       return next;
     });
-  }, []);
+  }, [openDock]);
 
   // Auto-collapse left sidebar on entering Immersive Mode and restore previous state on exit
   const sidebarCollapsedRef = useRef(sidebarCollapsed);
@@ -2883,82 +2894,10 @@ export function ShioriWorkbench({
       lastAutoOpenedBrowserProjectRef.current !== project
     ) {
       lastAutoOpenedBrowserProjectRef.current = project;
-      setDesktopDockOpen(true);
+      openDock();
       setDockTab("stage");
     }
-  }, [effectiveStageKind, isOverlayDock, project]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const handleResize = () => setViewportWidthPx(window.innerWidth);
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
-  }, []);
-
-  const containerWidth = workbenchRef.current?.clientWidth || viewportWidthPx;
-  const resolvedDockWidth = useMemo(() => {
-    if (!dockOpen || isOverlayDock) return null;
-    if (customDockWidth != null) {
-      return clampDockWidth(customDockWidth, containerWidth);
-    }
-    if (isInteractiveStage) {
-      const preferred = Math.min(680, Math.max(540, Math.round(containerWidth * 0.44)));
-      return clampDockWidth(preferred, containerWidth);
-    }
-    return null;
-  }, [dockOpen, isOverlayDock, customDockWidth, isInteractiveStage, containerWidth]);
-
-  const isDockExpanded = resolvedDockWidth != null && resolvedDockWidth >= 500;
-
-  const toggleDockWidth = useCallback(() => {
-    const widthNow = workbenchRef.current?.clientWidth || viewportWidthPx;
-    if (isDockExpanded) {
-      setCustomDockWidth(COMPACT_DOCK_WIDTH_PX);
-      return;
-    }
-    const expandedTarget = Math.min(680, Math.max(560, Math.round(widthNow * 0.48)));
-    setCustomDockWidth(clampDockWidth(expandedTarget, widthNow));
-  }, [isDockExpanded, viewportWidthPx]);
-
-  const dockResizeCleanupRef = useRef<(() => void) | null>(null);
-  useEffect(
-    () => () => {
-      dockResizeCleanupRef.current?.();
-    },
-    [],
-  );
-
-  const handleDockResizeStart = useCallback(
-    (event: ReactPointerEvent<HTMLDivElement>) => {
-      if (isOverlayDock || !dockOpen || event.button !== 0) return;
-      event.preventDefault();
-      dockResizeCleanupRef.current?.();
-      setResizingDock(true);
-
-      const handleMove = (moveEvent: globalThis.PointerEvent) => {
-        const host = workbenchRef.current;
-        const rect = host?.getBoundingClientRect();
-        const totalWidth = rect?.width || window.innerWidth;
-        const rightEdge = rect?.right ?? window.innerWidth;
-        const desired = rightEdge - moveEvent.clientX;
-        setCustomDockWidth(clampDockWidth(desired, totalWidth));
-      };
-
-      const finish = () => {
-        setResizingDock(false);
-        window.removeEventListener("pointermove", handleMove);
-        window.removeEventListener("pointerup", finish);
-        window.removeEventListener("pointercancel", finish);
-        dockResizeCleanupRef.current = null;
-      };
-
-      dockResizeCleanupRef.current = finish;
-      window.addEventListener("pointermove", handleMove);
-      window.addEventListener("pointerup", finish);
-      window.addEventListener("pointercancel", finish);
-    },
-    [dockOpen, isOverlayDock],
-  );
+  }, [effectiveStageKind, isOverlayDock, project, openDock]);
 
   const handleReclaimControl = useCallback(async () => {
     if (!project || !workspace) return;
@@ -2968,31 +2907,6 @@ export function ShioriWorkbench({
       // Transient / stale-epoch errors are reconciled by live session state polling.
     }
   }, [actions, project, workspace]);
-
-  useEffect(() => {
-    if (typeof window === "undefined" || typeof window.matchMedia !== "function") return;
-    const mql = window.matchMedia("(max-width: 1099px)");
-    setIsOverlayDock(mql.matches);
-    const handleMediaChange = (event: MediaQueryListEvent) => {
-      setIsOverlayDock(event.matches);
-      if (event.matches) {
-        setDrawerDockOpen(false);
-      }
-    };
-    mql.addEventListener("change", handleMediaChange);
-    return () => mql.removeEventListener("change", handleMediaChange);
-  }, []);
-
-  useEffect(() => {
-    if (!isOverlayDock || !drawerDockOpen) return;
-    const handleKey = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape" && !event.defaultPrevented) {
-        setDrawerDockOpen(false);
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [isOverlayDock, drawerDockOpen]);
 
   useEffect(() => {
     if (!requestedCall && !selectedImage) return;
@@ -3005,9 +2919,8 @@ export function ShioriWorkbench({
       at: matchedCall?.at ?? data.updatedAt,
     });
     setDockTab("stage");
-    setDesktopDockOpen(true);
-    setDrawerDockOpen(true);
-  }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt]);
+    openDock();
+  }, [requestedCall, selectedImage, data.run, data.calls, data.updatedAt, openDock]);
 
   const canMutatePool = Boolean(isLiveRun && project && workspace);
   const canResumeAuto = !isAuto && !consolidating;
@@ -3167,7 +3080,7 @@ export function ShioriWorkbench({
   const locatePoolEventInStream = useCallback(
     (event: PoolEvent) => {
       const ctx = poolLocateContextRef.current;
-      if (ctx.isOverlayDock) setDrawerDockOpen(false);
+      if (ctx.isOverlayDock) closeDock();
       if (scrollToPoolEvent(event.id)) {
         setPendingPoolLocateEvent(null);
         return;
@@ -3181,7 +3094,7 @@ export function ShioriWorkbench({
         scrollToPoolEvent(event.id);
       });
     },
-    [scrollToPoolEvent],
+    [closeDock, scrollToPoolEvent],
   );
 
   // Page upward history until a requested Event Pool item enters the loaded stream window.
@@ -3240,11 +3153,11 @@ export function ShioriWorkbench({
     focusedEventId: focusedPoolEventId,
     onFocusEvent: setFocusedPoolEventId,
     onComposeNewEvent: () => {
-      if (isOverlayDock) setDrawerDockOpen(false);
+      if (isOverlayDock) closeDock();
       setWorkflowCommand({ mode: "event", prompt: null });
     },
     onReply: (event, resumeAuto) => {
-      if (isOverlayDock) setDrawerDockOpen(false);
+      if (isOverlayDock) closeDock();
       setReplyTarget(event);
       setReplyAutoResumeDefault(resumeAuto);
     },
@@ -3696,7 +3609,6 @@ export function ShioriWorkbench({
 
   const showFollowPill = !isFollowing || feed.historical;
   const followPillPresence = useAnimatedPresence(showFollowPill, 140);
-  const backdropPresence = useAnimatedPresence(!immersiveMode && dockOpen && isOverlayDock, 180);
   const effectiveDockOpen = immersiveMode || dockOpen;
 
   const showHeaderStatusPill = Boolean(
@@ -3796,7 +3708,11 @@ export function ShioriWorkbench({
       }
     >
       {/* ── LEFT / CENTER MAIN PANE: CODEX CHAT STREAM ── */}
-      <section className="codex-chat-pane" aria-label={t("ariaLabel")}>
+      <section
+        className="codex-chat-pane"
+        aria-label={t("ariaLabel")}
+        inert={dock.mainInert || undefined}
+      >
         {/* Single 46px Thread Header (aligned with right-pane 46px header at y = 0) */}
         <header
           className="codex-thread-header codex-cockpit-header"
@@ -3857,17 +3773,19 @@ export function ShioriWorkbench({
               {pendingPoolCount > 0 && <span className="codex-pool-trigger-count">{pendingPoolCount}</span>}
             </button>
             <button
+              ref={dock.toggleButtonRef}
               type="button"
               className="codex-header-btn codex-header-icon-btn codex-dock-toggle-btn"
               data-active={dockOpen || undefined}
-              aria-pressed={dockOpen}
+              aria-expanded={dockOpen}
+              aria-controls={dock.dockId}
               title={t("toggleDockHint")}
               aria-label={t("toggleDockHint")}
               onClick={toggleDock}
             >
               <PanelRight className="size-4 shrink-0" aria-hidden="true" />
             </button>
-            {!dockOpen && desktopTrailingSlot}
+            {(!dockOpen || isOverlayDock) && desktopTrailingSlot}
           </div>
         </header>
 
@@ -4340,42 +4258,23 @@ export function ShioriWorkbench({
 
       {/* Split Mode Bottom Pill Composer (Left Column); Immersive Mode mounts <ImmersiveFloatingPod /> */}
       {!immersiveMode && (
-        <div className="codex-composer-slot">
+        <div className="codex-composer-slot" inert={dock.mainInert || undefined}>
           <div className="codex-composer-body">{renderSharedComposer(false, false)}</div>
         </div>
       )}
 
       {/* ── RIGHT WORKBENCH DOCK: LIVE VIEWPORT + COMPACT HOST OPS + TELEMETRY ── */}
-      {backdropPresence.mounted && (
-        <div
-          className="codex-dock-backdrop"
-          data-dock-backdrop
-          data-motion-state={backdropPresence.state}
-          aria-hidden="true"
-          onClick={closeDock}
-        />
-      )}
-      <aside
+      <WorkbenchRightDock
+        dock={dock}
+        immersive={immersiveMode}
         className="codex-right-dock"
-        data-dock-state={effectiveDockOpen ? "open" : "closed"}
-        data-immersive={immersiveMode ? "true" : undefined}
+        backdropClassName="codex-dock-backdrop"
+        resizerClassName="codex-dock-resizer"
+        ariaLabel={t("stageColumnAria")}
+        resizeAriaLabel={t("resizeDockAria")}
+        resizeTitle={t("resizeDockHint")}
         data-stage-kind={effectiveStageKind}
-        data-overlay={!immersiveMode && isOverlayDock ? "true" : undefined}
-        aria-hidden={!effectiveDockOpen || undefined}
-        inert={!effectiveDockOpen || undefined}
-        aria-label={t("stageColumnAria")}
       >
-          {!immersiveMode && !isOverlayDock && dockOpen && (
-            <div
-              className="codex-dock-resizer"
-              role="separator"
-              aria-orientation="vertical"
-              aria-label={t("resizeDockAria")}
-              title={t("resizeDockHint")}
-              onPointerDown={handleDockResizeStart}
-              onDoubleClick={() => setCustomDockWidth(null)}
-            />
-          )}
           <header
             className="codex-dock-header"
             hidden={Boolean(isInteractiveStage && !inspectedTurn && (immersiveMode || dockTab === "stage"))}
@@ -4437,12 +4336,12 @@ export function ShioriWorkbench({
                   className="codex-header-btn codex-header-icon-btn codex-dock-close-btn"
                   title={t("closeDock")}
                   aria-label={t("closeDock")}
-                  onClick={closeDock}
+                  onClick={() => closeDock({ restoreFocus: true })}
                 >
                   <X className="size-4" aria-hidden="true" />
                 </button>
               )}
-              {desktopTrailingSlot}
+              {!isOverlayDock && desktopTrailingSlot}
             </div>
           </header>
           {!immersiveMode && dockTab === "pool" && (
@@ -4474,7 +4373,22 @@ export function ShioriWorkbench({
                     suspended={viewportSuspended}
                     immersive={immersiveMode}
                     leadingSlot={immersiveMode ? mobileNavSlot : undefined}
-                    trailingSlot={desktopTrailingSlot}
+                    trailingSlot={
+                      <>
+                        {!immersiveMode && isOverlayDock && (
+                          <button
+                            type="button"
+                            className="codex-header-btn codex-header-icon-btn codex-dock-close-btn"
+                            title={t("closeDock")}
+                            aria-label={t("closeDock")}
+                            onClick={() => closeDock({ restoreFocus: true })}
+                          >
+                            <X className="size-4" aria-hidden="true" />
+                          </button>
+                        )}
+                        {(!isOverlayDock || immersiveMode) && desktopTrailingSlot}
+                      </>
+                    }
                     onChromeDoubleClick={onHeaderDoubleClick}
                     onToggleImmersive={toggleImmersiveMode}
                     onReclaimControl={handleReclaimControl}
@@ -4684,7 +4598,7 @@ export function ShioriWorkbench({
               </div>
             )}
           </div>
-        </aside>
+        </WorkbenchRightDock>
 
       {immersiveMode && (
         <ImmersiveFloatingPod

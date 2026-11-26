@@ -492,7 +492,7 @@ test("Live workbench CSS enforces full-width stretch, 46px header parity, <1100p
   assert.match(activityCss, /\.codex-header-icon-btn\s*\{[^}]*min-width:\s*28px;/);
   assert.match(
     activityCss,
-    /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock:not\(\[data-immersive="true"\]\)\s*\{[^}]*position:\s*absolute;[^}]*width:\s*min\(370px,\s*calc\(100vw\s*-\s*48px\)\);/,
+    /@media\s*\(max-width:\s*1099px\)[\s\S]*?\.codex-right-dock:not\(\[data-immersive="true"\]\)\s*\{[^}]*grid-area:\s*auto;[^}]*position:\s*absolute;[^}]*width:\s*min\(380px,\s*calc\(100%\s*-\s*24px\)\);/,
   );
   assert.match(
     activityCss,

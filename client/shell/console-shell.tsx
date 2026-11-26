@@ -559,6 +559,8 @@ export default function ConsoleShell() {
           ) : view === "replay" ? (
             <SlottedTimelinePlayer key={scopeKey} project={selection.project} run={run} epoch={selection.epoch || "all"}
               runPicker={contextualRunPicker} mobileNavSlot={mobileNavButton}
+              desktopTrailingSlot={desktopTrailingControls}
+              onHeaderDoubleClick={desktop.active ? () => void desktop.handleTitlebarDoubleClick() : undefined}
               onOverview={onReplayOverview} archiveRevision={archiveRevision}
               position={query.get("at")} evidence={replayEvidenceFromSearch(search)}
               onPosition={(at, nextEvidence = null, options) => {
