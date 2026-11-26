@@ -11,6 +11,7 @@ import {
   CpuIcon,
   FolderIcon,
   FolderOpenIcon,
+  GlobeIcon,
   MonitorIcon,
   PlayIcon,
   PlugIcon,
@@ -42,8 +43,16 @@ import type {
   CreateWorkspaceInput,
 } from "@ludens/protocol/workspaces";
 import type { WorkspaceDefaults, WorkspaceRegistration } from "@ludens/protocol/workspaces";
-import { BUILTIN_CUA_DRIVER, BUILTIN_CUA_DRIVER_SPEC } from "@ludens/protocol/drivers";
-import { BUILTIN_LOCAL_DESKTOP_MACHINE } from "@ludens/protocol/machines";
+import {
+  BUILTIN_BROWSER_DRIVER_SPEC,
+  BUILTIN_CUA_DRIVER,
+  BUILTIN_CUA_DRIVER_SPEC,
+} from "@ludens/protocol/drivers";
+import {
+  BUILTIN_LOCAL_BROWSER_MACHINE,
+  BUILTIN_LOCAL_DESKTOP_MACHINE,
+} from "@ludens/protocol/machines";
+import { BUILTIN_BROWSER_START_URL } from "@ludens/protocol/viewport";
 import {
   isSelectedModelAuthenticated,
   resolveCreationModelDefaults,
@@ -53,10 +62,14 @@ import {
   effectiveTargetMode,
   findExistingWorkspaceConflict,
   initialWorkspaceSetup,
+  isBrowserTargetDraft,
+  resolveFirstClassEnvironment,
+  selectFirstClassEnvironment,
   switchWorkspaceTargetMode,
   workspaceCreateInput,
   workspaceDriverCapabilities,
   workspaceLocation,
+  type FirstClassEnvironmentKind,
   type WorkspaceCreationIntent,
   type WorkspaceSetupIssue,
   type WorkspaceTargetMode,
@@ -88,7 +101,9 @@ function formatMachineTransportSummary(machine: BasewareMachineRuntimeStatus): s
     case "bridge":
       return `bridge · ${t.host ?? "127.0.0.1"}:${t.port}`;
     case "stdio":
-      return `stdio · ${t.command ?? "cua-driver"}`;
+      return machine.driver === "browser"
+        ? "browser · WebContentsView (isolated)"
+        : `stdio · ${t.command ?? "cua-driver"}`;
     case "ssh":
       return `ssh · ${t.user ? `${t.user}@` : ""}${t.host}`;
     case "http":
@@ -197,6 +212,22 @@ export function WorkspaceCreateForm({
   const [advanced, setAdvanced] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const modelManuallyChosenRef = useRef(false);
+  const targetManuallyChosenRef = useRef(
+    Boolean(initialIntent?.driverPackage?.trim() || initialIntent?.machineId?.trim()),
+  );
+
+  const browserAvailable = Boolean(
+    catalog.browserHost?.available ||
+      hostCapabilities.builtinBrowser ||
+      catalog.machines.some(
+        item => item.id === BUILTIN_LOCAL_BROWSER_MACHINE.id && item.available !== false,
+      ),
+  );
+
+  useEffect(() => {
+    if (!browserAvailable || targetManuallyChosenRef.current) return;
+    setDraft(prev => selectFirstClassEnvironment(prev, "browser"));
+  }, [browserAvailable]);
 
   // Sync initial model defaults from global config + live authenticated catalog until user overrides
   const resolvedModelDefaults = useMemo(
@@ -249,7 +280,12 @@ export function WorkspaceCreateForm({
 
   // When selecting an installed/cached non-builtin driver in Mode 2, auto-probe its manifest once for accurate `launchCommand` / `defaultPort`
   useEffect(() => {
-    if (mode !== "driver" || !selectedCatalogDriver || selectedCatalogDriver.spec === BUILTIN_CUA_DRIVER_SPEC) {
+    if (
+      mode !== "driver" ||
+      !selectedCatalogDriver ||
+      selectedCatalogDriver.spec === BUILTIN_CUA_DRIVER_SPEC ||
+      selectedCatalogDriver.spec === BUILTIN_BROWSER_DRIVER_SPEC
+    ) {
       setProbingCatalogDriver(false);
       return;
     }
@@ -287,19 +323,56 @@ export function WorkspaceCreateForm({
     mode === "machine"
       ? (availableMachines.find(m => m.id === draft.machineId)?.transport.kind === "stdio" ? "desktop" : "community")
       : mode === "driver"
-        ? (selectedCatalogDriver?.spec === BUILTIN_CUA_DRIVER_SPEC || selectedCatalogDriver?.transport === "stdio"
+        ? (selectedCatalogDriver?.spec === BUILTIN_CUA_DRIVER_SPEC ||
+            selectedCatalogDriver?.spec === BUILTIN_BROWSER_DRIVER_SPEC ||
+            selectedCatalogDriver?.transport === "stdio"
             ? "desktop"
             : "community")
         : "community";
 
   const activeDiscoveredForCaps =
     mode === "driver"
-      ? (selectedCatalogDriver && selectedCatalogDriver.spec !== BUILTIN_CUA_DRIVER_SPEC
+      ? (selectedCatalogDriver &&
+          selectedCatalogDriver.spec !== BUILTIN_CUA_DRIVER_SPEC &&
+          selectedCatalogDriver.spec !== BUILTIN_BROWSER_DRIVER_SPEC
           ? catalog.discoveredCache[selectedCatalogDriver.spec] ?? null
           : null)
       : mode === "package"
         ? driver
         : null;
+
+  const isBrowserTarget = isBrowserTargetDraft(draft, {
+    machines: availableMachines,
+    catalogDriver: mode === "driver" ? selectedCatalogDriver : null,
+  });
+
+  const activeFirstClassEnv = resolveFirstClassEnvironment(draft, {
+    machines: availableMachines,
+    catalogDriver: mode === "driver" ? selectedCatalogDriver : null,
+  });
+
+  const selectFirstClassEnv = (env: FirstClassEnvironmentKind) => {
+    if (env === "browser" && !browserAvailable) return;
+    targetManuallyChosenRef.current = true;
+    resetDiscovery();
+    const externalMachine =
+      availableMachines.find(
+        m => m.id !== BUILTIN_LOCAL_DESKTOP_MACHINE.id && m.id !== BUILTIN_LOCAL_BROWSER_MACHINE.id,
+      ) ?? null;
+    const externalDriver =
+      availableDrivers.find(
+        d => d.spec !== BUILTIN_CUA_DRIVER_SPEC && d.spec !== BUILTIN_BROWSER_DRIVER_SPEC,
+      ) ?? null;
+    if (env === "external" && !externalMachine && externalDriver) {
+      setSelectedDriverKey(externalDriver.key);
+    }
+    setDraft(prev =>
+      selectFirstClassEnvironment(prev, env, {
+        externalMachine,
+        externalDriver,
+      }),
+    );
+  };
 
   const capabilities = workspaceDriverCapabilities(
     effectiveEnvForCaps,
@@ -340,6 +413,7 @@ export function WorkspaceCreateForm({
 
   const selectTargetMode = (nextMode: WorkspaceTargetMode) => {
     if (mode === nextMode) return;
+    targetManuallyChosenRef.current = true;
     resetDiscovery();
     const defaultMachine = availableMachines[0] ?? null;
     const defaultDriver =
@@ -452,7 +526,7 @@ export function WorkspaceCreateForm({
   };
 
   const changeField = (
-    field: "name" | "targetDirectory" | "game" | "port" | "cuaCommand",
+    field: "name" | "targetDirectory" | "game" | "url" | "port" | "cuaCommand",
     value: string,
   ) => {
     setIssue(null);
@@ -725,9 +799,130 @@ export function WorkspaceCreateForm({
             ) : null}
           </div>
 
-          {/* 2. 3-Mode Target Environment Selector */}
-          <div className="grid gap-2.5">
+          {/* 2. First-Class Environment Selector + 3-Mode Target Options */}
+          <div className="grid gap-3">
             <Label id={`${id}-target-mode`}>{t("connectTo")}</Label>
+
+            {/* First-Class Environment Quick Choices */}
+            <div
+              className="grid grid-cols-1 gap-2.5 sm:grid-cols-3"
+              role="group"
+              aria-label={t("firstClassEnvAria")}
+            >
+              <button
+                type="button"
+                data-first-class-env="browser"
+                aria-pressed={activeFirstClassEnv === "browser"}
+                disabled={pending || !browserAvailable}
+                onClick={() => selectFirstClassEnv("browser")}
+                className={`flex min-w-0 flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  activeFirstClassEnv === "browser"
+                    ? "border-[var(--gold)] bg-[var(--surface-inset)]"
+                    : browserAvailable
+                      ? "border-border bg-background/60 hover:bg-muted/50"
+                      : "cursor-not-allowed border-dashed border-border/70 bg-muted/20 opacity-65"
+                }`}
+              >
+                <div className="flex w-full items-center justify-between gap-1.5">
+                  <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground">
+                    <GlobeIcon className="size-4 shrink-0 text-[var(--gold)]" aria-hidden="true" />
+                    <span className="truncate">{t("envBrowserTitle")}</span>
+                  </span>
+                  {browserAvailable ? (
+                    <Badge
+                      variant="outline"
+                      className="shrink-0 border-[var(--gold)]/45 bg-[var(--gold)]/10 text-[10px] text-[var(--gold)]"
+                    >
+                      {t("envRecommendedBadge")}
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="shrink-0 text-[10px]">
+                      {t("envDesktopAppBadge")}
+                    </Badge>
+                  )}
+                </div>
+                <span className="text-[11px] leading-snug text-muted-foreground">
+                  {t(browserAvailable ? "envBrowserSubtitle" : "envBrowserOfflineSubtitle")}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                data-first-class-env="computer"
+                aria-pressed={activeFirstClassEnv === "computer"}
+                disabled={pending}
+                onClick={() => selectFirstClassEnv("computer")}
+                className={`flex min-w-0 flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  activeFirstClassEnv === "computer"
+                    ? "border-[var(--gold)] bg-[var(--surface-inset)]"
+                    : "border-border bg-background/60 hover:bg-muted/50"
+                }`}
+              >
+                <div className="flex w-full items-center justify-between gap-1.5">
+                  <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground">
+                    <MonitorIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="truncate">{t("envComputerTitle")}</span>
+                  </span>
+                  <Badge variant="secondary" className="shrink-0 text-[10px]">
+                    CUA
+                  </Badge>
+                </div>
+                <span className="text-[11px] leading-snug text-muted-foreground">
+                  {t("envComputerSubtitle")}
+                </span>
+              </button>
+
+              <button
+                type="button"
+                data-first-class-env="external"
+                aria-pressed={activeFirstClassEnv === "external"}
+                disabled={pending}
+                onClick={() => selectFirstClassEnv("external")}
+                className={`flex min-w-0 flex-col items-start gap-1.5 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                  activeFirstClassEnv === "external"
+                    ? "border-[var(--gold)] bg-[var(--surface-inset)]"
+                    : "border-border bg-background/60 hover:bg-muted/50"
+                }`}
+              >
+                <div className="flex w-full items-center justify-between gap-1.5">
+                  <span className="flex min-w-0 items-center gap-1.5 text-sm font-medium text-foreground">
+                    <PlugIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                    <span className="truncate">{t("envExternalTitle")}</span>
+                  </span>
+                </div>
+                <span className="text-[11px] leading-snug text-muted-foreground">
+                  {t("envExternalSubtitle")}
+                </span>
+              </button>
+            </div>
+
+            {/* Browser Initial URL Input (when Built-in Browser is active) */}
+            {isBrowserTarget ? (
+              <div className="grid gap-1.5 rounded-lg border border-[var(--gold)]/35 bg-[var(--surface-inset)]/60 p-3">
+                <Label htmlFor={`${id}-initial-url`} className="text-xs">
+                  {t("initialUrlLabel")}
+                </Label>
+                <Input
+                  id={`${id}-initial-url`}
+                  name="url"
+                  value={draft.url ?? ""}
+                  maxLength={2000}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="none"
+                  spellCheck={false}
+                  placeholder={t("initialUrlPlaceholder").replace("{startUrl}", BUILTIN_BROWSER_START_URL)}
+                  aria-describedby={`${id}-initial-url-hint`}
+                  onChange={event => changeField("url", event.target.value)}
+                />
+                <p id={`${id}-initial-url-hint`} className="text-[11px] leading-relaxed text-muted-foreground">
+                  {t("initialUrlHint")}
+                </p>
+              </div>
+            ) : null}
+
+            {activeFirstClassEnv !== "browser" ? (
+              <>
             <RadioGroup
               value={mode}
               onValueChange={val => selectTargetMode(val as WorkspaceTargetMode)}
@@ -802,6 +997,7 @@ export function WorkspaceCreateForm({
               <div className="grid max-h-52 gap-2 overflow-y-auto rounded-lg border bg-muted/15 p-2.5">
                 {availableMachines.map(machine => {
                   const selected = (draft.machineId || availableMachines[0]?.id) === machine.id;
+                  const isBrowser = machine.driver === "browser";
                   const isDesktop = machine.driver === "cua";
                   return (
                     <button
@@ -810,6 +1006,7 @@ export function WorkspaceCreateForm({
                       data-machine-card={machine.id}
                       aria-pressed={selected}
                       onClick={() => {
+                        targetManuallyChosenRef.current = true;
                         setIssue(null);
                         setDraft(prev => ({
                           ...prev,
@@ -826,7 +1023,9 @@ export function WorkspaceCreateForm({
                     >
                       <div className="flex min-w-0 items-start gap-2.5">
                         <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded border bg-background text-muted-foreground">
-                          {isDesktop ? (
+                          {isBrowser ? (
+                            <GlobeIcon className="size-3.5 text-[var(--gold)]" aria-hidden="true" />
+                          ) : isDesktop ? (
                             <MonitorIcon className="size-3.5" aria-hidden="true" />
                           ) : (
                             <CpuIcon className="size-3.5 text-[var(--gold)]" aria-hidden="true" />
@@ -896,14 +1095,17 @@ export function WorkspaceCreateForm({
                         data-driver-card={drv.id}
                         aria-pressed={selected}
                         onClick={() => {
+                          targetManuallyChosenRef.current = true;
                           setSelectedDriverKey(drv.key);
                           setIssue(null);
-                          const isCua = drv.spec === BUILTIN_CUA_DRIVER_SPEC;
+                          const isBuiltin =
+                            drv.spec === BUILTIN_CUA_DRIVER_SPEC ||
+                            drv.spec === BUILTIN_BROWSER_DRIVER_SPEC;
                           setDraft(prev => ({
                             ...prev,
-                            environment: isCua ? "desktop" : "community",
+                            environment: isBuiltin ? "desktop" : "community",
                             driverId: drv.id,
-                            driverPackage: isCua ? "" : drv.spec,
+                            driverPackage: isBuiltin ? "" : drv.spec,
                             game: "",
                             port: undefined,
                           }));
@@ -1208,6 +1410,8 @@ export function WorkspaceCreateForm({
                   <p className="text-xs text-muted-foreground">{t("verifyFirstHint")}</p>
                 )}
               </div>
+            ) : null}
+              </>
             ) : null}
           </div>
 

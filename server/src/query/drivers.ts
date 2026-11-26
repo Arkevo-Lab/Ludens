@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
 import { isAbsolute, join } from "node:path";
+import {
+  BUILTIN_BROWSER_DRIVER,
+  BUILTIN_BROWSER_DRIVER_SPEC,
+  BUILTIN_CUA_DRIVER,
+  BUILTIN_CUA_DRIVER_SPEC,
+} from "@ludens/protocol/drivers";
 import { cliCommand } from "../daemon/background-jobs";
 import { repoRoot } from "./repo";
 
@@ -21,6 +27,26 @@ export async function discoverDriver(spec: string, signal?: AbortSignal): Promis
   const text = spec.trim();
   if (!text) throw Object.assign(new Error("请输入 driver 包地址（npm 名、github:org/repo#rev 或 file: 路径）"), { status: 400 });
   if (text.length > 500) throw Object.assign(new Error("包地址过长"), { status: 400 });
+  if (text === BUILTIN_CUA_DRIVER_SPEC || text === BUILTIN_CUA_DRIVER.id) {
+    return {
+      spec: BUILTIN_CUA_DRIVER_SPEC,
+      id: BUILTIN_CUA_DRIVER.id,
+      version: BUILTIN_CUA_DRIVER.version ?? "builtin",
+      ...(BUILTIN_CUA_DRIVER.transport ? { transport: BUILTIN_CUA_DRIVER.transport } : {}),
+      ...(BUILTIN_CUA_DRIVER.needsGame !== undefined ? { needsGame: BUILTIN_CUA_DRIVER.needsGame } : {}),
+      ...(BUILTIN_CUA_DRIVER.launchHint ? { launchHint: BUILTIN_CUA_DRIVER.launchHint } : {}),
+    };
+  }
+  if (text === BUILTIN_BROWSER_DRIVER_SPEC || text === BUILTIN_BROWSER_DRIVER.id) {
+    return {
+      spec: BUILTIN_BROWSER_DRIVER_SPEC,
+      id: BUILTIN_BROWSER_DRIVER.id,
+      version: BUILTIN_BROWSER_DRIVER.version ?? "builtin",
+      ...(BUILTIN_BROWSER_DRIVER.transport ? { transport: BUILTIN_BROWSER_DRIVER.transport } : {}),
+      ...(BUILTIN_BROWSER_DRIVER.needsGame !== undefined ? { needsGame: BUILTIN_BROWSER_DRIVER.needsGame } : {}),
+      ...(BUILTIN_BROWSER_DRIVER.launchHint ? { launchHint: BUILTIN_BROWSER_DRIVER.launchHint } : {}),
+    };
+  }
   if (text.startsWith("file:") && !isAbsolute(text.slice(5).trim())) {
     throw Object.assign(new Error("Dashboard 的 file: 包地址必须使用绝对路径"), { status: 400 });
   }

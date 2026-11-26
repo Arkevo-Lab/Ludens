@@ -19,6 +19,7 @@ import { handleHttpRequest } from "./http-routes.ts";
 import { localRequest, normalizeOrigin } from "./local-request.ts";
 import { generateMediaTicketSecret } from "./media-ticket.ts";
 import { RpcRouter, type RpcSession, type RpcWorkerClient } from "./rpc-router.ts";
+import { authorizeViewportUpgrade, ViewportWsBridge } from "./viewport-ws.ts";
 
 export interface WsListenOptions {
   host: string;
@@ -72,9 +73,17 @@ export interface AppServerHandle {
   close(options?: { emergency?: boolean; stopCores?: boolean }): Promise<void>;
 }
 
-interface WebSocketSessionData {
-  session: RpcSession | null;
-}
+type WebSocketSessionData =
+  | {
+      kind: "rpc";
+      session: RpcSession | null;
+    }
+  | {
+      kind: "viewport";
+      project: string;
+      machineId?: string;
+      bridge: ViewportWsBridge<WebSocketSessionData> | null;
+    };
 
 export function isLoopbackHost(rawHost: string): boolean {
   const normalized = rawHost.trim().toLowerCase().replace(/^\[|\]$/g, "");
@@ -202,6 +211,7 @@ export async function startAppServer(
 
   let udsServer: NetServer | null = null;
   const udsSockets = new Set<Socket>();
+  const viewportBridges = new Set<ViewportWsBridge<WebSocketSessionData>>();
   let httpServer: ReturnType<typeof Bun.serve<WebSocketSessionData>> | null = null;
   let boundPort: number | null = null;
   let displayHost: string | null = null;
@@ -248,6 +258,13 @@ export async function startAppServer(
       if (runtimeWritten) {
         await unlink(runtimeFilePath).catch(() => {});
       }
+
+      for (const bridge of viewportBridges) {
+        try {
+          bridge.close();
+        } catch {}
+      }
+      viewportBridges.clear();
 
       for (const sock of udsSockets) {
         try {
@@ -361,7 +378,41 @@ export async function startAppServer(
                 );
               }
             }
-            if (server.upgrade(request, { data: { session: null } })) {
+            if (server.upgrade(request, { data: { kind: "rpc", session: null } })) {
+              return undefined;
+            }
+            return Response.json(
+              { error: "WebSocket upgrade required" },
+              { status: 400, headers: { "Cache-Control": "no-store" } },
+            );
+          }
+
+          if (reqUrl.pathname === "/viewport" && request.method.toUpperCase() === "GET") {
+            const authError = authorizeViewportUpgrade(request, reqUrl, {
+              authMode,
+              mediaSecret,
+              trustedOrigins,
+            });
+            if (authError) return authError;
+
+            const project = reqUrl.searchParams.get("project")?.trim();
+            if (!project) {
+              return Response.json(
+                { error: "Missing project parameter" },
+                { status: 400, headers: { "Cache-Control": "no-store" } },
+              );
+            }
+            const machineId = reqUrl.searchParams.get("machine")?.trim() || undefined;
+            if (
+              server.upgrade(request, {
+                data: {
+                  kind: "viewport",
+                  project,
+                  ...(machineId ? { machineId } : {}),
+                  bridge: null,
+                },
+              })
+            ) {
               return undefined;
             }
             return Response.json(
@@ -381,6 +432,21 @@ export async function startAppServer(
         },
         websocket: {
           open(ws) {
+            if (ws.data.kind === "viewport") {
+              const bridge = new ViewportWsBridge<WebSocketSessionData>(ws, {
+                home,
+                project: ws.data.project,
+                ...(ws.data.machineId ? { machineId: ws.data.machineId } : {}),
+                eventHub,
+                onClose: () => {
+                  viewportBridges.delete(bridge);
+                },
+              });
+              ws.data.bridge = bridge;
+              viewportBridges.add(bridge);
+              bridge.start();
+              return;
+            }
             ws.data.session = router.createSession({
               transport: "ws",
               sendMessage: message => {
@@ -391,13 +457,27 @@ export async function startAppServer(
             });
           },
           message(ws, message) {
+            if (ws.data.kind === "viewport") {
+              void ws.data.bridge?.handleRawMessage(message);
+              return;
+            }
             const text =
               typeof message === "string"
                 ? message
                 : Buffer.from(message).toString("utf8");
             void ws.data.session?.handleRawText(text);
           },
+          drain(ws) {
+            if (ws.data.kind === "viewport") {
+              ws.data.bridge?.onDrain();
+            }
+          },
           close(ws) {
+            if (ws.data.kind === "viewport") {
+              ws.data.bridge?.close();
+              ws.data.bridge = null;
+              return;
+            }
             ws.data.session?.close();
             ws.data.session = null;
           },

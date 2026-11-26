@@ -613,7 +613,7 @@ export function BasewareView({
                               )}
                             </div>
                             <SingleLineTruncate
-                              text={`${machine.driver} · ${machine.transport.kind.toUpperCase()} · ${formatTransportSummary(machine.transport)}`}
+                              text={`${machine.driver} · ${machine.driver === "browser" && machine.transport.kind === "stdio" && !machine.transport.command ? "UDS" : machine.transport.kind.toUpperCase()} · ${formatTransportSummary(machine.transport, machine.driver)}`}
                               mono
                               className="text-[11px] text-muted-foreground"
                             />
@@ -801,7 +801,7 @@ export function BasewareView({
                         <div className="min-w-0 flex-1 space-y-1">
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="font-mono text-sm font-medium text-foreground">{driver.id}</span>
-                            {driver.version && (
+                            {driver.version && driver.version !== "builtin" && (
                               <span className="font-mono text-[11px] text-muted-foreground">v{driver.version}</span>
                             )}
                             <span className="text-[11px] text-muted-foreground">
@@ -1004,16 +1004,18 @@ export function BasewareView({
                   </Button>
                 ) : (
                   <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="h-7 px-2.5 text-xs"
-                      onClick={() => openEditorForMachine(renderedMachine)}
-                    >
-                      <Edit3 className="size-3" aria-hidden="true" />
-                      {t("edit")}
-                    </Button>
+                    {!renderedMachine.runtimeInjected && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2.5 text-xs"
+                        onClick={() => openEditorForMachine(renderedMachine)}
+                      >
+                        <Edit3 className="size-3" aria-hidden="true" />
+                        {t("edit")}
+                      </Button>
+                    )}
                     {renderedMachine.registrationStatus !== "builtin" && (
                       <Button
                         type="button"
@@ -1155,7 +1157,7 @@ export function BasewareView({
                   <dt className="shrink-0 text-muted-foreground">{t("endpointLabel")}</dt>
                   <dd className="min-w-0 font-mono text-foreground">
                     <SingleLineTruncate
-                      text={`${renderedMachine.transport.kind.toUpperCase()} · ${formatTransportSummary(renderedMachine.transport)}`}
+                      text={`${renderedMachine.driver === "browser" && renderedMachine.transport.kind === "stdio" && !renderedMachine.transport.command ? "UDS" : renderedMachine.transport.kind.toUpperCase()} · ${formatTransportSummary(renderedMachine.transport, renderedMachine.driver)}`}
                       mono
                     />
                   </dd>

@@ -3,6 +3,8 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { defaultDriverCacheRoot, resolveDriver } from "@ludens/baseware/drivers/loader.ts";
 import {
+  BUILTIN_BROWSER_DRIVER,
+  BUILTIN_LOCAL_BROWSER_MACHINE,
   ludensHome,
   readMachinesConfig,
   readWorkspaceIdentity,
@@ -277,26 +279,55 @@ export class WorkspaceSupervisor {
     return new WorkspaceLauncher(plan, io);
   }
 
+  private async resolveManifestForLaunch(
+    driver: string,
+    driverPackage: string | undefined,
+    cacheRoot: string,
+  ): Promise<NonNullable<LaunchPlan["manifest"]>> {
+    try {
+      return await resolveDriver(driver, driverPackage, cacheRoot || defaultDriverCacheRoot());
+    } catch (error) {
+      if (driver === "browser" && !driverPackage) {
+        return {
+          id: "browser",
+          version: BUILTIN_BROWSER_DRIVER.version ?? "builtin",
+          transport: "stdio",
+          needsGame: false,
+          launchHint: BUILTIN_BROWSER_DRIVER.launchHint,
+        };
+      }
+      throw error;
+    }
+  }
+
   private async buildUpPlan(workspace: string): Promise<LaunchPlan> {
     const raw = JSON.parse(await readFile(join(workspace, "ludens.json"), "utf8")) as Record<string, unknown>;
     if (typeof raw.driverPackage === "string" && raw.driverPackage.startsWith("file:")) {
       raw.driverPackage = `file:${resolve(workspace, raw.driverPackage.slice(5))}`;
     }
     const cacheRoot = join(this.home, "cache", "drivers");
-    let manifest = await resolveDriver(String(raw.driver ?? ""), raw.driverPackage as string | undefined, cacheRoot || defaultDriverCacheRoot());
+    let manifest = await this.resolveManifestForLaunch(String(raw.driver ?? ""), raw.driverPackage as string | undefined, cacheRoot);
     const config = parseConfig(raw, manifest);
     config.pet = false;
 
     let activeMachine: BasewareMachineSpec | undefined;
     if (config.machines?.active && config.machines.active !== "workspace-default") {
-      const registry = await readMachinesConfig(this.home);
-      const found = registry.machines.find(item => item.id === config.machines!.active);
-      if (!found) throw new Error(`Unknown Baseware machine in machines.active: ${config.machines.active}`);
-      activeMachine = found;
-      const pkg = found.driverPackage?.startsWith("file:")
-        ? `file:${resolve(workspace, found.driverPackage.slice(5))}`
-        : found.driverPackage;
-      manifest = await resolveDriver(found.driver, pkg, cacheRoot || defaultDriverCacheRoot());
+      if (config.machines.active === BUILTIN_LOCAL_BROWSER_MACHINE.id) {
+        activeMachine = {
+          ...BUILTIN_LOCAL_BROWSER_MACHINE,
+          ...(config.url ? { initialUrl: config.url } : {}),
+        };
+        manifest = await this.resolveManifestForLaunch(activeMachine.driver, undefined, cacheRoot);
+      } else {
+        const registry = await readMachinesConfig(this.home);
+        const found = registry.machines.find(item => item.id === config.machines!.active);
+        if (!found) throw new Error(`Unknown Baseware machine in machines.active: ${config.machines.active}`);
+        activeMachine = found;
+        const pkg = found.driverPackage?.startsWith("file:")
+          ? `file:${resolve(workspace, found.driverPackage.slice(5))}`
+          : found.driverPackage;
+        manifest = await this.resolveManifestForLaunch(found.driver, pkg, cacheRoot);
+      }
     }
 
     const managedGame = activeMachine

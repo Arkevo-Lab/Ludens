@@ -1,4 +1,8 @@
 import type { LogBlock } from "@ludens/protocol/activity";
+import type {
+  DesktopViewportAttachInput,
+  NativeViewportBounds,
+} from "@ludens/protocol/viewport";
 
 export type BlockKind = LogBlock["kind"];
 export interface PetSoundSettings {
@@ -121,14 +125,72 @@ export interface DesktopDialogBridge {
   pickPath(options: DesktopPickPathOptions): Promise<string | null>;
 }
 
+export interface DesktopViewportHostInfo {
+  readonly available: boolean;
+  readonly hostId?: string;
+  readonly socketPath?: string;
+}
+
+export interface DesktopViewportUpdateBoundsInput {
+  readonly sessionId: string;
+  readonly bounds: NativeViewportBounds;
+  readonly visible: boolean;
+  readonly interactive: boolean;
+}
+
+export interface DesktopViewportFramePayload {
+  readonly sessionId: string;
+  readonly format: "jpeg" | "png" | "webp";
+  readonly dataBase64: string;
+  readonly width: number;
+  readonly height: number;
+  readonly timestampMs: number;
+  readonly seq: number;
+  readonly pointerLocked: boolean;
+}
+
+export interface DesktopViewportFrameStreamInput {
+  readonly sessionId: string;
+  readonly active: boolean;
+  readonly maxFps?: number;
+  readonly quality?: number;
+}
+
+export interface DesktopViewportBridge {
+  getHostInfo(): Promise<DesktopViewportHostInfo>;
+  attach(input: DesktopViewportAttachInput): Promise<void | { ok: boolean; error?: string }>;
+  updateBounds(
+    input: DesktopViewportUpdateBoundsInput,
+  ): Promise<void | { ok: boolean; error?: string }>;
+  detach(sessionId?: string): Promise<void | { ok: boolean }>;
+  setFrameStream?(input: DesktopViewportFrameStreamInput): Promise<void | { ok: boolean }>;
+  onFrame?(callback: (frame: DesktopViewportFramePayload) => void): () => void;
+}
+
+export interface DesktopPowerState {
+  readonly preventAppSuspension: boolean;
+  readonly blocking: boolean;
+  readonly activeCoreCount: number;
+}
+
+export interface DesktopPowerBridge {
+  getState(): Promise<DesktopPowerState>;
+  setPreventAppSuspension(enabled: boolean): Promise<DesktopPowerState>;
+  onState(callback: (state: DesktopPowerState) => void): () => void;
+}
+
+export interface LudensDesktopBridge {
+  readonly companion?: DesktopCompanion;
+  readonly window?: DesktopWindowBridge;
+  readonly rpc?: DesktopRpcBridge;
+  readonly dialog?: DesktopDialogBridge;
+  readonly viewport?: DesktopViewportBridge;
+  readonly power?: DesktopPowerBridge;
+}
+
 declare global {
   interface Window {
-    readonly ludens?: {
-      readonly companion?: DesktopCompanion;
-      readonly window?: DesktopWindowBridge;
-      readonly rpc?: DesktopRpcBridge;
-      readonly dialog?: DesktopDialogBridge;
-    };
+    readonly ludens?: LudensDesktopBridge;
     readonly ludensPet?: {
       getSnapshot(): Promise<DesktopSnapshot>;
       onSnapshot(callback: (snapshot: DesktopSnapshot) => void): () => void;

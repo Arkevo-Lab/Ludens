@@ -12,7 +12,7 @@ import {
 
 describe('window-chrome', () => {
   it('defines expected constants and caption styles per platform', () => {
-    expect(DESKTOP_TITLEBAR_HEIGHT).toBe(38)
+    expect(DESKTOP_TITLEBAR_HEIGHT).toBe(46)
     expect(DESKTOP_BG_COLOR).toBe('#090a0d')
     expect(DESKTOP_SIDEBAR_BG_COLOR).toBe('#0c0e12')
     expect(DESKTOP_WIN_SYMBOL_COLOR).toBe('#cfd5e2')
@@ -36,7 +36,7 @@ describe('window-chrome', () => {
     expect(opts.show).toBe(false)
     expect(opts.backgroundColor).toBe('#090a0d')
     expect(opts.titleBarStyle).toBe('hiddenInset')
-    expect(opts.trafficLightPosition).toEqual({ x: 14, y: 12 })
+    expect(opts.trafficLightPosition).toEqual({ x: 14, y: 17 })
     expect(opts.x).toBe(100)
     expect(opts.y).toBe(80)
     expect(opts.width).toBe(1280)
@@ -60,7 +60,7 @@ describe('window-chrome', () => {
     expect(opts.titleBarOverlay).toEqual({
       color: '#090a0d',
       symbolColor: '#cfd5e2',
-      height: 38,
+      height: 46,
     })
     expect(opts.autoHideMenuBar).toBe(true)
     expect(opts.width).toBe(1440)

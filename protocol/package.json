@@ -9,6 +9,7 @@
     "./activity-view": "./src/activity-view.ts",
     "./app-rpc": "./src/app-rpc.ts",
     "./app-server-paths": "./src/app-server-paths.ts",
+    "./browser-host-paths": "./src/browser-host-paths.ts",
     "./capabilities": "./src/capabilities.ts",
     "./connection": "./src/connection.ts",
     "./docs": "./src/docs.ts",
@@ -33,6 +34,7 @@
     "./timeline-types": "./src/timeline-types.ts",
     "./transport": "./src/transport.ts",
     "./types": "./src/types.ts",
+    "./viewport": "./src/viewport.ts",
     "./workspaces": "./src/workspaces.ts"
   },
   "devDependencies": {

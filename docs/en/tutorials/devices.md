@@ -4,9 +4,35 @@
 
 For protocol-level contracts, read [Baseware Reference](../reference/baseware.md) and [Driver Bridge Protocol](../reference/driver-bridge-protocol.md).
 
-## 1. Built-in Desktop Target (`cua`)
+## 1. First-Class Built-in Browser (`browser`) & Device Viewport
 
-Ludens ships with the built-in `cua` (`builtin:cua`) desktop automation driver and a default `local-desktop` machine entry over `stdio` MCP transport. It works out of the box with zero external driver package:
+When running **Ludens Desktop (`ludens-app`)**, you can play Three.js / WebGL games and web targets immediately with zero simulator, CUA permission, or hardware-bridge setup:
+
+- **Runtime Auto-Injection**: Ludens Desktop starts a local zero-TCP-port `BrowserHost` over Unix Domain Socket (`<LUDENS_HOME>/run/browser-host.sock`). `ludens-server` probes `BrowserHost` at runtime and automatically injects the **`builtin:browser`** driver and **`builtin-browser`** controlled node into the Console and workspace launcher. When the Desktop App is not running, `builtin-browser` is not spuriously injected; existing browser workspaces show an offline status and resume automatically once Desktop is started again.
+- **Creating a Browser Workspace**:
+  - **In Console**: Click **New Workspace**, select the first-class **Built-in Browser** target, and optionally enter an **Initial URL** (leaving it blank loads the built-in zero-dependency 3D WebGL interactive starter page `ludens-browser://start`).
+  - **Via CLI**:
+
+```sh
+ludens workspace init --name webgl-play --driver browser --url https://example.com/game
+cd "$HOME/.ludens/workspaces/webgl-play"
+ludens workspace up
+```
+
+  `ludens workspace init --driver browser` generates a ready-to-run 30 Hz `screen.capture` `perception.py` template out of the box.
+- **Per-Workspace Isolated Spaces**: Each browser workspace owns an isolated `WebContentsView` keyed by `sessionId = workspaceId` with dedicated persistent storage (`persist:ludens-browser-<sessionId>`), `backgroundThrottling: false`, and background keepalive—so multiple browser workspaces run concurrently without cross-talk, switching workspaces flips pages instantly, and 30 Hz capture continues even when a workspace is in the background. You can also browse and warm up the page in `Manual` mode before starting the workspace Core; the same `sessionId` is seamlessly handed over when Core starts.
+- **`Manual` Play vs `Auto` Takeover & `Reclaim Control` Key-Release Guarantee**:
+  - In **`Manual`** mode, you interact directly with the embedded browser (mouse, wheel, keyboard, Pointer Lock 3D camera, and address bar).
+  - In **`Auto`** mode, Baseware's `epoch` control gate blocks human passthrough input while Shiori and `perception.py` drive the page via `screen.capture`, `page.*`, `keyboard.*`, `mouse.*` (including `mouse.moveRelative` for Pointer Lock), and `input.play`.
+  - Clicking **Reclaim Control** (or running `ludens auto off`) immediately cancels any in-flight `input.play` sequence and triggers `release(epoch)` → `session.releaseAll`, releasing every held key and mouse button so no input ever stays stuck.
+- **Unified `<DeviceViewport />` & Web Console `/viewport` Streaming**:
+  - In **Ludens Desktop (`electron-local`)**, `<DeviceViewport />` attaches the native `WebContentsView` directly into the resizable right workbench (`0ms` WebGL rendering + native audio) and seamlessly switches to an in-process high-FPS canvas stream whenever a floating overlay or modal dialog overlaps the viewport.
+  - In **Web Console, mobile browsers, or remote clients**, `<DeviceViewport />` connects to `ludens-server`'s HMAC-authenticated `/viewport` binary WebSocket stream (rendering frames via `createImageBitmap` with drop-oldest backpressure) and forwards `Manual` mouse, wheel, keyboard, and Pointer Lock input back to the host.
+  - **Immersive Mode**: Click **Immersive** in the **Live** viewport header to auto-collapse the left sidebar, merge navigation and the centered pill address bar into a single minimal top bar (`38px` on Desktop, `40px` on Web), and expand the built-in browser `100%` edge-to-edge with live viewport resolution sync. A draggable, 5-corner-snapping **Codex Floating Pod** sits in the corner with three progressive tiers (**Minimized Pill** ↔ **Compact Composer Card** ↔ **Mini Conversation Drawer**). Toggle **Split View** at any time without dropping frames, reconnecting streams, or losing composer drafts (restoring `1280×720` desktop layout automatically).
+
+## 2. Built-in Desktop Target (`cua`)
+
+Ludens also ships with the built-in `cua` (`builtin:cua`) desktop automation driver and a default `local-desktop` machine entry over `stdio` MCP transport. It works out of the box with zero external driver package:
 
 ```sh
 ludens workspace init --name desktop-monitor --driver cua
@@ -23,13 +49,13 @@ ludens-core controller list
 ludens-core controller controller/screenshot --help
 ```
 
-## 2. Five Transports & Driver Packages
+## 3. Five Transports & Driver Packages
 
 Baseware separates driver manifests (`~/.ludens/drivers.json`) from controlled machine definitions (`~/.ludens/machines.json`), supporting five transport protocols across local and remote nodes:
 
 | Transport | Typical Target | Key Parameters / CLI Flags |
 | --- | --- | --- |
-| `stdio` | Local MCP desktop driver (`cua`) or local subprocess driver | `--driver cua [--cua-command <path>]` or `--transport stdio` |
+| `stdio` | Built-in `browser` / `cua` desktop drivers or local subprocess driver | `--driver browser [--initial-url <url>]`, `--driver cua [--cua-command <path>]`, or `--transport stdio` |
 | `bridge` | Local or LAN TCP line-protocol device / simulator / hardware bridge | `--transport bridge --host <host> --port <n>` |
 | `ssh` | Remote host exposed over SSH stdio tunnel (`ssh -o BatchMode=yes`) | `--transport ssh --ssh-host <host> --ssh-user <user> --ssh-port <n> --ssh-identity <path> --ssh-command <cmd>` |
 | `http` | Streamable HTTP MCP device or service endpoint | `--transport http --url <url>` |
@@ -51,7 +77,7 @@ baseware driver discover --package 'file:/path/to/my-driver'
 
 `baseware driver discover` installs dependencies and imports the package entry to emit the validated `DriverManifest` JSON, without calling `load()`. Because package installation scripts and module top-level code still execute locally during discovery, only inspect and load driver packages from trusted sources.
 
-## 3. Managing Drivers & Nodes in Console (`Devices`, `?view=baseware`)
+## 4. Managing Drivers & Nodes in Console (`Devices`, `?view=baseware`)
 
 Open **Devices** (`?view=baseware`, titled **Devices & Nodes · Baseware**) in the Console sidebar to configure drivers and machines visually without hand-editing JSON:
 
@@ -62,7 +88,7 @@ Open **Devices** (`?view=baseware`, titled **Devices & Nodes · Baseware**) in t
 
 You can also pin the active target device for a workspace in Console **Config** (`?view=perception`) under **Target Device**.
 
-## 4. Multi-Machine Mounting & Tool Routing
+## 5. Multi-Machine Mounting & Tool Routing
 
 A workspace can authorize a pool of controlled machines (`machines.allowed`) and designate one primary machine (`machines.active`) in `ludens.json`. For example:
 
@@ -117,7 +143,7 @@ telemetry = call("controller/gpio.read", {"pin": 4}, machine="lab-bench-ssh")
 use_machine("lab-bench-ssh")
 ```
 
-## 5. Standalone Baseware CLI & Resilience
+## 6. Standalone Baseware CLI & Resilience
 
 When debugging a single hardware adapter outside a workspace, run `baseware` directly in the foreground:
 

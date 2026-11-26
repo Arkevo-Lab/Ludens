@@ -1,4 +1,10 @@
 import type { ToolArguments, ToolDefinition, ToolResult } from "./tool-contract.ts";
+import type {
+  BrowserHostEvent,
+  ViewportControlAction,
+  ViewportHumanInput,
+  ViewportState,
+} from "@ludens/protocol/viewport";
 export type { ToolArguments, ToolDefinition, ToolResult, JsonSchema } from "./tool-contract.ts";
 
 export interface Clock {
@@ -59,6 +65,17 @@ export interface ControllerContext {
   record?(type: "action_start" | "action_end", data: Record<string, unknown>): void;
 }
 
+export interface ViewportProvider {
+  describe(signal?: AbortSignal): Promise<ViewportState>;
+  performAction(action: ViewportControlAction, signal?: AbortSignal): Promise<ViewportState>;
+  sendHumanInput(input: ViewportHumanInput, signal?: AbortSignal): Promise<{ ok: true; pointerLocked: boolean }>;
+  subscribe(
+    options: { maxFps?: number; quality?: number },
+    onEvent: (event: BrowserHostEvent) => void,
+  ): Promise<() => void>;
+}
+
 export interface Capabilities {
   controllers: Controller[];
+  viewport?: ViewportProvider;
 }

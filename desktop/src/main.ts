@@ -6,6 +6,7 @@ import {
   Menu,
   nativeImage,
   nativeTheme,
+  powerSaveBlocker,
   protocol,
   screen,
   session,
@@ -18,8 +19,10 @@ import { fileURLToPath } from 'node:url'
 import { parseArgs } from 'node:util'
 import { NodeUdsRpcClient } from '@ludens/client/cli/app-rpc-client'
 import { ludensHome, registerWorkspace } from '@ludens/protocol/ludens'
+import type { DesktopViewportAttachInput, NativeViewportBounds } from '@ludens/protocol/viewport'
 import type { DesktopWindowCommand, DesktopWindowState } from '@ludens/client/lib/desktop'
 import { AppServerHost, resolveStaticDir } from './app-server-host.js'
+import { BrowserHost } from './browser-host.js'
 import { createCompanion } from './companion.js'
 import {
   LUDENS_APP_ENTRY_URL,
@@ -35,8 +38,14 @@ import {
 import type { LudensPetSnapshot } from './ludens-source.js'
 import { extractProjectFromUrl, PetSessionCoordinator } from './pet-session.js'
 import { installMainProcessSafety, installParentWatchdog } from './process-safety.js'
+import {
+  createPowerSavePreferenceStore,
+  DesktopPowerSaveController,
+  LUDENS_POWER_CHANNELS,
+} from './power-save-blocker.js'
 import { ActiveCoreQuitGuard, mapDialogButtonToQuitAction } from './quit-guard.js'
 import { DesktopUdsRpcRelay } from './rpc-bridge.js'
+import { LUDENS_VIEWPORT_CHANNELS, type DesktopViewportFrameStreamInput } from './rpc-channels.js'
 import { createLudensTrayIcon } from './tray-icon.js'
 import {
   buildOfflineWaitingHtml,
@@ -149,7 +158,31 @@ if (values.help) {
     let tray: Tray | undefined
     let source: PetSessionCoordinator | undefined
     let rpcRelay: DesktopUdsRpcRelay | undefined
+    let browserHost: BrowserHost | undefined
+    let powerSaveController: DesktopPowerSaveController | undefined
+    let activeFrameStream: { sessionId: string; unsubscribe: () => void } | undefined
+    let pendingFrameStreamSessionId: string | undefined
+    let frameStreamGeneration = 0
     let mainMediaClient: NodeUdsRpcClient | undefined
+
+    const stopActiveFrameStream = (onlySessionId?: string) => {
+      const matchesActive = activeFrameStream && (!onlySessionId || activeFrameStream.sessionId === onlySessionId)
+      const matchesPending =
+        pendingFrameStreamSessionId && (!onlySessionId || pendingFrameStreamSessionId === onlySessionId)
+      if (!onlySessionId || matchesActive || matchesPending) {
+        frameStreamGeneration += 1
+      }
+      if (matchesPending) {
+        pendingFrameStreamSessionId = undefined
+      }
+      if (matchesActive && activeFrameStream) {
+        const current = activeFrameStream
+        activeFrameStream = undefined
+        try {
+          current.unsubscribe()
+        } catch {}
+      }
+    }
     let mainMediaSocketPath: string | undefined
     let retryDashboard: (() => void) | undefined
     let dashboardTimer: ReturnType<typeof setInterval> | undefined
@@ -163,6 +196,31 @@ if (values.help) {
     const windowStatePath = join(app.getPath('userData'), 'window-state.json')
     let persistedState: SavedWindowState | undefined
 
+    const notifyBrowserHostStatus = async (
+      socketPath: string | undefined,
+      status: 'online' | 'offline',
+      host: BrowserHost | undefined = browserHost,
+    ): Promise<void> => {
+      if (!socketPath || !host) return
+      const client = new NodeUdsRpcClient({ socketPath, connectTimeoutMs: 1_200 })
+      try {
+        await client.call(
+          'browserHost/notify',
+          {
+            status,
+            hostId: host.hostId,
+            socketPath: host.socketPath,
+            pid: process.pid,
+          },
+          { timeoutMs: 2_000 },
+        )
+      } catch {
+        // Best-effort notification; server also probes browser-host.json/sock directly.
+      } finally {
+        await client.close().catch(() => {})
+      }
+    }
+
     const cleanupDesktopResources = async (cleanupOptions: {
       saveWindow: boolean
       stopOwnedDaemon: boolean
@@ -170,13 +228,22 @@ if (values.help) {
       try { clearInterval(dashboardTimer) } catch {}
       try { clearTimeout(saveStateTimer) } catch {}
       try { if (syncTrayTheme) nativeTheme.off('updated', syncTrayTheme) } catch {}
+      stopActiveFrameStream()
       if (cleanupOptions.saveWindow) {
         try {
           const nextState = captureWindowState?.()
           if (nextState) saveWindowStateSync(windowStatePath, nextState)
         } catch {}
       }
+      if (browserHost) {
+        const closingHost = browserHost
+        browserHost = undefined
+        const serverSocket = appServerHost.current()?.socketPath ?? appServerHost.socketPath()
+        await notifyBrowserHostStatus(serverSocket, 'offline', closingHost).catch(() => {})
+        await closingHost.close().catch(() => {})
+      }
       try { source?.stop() } catch {}
+      try { powerSaveController?.dispose(); powerSaveController = undefined } catch {}
       try { rpcRelay?.dispose() } catch {}
       try { if (tray && !tray.isDestroyed()) tray.destroy() } catch {}
       try { await mainMediaClient?.close().catch(() => {}) } catch {}
@@ -293,6 +360,16 @@ if (values.help) {
 
     void app.whenReady().then(async () => {
       appReady = true
+      browserHost = new BrowserHost({
+        home: ludensHome(),
+        version: app.getVersion(),
+      })
+      try {
+        await browserHost.start()
+      } catch (error) {
+        console.error('[ludens] BrowserHost startup failed:', error)
+      }
+
       const staticDir = resolveStaticDir({
         here,
         resourcesPath: process.resourcesPath,
@@ -537,6 +614,7 @@ if (values.help) {
       })
       owner.webContents.on('render-process-gone', (_event, details) => {
         dashboardReady = false
+        stopActiveFrameStream()
         console.error(`[ludens] console renderer exited: ${details.reason}`)
       })
       owner.on('close', event => {
@@ -544,6 +622,13 @@ if (values.help) {
           event.preventDefault()
           owner?.hide()
         }
+      })
+      owner.on('hide', () => {
+        stopActiveFrameStream()
+        if (owner) void browserHost?.suspendOwnerView(owner)
+      })
+      owner.on('show', () => {
+        if (owner) void browserHost?.resumeOwnerView(owner)
       })
 
       const openDetails = (url: string) => {
@@ -635,6 +720,162 @@ if (values.help) {
       ipcMain.handle(LUDENS_DIALOG_PICK_PATH_CHANNEL, async (event, rawOptions: unknown) => {
         if (!trusted(event)) throw new Error('Unauthorized dialog access')
         return runDialogPickPath(owner, dialog.showOpenDialog.bind(dialog), rawOptions)
+      })
+
+      const powerPrefsStore = createPowerSavePreferenceStore(
+        join(app.getPath('userData'), 'power-preferences.json'),
+      )
+      powerSaveController = new DesktopPowerSaveController({
+        blocker: powerSaveBlocker,
+        store: powerPrefsStore,
+        queryStatus: timeoutMs => appServerHost.probeStatus(timeoutMs),
+        onStateChange: state => {
+          if (owner && !owner.isDestroyed() && isDashboardUrl(owner.webContents.getURL(), serverOrigin)) {
+            owner.webContents.send(LUDENS_POWER_CHANNELS.state, state)
+          }
+        },
+      })
+      ipcMain.handle(LUDENS_POWER_CHANNELS.getState, async event => {
+        if (!trusted(event)) throw new Error('Unauthorized power access')
+        return powerSaveController ? powerSaveController.refresh() : {
+          preventAppSuspension: true,
+          blocking: false,
+          activeCoreCount: 0,
+        }
+      })
+      ipcMain.handle(LUDENS_POWER_CHANNELS.setPreventAppSuspension, async (event, rawEnabled: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized power access')
+        if (!powerSaveController) {
+          return { preventAppSuspension: Boolean(rawEnabled), blocking: false, activeCoreCount: 0 }
+        }
+        return powerSaveController.setPreventAppSuspension(Boolean(rawEnabled))
+      })
+
+      const parseBounds = (raw: unknown): NativeViewportBounds => {
+        if (!raw || typeof raw !== 'object') {
+          throw new Error('Invalid viewport bounds')
+        }
+        const candidate = raw as Partial<NativeViewportBounds>
+        return {
+          x: typeof candidate.x === 'number' && Number.isFinite(candidate.x) ? candidate.x : 0,
+          y: typeof candidate.y === 'number' && Number.isFinite(candidate.y) ? candidate.y : 0,
+          width: typeof candidate.width === 'number' && Number.isFinite(candidate.width) ? candidate.width : 0,
+          height: typeof candidate.height === 'number' && Number.isFinite(candidate.height) ? candidate.height : 0,
+        }
+      }
+
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.getHostInfo, event => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        return browserHost
+          ? browserHost.getHostInfo()
+          : { available: false, hostId: '', socketPath: '', pid: process.pid }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.attach, async (event, rawInput: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!owner || owner.isDestroyed() || !browserHost?.isRunning()) {
+          throw new Error('Built-in BrowserHost is not running')
+        }
+        if (!rawInput || typeof rawInput !== 'object') {
+          throw new Error('Invalid viewport attach payload')
+        }
+        const candidate = rawInput as Partial<DesktopViewportAttachInput>
+        if (typeof candidate.sessionId !== 'string' || !candidate.sessionId.trim()) {
+          throw new Error('Viewport attach requires sessionId')
+        }
+        await browserHost.attachToOwner(owner, {
+          sessionId: candidate.sessionId.trim(),
+          initialUrl: typeof candidate.initialUrl === 'string' ? candidate.initialUrl : undefined,
+          bounds: parseBounds(candidate.bounds),
+          visible: candidate.visible !== false,
+          interactive: candidate.interactive !== false,
+        })
+        return { ok: true as const }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.updateBounds, async (event, rawInput: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!owner || owner.isDestroyed() || !browserHost?.isRunning()) {
+          return { ok: true as const }
+        }
+        if (!rawInput || typeof rawInput !== 'object') {
+          throw new Error('Invalid viewport bounds payload')
+        }
+        const candidate = rawInput as Partial<DesktopViewportAttachInput>
+        await browserHost.updateOwnerBounds(owner, {
+          sessionId: typeof candidate.sessionId === 'string' && candidate.sessionId.trim()
+            ? candidate.sessionId.trim()
+            : undefined,
+          initialUrl: typeof candidate.initialUrl === 'string' ? candidate.initialUrl : undefined,
+          bounds: parseBounds(candidate.bounds),
+          visible: typeof candidate.visible === 'boolean' ? candidate.visible : undefined,
+          interactive: typeof candidate.interactive === 'boolean' ? candidate.interactive : undefined,
+        })
+        return { ok: true as const }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.detach, async (event, rawTarget: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!owner || !browserHost) return { ok: true as const }
+        let sessionId: string | undefined
+        if (typeof rawTarget === 'string' && rawTarget.trim()) {
+          sessionId = rawTarget.trim()
+        } else if (rawTarget && typeof rawTarget === 'object') {
+          const candidate = rawTarget as { sessionId?: unknown }
+          if (typeof candidate.sessionId === 'string' && candidate.sessionId.trim()) {
+            sessionId = candidate.sessionId.trim()
+          }
+        }
+        stopActiveFrameStream(sessionId)
+        await browserHost.detachFromOwner(owner, sessionId)
+        return { ok: true as const }
+      })
+      ipcMain.handle(LUDENS_VIEWPORT_CHANNELS.setFrameStream, async (event, rawInput: unknown) => {
+        if (!trusted(event)) throw new Error('Unauthorized viewport access')
+        if (!rawInput || typeof rawInput !== 'object') {
+          throw new Error('Invalid viewport frame stream payload')
+        }
+        const candidate = rawInput as Partial<DesktopViewportFrameStreamInput>
+        const sessionId = typeof candidate.sessionId === 'string' ? candidate.sessionId.trim() : ''
+        const active = candidate.active === true
+        if (!active) {
+          stopActiveFrameStream(sessionId || undefined)
+          return { ok: true }
+        }
+        if (!sessionId) {
+          throw new Error('Viewport frame stream requires sessionId')
+        }
+        stopActiveFrameStream()
+        if (!browserHost?.isRunning() || !owner || owner.isDestroyed()) {
+          return { ok: false }
+        }
+        const maxFps =
+          typeof candidate.maxFps === 'number' && Number.isFinite(candidate.maxFps) && candidate.maxFps > 0
+            ? candidate.maxFps
+            : undefined
+        const quality =
+          typeof candidate.quality === 'number' && Number.isFinite(candidate.quality)
+            ? candidate.quality
+            : undefined
+        const generation = ++frameStreamGeneration
+        pendingFrameStreamSessionId = sessionId
+        const unsubscribe = await browserHost.subscribeSessionFrames(
+          sessionId,
+          frame => {
+            if (owner && !owner.isDestroyed() && isDashboardUrl(owner.webContents.getURL(), serverOrigin)) {
+              owner.webContents.send(LUDENS_VIEWPORT_CHANNELS.frame, frame)
+            }
+          },
+          { maxFps, quality },
+        )
+        if (pendingFrameStreamSessionId === sessionId) {
+          pendingFrameStreamSessionId = undefined
+        }
+        if (generation !== frameStreamGeneration || !owner || owner.isDestroyed() || !browserHost?.isRunning()) {
+          try {
+            unsubscribe()
+          } catch {}
+          return { ok: false }
+        }
+        activeFrameStream = { sessionId, unsubscribe }
+        return { ok: true }
       })
       ipcMain.handle('ludens-pet:snapshot', event => {
         if (!trusted(event)) throw new Error('Unauthorized pet access')
@@ -767,6 +1008,9 @@ if (values.help) {
       if (shouldShowWindow) showOwner()
 
       const daemonInfo = await daemonReadyPromise
+      if (browserHost?.isRunning()) {
+        void notifyBrowserHostStatus(daemonInfo.socketPath, 'online', browserHost)
+      }
       void rpcRelay.start().catch(error => {
         console.error('[ludens] UDS RPC relay initial connection failed (will retry):', error)
       })
@@ -776,12 +1020,15 @@ if (values.help) {
         socketPath: daemonInfo.socketPath,
         onTargetChanged: () => {
           if (source && companion) companion.configureActivity(source)
+          void powerSaveController?.refresh()
         },
         onSnapshot: value => {
           snapshot = value
           if (owner && !owner.isDestroyed()) owner.webContents.send('ludens-pet:snapshot', value)
+          void powerSaveController?.refresh()
         },
       })
+      powerSaveController?.start()
       if (companion) companion.configureActivity(source)
       source.setFocusedProject(extractProjectFromUrl(dashboardTarget, serverOrigin))
       void source.start(workspace)

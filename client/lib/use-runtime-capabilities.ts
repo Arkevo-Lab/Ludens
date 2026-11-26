@@ -20,6 +20,8 @@ export interface HostSessionCapabilities {
   readonly localFileDrivers: boolean;
   readonly hostProcessOverrides: boolean;
   readonly hostStorageConfig: boolean;
+  readonly builtinBrowser?: boolean;
+  readonly browserHostId?: string | null;
 }
 
 export type DevSimulateProfile = "auto" | "remote" | "desktop";
@@ -102,6 +104,15 @@ function normalizeCapabilities(
       typeof raw.hostStorageConfig === "boolean"
         ? raw.hostStorageConfig
         : fallback.hostStorageConfig,
+    ...(typeof raw.builtinBrowser === "boolean" ? { builtinBrowser: raw.builtinBrowser } : {}),
+    ...(raw.browserHostId !== undefined
+      ? {
+          browserHostId:
+            typeof raw.browserHostId === "string" || raw.browserHostId === null
+              ? raw.browserHostId
+              : null,
+        }
+      : {}),
   };
 }
 

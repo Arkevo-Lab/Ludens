@@ -4,9 +4,35 @@
 
 底层协议细节与错误码定义请参见 [Baseware 参考手册](../reference/baseware.md) 与 [Driver Bridge 协议](../reference/driver-bridge-protocol.md)。
 
-## 1. 开箱即用的桌面目标（`cua`）
+## 1. 一等公民内置浏览器（`browser`）与设备视口（Device Viewport）
 
-Ludens 内置了基于 `stdio` MCP 传输的 `cua`（`builtin:cua`）桌面自动化驱动，以及默认受控节点 `local-desktop`，无需任何外部驱动包即可启动：
+使用 **Ludens 桌面端（`ludens-app`）** 时，无需配置模拟器、系统辅助功能权限或硬件桥，即可直接打开网页或 Three.js / WebGL 游戏开玩：
+
+- **运行态自动注入**：Ludens 桌面端会在本地启动零 TCP 端口的 Unix Domain Socket `BrowserHost`（`<LUDENS_HOME>/run/browser-host.sock`）。`ludens-server` 在运行期自动探测 `BrowserHost`，动态注入 **`builtin:browser`** 驱动与 **`builtin-browser`** 受控节点。若桌面端未运行，系统不会凭空注入离线节点；已创建的浏览器工作区会清晰展示离线状态，并在桌面端上线后自动恢复。
+- **创建浏览器工作区**：
+  - **通过控制台**：点击 **新建工作区**，选择一等公民目标 **内置浏览器（Built-in Browser）**，可选填写 **初始 URL**（留空时默认加载零外部依赖的内置 3D WebGL 互动起始页 `ludens-browser://start`）。
+  - **通过 CLI**：
+
+```sh
+ludens workspace init --name webgl-play --driver browser --url https://example.com/game
+cd "$HOME/.ludens/workspaces/webgl-play"
+ludens workspace up
+```
+
+  `ludens workspace init --driver browser` 会自动生成开箱即用的 30 Hz `screen.capture` `perception.py` 感知模板。
+- **每工作区独立隔离空间**：每个浏览器工作区按 `sessionId = workspaceId` 拥有独立的 `WebContentsView` 与持久化存储分区（`persist:ludens-browser-<sessionId>`），开启 `backgroundThrottling: false` 与后台保活——多个浏览器工作区可并发运行互不干扰、切换工作区秒切页面，即使退居后台也能持续保持 30 Hz 画面采集。工作区 Core 启动前即可在 `Manual` 模式下预热浏览页面，启动 Core 后无缝复用同一 `sessionId` 页面状态。
+- **`Manual` 人工游玩 vs `Auto` Shiori 接管与「收回控制权」自动抬键保证**：
+  - 在 **`Manual`** 模式下，你可以直接操作内嵌浏览器（鼠标、滚轮、键盘、Pointer Lock 3D 视角与地址栏导航）。
+  - 在 **`Auto`** 模式下，Baseware 的 `epoch` 控制门禁会屏蔽人工透传输入，由 Shiori 与 `perception.py` 通过 `screen.capture`、`page.*`、`keyboard.*`、`mouse.*`（含 Pointer Lock 相对位移 `mouse.moveRelative`）与 `input.play` 接管操作。
+  - 随时点击 **收回控制权（Reclaim Control）**（或执行 `ludens auto off`），Baseware 会立即取消在途 `input.play` 序列并触发 `release(epoch)` → `session.releaseAll`，强制抬起所有按住的键盘按键与鼠标键，确保绝不卡键。
+- **统一 `<DeviceViewport />` 与 Web 控制台 `/viewport` 串流**：
+  - 在 **Ludens 桌面端（`electron-local`）**，`<DeviceViewport />` 将原生 `WebContentsView` 直接贴合到可拖拽调宽的右侧工作台槽位（0ms WebGL 渲染 + 原生音频），当悬浮窗或弹窗覆盖视口区域时平滑切换至进程内高帧率画布流。
+  - 在 **Web 控制台、手机端或远端客户端**，`<DeviceViewport />` 连接 `ludens-server` 的 HMAC 鉴权 `/viewport` 二进制 WebSocket 帧流（通过 `createImageBitmap` 渲染并采用单槽丢旧帧背压），并在 `Manual` 模式下将鼠标、滚轮、键盘与 Pointer Lock 输入回传给宿主。
+  - **沉浸模式（Immersive Mode）**：在 **运行（Live）** 视口右上角点击进入 **沉浸模式**，会自动收起左侧导航栏、将导航与居中胶囊地址栏合入单条极简顶栏（桌面端 `38px` 窗口顶栏合一，Web 端 `40px`），并让内置浏览器 `100%` 无黑边贴边铺满舞台、实时同步视口分辨率；角落提供支持自由拖拽与五点磁吸记忆的三档 **Codex 悬浮小窗**（**最小化胶囊** ↔ **紧凑输入卡** ↔ **迷你对话流抽屉**）。随时切回 **分栏视图** 不会断连、不丢帧、不丢失输入草稿，并会自动还原 `1280×720` 桌面视口与侧栏状态。
+
+## 2. 开箱即用的桌面目标（`cua`）
+
+Ludens 同样内置了基于 `stdio` MCP 传输的 `cua`（`builtin:cua`）桌面自动化驱动，以及默认受控节点 `local-desktop`，无需任何外部驱动包即可启动：
 
 ```sh
 ludens workspace init --name desktop-monitor --driver cua
@@ -23,13 +49,13 @@ ludens-core controller list
 ludens-core controller controller/screenshot --help
 ```
 
-## 2. 五种传输协议与外部驱动包
+## 3. 五种传输协议与外部驱动包
 
 Baseware 将全局驱动清单（`~/.ludens/drivers.json`）与全局受控节点池（`~/.ludens/machines.json`）解耦管理，原生支持五种传输协议：
 
 | 传输方式 | 典型受控目标 | 关键参数 / CLI 选项 |
 | --- | --- | --- |
-| `stdio` | 本机 MCP 桌面驱动（`cua`）或本地子进程驱动 | `--driver cua [--cua-command <path>]` 或 `--transport stdio` |
+| `stdio` | 内置 `browser` / `cua` 桌面驱动或本地子进程驱动 | `--driver browser [--initial-url <url>]`、`--driver cua [--cua-command <path>]` 或 `--transport stdio` |
 | `bridge` | 本机或局域网 TCP 行协议硬件桥 / 仿真器 | `--transport bridge --host <host> --port <n>` |
 | `ssh` | 通过 SSH 标准输入输出隧道托管的远程设备（`ssh -o BatchMode=yes`） | `--transport ssh --ssh-host <host> --ssh-user <user> --ssh-port <n> --ssh-identity <path> --ssh-command <cmd>` |
 | `http` | Streamable HTTP MCP 设备或服务端点 | `--transport http --url <url>` |
@@ -51,7 +77,7 @@ baseware driver discover --package 'file:/path/to/my-driver'
 
 `baseware driver discover` 会安装依赖、加载入口模块并输出 JSON 格式的 `DriverManifest`。需要留意：`discover` 过程中包安装脚本与模块顶层代码仍会在本机执行，请仅加载来自可信来源的驱动包。
 
-## 3. 在控制台（**设备**，`?view=baseware`）管理驱动与节点
+## 4. 在控制台（**设备**，`?view=baseware`）管理驱动与节点
 
 打开控制台侧栏的 **设备（Devices）**（`?view=baseware`，页头显示 **设备与节点 · Baseware**），无需手写 JSON 即可可视化管理驱动与受控设备：
 
@@ -62,7 +88,7 @@ baseware driver discover --package 'file:/path/to/my-driver'
 
 也可以在工作区的 **配置（Config）**（`?view=perception`）中的 **目标设备（Target Device）** 页签固定或调整当前工作区的默认目标。
 
-## 4. 多节点并发挂载与跨设备路由
+## 5. 多节点并发挂载与跨设备路由
 
 单个工作区可以在 `ludens.json` 中声明允许挂载的节点池（`machines.allowed`）与当前主节点（`machines.active`）：
 
@@ -117,7 +143,7 @@ telemetry = call("controller/gpio.read", {"pin": 4}, machine="lab-bench-ssh")
 use_machine("lab-bench-ssh")
 ```
 
-## 5. 独立调试 Baseware 与断线恢复
+## 6. 独立调试 Baseware 与断线恢复
 
 在脱离完整工作区、单独排查某个硬件驱动或通道时，可以在前台直接拉起 Baseware 进程：
 

@@ -600,7 +600,7 @@ test("ShioriWorkbench prefers live model in both Composer pill and Right Dock pr
 
   assert.match(workbenchHtml, /data-provenance-model[^>]*>anthropic\/claude-opus-4-6</);
   assert.match(workbenchHtml, /omp · claude-opus-4-6/);
-  assert.doesNotMatch(workbenchHtml, /codex-cockpit-header/);
+  assert.match(workbenchHtml, /codex-cockpit-header/);
   assert.doesNotMatch(workbenchHtml, /codex-expand-all-btn/);
   assert.match(workbenchHtml, /shiori-timer-header/);
   assert.match(workbenchHtml, /shiori-stat-card/);

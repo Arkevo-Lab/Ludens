@@ -1,74 +1,96 @@
 @layer components {
-/* ── Antigravity-Inspired Cross-Platform 38px Desktop Chrome ── */
+/* ── Full-Height 3-Column Desktop Chrome (Zero T-Shaped Global Topbar) ── */
 
-.desktop-titlebar {
-  position: sticky;
-  top: 0;
-  z-index: 60;
-  display: flex;
-  align-items: stretch;
-  width: 100%;
-  height: var(--shell-topbar-height, 38px);
-  min-height: var(--shell-topbar-height, 38px);
-  max-height: var(--shell-topbar-height, 38px);
-  background: var(--bg);
-  color: var(--text);
+/* Column top headers double as native window drag regions on Desktop */
+.desktop-shell-root[data-desktop-chrome="true"] .sidebar-desktop-header,
+.desktop-shell-root[data-desktop-chrome="true"] .codex-thread-header,
+.desktop-shell-root[data-desktop-chrome="true"] .codex-dock-header,
+.desktop-shell-root[data-desktop-chrome="true"] .device-viewport-chrome,
+.desktop-shell-root[data-desktop-chrome="true"] .desktop-view-dragbar {
+  -webkit-app-region: drag;
   user-select: none;
   -webkit-user-select: none;
-  font-family: var(--font-sans);
 }
 
-/* Windows 11 DWM dark window subtle 1px top highlight when unmaximized */
-.desktop-titlebar[data-platform="win32"][data-maximized="false"][data-fullscreen="false"]::before {
-  content: "";
-  position: absolute;
-  inset: 0 0 auto 0;
-  height: 1px;
-  background: rgba(255, 255, 255, 0.065);
-  pointer-events: none;
-  z-index: 2;
-}
-
-/* Left Cell: Pixel-aligned with 220px ConsoleSidebar when expanded */
-.desktop-titlebar-left {
-  position: relative;
-  display: flex;
-  align-items: center;
-  width: var(--shell-sidebar-width, 220px);
-  flex: 0 0 var(--shell-sidebar-width, 220px);
-  padding-right: 8px;
-  background: var(--sidebar);
-  border-right: 1px solid var(--line);
-  border-bottom: 1px solid transparent;
-  -webkit-app-region: drag;
-  transition:
-    background-color var(--duration-fast) var(--ease-out-expo),
-    border-color var(--duration-fast) var(--ease-out-expo);
-}
-
-.desktop-titlebar[data-desktop-window="false"] .desktop-titlebar-left,
-.desktop-titlebar[data-desktop-window="false"] .desktop-titlebar-main {
+.desktop-shell-root[data-desktop-chrome="true"] :is(
+  .sidebar-desktop-header,
+  .codex-thread-header,
+  .codex-dock-header,
+  .device-viewport-chrome,
+  .desktop-view-dragbar
+) :is(button, a, input, select, form, [role="tab"], [data-no-drag]) {
   -webkit-app-region: no-drag;
 }
 
-/* Collapsed sidebar or <=680px narrow drawer: left cell melts seamlessly into main titlebar,
-   keeping identical left padding so icon buttons NEVER jump even 1px! */
-.desktop-titlebar[data-sidebar-collapsed="true"] .desktop-titlebar-left {
-  width: auto;
-  flex: 0 0 auto;
-  background: var(--bg);
-  border-right-color: transparent;
-  border-bottom-color: var(--line);
+.sidebar-desktop-header {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 46px;
+  min-height: 46px;
+  margin: 0 -10px;
+  padding-right: 10px;
+  flex-shrink: 0;
+  box-sizing: border-box;
 }
 
-@media (max-width: 680px) {
-  .desktop-titlebar .desktop-titlebar-left {
-    width: auto;
-    flex: 0 0 auto;
-    background: var(--bg);
-    border-right-color: transparent;
-    border-bottom-color: var(--line);
-  }
+.desktop-leading-controls {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.desktop-leading-controls[data-desktop-leading="sidebar"] {
+  width: 100%;
+  justify-content: flex-end;
+}
+
+.desktop-leading-controls[data-desktop-leading="sidebar"] .desktop-titlebar-app-icon {
+  margin-right: auto;
+}
+
+.desktop-leading-controls[data-desktop-leading="inline"] {
+  margin-right: 4px;
+}
+
+.desktop-trailing-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 46px;
+  flex-shrink: 0;
+  margin-right: -12px;
+}
+
+.codex-thread-header .desktop-trailing-controls {
+  margin-right: -20px;
+}
+
+.codex-dock-header .desktop-trailing-controls {
+  margin-right: -16px;
+}
+
+.desktop-view-dragbar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 46px;
+  min-height: 46px;
+  padding: 0 12px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+}
+
+.desktop-view-dragbar-left,
+.desktop-view-dragbar-right {
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+  min-width: 0;
 }
 
 /* Preview-only macOS Sequoia traffic light stand-ins (never rendered when native AppKit traffic lights exist) */
@@ -81,6 +103,10 @@
   align-items: center;
   gap: 8px;
   -webkit-app-region: no-drag;
+}
+
+.desktop-leading-controls[data-desktop-leading="inline"] .desktop-preview-traffic-lights {
+  left: 2px;
 }
 
 .desktop-preview-dot {
@@ -105,7 +131,7 @@
   background: #28c840;
 }
 
-.desktop-titlebar[data-focused="false"] .desktop-preview-dot {
+.desktop-leading-controls[data-focused="false"] .desktop-preview-dot {
   background: #353a45;
   border-color: rgba(255, 255, 255, 0.06);
 }
@@ -139,45 +165,22 @@
 }
 
 .desktop-chrome-icon-btn {
-  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 28px;
+  height: 28px;
   padding: 0;
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 7px;
   background: transparent;
   color: #aeb5c4;
+  cursor: pointer;
   transition:
     background-color var(--duration-fast) var(--ease-out-expo),
     color var(--duration-fast) var(--ease-out-expo),
     opacity var(--duration-fast) var(--ease-out-expo);
   -webkit-app-region: no-drag;
-}
-
-.desktop-chrome-badge {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 13px;
-  height: 13px;
-  padding: 0 3px;
-  border-radius: 999px;
-  background: var(--gold);
-  color: #0b0d12;
-  font-size: 9px;
-  font-weight: 700;
-  line-height: 13px;
-  text-align: center;
-  pointer-events: none;
-  box-shadow: 0 0 0 1.5px var(--bg);
-}
-
-.desktop-chrome-badge[data-tone="outbound"] {
-  background: #f59e0b;
-  color: #0b0d12;
 }
 
 .desktop-chrome-icon-btn:hover:not(:disabled) {
@@ -203,172 +206,48 @@
   outline-offset: 1px;
 }
 
-/* Right Cell: Main Draggable Workspace Header */
-.desktop-titlebar-main {
-  flex: 1 1 0%;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  background: var(--bg);
-  border-bottom: 1px solid var(--line);
-  -webkit-app-region: drag;
-}
-
-.desktop-titlebar-primary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  flex: 1 1 auto;
-  padding-left: 12px;
-  font-size: 12.5px;
-  line-height: 1;
-  letter-spacing: -0.005em;
-  white-space: nowrap;
-  overflow: hidden;
-  transition: opacity var(--duration-fast) var(--ease-out-expo);
-}
-
-.desktop-titlebar-slot-primary {
-  display: none;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-  max-width: 100%;
-  -webkit-app-region: no-drag;
-}
-
-.desktop-titlebar-slot-primary[data-occupied="true"] {
-  display: inline-flex;
-}
-
-.desktop-titlebar-slot-primary .context-picker-trigger {
-  height: 25px;
-  min-height: 25px;
-  padding: 0 8px;
-  font-size: 12px;
-  border-radius: 6px;
-  border-color: color-mix(in srgb, var(--line) 85%, transparent);
-  background: color-mix(in srgb, var(--surface-inset) 70%, transparent);
-}
-
-.desktop-titlebar-slot-primary .context-picker-trigger:hover {
-  border-color: #2f3646;
-  background: #10141c;
-}
-
-.desktop-titlebar-slot-primary .perf-run-status {
-  margin-left: 0;
-  height: 25px;
-  padding: 0 8px;
-  font-size: 11.5px;
-}
-
-.desktop-titlebar-slot-actions,
-.desktop-titlebar-slot-dock-toggle {
-  display: none;
-  align-items: center;
-  gap: 2px;
-  -webkit-app-region: no-drag;
-}
-
-.desktop-titlebar-slot-actions[data-occupied="true"],
-.desktop-titlebar-slot-dock-toggle[data-occupied="true"] {
-  display: inline-flex;
-}
-
-.desktop-breadcrumb-view {
-  color: #dfe3ec;
-  font-weight: 500;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  pointer-events: none;
-}
-
-/* Compact status indicator inside the unified top bar (Live / Perf) */
-.topbar-status-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  height: 24px;
-  padding: 0 7px;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--muted-foreground);
-  font-size: 11.5px;
-  font-weight: 500;
-  line-height: 1;
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-
-.topbar-status-chip[data-tone="auto"] {
-  color: var(--sage);
-  background: color-mix(in srgb, var(--sage) 10%, transparent);
-}
-
-.topbar-status-chip[data-tone="manual"] {
-  color: var(--gold);
-  background: color-mix(in srgb, var(--gold) 10%, transparent);
-}
-
-.topbar-status-chip[data-tone="standby"] {
-  color: var(--muted-foreground);
-}
-
-.topbar-status-chip[data-spawning-core="true"] {
-  color: var(--gold);
-  background: color-mix(in srgb, var(--gold) 12%, transparent);
-}
-
-/* Native macOS Sequoia / Windows 11 unfocused titlebar dimming */
-.desktop-titlebar[data-focused="false"] .desktop-titlebar-nav-group,
-.desktop-titlebar[data-focused="false"] .desktop-titlebar-primary,
-.desktop-titlebar[data-focused="false"] .desktop-titlebar-tools,
-.desktop-titlebar[data-focused="false"] .desktop-win-controls,
-.desktop-titlebar[data-focused="false"] .desktop-titlebar-app-icon {
+/* Native macOS Sequoia / Windows 11 unfocused dimming */
+.desktop-leading-controls[data-focused="false"] .desktop-titlebar-nav-group,
+.desktop-leading-controls[data-focused="false"] .desktop-titlebar-app-icon,
+.desktop-trailing-controls[data-focused="false"] .desktop-win-controls {
   opacity: 0.62;
 }
 
-.desktop-titlebar[data-focused="false"] .desktop-titlebar-nav-group:hover,
-.desktop-titlebar[data-focused="false"] .desktop-titlebar-tools:hover,
-.desktop-titlebar[data-focused="false"] .desktop-win-controls:hover {
+.desktop-leading-controls[data-focused="false"] .desktop-titlebar-nav-group:hover,
+.desktop-trailing-controls[data-focused="false"] .desktop-win-controls:hover {
   opacity: 1;
 }
 
-.desktop-titlebar-right {
+/* Companion Pet quick toggle capsule (placed in left sidebar footer beside Settings) */
+.sidebar-footer-bottom {
   display: flex;
   align-items: center;
-  height: 100%;
-  flex-shrink: 0;
-  -webkit-app-region: no-drag;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
 }
 
-.desktop-titlebar-tools {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding-right: 8px;
-  transition: opacity var(--duration-fast) var(--ease-out-expo);
+.sidebar-footer-bottom .sidebar-settings {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
-/* Companion Pet quick toggle capsule */
 .desktop-pet-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  height: 23px;
-  padding: 0 8.5px;
+  height: 26px;
+  padding: 0 9px;
   border-radius: 999px;
   border: 1px solid var(--line);
   background: var(--surface-inset);
   color: var(--muted-foreground);
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 500;
   line-height: 1;
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
   transition:
     border-color var(--duration-fast) var(--ease-out-expo),
     color var(--duration-fast) var(--ease-out-expo),
@@ -405,6 +284,7 @@
   align-items: center;
   height: 23px;
   padding: 1px;
+  margin-right: 8px;
   border-radius: 6px;
   border: 1px solid var(--line);
   background: var(--surface-inset);
@@ -424,6 +304,7 @@
   font-size: 10.5px;
   font-weight: 500;
   line-height: 1;
+  cursor: pointer;
   transition:
     background-color var(--duration-fast) var(--ease-out-expo),
     color var(--duration-fast) var(--ease-out-expo);
@@ -465,7 +346,7 @@
   pointer-events: none;
 }
 
-/* Custom Windows 11 Fluent 46x38px Caption Controls (`?desktopPreview=win32` / custom frame) */
+/* Custom Windows 11 Fluent 46x46px Caption Controls (`?desktopPreview=win32` / custom frame) */
 .desktop-win-controls {
   display: inline-flex;
   align-items: stretch;

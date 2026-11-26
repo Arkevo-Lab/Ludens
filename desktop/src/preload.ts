@@ -1,8 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import {
   LUDENS_RPC_CHANNELS,
+  LUDENS_VIEWPORT_CHANNELS,
   type DesktopRpcBridge,
   type DesktopRpcStatus,
+  type DesktopViewportBridge,
+  type DesktopViewportFramePayload,
 } from './rpc-channels.js'
 import {
   DESKTOP_TITLEBAR_HEIGHT,
@@ -10,6 +13,7 @@ import {
   resolveCaptionStyle,
 } from './window-chrome.js'
 import { LUDENS_DIALOG_PICK_PATH_CHANNEL } from './dialog-picker.js'
+import { LUDENS_POWER_CHANNELS } from './power-save-blocker.js'
 
 function on(channel: string, callback: (value: any) => void) {
   const listener = (_event: Electron.IpcRendererEvent, value: unknown) => callback(value)
@@ -73,11 +77,30 @@ const rpcBridge: DesktopRpcBridge = {
   },
 }
 
-// Narrow UDS RPC relay, Pet settings, activity, and window-chrome IPC bridge; no node:net or fs exposure.
+const viewportBridge: DesktopViewportBridge = {
+  getHostInfo: () => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.getHostInfo),
+  attach: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.attach, input),
+  updateBounds: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.updateBounds, input),
+  detach: sessionId => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.detach, sessionId),
+  setFrameStream: input => ipcRenderer.invoke(LUDENS_VIEWPORT_CHANNELS.setFrameStream, input),
+  onFrame: callback =>
+    on(LUDENS_VIEWPORT_CHANNELS.frame, value => {
+      if (value && typeof value === 'object') callback(value as DesktopViewportFramePayload)
+    }),
+}
+
+// Narrow UDS RPC relay, Pet settings, activity, viewport, and window-chrome IPC bridge; no node:net or fs exposure.
 contextBridge.exposeInMainWorld('ludens', {
   rpc: rpcBridge,
+  viewport: viewportBridge,
   dialog: {
     pickPath: (options: unknown) => ipcRenderer.invoke(LUDENS_DIALOG_PICK_PATH_CHANNEL, options),
+  },
+  power: {
+    getState: () => ipcRenderer.invoke(LUDENS_POWER_CHANNELS.getState),
+    setPreventAppSuspension: (enabled: boolean) =>
+      ipcRenderer.invoke(LUDENS_POWER_CHANNELS.setPreventAppSuspension, Boolean(enabled)),
+    onState: (callback: (value: unknown) => void) => on(LUDENS_POWER_CHANNELS.state, callback),
   },
   companion: {
     getSound: () => ipcRenderer.invoke('ludens:companion:sound:get'),

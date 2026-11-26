@@ -3,6 +3,7 @@
 import type { ModelConnectionConfig } from "./connection.ts";
 import type { BasewareMachineSpec, MachineTransportKind, WorkspaceMachinesBinding } from "./machines.ts";
 import type { WorkspaceStorageOverride } from "./storage.ts";
+import type { DeviceStageKind } from "./viewport.ts";
 
 export const OMP_SERVICE_TIERS = ["priority", "ultrafast"] as const;
 export type OmpServiceTier = (typeof OMP_SERVICE_TIERS)[number];
@@ -61,6 +62,7 @@ export interface CreateWorkspaceInput {
   driverPackage?: string;
   machineId?: string;
   game?: string;
+  url?: string;
   port?: number;
   cuaCommand?: string;
   model?: string;
@@ -75,6 +77,7 @@ export interface WorkspaceConfigSummary {
   driver: string;
   driverPackage?: string;
   game?: string;
+  url?: string;
   port?: number;
   cuaCommand?: string;
   model: string;
@@ -116,6 +119,8 @@ export interface BasewareDriverOverviewItem {
   sourceKind: DriverSourceKind;
   registrationStatus: DriverRegistrationStatus;
   available: boolean;
+  runtimeInjected?: boolean;
+  stageKind?: DeviceStageKind;
   localPath?: string;
   cacheKey?: string;
   packageName?: string;
@@ -170,6 +175,11 @@ export interface WorkspaceBasewareSnapshot {
   };
   machines: BasewareMachineRuntimeStatus[];
   drivers: BasewareDriverOverviewItem[];
+  browserHost?: {
+    available: boolean;
+    hostId?: string;
+    socketPath?: string;
+  };
 }
 
 export interface WorkspaceSessionEntry {
@@ -212,6 +222,7 @@ export interface WorkspaceStudioConfigPatch {
   dashboard?: boolean;
   port?: number | null;
   game?: string | null;
+  url?: string | null;
   cuaCommand?: string | null;
   connection?: ModelConnectionConfig | null;
   machines?: WorkspaceMachinesBinding | null;

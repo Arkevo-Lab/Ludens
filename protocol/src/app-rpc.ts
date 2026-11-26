@@ -69,6 +69,11 @@ import type {
   RunData,
 } from "./types.ts";
 import type {
+  ViewportControlAction,
+  ViewportHumanInput,
+  ViewportState,
+} from "./viewport.ts";
+import type {
   CreateWorkspaceInput,
   LegacyWorkspaceImportReceipt,
   OmpEffort,
@@ -196,6 +201,8 @@ export interface HostSessionCapabilities {
   localFileDrivers: boolean;
   hostProcessOverrides: boolean;
   hostStorageConfig: boolean;
+  builtinBrowser?: boolean;
+  browserHostId?: string | null;
 }
 
 export interface RpcClientInfo {
@@ -223,6 +230,7 @@ export interface InitializeResult {
   managedWorkspaces: string[];
   media: {
     basePath: "/media";
+    viewportBasePath?: "/viewport";
     ticket?: string;
     /** Unix epoch milliseconds when the capability ticket expires. */
     ticketExpiresAt?: number;
@@ -317,6 +325,7 @@ export const LUDENS_EVENT_TOPICS = [
   "pet",
   "baseware",
   "storage",
+  "viewport",
 ] as const;
 
 export type LudensEventTopic = (typeof LUDENS_EVENT_TOPICS)[number];
@@ -804,6 +813,37 @@ export interface AppRpcMethods {
   "baseware/mutate": {
     params: BasewareMutateParams;
     result: unknown;
+  };
+  "viewport/describe": {
+    params: { project: string; workspace?: string; machineId?: string };
+    result: ViewportState;
+  };
+  "viewport/action": {
+    params: {
+      project: string;
+      workspace?: string;
+      machineId?: string;
+      action: ViewportControlAction;
+    };
+    result: ViewportState;
+  };
+  "viewport/input": {
+    params: {
+      project: string;
+      workspace?: string;
+      machineId?: string;
+      input: ViewportHumanInput;
+    };
+    result: { ok: true; pointerLocked: boolean };
+  };
+  "browserHost/notify": {
+    params: {
+      status: "online" | "offline";
+      hostId?: string;
+      socketPath?: string;
+      pid?: number;
+    };
+    result: { ok: true; available: boolean };
   };
   "drivers/discover": {
     params: { spec: string };

@@ -20,10 +20,10 @@ Ludens 不把智能体限制在静态提示词或固定动作 Schema 里，而�
 
 ## 为什么选择 Ludens
 
-- **任意屏幕，任意设备（`Baseware`）** — 统一接入本机桌面（`cua`）、采集卡与 HID 硬件桥（如通过 SSH 或 TCP 桥接控制的机器设备与嵌入式主机）、仿真器或 MCP 端点；单个工作区支持并发挂载多个受控节点并按需路由。
+- **任意屏幕，任意设备（`Baseware`）** — 在 Ludens 桌面端（`ludens-app`）中零配置开箱即用**内置浏览器（`builtin:browser` / `builtin-browser`）**，为每个工作区提供独立隔离的 `WebContentsView` 空间与零外部依赖的 3D WebGL 互动起始页（`ludens-browser://start`），直接畅玩 Three.js / WebGL 游戏与各类网页目标；同时统一接入本机桌面（`cua`）、采集卡与 HID 硬件桥（如通过 SSH 或 TCP 桥接控制的机器设备与嵌入式主机）、仿真器或 MCP 端点，单个工作区支持并发挂载多个受控节点并按需路由。
 - **代码即感知（`perception.py`）** — 常驻 Python 进程将实时画面录制为可检索的 30 Hz fMP4 时间轴，同时在内存中运行并热重载智能体自己编写的视觉检测器与闭环状态机。
 - **可自验证的能力演化（`@capability` 与 `ludens workspace eval`）** — 将反复试错的动作流程沉淀为带类型的 Python 能力函数，搭配离线代理环境（`@eval_env`）与评测断言（`@eval_capability`），在秒级内离线完成回归验证后再下发真机执行。
-- **统一控制台、自主循环与逐帧回放** — 一套同构 Vite 静态 SPA（`@ludens/client`）与 JSON-RPC 2.0（`ludens-server`）覆盖零端口 **Ludens 桌面应用**（`ludens-app`）、托管 Web **控制台**、远程 `wss://` 与移动端四种工况：一键启停工作区、开启**自主运行**、经由双向 `EventHub` 异步协作、在推理中途紧急插话纠偏（`ludens steer`）、随时一键**收回控制权**（`ludens auto off`），并对照模型完整轨迹拖拽 30 Hz 录像回放。*（可选附带系统托盘**桌宠**小组件。）*
+- **统一控制台、`<DeviceViewport />`、自主循环与逐帧回放** — 一套同构 Vite 静态 SPA（`@ludens/client`）与 JSON-RPC 2.0（`ludens-server`）覆盖零端口 **Ludens 桌面应用**（`ludens-app`）、托管 Web **控制台**、远程 `wss://` 与移动端四种工况：通过统一的 `<DeviceViewport />` 三态右侧工作台（`browser | computer | observe`，桌面端原生贴合 `WebContentsView`，Web/移动端走 HMAC `/viewport` 二进制 WebSocket 串流）实时交互、一键启停工作区、开启**自主运行**、经由双向 `EventHub` 异步协作、在推理中途紧急插话纠偏（`ludens steer`）、随时一键**收回控制权**（`ludens auto off`），并对照模型完整轨迹拖拽 30 Hz 录像回放。*（可选附带系统托盘**桌宠**小组件。）*
 
 ## 30 秒看懂工作流
 
@@ -92,11 +92,15 @@ export PATH="$PWD/baseware/bin:$PWD/core/bin:$PWD/server/bin:$PWD/client/bin:$PW
 
 Ludens 基于同构的 React 19 + Vite 静态 SPA（`@ludens/client`，`client/dist`）、纯 RPC 命令行客户端（`ludens`）、All-in-One Electron 桌面壳（`@ludens/desktop`，`ludens-app`）与统一 JSON-RPC 2.0 控制面服务端（`@ludens/server`，`ludens-server`）提供四种运行工况：
 
-- **桌面端应用（`ludens-app` —— All-in-One 零 TCP 端口本地模式）**：执行一次 `bun run build`（或 `bun run build:desktop`）后运行 `ludens-app --show-window`（或执行 `bun run pack:desktop` / `bun run dist:desktop` 打包原生 macOS `.dmg` / Windows `.exe` 安装包）。桌面壳自包含 `client + server + core + baseware` 本地开箱即用，按 `LUDENS_HOME` 通过 Unix Domain Socket（`app-server.sock`）通信（**0 个监听 TCP 端口**，`ludens-app://console/`、`ludens-media://local/media?...`、`window.ludens.rpc`），也支持一键切连远程 `ludens-server`。关闭主窗口（`×`）时最小化至托盘与可选桌宠；退出（`⌘Q` / 托盘 **Quit**）时，若无活跃 Core 则直接退出并保留后台服务，若有活跃 Core 则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。
-- **托管 Web / 远端服务端（`ludens-server`）**：开源控制面服务端，支持本地、自托管或云端部署。单进程同时提供静态 SPA 控制台、WebSocket JSON-RPC `/rpc` 与 HMAC capability ticket 鉴权的 `/media` 端点：执行 `ludens-server start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir "$PWD/client/dist"`（或直接运行 `bun run start:selfhost` 启动单机/VPS 自托管前台服务 `ludens-server serve --static-dir client/dist`；非回环地址必须启用 `--auth token`；页面加载 `http(s)://host:port/#token=...` 后会立即通过 `history.replaceState` 擦除 URL 中的 token）。使用 `ludens-server <start|stop|restart|status>` 监管后台服务。
+- **桌面端应用（`ludens-app` —— All-in-One 零 TCP 端口本地模式）**：执行一次 `bun run build`（或 `bun run build:desktop`）后运行 `ludens-app --show-window`（或执行 `bun run pack:desktop` / `bun run dist:desktop` 打包原生 macOS `.dmg` / Windows `.exe` 安装包）。桌面壳自包含 `client + server + core + baseware` 本地开箱即用，按 `LUDENS_HOME` 通过 Unix Domain Socket（`app-server.sock`）通信（**0 个监听 TCP 端口**，`ludens-app://console/`、`ludens-media://local/media?...`、`window.ludens.rpc`），同时内置零端口本地 `BrowserHost`（`browser-host.sock`）自动注入**内置浏览器（`builtin:browser` / `builtin-browser`）**与每工作区独立 `WebContentsView` 空间，也支持一键切连远程 `ludens-server`。关闭主窗口（`×`）时最小化至托盘与可选桌宠；退出（`⌘Q` / 托盘 **Quit**）时，若无活跃 Core 则直接退出并保留后台服务，若有活跃 Core 则弹出三选一确认（**后台继续运行 / 停止所有 Core 并退出 / 取消**）。
+- **托管 Web / 远端服务端（`ludens-server`）**：开源控制面服务端，支持本地、自托管或云端部署。单进程同时提供静态 SPA 控制台、WebSocket JSON-RPC `/rpc`、HMAC capability ticket 鉴权的 `/media` 与 `/viewport` 二进制 WebSocket 视口串流端点：执行 `ludens-server start --listen ws://127.0.0.1:3015 --auth token --token-env LUDENS_APP_TOKEN --static-dir "$PWD/client/dist"`（或直接运行 `bun run start:selfhost` 启动单机/VPS 自托管前台服务 `ludens-server serve --static-dir client/dist`；非回环地址必须启用 `--auth token`；页面加载 `http(s)://host:port/#token=...` 后会立即通过 `history.replaceState` 擦除 URL 中的 token）。使用 `ludens-server <start|stop|restart|status>` 监管后台服务。
 - **纯 RPC CLI（`ludens` —— 本地 UDS 与 `--remote`）**：面向人的纯 RPC 操作者 CLI（`@ludens/client`，零 Core/Server/Baseware 运行时依赖）。既可直连本地 `app-server.sock`，也可传入 `--remote ws(s)://... [--token ...]` 统一接入远端 `ludens-server`（接入外部驱动包 `--driver-package` 或远程 SSH / 桥接节点详见[设备与驱动准备](docs/zh/tutorials/devices.md)）：
 
 ```sh
+# 零配置内置浏览器工作区（Ludens 桌面端在线时开箱即用）
+ludens workspace init --name webgl-play --driver browser --url https://example.com/game
+
+# 或本机桌面 CUA 工作区
 ludens workspace init --name my-agent --driver cua
 cd "$HOME/.ludens/workspaces/my-agent"
 ludens workspace up
@@ -165,11 +169,11 @@ flowchart TB
 
 | 架构层级 | 子包 | 路径与命令 | 职责 |
 | --- | --- | --- | --- |
-| **L1 客户端** | [`@ludens/client`](client/README.md) | `client/` · `ludens` | Web 与手机端同构 Vite SPA 控制台（`client/dist`），独立发版、异源一等公民（仅依赖 `@ludens/protocol`），以及面向人的纯 RPC CLI `ludens`。 |
-| **L1 桌面壳** | [`@ludens/desktop`](desktop/README.md) | `desktop/` · `ludens-app` | All-in-One Electron 桌面壳，自包含 `client + server + core + baseware` 实现零端口本地开箱即用（`ludens-app://` / `ludens-media://`）、多目标连接弹窗与可选桌宠，也可一键切连远程 `ludens-server`。 |
-| **L2 控制面** | [`@ludens/server`](server/README.md) | `server/` · `ludens-server` | 开源控制面服务端（支持本地、自托管或云端部署）：统一提供 JSON-RPC 2.0、`EventHub`、HMAC `/media`、查询引擎与 Core 运行环境调度。 |
+| **L1 客户端** | [`@ludens/client`](client/README.md) | `client/` · `ludens` | Web 与手机端同构 Vite SPA 控制台（`client/dist`），内置 `<DeviceViewport />` 三态右侧工作台，独立发版、异源一等公民（仅依赖 `@ludens/protocol`），以及面向人的纯 RPC CLI `ludens`。 |
+| **L1 桌面壳** | [`@ludens/desktop`](desktop/README.md) | `desktop/` · `ludens-app` | All-in-One Electron 桌面壳，自包含 `client + server + core + baseware` 实现零端口本地开箱即用（`ludens-app://` / `ludens-media://`），提供本地 UDS `BrowserHost`（`browser-host.sock`）承载每工作区独立 `WebContentsView` 空间、多目标连接弹窗与可选桌宠，也可一键切连远程 `ludens-server`。 |
+| **L2 控制面** | [`@ludens/server`](server/README.md) | `server/` · `ludens-server` | 开源控制面服务端（支持本地、自托管或云端部署）：统一提供 JSON-RPC 2.0、`EventHub`、HMAC `/media` 与 `/viewport` 二进制 WebSocket 串流、运行态 `builtin-browser` 注入、查询引擎与 Core 运行环境调度。 |
 | **L3 执行内核** | [`@ludens/core`](core/README.md) | `core/` · `ludens-core` | `1 Workspace = 1 Core` 执行沙盒，承载 **Shiori**（OMP `18.22.2`）、常驻 `perception.py`、`loop.py` 与工作区代码/自验证，提供 `ludens-core run` 及沙盒内 `ludens-core <controller\|perception\|event\|machine\|eval>`。 |
-| **L4 设备集成** | [`@ludens/baseware`](baseware/README.md) | `baseware/` · `baseware` | 跨设备集成层：独立硬件/模拟器/桌面驱动、Controller 契约、`epoch` 控制租约仲裁与 MCP。 |
+| **L4 设备集成** | [`@ludens/baseware`](baseware/README.md) | `baseware/` · `baseware` | 跨设备集成层：内置 `browser` 与 `cua` 及独立硬件/模拟器/MCP 驱动、通用 `Viewport` 能力、Controller 契约、`epoch` 控制租约仲裁与 MCP。 |
 | **共享契约** | [`@ludens/protocol`](protocol/README.md) | `protocol/` | 零运行时依赖的强类型协议（`@ludens/protocol/app-rpc`）、事件信封、连接传输策略与跨端 DTO。 |
 
 ## 文档导航

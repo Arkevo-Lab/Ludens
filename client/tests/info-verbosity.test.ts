@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import test from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -10,8 +11,14 @@ import {
   resetInfoVerbosityCache,
   setInfoVerbosity,
 } from "../lib/use-info-verbosity";
-import { SettingsView } from "../features/workspaces/settings-view";
 import type { PetFollow } from "../features/pet/pet-follow";
+
+const nodeRequire = createRequire(import.meta.url);
+const cjsModule = nodeRequire("node:module") as {
+  _extensions: Record<string, (mod: unknown, filename: string) => void>;
+};
+cjsModule._extensions[".css"] ??= () => {};
+const { SettingsView } = nodeRequire("../features/workspaces/settings-view") as typeof import("../features/workspaces/settings-view");
 
 test("normalizeInfoVerbosity clamps invalid values to default L3 and accepts 1..5", () => {
   assert.equal(normalizeInfoVerbosity(1), 1);

@@ -10,12 +10,19 @@ export interface DeviceEvent extends EventMetadata { type: string; data: unknown
 export type RecordEvent = (type: string, data: unknown, trace?: Trace, metadata?: EventMetadata) => void;
 import type { ToolDefinition, ToolArguments } from "./contracts.ts";
 import type { DriverManifest } from "./drivers/registry.ts";
+import type {
+  DeviceStageKind,
+  ViewportControlAction,
+  ViewportHumanInput,
+} from "@ludens/protocol/viewport";
 
 export interface BasewareMountedMachineStatus {
   id: string;
   label: string;
   driver: string;
   transport: string;
+  stageKind?: DeviceStageKind;
+  hasViewport?: boolean;
   connected: boolean;
   reason: string;
   isPrimary: boolean;
@@ -30,10 +37,31 @@ export interface Catalog {
   activeMachineId?: string;
 }
 export interface Request {
-  kind: "status" | "list" | "help" | "acquire" | "release" | "revoke" | "input_generation" | "lease_duration" | "controller" | "cancel" | "subscribe" | "reconnect" | "machines";
+  kind:
+    | "status"
+    | "list"
+    | "help"
+    | "acquire"
+    | "release"
+    | "revoke"
+    | "input_generation"
+    | "lease_duration"
+    | "controller"
+    | "cancel"
+    | "subscribe"
+    | "reconnect"
+    | "machines"
+    | "viewport.describe"
+    | "viewport.action"
+    | "viewport.input"
+    | "viewport.subscribe";
   id?: string;
   machine?: string;
   action?: "list" | "use" | "connect" | "disconnect";
+  viewportAction?: ViewportControlAction;
+  viewportInput?: ViewportHumanInput;
+  maxFps?: number;
+  quality?: number;
   ids?: string[];
   arguments?: ToolArguments;
   epoch?: string;

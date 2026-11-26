@@ -5,6 +5,7 @@ import { Bot, Cable, Cpu, HardDrive, Monitor, SlidersHorizontal } from "lucide-r
 import { PetSettings } from "@/features/pet/pet-settings";
 import { ConnectionSettings } from "@/features/workspaces/connection-settings";
 import { StorageSettings } from "@/features/workspaces/storage-settings";
+import { useDesktopPowerSave } from "@/features/workspaces/use-desktop-power-save";
 import {
   ModelEffortBadge,
   ModelPickerDialog,
@@ -49,10 +50,12 @@ export function SettingsView({
 }) {
   const { locale, setLocale } = useLocale();
   const { level: verbosity, setLevel: setVerbosity } = useInfoVerbosity();
+  const powerSave = useDesktopPowerSave();
   const t = useTranslations("settings");
   const vt = useTranslations("views.settings");
   const languageId = useId();
   const verbosityId = useId();
+  const preventSuspensionId = useId();
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(initialCategory);
 
   const categories: SettingsCategoryItem[] = [
@@ -135,6 +138,34 @@ export function SettingsView({
                 </div>
                 <p className="text-[11.5px] leading-snug text-muted-foreground" data-info-verbosity-detail="">
                   {t(`infoVerbosityLevel${verbosity}Detail`)}
+                </p>
+              </div>
+            }
+          />
+          <SettingsRow
+            label={t("preventAppSuspension")}
+            htmlFor={preventSuspensionId}
+            description={t("preventAppSuspensionDescription")}
+            descriptionId={`${preventSuspensionId}-hint`}
+            control={
+              <div className="flex flex-col items-end gap-1.5" data-power-save-setting="">
+                <Switch
+                  id={preventSuspensionId}
+                  checked={powerSave.state.preventAppSuspension}
+                  disabled={!powerSave.available || powerSave.loading || powerSave.saving}
+                  aria-describedby={`${preventSuspensionId}-hint`}
+                  onCheckedChange={checked => {
+                    void powerSave.setPreventAppSuspension(checked);
+                  }}
+                />
+                <p className="text-right text-[11.5px] leading-snug text-muted-foreground" data-power-save-status="">
+                  {!powerSave.available
+                    ? t("preventAppSuspensionDesktopOnly")
+                    : !powerSave.state.preventAppSuspension
+                      ? t("preventAppSuspensionDisabled")
+                      : powerSave.state.blocking
+                        ? t("preventAppSuspensionBlocking").replace("{count}", String(powerSave.state.activeCoreCount))
+                        : t("preventAppSuspensionStandby")}
                 </p>
               </div>
             }

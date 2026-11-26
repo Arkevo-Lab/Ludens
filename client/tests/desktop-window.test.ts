@@ -11,7 +11,11 @@ import {
   filterQuickSwitcherItems,
   type QuickSwitcherItem,
 } from "../shell/desktop-quick-switcher";
-import { DesktopTitlebar } from "../shell/desktop-titlebar";
+import {
+  DesktopDragStrip,
+  DesktopLeadingControls,
+  DesktopTrailingControls,
+} from "../shell/desktop-titlebar";
 import {
   computeTitlebarLayout,
   createSpaHistory,
@@ -47,11 +51,11 @@ test("detectBrowserPlatform identifies darwin, win32, and linux hints", () => {
 });
 
 test("resolveDesktopChromeState handles plain Web, Electron macOS/Win32 bridges, and cross-OS browser previews", () => {
-  // 1. Plain Web browser (unified 38px topbar, non-desktop window chrome)
+  // 1. Plain Web browser
   const web = resolveDesktopChromeState({ fallbackWebPlatform: "darwin" });
   assert.equal(web.active, false);
   assert.equal(web.isPreview, false);
-  assert.equal(web.titlebarHeight, 38);
+  assert.equal(web.titlebarHeight, 0);
 
   // 2. Native Electron macOS hiddenInset
   const macNative = resolveDesktopChromeState({
@@ -121,7 +125,7 @@ test("computeTitlebarLayout calculates macOS traffic-light fullscreen collapse a
     captionStyle: "macos",
     fullScreen: false,
   });
-  assert.equal(macWindowed.topbarHeightPx, 38);
+  assert.equal(macWindowed.topbarHeightPx, 0);
   assert.equal(macWindowed.leftInsetPx, 74);
   assert.equal(macWindowed.showTrafficLightZone, true);
   assert.equal(macWindowed.showLeadingBrandMark, false);
@@ -212,82 +216,97 @@ test("SPA navigation history stack tracks push, replace, back/forward, and repea
   assert.equal(backToInitialA.index, 0);
 });
 
-test("DesktopTitlebar renders Antigravity macOS layout, Windows 11 custom Fluent caption buttons, and WCO spacer", () => {
+test("DesktopLeadingControls, DesktopTrailingControls, and DesktopDragStrip render full-height column chrome across macOS and Windows", () => {
   const noop = () => {};
-  const baseProps = {
+  const leadingBase = {
+    active: true,
+    fullScreen: false,
+    focused: true,
+    isPreview: true,
+    sidebarCollapsed: false,
+    onToggleSidebar: noop,
+    onOpenQuickSwitcher: noop,
+    onMinimize: noop,
+    onToggleMaximize: noop,
+    onClose: noop,
+  };
+  const trailingBase = {
     active: true,
     maximized: false,
     fullScreen: false,
     focused: true,
     isPreview: true,
-    sidebarCollapsed: false,
-    viewTitle: "Live",
-    canGoBack: true,
-    canGoForward: false,
-    companionAvailable: true,
-    companionVisible: true,
-    onToggleSidebar: noop,
-    onGoBack: noop,
-    onGoForward: noop,
-    onOpenQuickSwitcher: noop,
-    onToggleCompanion: noop,
     onMinimize: noop,
     onToggleMaximize: noop,
     onClose: noop,
-    onTitlebarDoubleClick: noop,
     onSelectPreviewPlatform: noop,
   };
 
-  // Plain Web mode renders the same unified single-row top bar without native traffic lights or window controls
-  const webHtml = renderToStaticMarkup(
-    createElement(
-      LocaleProvider,
-      null,
-      createElement(DesktopTitlebar, {
-        ...baseProps,
+  assert.equal(
+    renderToStaticMarkup(
+      createElement(DesktopLeadingControls, {
+        ...leadingBase,
         active: false,
-        isPreview: false,
-        platform: "darwin",
-        captionStyle: "custom",
-      }),
-    ),
-  );
-  assert.match(webHtml, /data-desktop-titlebar=""/);
-  assert.match(webHtml, /data-desktop-window="false"/);
-  assert.match(webHtml, /padding-left:12px/);
-  assert.match(webHtml, /data-titlebar-brand/);
-  assert.match(webHtml, /data-titlebar-view-title=""[^>]*>Live<\/strong>/);
-  assert.doesNotMatch(webHtml, /data-preview-traffic-lights/);
-  assert.doesNotMatch(webHtml, /data-win-controls/);
-  assert.doesNotMatch(webHtml, /data-action="reload"/);
-
-  const macHtml = renderToStaticMarkup(
-    createElement(
-      LocaleProvider,
-      null,
-      createElement(DesktopTitlebar, {
-        ...baseProps,
         platform: "darwin",
         captionStyle: "macos",
       }),
     ),
+    "",
   );
-  assert.match(macHtml, /padding-left:74px/);
-  assert.match(macHtml, /data-preview-traffic-lights/);
-  assert.match(macHtml, /data-titlebar-primary/);
-  assert.match(macHtml, /data-action="toggle-companion"/);
-  assert.match(macHtml, /data-preview-switcher/);
-  assert.match(macHtml, /⌘K/);
-  assert.doesNotMatch(macHtml, /data-win-controls/);
-  assert.doesNotMatch(macHtml, /data-titlebar-brand/);
-  assert.doesNotMatch(macHtml, /data-action="reload"/);
+  assert.equal(
+    renderToStaticMarkup(
+      createElement(DesktopTrailingControls, {
+        ...trailingBase,
+        active: false,
+        platform: "darwin",
+        captionStyle: "macos",
+      }),
+    ),
+    "",
+  );
 
+  // macOS preview leading controls in sidebar header
+  const macLeadingHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(DesktopLeadingControls, {
+        ...leadingBase,
+        platform: "darwin",
+        captionStyle: "macos",
+        variant: "sidebar",
+      }),
+    ),
+  );
+  assert.match(macLeadingHtml, /padding-left:74px/);
+  assert.match(macLeadingHtml, /data-preview-traffic-lights/);
+  assert.match(macLeadingHtml, /data-action="toggle-sidebar"/);
+  assert.match(macLeadingHtml, /data-action="quick-switcher"/);
+  assert.match(macLeadingHtml, /⌘K/);
+  assert.doesNotMatch(macLeadingHtml, /data-titlebar-brand/);
+
+  // Native macOS DesktopTrailingControls returns null so the right column stays 100% pure
+  const macNativeTrailingHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(DesktopTrailingControls, {
+        ...trailingBase,
+        platform: "darwin",
+        captionStyle: "macos",
+        isPreview: false,
+      }),
+    ),
+  );
+  assert.equal(macNativeTrailingHtml, "");
+
+  // Native macOS fullscreen collapses traffic-light inset
   const macFsNativeHtml = renderToStaticMarkup(
     createElement(
       LocaleProvider,
       null,
-      createElement(DesktopTitlebar, {
-        ...baseProps,
+      createElement(DesktopLeadingControls, {
+        ...leadingBase,
         platform: "darwin",
         captionStyle: "macos",
         isPreview: false,
@@ -299,29 +318,44 @@ test("DesktopTitlebar renders Antigravity macOS layout, Windows 11 custom Fluent
   assert.match(macFsNativeHtml, /padding-left:10px/);
   assert.doesNotMatch(macFsNativeHtml, /data-preview-traffic-lights/);
 
-  const winCustomHtml = renderToStaticMarkup(
+  // Windows custom preview renders brand mark + Ctrl+K in leading and Fluent controls in trailing
+  const winLeadingHtml = renderToStaticMarkup(
     createElement(
       LocaleProvider,
       null,
-      createElement(DesktopTitlebar, {
-        ...baseProps,
+      createElement(DesktopLeadingControls, {
+        ...leadingBase,
+        platform: "win32",
+        captionStyle: "custom",
+      }),
+    ),
+  );
+  assert.match(winLeadingHtml, /padding-left:12px/);
+  assert.match(winLeadingHtml, /data-titlebar-brand/);
+  assert.match(winLeadingHtml, /Ctrl\+K/);
+
+  const winTrailingHtml = renderToStaticMarkup(
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(DesktopTrailingControls, {
+        ...trailingBase,
         platform: "win32",
         captionStyle: "custom",
         maximized: true,
       }),
     ),
   );
-  assert.match(winCustomHtml, /padding-left:12px/);
-  assert.match(winCustomHtml, /data-titlebar-brand/);
-  assert.match(winCustomHtml, /data-win-control="minimize"/);
-  assert.match(winCustomHtml, /data-win-control="maximize"/);
-  assert.match(winCustomHtml, /Restore window/);
-  assert.match(winCustomHtml, /data-win-control="close"/);
-  assert.match(winCustomHtml, /Ctrl\+K/);
+  assert.match(winTrailingHtml, /data-preview-switcher/);
+  assert.match(winTrailingHtml, /data-win-control="minimize"/);
+  assert.match(winTrailingHtml, /data-win-control="maximize"/);
+  assert.match(winTrailingHtml, /Restore window/);
+  assert.match(winTrailingHtml, /data-win-control="close"/);
 
+  // Native Windows WCO reserves spacer without custom Fluent buttons
   const winOverlayHtml = renderToStaticMarkup(
-    createElement(DesktopTitlebar, {
-      ...baseProps,
+    createElement(DesktopTrailingControls, {
+      ...trailingBase,
       platform: "win32",
       captionStyle: "win32-overlay",
       isPreview: false,
@@ -329,6 +363,17 @@ test("DesktopTitlebar renders Antigravity macOS layout, Windows 11 custom Fluent
   );
   assert.match(winOverlayHtml, /data-win32-overlay-spacer/);
   assert.doesNotMatch(winOverlayHtml, /data-win-controls/);
+
+  // DesktopDragStrip mounts leading & trailing slots for non-workbench views
+  const dragStripHtml = renderToStaticMarkup(
+    createElement(DesktopDragStrip, {
+      leadingSlot: createElement("span", { "data-test-leading": "" }, "L"),
+      trailingSlot: createElement("span", { "data-test-trailing": "" }, "R"),
+    }),
+  );
+  assert.match(dragStripHtml, /data-desktop-dragbar=""/);
+  assert.match(dragStripHtml, /data-test-leading=""/);
+  assert.match(dragStripHtml, /data-test-trailing=""/);
 });
 
 test("DesktopQuickSwitcher renders grouped workspaces, views, and window actions and filters by query tokens", () => {
@@ -413,18 +458,28 @@ test("ConsoleSidebar renders Web collapse control when desktopChrome is false an
   assert.match(webHtml, /sidebar-collapse-toggle/);
 
   const desktopHtml = renderToStaticMarkup(
-    createElement(ConsoleSidebar, {
-      view: "live",
-      viewLink: (id) => `?view=${id}`,
-      onNavigate() {},
-      onToggleCollapse() {},
-      desktopChrome: true,
-      collapsed: true,
-    }),
+    createElement(
+      LocaleProvider,
+      null,
+      createElement(ConsoleSidebar, {
+        view: "live",
+        viewLink: (id) => `?view=${id}`,
+        onNavigate() {},
+        onToggleCollapse() {},
+        desktopChrome: true,
+        desktopHeaderSlot: createElement("div", { "data-test-desktop-header": "" }, "hdr"),
+        companionAvailable: true,
+        companionVisible: true,
+        onToggleCompanion() {},
+        collapsed: true,
+      }),
+    ),
   );
   assert.doesNotMatch(desktopHtml, /sidebar-collapse-toggle/);
   assert.match(desktopHtml, /data-desktop-chrome="true"/);
   assert.match(desktopHtml, /data-collapsed="true"/);
+  assert.match(desktopHtml, /data-test-desktop-header=""/);
+  assert.match(desktopHtml, /data-action="toggle-companion"/);
 });
 
 test("Viewport 100dvh budgets subtract --shell-topbar-height across shell, live, replay, perf, and docs", () => {
@@ -445,7 +500,7 @@ test("Viewport 100dvh budgets subtract --shell-topbar-height across shell, live,
     "utf8",
   );
 
-  assert.match(globalsCss, /--shell-topbar-height:\s*38px/);
+  assert.match(globalsCss, /--shell-topbar-height:\s*0px/);
   assert.match(
     globalsCss,
     /\.sidebar\s*\{[\s\S]*?height:\s*calc\(100dvh\s*-\s*var\(--shell-topbar-height,\s*0px\)\)/,

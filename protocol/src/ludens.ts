@@ -25,6 +25,8 @@ export {
   DRIVER_ID_PATTERN,
   BUILTIN_CUA_DRIVER_SPEC,
   BUILTIN_CUA_DRIVER,
+  BUILTIN_BROWSER_DRIVER_SPEC,
+  BUILTIN_BROWSER_DRIVER,
   validDriverId,
   driverRegistryKey,
   validateRegisteredDriverSpec,
@@ -42,6 +44,8 @@ import {
 export {
   MACHINE_TRANSPORT_KINDS,
   BUILTIN_LOCAL_DESKTOP_MACHINE,
+  BUILTIN_LOCAL_BROWSER_MACHINE,
+  resolveMachineStageKind,
   validMachineId,
   validateMachineTransport,
   validateMachineSpec,
@@ -56,6 +60,14 @@ export {
   type WorkspaceMachinesBinding,
   type MachinesRegistryFile,
 } from "./machines";
+export {
+  DEVICE_STAGE_KINDS,
+  BUILTIN_BROWSER_START_URL,
+  DEFAULT_VIEWPORT_WIDTH,
+  DEFAULT_VIEWPORT_HEIGHT,
+  isDeviceStageKind,
+  type DeviceStageKind,
+} from "./viewport";
 import {
   BUILTIN_LOCAL_DESKTOP_MACHINE,
   validMachineId,

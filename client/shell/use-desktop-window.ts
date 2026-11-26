@@ -18,7 +18,7 @@ import type {
 } from "@/lib/desktop";
 
 export const SIDEBAR_COLLAPSED_STORAGE_KEY = "ludens:sidebar-collapsed";
-export const DEFAULT_DESKTOP_TITLEBAR_HEIGHT = 38;
+export const DEFAULT_DESKTOP_TITLEBAR_HEIGHT = 46;
 const MAX_SPA_HISTORY_ENTRIES = 200;
 const COMMAND_DEDUPE_MS = 45;
 
@@ -169,7 +169,7 @@ export function resolveDesktopChromeState(input: {
     hasNativeMacTrafficLights: false,
     platform: fallbackWebPlatform,
     captionStyle: "custom",
-    titlebarHeight: DEFAULT_DESKTOP_TITLEBAR_HEIGHT,
+    titlebarHeight: 0,
     maximized: false,
     fullScreen: false,
     focused: windowFocused,
@@ -186,7 +186,7 @@ export interface DesktopTitlebarLayout {
   shortcutPrefix: string;
 }
 
-/** Pure platform geometry & shortcut formatting helper for `DesktopTitlebar`. */
+/** Pure platform geometry & shortcut formatting helper for full-height column desktop chrome. */
 export function computeTitlebarLayout(input: {
   active: boolean;
   platform: DesktopPlatform;
@@ -194,14 +194,13 @@ export function computeTitlebarLayout(input: {
   fullScreen: boolean;
   titlebarHeight?: number;
 }): DesktopTitlebarLayout {
-  const height = input.titlebarHeight || DEFAULT_DESKTOP_TITLEBAR_HEIGHT;
   const isMac = input.platform === "darwin";
-  const isMacDesktop = input.active && isMac;
   return {
-    topbarHeightPx: height,
-    leftInsetPx: isMacDesktop ? (input.fullScreen ? 10 : 74) : 12,
-    showTrafficLightZone: isMacDesktop && !input.fullScreen,
-    showLeadingBrandMark: !isMacDesktop,
+    // Full-height 3-column desktop chrome: zero T-shaped global top bar; every column starts at y = 0.
+    topbarHeightPx: 0,
+    leftInsetPx: isMac ? (input.fullScreen ? 10 : 74) : 12,
+    showTrafficLightZone: isMac && !input.fullScreen,
+    showLeadingBrandMark: !isMac,
     showCustomWindowControls:
       input.active && input.captionStyle === "custom" && !isMac,
     reserveWin32Overlay:
@@ -389,7 +388,10 @@ export interface DesktopWindowController extends ResolvedDesktopChromeState {
   companionVisible: boolean;
   toggleCompanion(): Promise<void>;
   sidebarCollapsed: boolean;
-  setSidebarCollapsed(next: boolean | ((prev: boolean) => boolean)): void;
+  setSidebarCollapsed(
+    next: boolean | ((prev: boolean) => boolean),
+    options?: { persist?: boolean },
+  ): void;
   toggleSidebar(): void;
   quickSwitcherOpen: boolean;
   setQuickSwitcherOpen(next: boolean | ((prev: boolean) => boolean)): void;
@@ -560,16 +562,21 @@ export function useDesktopWindow({
   }, []);
 
   const setSidebarCollapsed = useCallback(
-    (next: boolean | ((prev: boolean) => boolean)) => {
+    (
+      next: boolean | ((prev: boolean) => boolean),
+      options?: { persist?: boolean },
+    ) => {
       setSidebarCollapsedState((prev) => {
         const resolved = typeof next === "function" ? next(prev) : next;
-        try {
-          window.localStorage.setItem(
-            SIDEBAR_COLLAPSED_STORAGE_KEY,
-            resolved ? "1" : "0",
-          );
-        } catch {
-          // Ignore storage write errors.
+        if (options?.persist !== false) {
+          try {
+            window.localStorage.setItem(
+              SIDEBAR_COLLAPSED_STORAGE_KEY,
+              resolved ? "1" : "0",
+            );
+          } catch {
+            // Ignore storage write errors.
+          }
         }
         return resolved;
       });

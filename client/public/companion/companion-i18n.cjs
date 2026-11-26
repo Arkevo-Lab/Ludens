@@ -7,7 +7,7 @@ const companionI18n = {
     details: 'Details', dismiss: 'Dismiss', dismissLabel: 'Dismiss this activity',
     lines: ['I’m here.', 'Look first, then act.', 'Hmm? The name’s Ludens.', 'Enough poking. I’m thinking.', 'I’ve got this. Probably.', 'Even spider legs need a break.', 'One more try.', 'Shall we take a look together?'],
     activity: {
-      running: 'Running', error: 'Error', complete: 'Done', generating: 'Generating',
+      running: 'Running', error: 'Error', complete: 'Done', generating: 'Generating', executing: 'Executing…',
       content: '{title} content, scrollable', arguments: 'Arguments', result: 'Result',
       aiControl: 'Auto Run', manualControl: 'Control Reclaimed',
       waiting: 'Connected · Manual Standby', returned: 'Cycle ended · Control reclaimed',
@@ -42,7 +42,7 @@ const companionI18n = {
     details: '详情', dismiss: '收起', dismissLabel: '收起这条日志',
     lines: ['我在。', '先观察，再行动。', '嗯？叫我 Ludens 就好。', '别戳了，在想了。', '这次有把握。大概。', '蛛腿也要休息。', '再试一次。', '一起看看？'],
     activity: {
-      running: '运行中', error: '出错', complete: '完成', generating: '正在生成',
+      running: '运行中', error: '出错', complete: '完成', generating: '正在生成', executing: '正在执行…',
       content: '{title}内容，可滚动', arguments: '参数', result: '结果',
       aiControl: '自主运行中', manualControl: '控制权已收回',
       waiting: '已连接 · 手动待命', returned: '本轮已结束，控制权已收回',

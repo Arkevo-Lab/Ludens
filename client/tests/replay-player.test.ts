@@ -34,7 +34,7 @@ test("replayRulerRatios adapts between 3 ticks on narrow lanes (<420px) and 5 ti
   assert.deepEqual(replayRulerRatios(320), [0, 0.5, 1]);
 });
 
-test("TimelinePlayer delegates controls to unified TopbarSlot, keeps 2-band ruler, and removes redundant studio topbar & inspector close button", async () => {
+test("TimelinePlayer renders single 46px non-wrapping studio topbar with mobileNavSlot, runPicker, dock toggle, 2-band ruler, and aligned 46px inspector header", async () => {
   const { TimelinePlayer } = await import("../features/replay/timeline-player");
 
   const html = renderToStaticMarkup(
@@ -46,6 +46,7 @@ test("TimelinePlayer delegates controls to unified TopbarSlot, keeps 2-band rule
         run: "run-001",
         epoch: "epoch-1",
         initialOverview: SAMPLE_OVERVIEW,
+        mobileNavSlot: createElement("button", { type: "button", "data-test-mobile-nav": "true" }, "Menu"),
         runPicker: createElement("div", { "data-test-run-picker": "true" }, "Latest run"),
         onPosition() {},
         onEvidence() {},
@@ -53,10 +54,19 @@ test("TimelinePlayer delegates controls to unified TopbarSlot, keeps 2-band rule
     ),
   );
 
-  // Secondary studio topbar and duplicate close button are removed in favor of unified single-row topbar
-  assert.doesNotMatch(html, /replay-studio-topbar/);
+  // Contextual slots rendered in topbar-left; redundant static readonly pill removed
+  assert.match(html, /data-test-mobile-nav="true"/);
+  assert.match(html, /data-test-run-picker="true"/);
   assert.doesNotMatch(html, /replay-readonly-pill/);
-  assert.doesNotMatch(html, /replay-inspector-close/);
+
+  // Compact coverage badge & capability filter rendered in topbar-left
+  assert.match(html, /replay-coverage-pill/);
+  assert.match(html, /82%/);
+  assert.match(html, /replay-capability/);
+
+  // Action buttons preserve accessible labels/titles + right-dock toggle rendered at far right
+  assert.match(html, /data-replay-dock-toggle/);
+  assert.match(html, /replay-topbar-action-btn/);
 
   // Two-band non-overlapping time ruler: upper .replay-ruler-tick + lower .replay-time-axis-track with hairlines & cap
   assert.match(html, /class="replay-time-axis"/);
@@ -65,15 +75,16 @@ test("TimelinePlayer delegates controls to unified TopbarSlot, keeps 2-band rule
   assert.match(html, /class="replay-ruler-hairline"/);
   assert.match(html, /class="replay-playhead-cap"/);
 
-  // Right inspector dock header + 2-row compact ReplayEventSearch
+  // Right inspector dock aligned 46px header + 2-row compact ReplayEventSearch
   assert.match(html, /replay-inspector-header/);
   assert.match(html, /replay-inspector-tablist[^"]*h-\[46px\]/);
+  assert.match(html, /replay-inspector-close/);
   assert.match(html, /replay-search-row-top/);
   assert.match(html, /replay-search-row-bottom/);
   assert.match(html, /replay-track-pills/);
 });
 
-test("TimelinePlayer renders clean preparing state without duplicate studio topbar", async () => {
+test("TimelinePlayer keeps runPicker and mobileNavSlot reachable while preparing or when run is empty", async () => {
   const { TimelinePlayer } = await import("../features/replay/timeline-player");
 
   const preparingHtml = renderToStaticMarkup(
@@ -83,14 +94,15 @@ test("TimelinePlayer renders clean preparing state without duplicate studio topb
       createElement(TimelinePlayer, {
         project: "ws-demo",
         run: "run-001",
+        mobileNavSlot: createElement("button", { type: "button", "data-mobile-slot": "1" }),
         runPicker: createElement("div", { "data-run-slot": "1" }),
         onPosition() {},
         onEvidence() {},
       }),
     ),
   );
-  assert.doesNotMatch(preparingHtml, /replay-studio-topbar/);
-  assert.match(preparingHtml, /empty-state/);
+  assert.match(preparingHtml, /data-mobile-slot="1"/);
+  assert.match(preparingHtml, /data-run-slot="1"/);
 });
 
 test("ReplayTimeJump and timeline-player.css enforce full-width stretch, unclipped frame-meta actions, lifted 42dvh cap, and <1100px overlay drawer", async () => {

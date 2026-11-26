@@ -1,4 +1,5 @@
 import type { Capabilities, Clock } from "../contracts.ts";
+import { createBrowserProvider } from "./browser/provider.ts";
 import { createCuaProvider } from "./cua/provider.ts";
 
 /** Runtime shape every driver (built-in or community) must satisfy. */
@@ -18,6 +19,9 @@ export interface DriverCreateOptions {
   ssh?: { host: string; user?: string; port?: number; identityFile?: string; command?: string };
   url?: string;
   headers?: Record<string, string>;
+  sessionId?: string;
+  initialUrl?: string;
+  browserSocket?: string;
   clock: Clock;
 }
 
@@ -73,10 +77,19 @@ export function getDriver(id: string): DriverRegistration {
   return entry;
 }
 
-// Emulator implementations are optional external packages; only desktop CUA is built in.
+// Emulator implementations are optional external packages; desktop CUA and built-in Browser are built in.
 registerDriver({ id: "cua", transport: "stdio",
   launchHint: "Starts the installed Cua Driver (cua-driver by default); it needs no emulator or bridge port.",
   load: options => createCuaProvider({ command: options.command, args: options.args,
     // CUA has no bridge mode; every remaining transport passes straight through.
     transportMode: options.transportMode === "bridge" ? undefined : options.transportMode,
     ssh: options.ssh, url: options.url, headers: options.headers, clock: options.clock }) });
+
+registerDriver({ id: "browser", transport: "stdio",
+  launchHint: "Runs inside Ludens Desktop App BrowserHost with per-workspace isolated WebContentsView spaces.",
+  load: options => createBrowserProvider({
+    sessionId: options.sessionId,
+    initialUrl: options.initialUrl,
+    browserSocket: options.browserSocket,
+    clock: options.clock,
+  }) });
